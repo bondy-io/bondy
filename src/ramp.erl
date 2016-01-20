@@ -1,0 +1,2 @@
+-module(ramp).
+-include ("ramp.hrl").
