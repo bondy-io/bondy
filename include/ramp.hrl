@@ -3,6 +3,27 @@
 -type id()      ::  0..9007199254740993.
 -type payload() ::  map().
 
+%% A _Client_ can support any combination of the following roles but must
+%% support at least one role.
+-type client_role() ::  caller | callee | subscriber | publisher.
+
+%% Adictionary describing *features* supported by the peer for that role.
+%% This MUST be empty for WAMP Basic Profile implementations, and MUST
+%% be used by implementations implementing parts of the Advanced Profile
+%% to list the specific set of features they support.
+-type role_features() :: dict().
+
+-define(WS_SUBPROTOCOL_HEADER_NAME, <<"sec-websocket-protocol">>).
+-define(WAMP2_JSON, <<"wamp.2.json">>).
+-define(WAMP2_MSGPACK, <<"wamp.2.msgpack">>).
+-define(WAMP2_MSGPACK_BATCHED,<<"wamp.2.msgpack.batched">>).
+-define(WAMP2_JSON_BATCHED,<<"wamp.2.json.batched">>).
+
+-type subprotocol() ::  #{
+    id => binary(),
+    frame_type => text | binary,
+    encoding => json | msgpack | json_batched | msgpack_batched
+}.
 
 -define(HELLO, 1).
 -define(WELCOME, 2).
@@ -31,10 +52,23 @@
 -define(YIELD, 70).
 
 
-%% DO NOT CHANGE THE ORDER OF THE RECORD FIELDS
+
+
+%% DO NOT CHANGE THE ORDER OF THE RECORD FIELDS as it maps
+%% to the order in WAMP messages
 -record (hello, {
     realm_uri       ::  uri(),
     details         ::  map()
+}).
+
+-record (challenge, {
+    auth_method      ::  binary(),
+    extra            ::  map()
+}).
+
+-record (authenticate, {
+    signature       ::  binary(),
+    extra           ::  map()
 }).
 
 -record (welcome, {
@@ -110,6 +144,11 @@
     payload         ::  map()
 }).
 
+-record (cancel, {
+    request_id      ::  id(),
+    options         ::  map()
+}).
+
 -record (result, {
     request_id      ::  id(),
     details         ::  map(),
@@ -145,9 +184,56 @@
     payload         ::  map()
 }).
 
+-record (interrupt, {
+    request_id      ::  id(),
+    options         ::  map()
+}).
+
 -record (yield, {
     request_id      ::  id(),
     options         ::  map(),
     arguments       ::  list(),
     payload         ::  map()
 }).
+
+-type message()     ::  #hello{} | #challenge{} | #authenticate{} | #welcome{}
+                        | #abort{}
+                        | #goodbye{}
+                        | #error{}
+                        | #publish{} | #published{}
+                        | #subscribe{} | #subscribed{}
+                        | #unsubscribe{} | #unsubscribed{}
+                        | #event{}
+                        | #call{}
+                        | #cancel{}
+                        | #result{}
+                        | #register{} | #registered{}
+                        | #unregister{} | #unregistered{}
+                        | #invocation{}
+                        | #interrupt{}
+                        | #yield{}.
+
+
+-define(WAMP_ERROR_AUTHORIZATION_FAILED, <<"wamp.error.authorization_failed">>).
+-define(WAMP_ERROR_CANCELED, <<"wamp.error.canceled">>).
+-define(WAMP_ERROR_CLOSE_REALM, <<"wamp.error.close_realm">>).
+-define(WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED,
+    <<"wamp.error.disclose_me.not_allowed">>).
+-define(WAMP_ERROR_GOODBYE_AND_OUT, <<"wamp.error.goodbye_and_out">>).
+-define(WAMP_ERROR_INVALID_ARGUMENT, <<"wamp.error.invalid_argument">>).
+-define(WAMP_ERROR_INVALID_URI, <<"wamp.error.invalid_uri">>).
+-define(WAMP_ERROR_NET_FAILURE, <<"wamp.error.network_failure">>).
+-define(WAMP_ERROR_NO_ELIGIBLE_CALLE, <<"wamp.error.no_eligible_callee">>).
+-define(WAMP_ERROR_NO_SUCH_PROCEDURE, <<"wamp.error.no_such_procedure">>).
+-define(WAMP_ERROR_NO_SUCH_REALM, <<"wamp.error.no_such_realm">>).
+-define(WAMP_ERROR_NO_SUCH_REGISTRATION, <<"wamp.error.no_such_registration">>).
+-define(WAMP_ERROR_NO_SUCH_ROLE, <<"wamp.error.no_such_role">>).
+-define(WAMP_ERROR_NO_SUCH_SESSION, <<"wamp.error.no_such_session">>).
+-define(WAMP_ERROR_NO_SUCH_SUBSCRIPTION, <<"wamp.error.no_such_subscription">>).
+-define(WAMP_ERROR_NOT_AUTHORIZED, <<"wamp.error.not_authorized">>).
+-define(WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME,
+    <<"wamp.error.option_disallowed.disclose_me">>).
+-define(WAMP_ERROR_OPTION_NOT_ALLOWED, <<"wamp.error.option_not_allowed">>).
+-define(WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
+    <<"wamp.error.procedure_already_exists">>).
+-define(WAMP_ERROR_SYSTEM_SHUTDOWN, <<"wamp.error.system_shutdown">>).

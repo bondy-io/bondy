@@ -1,0 +1,10 @@
+types:
+    - build
+
+build:
+    type: build
+    tags:
+        - ERLANG_18_1
+    script:
+        - make
+        - make docker-push
