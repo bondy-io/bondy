@@ -32,7 +32,7 @@ decode_text(Data, erl, Acc) ->
     M = unpack(Term),
     {[M | Acc], <<>>};
 decode_text(Data, json, Acc) ->
-    Term = jsx:decode(Data, [return_maps]),
+    Term = jsx:decode(Data, [return_maps, {labels, existing_atom}]),
     M = unpack(Term),
     {[M | Acc], <<>>}.
 
@@ -145,7 +145,7 @@ pack(#yield{} = M) ->
 
 pack(M) when is_tuple(M) ->
     [_H|T] = tuple_to_list(M),
-    [pack_message_type(element(1, M)), T].
+    [pack_message_type(element(1, M)) | T].
 
 
 
@@ -375,23 +375,26 @@ pack_optionals(Args, Payload) -> [Args, Payload].
 %% @private
 validate_dict(Map) ->
     lists:any(fun is_invalid_dict_key/1, maps:keys(Map)) == false
-    orelse error({invalid_dict, Map}).
+    orelse error({invalid_dict, Map}),
+    Map.
 
 
 %% @private
 is_invalid_dict_key(_Key) ->
     %% TODO
-    true.
+    false.
 
 
 %% @private
 validate_id(Id) ->
-    ramp_id:is_valid(Id) == true orelse error({invalid_id, Id}).
+    ramp_id:is_valid(Id) == true orelse error({invalid_id, Id}),
+    Id.
 
 
 %% @private
 validate_uri(Uri) ->
-    ramp_uri:is_valid(Uri) == true orelse error({invalid_uri, Uri}).
+    ramp_uri:is_valid(Uri) == true orelse error({invalid_uri, Uri}),
+    Uri.
 
 
 %% @private

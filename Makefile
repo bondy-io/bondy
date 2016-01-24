@@ -1,6 +1,6 @@
 PROJECT = ramp
 PROJECT_VERSION = 0.1.0
-DEPS = ranch cowboy msgpack jsx tuplespace u cors
+DEPS = ranch cowboy gun msgpack jsx tuplespace u cors
 
 dep_tuplespace = git git@git.rand.dev.williamhill.plc:aramallo/tuplespace.git develop
 dep_u = git git@gitlab.williamhill-dev.local:pmorgan/erlang-utilities.git develop
