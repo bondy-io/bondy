@@ -29,45 +29,59 @@
 
 
 
+-spec hello(uri(), map()) -> #hello{}.
 hello(RealmUri, Details) ->
     #hello{
         realm_uri = RealmUri,
         details = Details
     }.
 
+
+-spec welcome(id(), map()) -> #welcome{}.
 welcome(SessionId, Details) ->
     #welcome{
         session_id = SessionId,
         details = Details
     }.
 
+
+-spec abort(map(), uri()) -> #abort{}.
 abort(Details, ReasonUri) ->
     #abort{
         details = Details,
         reason_uri = ReasonUri
     }.
 
+
+-spec challenge(binary(), map()) -> #challenge{}.
 challenge(AuthMethod, Extra) ->
     #challenge{
         auth_method = AuthMethod,
         extra = Extra
     }.
 
+
+-spec authenticate(binary(), map()) -> #authenticate{}.
 authenticate(Signature, Extra) ->
     #authenticate{
         signature = Signature,
         extra = Extra
     }.
 
+
+-spec goodbye(map(), uri()) -> #goodbye{}.
 goodbye(Details, ReasonUri) ->
     #goodbye{
         details = Details,
         reason_uri = ReasonUri
     }.
 
+
 heartbeat() ->
     ok.
 
+
+-spec error(binary(), id(), map(), uri()) -> #error{}.
 error(ReqType, ReqId, Details, ErrorUri) ->
     #error{
         request_type = ReqType,
@@ -76,6 +90,8 @@ error(ReqType, ReqId, Details, ErrorUri) ->
         error_uri = ErrorUri
     }.
 
+
+-spec error(binary(), id(), map(), uri(), list()) -> #error{}.
 error(ReqType, ReqId, Details, ErrorUri, Args) ->
     #error{
         request_type = ReqType,
@@ -85,6 +101,8 @@ error(ReqType, ReqId, Details, ErrorUri, Args) ->
         arguments = Args
     }.
 
+
+-spec error(binary(), id(), map(), uri(), list(), map()) -> #error{}.
 error(ReqType, ReqId, Details, ErrorUri, Args, Payload) ->
     #error{
         request_type = ReqType,
@@ -95,6 +113,8 @@ error(ReqType, ReqId, Details, ErrorUri, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec publish(id(), map(), uri()) -> #publish{}.
 publish(ReqId, Options, TopicUri) ->
     #publish{
         request_id = ReqId,
@@ -102,6 +122,8 @@ publish(ReqId, Options, TopicUri) ->
         topic_uri = TopicUri
     }.
 
+
+-spec publish(id(), map(), uri(), list()) -> #publish{}.
 publish(ReqId, Options, TopicUri, Args) ->
     #publish{
         request_id = ReqId,
@@ -110,6 +132,8 @@ publish(ReqId, Options, TopicUri, Args) ->
         arguments = Args
     }.
 
+
+-spec publish(id(), map(), uri(), list(), map()) -> #publish{}.
 publish(ReqId, Options, TopicUri, Args, Payload) ->
     #publish{
         request_id = ReqId,
@@ -119,12 +143,16 @@ publish(ReqId, Options, TopicUri, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec published(id(), id()) -> #published{}.
 published(ReqId, PubId) ->
     #published{
         request_id = ReqId,
         publication_id = PubId
     }.
 
+
+-spec subscribe(id(), map(), uri()) -> #subscribe{}.
 subscribe(ReqId, Options, TopicUri) ->
     #subscribe{
         request_id = ReqId,
@@ -132,23 +160,31 @@ subscribe(ReqId, Options, TopicUri) ->
         topic_uri = TopicUri
     }.
 
+
+-spec subscribed(id(), id()) -> #subscribed{}.
 subscribed(ReqId, SubsId) ->
     #subscribed{
         request_id = ReqId,
         subscription_id = SubsId
     }.
 
+
+-spec unsubscribe(id(), id()) -> #unsubscribe{}.
 unsubscribe(ReqId, SubsId) ->
     #unsubscribe{
         request_id = ReqId,
         subscription_id = SubsId
     }.
 
+
+-spec unsubscribed(id()) -> #unsubscribed{}.
 unsubscribed(ReqId) ->
     #unsubscribed{
         request_id = ReqId
     }.
 
+
+-spec event(id(), id(), map()) -> #event{}.
 event(SubsId, PubId, Details) ->
     #event{
         subscription_id = SubsId,
@@ -156,6 +192,8 @@ event(SubsId, PubId, Details) ->
         details = Details
     }.
 
+
+-spec event(id(), id(), map(), list()) -> #event{}.
 event(SubsId, PubId, Details, Args) ->
     #event{
         subscription_id = SubsId,
@@ -164,6 +202,8 @@ event(SubsId, PubId, Details, Args) ->
         arguments = Args
     }.
 
+
+-spec event(id(), id(), map(), list(), map()) -> #event{}.
 event(SubsId, PubId, Details, Args, Payload) ->
     #event{
         subscription_id = SubsId,
@@ -173,6 +213,8 @@ event(SubsId, PubId, Details, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec call(id(), map(), uri()) -> #call{}.
 call(ReqId, Options, ProcedureUri) ->
     #call{
         request_id = ReqId,
@@ -180,6 +222,8 @@ call(ReqId, Options, ProcedureUri) ->
         procedure_uri = ProcedureUri
     }.
 
+
+-spec call(id(), map(), uri(), list()) -> #call{}.
 call(ReqId, Options, ProcedureUri, Args) ->
     #call{
         request_id = ReqId,
@@ -188,6 +232,8 @@ call(ReqId, Options, ProcedureUri, Args) ->
         arguments = Args
     }.
 
+
+-spec call(id(), map(), uri(), list(), map()) -> #call{}.
 call(ReqId, Options, ProcedureUri, Args, Payload) ->
     #call{
         request_id = ReqId,
@@ -197,18 +243,24 @@ call(ReqId, Options, ProcedureUri, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec cancel(id(), map()) -> #cancel{}.
 cancel(ReqId, Options) ->
     #cancel{
         request_id = ReqId,
         options = Options
     }.
 
+
+-spec result(id(), map()) -> #result{}.
 result(ReqId, Details) ->
     #result{
         request_id = ReqId,
         details = Details
     }.
 
+
+-spec result(id(), map(), list()) -> #result{}.
 result(ReqId, Details, Args) ->
     #result{
         request_id = ReqId,
@@ -216,6 +268,8 @@ result(ReqId, Details, Args) ->
         arguments = Args
     }.
 
+
+-spec result(id(), map(), list(), map()) -> #result{}.
 result(ReqId, Details, Args, Payload) ->
     #result{
         request_id = ReqId,
@@ -224,6 +278,8 @@ result(ReqId, Details, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec register(id(), map(), uri()) -> #register{}.
 register(ReqId, Options, ProcedureUri) ->
     #register{
         request_id = ReqId,
@@ -231,23 +287,31 @@ register(ReqId, Options, ProcedureUri) ->
         procedure_uri = ProcedureUri
     }.
 
+
+-spec registered(id(), id()) -> #registered{}.
 registered(ReqId, RegId) ->
     #registered{
         request_id = ReqId,
         registration_id = RegId
     }.
 
+
+-spec unregister(id(), id()) -> #unregister{}.
 unregister(ReqId, RegId) ->
     #unregister{
         request_id = ReqId,
         registration_id = RegId
     }.
 
+
+-spec unregistered(id()) -> #unregistered{}.
 unregistered(ReqId) ->
     #unregistered{
         request_id = ReqId
     }.
 
+
+-spec invocation(id(), id(), map()) -> #invocation{}.
 invocation(ReqId, RegId, Details) ->
     #invocation{
         request_id = ReqId,
@@ -255,6 +319,8 @@ invocation(ReqId, RegId, Details) ->
         details = Details
     }.
 
+
+-spec invocation(id(), id(), map(), list()) -> #invocation{}.
 invocation(ReqId, RegId, Details, Args) ->
     #invocation{
         request_id = ReqId,
@@ -263,6 +329,8 @@ invocation(ReqId, RegId, Details, Args) ->
         arguments = Args
     }.
 
+
+-spec invocation(id(), id(), map(), list(), map()) -> #invocation{}.
 invocation(ReqId, RegId, Details, Args, Payload) ->
     #invocation{
         request_id = ReqId,
@@ -272,18 +340,24 @@ invocation(ReqId, RegId, Details, Args, Payload) ->
         payload = Payload
     }.
 
+
+-spec interrupt(id(), map()) -> #interrupt{}.
 interrupt(ReqId, Options) ->
     #interrupt{
         request_id = ReqId,
         options = Options
     }.
 
+
+-spec yield(id(), map()) -> #yield{}.
 yield(ReqId, Options) ->
     #yield{
         request_id = ReqId,
         options = Options
     }.
 
+
+-spec yield(id(), map(), list()) -> #yield{}.
 yield(ReqId, Options, Args) ->
     #yield{
         request_id = ReqId,
@@ -291,6 +365,8 @@ yield(ReqId, Options, Args) ->
         arguments = Args
     }.
 
+
+-spec yield(id(), map(), list(), map()) -> #yield{}.
 yield(ReqId, Options, Args, Payload) ->
     #yield{
         request_id = ReqId,
