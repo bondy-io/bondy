@@ -31,9 +31,15 @@ handle_message(#hello{}, #{session_id := _} = Ctxt) ->
 handle_message(#hello{} = M, Ctxt0) ->
     handle_open_session(M#hello.realm_uri, M#hello.details, Ctxt0);
 
-handle_message(_M, #{session_id := _} = _Ctxt) ->
-    %% TODO ALL
-    error(not_yet_implemented).
+handle_message(M, #{session_id := _} = Ctxt) ->
+    handle_session_message(M, Ctxt);
+
+handle_message(_M, Ctxt) ->
+    Abort = ramp_message:abort(
+        #{message => <<"You need to estalish a session first.">>},
+        <<"wamp.error.not_in_session">>
+    ),
+    {stop, Abort, Ctxt}.
 
 
 
@@ -41,6 +47,20 @@ handle_message(_M, #{session_id := _} = _Ctxt) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+handle_session_message(#goodbye{} = M, Ctxt) ->
+    SessionId = ramp_context:session_id(Ctxt),
+    error_logger:info_report(
+        "Session ~p closed as per client request. Reason: ~p~n",
+        [SessionId, M#goodbye.reason_uri]
+    ),
+    Reply = ramp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
+    {stop, Reply, #{}};
+
+handle_session_message(_M, _Ctxt) ->
+    error(not_yet_implemented).
 
 
 %% @private
