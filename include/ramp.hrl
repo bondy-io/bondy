@@ -31,7 +31,6 @@
 -define(CHALLENGE, 4).
 -define(AUTHENTICATE, 5).
 -define(GOODBYE, 6).
--define(HEARTBEAT, 7).
 -define(ERROR, 8).
 -define(PUBLISH, 16).
 -define(PUBLISHED, 17).

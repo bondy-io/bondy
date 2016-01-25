@@ -15,3 +15,4 @@ app-deps.png
 db
 .erlang.mk
 *.d
+*.beam

@@ -404,7 +404,6 @@ pack_message_type(abort) -> ?ABORT;
 pack_message_type(challenge) -> ?CHALLENGE;
 pack_message_type(authenticate) -> ?AUTHENTICATE;
 pack_message_type(goodbye) -> ?GOODBYE;
-pack_message_type(heartbeat) -> ?HEARTBEAT;
 pack_message_type(error) -> ?ERROR;
 pack_message_type(publish) -> ?PUBLISH;
 pack_message_type(published) -> ?PUBLISHED;

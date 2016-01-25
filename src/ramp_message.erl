@@ -7,7 +7,6 @@
 -export([challenge/2]).
 -export([authenticate/2]).
 -export([goodbye/2]).
--export([heartbeat/0]).
 -export([error/4, error/5, error/6]).
 -export([publish/3, publish/4, publish/5]).
 -export([published/2]).
@@ -75,10 +74,6 @@ goodbye(Details, ReasonUri) ->
         details = Details,
         reason_uri = ReasonUri
     }.
-
-
-heartbeat() ->
-    ok.
 
 
 -spec error(binary(), id(), map(), uri()) -> #error{}.

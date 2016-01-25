@@ -42,8 +42,6 @@ goodbye_json_test(_) ->
     ),
     {[M], <<>>} = ramp_encoding:decode(ramp_encoding:encode(M, json), text, json).
 
-heartbeat_json_test(_) ->
-    ok.
 
 error_json_test(_) ->
     M = ramp_message:error(0, 1, #{}, <<"wamp.error.foo">>),
@@ -209,8 +207,6 @@ goodbye_erl_test(_) ->
     ),
     {[M], <<>>} = ramp_encoding:decode(ramp_encoding:encode(M, erl), text, erl).
 
-heartbeat_erl_test(_) ->
-    ok.
 
 error_erl_test(_) ->
     M = ramp_message:error(0, 1, #{}, <<"wamp.error.foo">>),
