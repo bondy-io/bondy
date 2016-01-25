@@ -18,7 +18,7 @@
     | {reply, Reply :: message(), NewCtxt :: ramp_context:context()}
     | {stop, Reply :: message(), NewCtxt :: ramp_context:context()}.
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
-    %% We already have a session!
+    %% Client already has a session!
     %% It is a protocol error to receive a second "HELLO" message during the
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
@@ -29,12 +29,15 @@ handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     {stop, Abort, Ctxt};
 
 handle_message(#hello{} = M, Ctxt0) ->
+    %% Client does not have a session and wants to open one
     handle_open_session(M#hello.realm_uri, M#hello.details, Ctxt0);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
+    %% Client already has a session!
     handle_session_message(M, Ctxt);
 
 handle_message(_M, Ctxt) ->
+    %% Client does not have a session and message is not HELLO
     Abort = ramp_message:abort(
         #{message => <<"You need to estalish a session first.">>},
         <<"wamp.error.not_in_session">>
@@ -51,13 +54,13 @@ handle_message(_M, Ctxt) ->
 
 %% @private
 handle_session_message(#goodbye{} = M, Ctxt) ->
-    SessionId = ramp_context:session_id(Ctxt),
+    #{session_id := SessionId} = Ctxt,
     error_logger:info_report(
         "Session ~p closed as per client request. Reason: ~p~n",
         [SessionId, M#goodbye.reason_uri]
     ),
     Reply = ramp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
-    {stop, Reply, #{}};
+    {stop, Reply, Ctxt};
 
 handle_session_message(_M, _Ctxt) ->
     error(not_yet_implemented).
