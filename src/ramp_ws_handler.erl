@@ -71,7 +71,7 @@ websocket_init(_TransportName, Req0, _Opts) ->
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
     St = #{
-        context => ramp_router:init_context(),
+        context => ramp_context:new(),
         subprotocol => undefined,
         data => <<>>
     },
@@ -135,6 +135,13 @@ websocket_info({timeout, _Ref, _Msg}, Req, St) ->
     %% reply(text, Msg, Req, St);
     {ok, Req, St};
 
+websocket_info({stop, Reason}, Req, St) ->
+    error_logger:error_report([
+        {description, <<"WAMP session shutdown">>},
+        {reason, Reason}
+    ]),
+    {shutdown, Req, St};
+
 websocket_info(_Info, Req, St) ->
     {ok, Req, St}.
 
@@ -145,21 +152,21 @@ websocket_info(_Info, Req, St) ->
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_terminate({normal, shutdown}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({normal, timeout}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({error, closed}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({error, badencoding}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({error, badframe}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({error, _Other}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({remote, closed}, _Req, St) ->
-    ramp_session:close(session_id(St));
+    maybe_close_session(St);
 websocket_terminate({remote, _Code, _Binary}, _Req, St) ->
-    ramp_session:close(session_id(St)).
+    maybe_close_session(St).
 
 
 %% =============================================================================
@@ -178,7 +185,7 @@ subprotocol_init(undefined, Req0, _St) ->
     {shutdown, Req0};
 
 subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
-    #{header := SubprotocolId} = Subprotocol,
+    #{id := SubprotocolId} = Subprotocol,
 
     Req1 = cowboy_req:set_resp_header(
         ?WS_SUBPROTOCOL_HEADER_NAME, SubprotocolId, Req0),
@@ -279,11 +286,11 @@ handle_wamp_frame(Data1, Req, St0) ->
         {stop, Ctxt1} ->
             {shutdown, Req, St1#{context => Ctxt1}};
         {reply, Replies, Ctxt1} ->
-            ReplyFrames = [ramp_encoding:encode(R, T, E) || R <- Replies],
+            ReplyFrames = [ramp_encoding:encode(R, E) || R <- Replies],
             reply(T, ReplyFrames, Req, St1#{context => Ctxt1});
         {stop, Replies, Ctxt1} ->
-            self() ! {normal, shutdown},
-            ReplyFrames = [ramp_encoding:encode(R, T, E) || R <- Replies],
+            self() ! {stop, <<"Router dropped session.">>},
+            ReplyFrames = [ramp_encoding:encode(R, E) || R <- Replies],
             reply(T, ReplyFrames, Req, St1#{context => Ctxt1})
     end.
 
@@ -314,7 +321,13 @@ handle_wamp_messages([H|T], Req, Ctxt0, Acc, StopFlag) ->
             handle_wamp_messages(T, Req, Ctxt1, [Reply | Acc], StopFlag)
     end.
 
-
+maybe_close_session(St) ->
+    case session_id(St) of
+        undefined ->
+            ok;
+            SessionId ->
+                ramp_session:close(SessionId)
+    end.
 
 %% =============================================================================
 %% PRIVATE STATE ACCESSORS
@@ -324,4 +337,6 @@ handle_wamp_messages([H|T], Req, Ctxt0, Acc, StopFlag) ->
 
 %% @private
 session_id(#{context := #{session_id := SessionId}}) ->
-    SessionId.
+    SessionId;
+session_id(_) ->
+    undefined.

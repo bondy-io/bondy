@@ -39,7 +39,10 @@ start_https() ->
 dispatch_table() ->
     List = [
         {'_', [
-            {"/", ramp_entry_point_rh, []}
+            {"/", ramp_entry_point_rh, []},
+            {"/ws", ramp_ws_handler, []},
+            {"/publications", ramp_publication_collection_rh, []},
+            {"/calls", ramp_call_collection_rh, []}
         ]}
     ],
     cowboy_router:compile(List).

@@ -51,7 +51,7 @@ open(RealmUri, Details) when is_map(Details) ->
     Session1 = parse_details(Details, Session0),
     case ets:insert_new(table(SessionId), Session1) of
         true ->
-            SessionId;
+            Session1;
         false ->
             error({integrity_constraint_violation, SessionId})
     end.
@@ -149,15 +149,15 @@ parse_details(Options, Session0)  when is_map(Options) ->
 
 
 %% @private
-parse_details(<<"roles">>, Roles, Session) when is_map(Roles) ->
+parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
-parse_details(<<"caller">>, V, Session) when is_map(V) ->
+parse_details(caller, V, Session) when is_map(V) ->
     Session#session{caller_role = V};
-parse_details(<<"calle">>, V, Session) when is_map(V) ->
+parse_details(calle, V, Session) when is_map(V) ->
     Session#session{callee_role = V};
-parse_details(<<"subscriber">>, V, Session) when is_map(V) ->
+parse_details(subscriber, V, Session) when is_map(V) ->
     Session#session{subscriber_role = V};
-parse_details(<<"publisher">>, V, Session) when is_map(V) ->
+parse_details(publisher, V, Session) when is_map(V) ->
     Session#session{publisher_role = V};
 parse_details(_, _, Session) ->
     Session.

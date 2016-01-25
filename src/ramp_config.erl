@@ -17,6 +17,20 @@
 -export[tls_max_connections/0].
 -export[tls_port/0].
 -export[ws_compress_enabled/0].
+-export[is_router/0].
+
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
+-spec is_router() -> boolean().
+is_router() ->
+    application:get_env(?APP, is_router, false).
 
 
 
@@ -26,13 +40,13 @@
 
 
 http_acceptors_pool_size() ->
-    u:get_integer(?APP, http_acceptors_pool_size, 200).
+    application:get_env(?APP, http_acceptors_pool_size, 200).
 
 http_max_connections() ->
-    u:get_integer(?APP, http_max_connections, 1000).
+    application:get_env(?APP, http_max_connections, 1000).
 
 http_port() ->
-    u:get_integer(?APP, http_port, 8080).
+    application:get_env(?APP, http_port, 8080).
 
 
 %% @doc
@@ -46,13 +60,13 @@ ws_compress_enabled() -> true.
 %% =============================================================================
 
 https_acceptors_pool_size() ->
-    u:get_integer(?APP, https_acceptors_pool_size, 200).
+    application:get_env(?APP, https_acceptors_pool_size, 200).
 
 https_max_connections() ->
-    u:get_integer(?APP, https_max_connections, 1000).
+    application:get_env(?APP, https_max_connections, 1000).
 
 https_port() ->
-    u:get_integer(?APP, https_port, 443).
+    application:get_env(?APP, https_port, 8043).
 
 
 %% =============================================================================
@@ -61,13 +75,13 @@ https_port() ->
 
 
 tcp_acceptors_pool_size() ->
-    u:get_integer(?APP, tcp_acceptors_pool_size, 200).
+    application:get_env(?APP, tcp_acceptors_pool_size, 200).
 
 tcp_max_connections() ->
-    u:get_integer(?APP, tcp_max_connections, 1000).
+    application:get_env(?APP, tcp_max_connections, 1000).
 
 tcp_port() ->
-    u:get_integer(?APP, tcp_port, 10082).
+    application:get_env(?APP, tcp_port, 10082).
 
 
 %% =============================================================================
@@ -76,13 +90,13 @@ tcp_port() ->
 
 
 tls_acceptors_pool_size() ->
-    u:get_integer(?APP, tls_acceptors_pool_size, 200).
+    application:get_env(?APP, tls_acceptors_pool_size, 200).
 
 tls_max_connections() ->
-    u:get_integer(?APP, tls_max_connections, 1000).
+    application:get_env(?APP, tls_max_connections, 1000).
 
 tls_port() ->
-    u:get_integer(?APP, tls_port, 10083).
+    application:get_env(?APP, tls_port, 10083).
 
 
 %% =============================================================================
@@ -91,7 +105,7 @@ tls_port() ->
 
 
 automatically_create_realms() ->
-    u:get_boolean(?APP, automatically_create_realms, true).
+    application:get_env(?APP, automatically_create_realms, true).
 
 
 %% =============================================================================
@@ -100,4 +114,4 @@ automatically_create_realms() ->
 
 -spec connection_lifetime() -> session | connection.
 connection_lifetime() ->
-    u:get_atom(?APP, connection_lifetime, session).
+    application:get_env(?APP, connection_lifetime, session).

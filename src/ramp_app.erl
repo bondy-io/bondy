@@ -7,7 +7,7 @@
 start(_Type, _Args) ->
     case ramp_sup:start_link() of
         {ok, Pid} ->
-            ok = start_tcp_handlers(),
+            ok = maybe_start_router_services(),
             {ok, Pid};
         Other  ->
             Other
@@ -23,6 +23,16 @@ stop(_State) ->
 %% PRIVATE
 %% =============================================================================
 
+maybe_start_router_services() ->
+    case ramp_config:is_router() of
+        true ->
+            ok = start_tcp_handlers(),
+            %% {ok, _} = ramp_api_http:start_https(),
+            {ok, _} = ramp_api_http:start_http(),
+            ok;
+        false ->
+            ok
+    end.
 
 
 %% @private

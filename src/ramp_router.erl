@@ -1,14 +1,7 @@
 -module(ramp_router).
 -include ("ramp.hrl").
 
--type context()       ::  #{
-    session_id => id(),
-    realm_uri => uri(),
-    subprotocol => subprotocol()
-}.
--export_type([context/0]).
 
--export([init_context/0]).
 -export([handle_message/2]).
 
 
@@ -19,16 +12,11 @@
 
 
 
--spec init_context() -> context().
-init_context() ->
-    #{}.
-
-
 -spec handle_message(M :: message(), Ctxt :: map()) ->
-    {ok, NewCtxt :: context()}
-    | {stop, NewCtxt :: context()}
-    | {reply, Reply :: message(), NewCtxt :: context()}
-    | {stop, Reply :: message(), NewCtxt :: context()}.
+    {ok, NewCtxt :: ramp_context:context()}
+    | {stop, NewCtxt :: ramp_context:context()}
+    | {reply, Reply :: message(), NewCtxt :: ramp_context:context()}
+    | {stop, Reply :: message(), NewCtxt :: ramp_context:context()}.
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     %% We already have a session!
     %% It is a protocol error to receive a second "HELLO" message during the
