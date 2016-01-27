@@ -2,9 +2,6 @@
 -include("ramp.hrl").
 
 
--define(MAX_ID, 9007199254740993).
-
-
 -export ([new/1]).
 -export ([is_valid/1]).
 

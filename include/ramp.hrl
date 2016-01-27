@@ -1,3 +1,18 @@
+
+
+%% Adictionary describing *features* supported by the peer for that role.
+%% This MUST be empty for WAMP Basic Profile implementations, and MUST
+%% be used by implementations implementing parts of the Advanced Profile
+%% to list the specific set of features they support.
+-type role_features() :: dict().
+-define(RAMP_VERSION_STRING, <<"RAMP-0.0.1">>).
+-define(WS_SUBPROTOCOL_HEADER_NAME, <<"sec-websocket-protocol">>).
+-define(WAMP2_JSON, <<"wamp.2.json">>).
+-define(WAMP2_MSGPACK, <<"wamp.2.msgpack">>).
+-define(WAMP2_MSGPACK_BATCHED,<<"wamp.2.msgpack.batched">>).
+-define(WAMP2_JSON_BATCHED,<<"wamp.2.json.batched">>).
+-define(MAX_ID, 9007199254740993).
+
 -type dict()    ::  map().
 -type uri()     ::  binary().
 -type id()      ::  0..9007199254740993.
@@ -6,18 +21,6 @@
 %% A _Client_ can support any combination of the following roles but must
 %% support at least one role.
 -type client_role() ::  caller | callee | subscriber | publisher.
-
-%% Adictionary describing *features* supported by the peer for that role.
-%% This MUST be empty for WAMP Basic Profile implementations, and MUST
-%% be used by implementations implementing parts of the Advanced Profile
-%% to list the specific set of features they support.
--type role_features() :: dict().
-
--define(WS_SUBPROTOCOL_HEADER_NAME, <<"sec-websocket-protocol">>).
--define(WAMP2_JSON, <<"wamp.2.json">>).
--define(WAMP2_MSGPACK, <<"wamp.2.msgpack">>).
--define(WAMP2_MSGPACK_BATCHED,<<"wamp.2.msgpack.batched">>).
--define(WAMP2_JSON_BATCHED,<<"wamp.2.json.batched">>).
 
 -type subprotocol() ::  #{
     id => binary(),
