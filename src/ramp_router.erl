@@ -1,6 +1,45 @@
+%% ,------.                                    ,------.
+%% | Peer |                                    | Peer |
+%% `--+---'                                    `--+---'
+%%
+%%                   TCP established
+%%    |<----------------------------------------->|
+%%    |                                           |
+%%    |               TLS established             |
+%%    |+<--------------------------------------->+|
+%%    |+                                         +|
+%%    |+           WebSocket established         +|
+%%    |+|<------------------------------------->|+|
+%%    |+|                                       |+|
+%%    |+|            WAMP established           |+|
+%%    |+|+<----------------------------------->+|+|
+%%    |+|+                                     +|+|
+%%    |+|+                                     +|+|
+%%    |+|+            WAMP closed              +|+|
+%%    |+|+<----------------------------------->+|+|
+%%    |+|                                       |+|
+%%    |+|                                       |+|
+%%    |+|            WAMP established           |+|
+%%    |+|+<----------------------------------->+|+|
+%%    |+|+                                     +|+|
+%%    |+|+                                     +|+|
+%%    |+|+            WAMP closed              +|+|
+%%    |+|+<----------------------------------->+|+|
+%%    |+|                                       |+|
+%%    |+|           WebSocket closed            |+|
+%%    |+|<------------------------------------->|+|
+%%    |+                                         +|
+%%    |+              TLS closed                 +|
+%%    |+<--------------------------------------->+|
+%%    |                                           |
+%%    |               TCP closed                  |
+%%    |<----------------------------------------->|
+%%
+%% ,--+---.                                    ,--+---.
+%% | Peer |                                    | Peer |
+%% `------'                                    `------'
 -module(ramp_router).
--include ("ramp.hrl").
-
+-include("ramp.hrl").
 
 -export([handle_message/2]).
 
@@ -9,6 +48,7 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
 
 
 
@@ -53,7 +93,12 @@ handle_message(_M, Ctxt) ->
 
 
 %% @private
+handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
+    %% The client is replying our goodbye.
+    {stop, Ctxt};
+
 handle_session_message(#goodbye{} = M, Ctxt) ->
+    %% Goodbye initiated by client, we reply with goodbye.
     #{session_id := SessionId} = Ctxt,
     error_logger:info_report(
         "Session ~p closed as per client request. Reason: ~p~n",
@@ -61,6 +106,14 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
     ),
     Reply = ramp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
+
+handle_session_message(#subscribe{} = M, Ctxt) ->
+    ReqId = M#subscribe.request_id,
+    Opts = M#subscribe.options,
+    Topic = M#subscribe.topic_uri,
+    {ok, SubsId} = ramp_subscription:add(ReqId, Opts, Topic, Ctxt),
+    Reply = ramp_message:subscribed(ReqId, SubsId),
+    {reply, Reply, Ctxt};
 
 handle_session_message(_M, _Ctxt) ->
     error(not_yet_implemented).
@@ -77,10 +130,13 @@ handle_open_session(RealmUri, Details, Ctxt0) ->
         },
         Welcome = ramp_message:welcome(
             SessionId,
-            #{roles => #{
-                dealer => #{},
-                broker => #{}
-            }}
+            #{
+                agent => ?RAMP_VERSION_STRING,
+                roles => #{
+                    dealer => #{},
+                    broker => #{}
+                }
+            }
         ),
         {reply, Welcome, Ctxt1}
     catch
