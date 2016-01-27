@@ -43,7 +43,7 @@ welcome(SessionId, Details) ->
         details = Details
     }.
 
-
+%% "ABORT" gets sent only _before_ a _Session_ is established, while
 -spec abort(map(), uri()) -> #abort{}.
 abort(Details, ReasonUri) ->
     #abort{
@@ -67,7 +67,7 @@ authenticate(Signature, Extra) ->
         extra = Extra
     }.
 
-
+%% "GOODBYE" is sent only _after_ a _Session_ is already established.
 -spec goodbye(map(), uri()) -> #goodbye{}.
 goodbye(Details, ReasonUri) ->
     #goodbye{
