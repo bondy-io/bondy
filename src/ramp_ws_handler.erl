@@ -38,11 +38,10 @@
     subprotocol => subprotocol()
 }.
 
--export([init/3]).
--export([websocket_init/3]).
+-export([init/2]).
 -export([websocket_handle/3]).
 -export([websocket_info/3]).
--export([websocket_terminate/3]).
+-export([terminate/3]).
 
 
 
@@ -52,8 +51,32 @@
 
 
 
-init(_, _Req0, _Opts) ->
-    {upgrade, protocol, cowboy_websocket}.
+init(Req, Opts) ->
+    %% From [Cowboy's Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
+    %% If the sec-websocket-protocol header was sent with the request for
+    %% establishing a Websocket connection, then the Websocket handler must
+    %% select one of these subprotocol and send it back to the client,
+    %% otherwise the client might decide to close the connection, assuming no
+    %% correct subprotocol was found.
+    case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
+        undefined ->
+            %% Plain websockets
+            %% {ok, Req1, St, ?TIMEOUT};
+            %% At the moment we only support wamp, not plain ws, so we stop.
+            error_logger:error_report([
+                {error,
+                    {missing_value_for_header, <<"sec-websocket-protocol">>}}
+            ]),
+            {ok, Req, Opts};
+        Subprotocols ->
+            St = #{
+                context => ramp_context:new(),
+                subprotocol => undefined,
+                data => <<>>
+            },
+            %% The client provided subprotocol options
+            subprotocol_init(select_subprotocol(Subprotocols), Req, St)
+    end.
 
 
 
@@ -62,58 +85,30 @@ init(_, _Req0, _Opts) ->
 %% =============================================================================
 
 
-%% @TODO Support for SSL/TLS
-websocket_init(_TransportName, Req0, _Opts) ->
-    %% From [Cowboy's Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
-    %% If the sec-websocket-protocol header was sent with the request for
-    %% establishing a Websocket connection, then the Websocket handler must
-    %% select one of these subprotocol and send it back to the client,
-    %% otherwise the client might decide to close the connection, assuming no
-    %% correct subprotocol was found.
-    St = #{
-        context => ramp_context:new(),
-        subprotocol => undefined,
-        data => <<>>
-    },
-    case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req0) of
-        {ok, undefined, Req1} ->
-            %% Plain websockets
-            %% {ok, Req1, St, ?TIMEOUT};
-            %% At the moment we only support wamp, not plain ws
-            error_logger:error_report([
-                {error,
-                    {missing_value_for_header, <<"sec-websocket-protocol">>}}
-            ]),
-            {shutdown, Req1};
-        {ok, Subprotocols, Req1} ->
-            %% The client provided subprotocol options
-            subprotocol_init(select_subprotocol(Subprotocols), Req1, St)
-    end.
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles frames sent by client
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_handle(Frame, Req, #{subprotocol := undefined} = St) ->
-    %% At the moment we only support wamp
+websocket_handle(Msg, Req, #{subprotocol := undefined} = St) ->
+    %% At the moment we only support wamp, so we stop.
     error_logger:error_report([
-        {error, {unsupported_message, Frame}},
+        {error, {unsupported_message, Msg}},
         {state, St},
         {stacktrace, erlang:get_stacktrace()}
     ]),
-    {ok, Req, St};
+    {stop, Req, St};
 
 websocket_handle({T, Data}, Req, #{subprotocol := #{frame_type := T}} = St) ->
-    handle_wamp_frame(Data, Req, St);
+    handle_wamp_data(Data, Req, St);
 
 websocket_handle({ping, _Msg}, Req, St) ->
-    %% Do nothing, cowboy will handle ping
+    %% Cowboy already handled ping
+    %% We ignore this message and carry on listening
     {ok, Req, St};
 
 websocket_handle({pong, _Msg}, Req, St) ->
-    %% Do nothing
+    %% We ignore this message and carry on listening
     {ok, Req, St};
 
 websocket_handle(Data, Req, St) ->
@@ -122,6 +117,7 @@ websocket_handle(Data, Req, St) ->
         {state, St},
         {stacktrace, erlang:get_stacktrace()}
     ]),
+    %% We ignore this message and carry on listening
     {ok, Req, St}.
 
 
@@ -151,21 +147,30 @@ websocket_info(_Info, Req, St) ->
 %% Termination
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_terminate({normal, shutdown}, _Req, St) ->
+terminate(normal, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({normal, timeout}, _Req, St) ->
+terminate(stop, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({error, closed}, _Req, St) ->
+terminate(timeout, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({error, badencoding}, _Req, St) ->
+terminate(remote, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({error, badframe}, _Req, St) ->
+terminate({error, closed}, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({error, _Other}, _Req, St) ->
+terminate({error, badencoding}, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({remote, closed}, _Req, St) ->
+terminate({error, badframe}, _Req, St) ->
     maybe_close_session(St);
-websocket_terminate({remote, _Code, _Binary}, _Req, St) ->
+terminate({error, _Other}, _Req, St) ->
+    maybe_close_session(St);
+
+terminate({crash, error, _Other}, _Req, St) ->
+    maybe_close_session(St);
+terminate({crash, exit, _Other}, _Req, St) ->
+    maybe_close_session(St);
+terminate({crash, throw, _Other}, _Req, St) ->
+    maybe_close_session(St);
+terminate({remote, _Code, _Binary}, _Req, St) ->
     maybe_close_session(St).
 
 
@@ -177,12 +182,13 @@ websocket_terminate({remote, _Code, _Binary}, _Req, St) ->
 %% @private
 -spec subprotocol_init(
     undefined | subprotocol(), cowboy_req:req(), state()) ->
-    {shutdown, cowboy_req:req()}
-    | {ok, cowboy_req:req(), state()}
-    | {ok, cowboy_req:req(), state(), timeout()}.
-subprotocol_init(undefined, Req0, _St) ->
-    %% No valid subprotocol found in sec-websocket-protocol header
-    {shutdown, Req0};
+    {ok | module(), cowboy_req:req(), state()}
+    | {module(), cowboy_req:req(), state(), hibernate}
+    | {module(), cowboy_req:req(), state(), timeout()}
+    | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
+subprotocol_init(undefined, Req0, St) ->
+    %% No valid subprotocol found in sec-websocket-protocol header, so we stop
+    {ok, Req0, St};
 
 subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
     #{id := SubprotocolId} = Subprotocol,
@@ -194,7 +200,7 @@ subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
         data => <<>>,
         subprotocol => Subprotocol
     },
-    {ok, Req1, St1, ?TIMEOUT}.
+    {cowboy_websocket, Req1, St1, ?TIMEOUT}.
 
 
 %% -----------------------------------------------------------------------------
@@ -263,13 +269,13 @@ should_hibernate(_St) ->
 %% the client when required.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_wamp_frame(binary(), cowboy_req:req(), state()) ->
+-spec handle_wamp_data(binary(), cowboy_req:req(), state()) ->
     {ok, cowboy_req:req(), state()}
     | {ok, cowboy_req:req(), state(), hibernate}
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state()}
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state(), hibernate}
     | {shutdown, cowboy_req:req(), state()}.
-handle_wamp_frame(Data1, Req, St0) ->
+handle_wamp_data(Data1, Req, St0) ->
     #{
         subprotocol := #{frame_type := T, encoding := E},
         data := Data0,

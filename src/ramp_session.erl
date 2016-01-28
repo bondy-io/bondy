@@ -9,10 +9,10 @@
     realm_uri       ::  uri(),
     pid = self()    ::  pid(),
     seq = 0         ::  non_neg_integer(),
-    caller_role     ::  map(),
-    callee_role     ::  map(),
-    subscriber_role ::  map(),
-    publisher_role  ::  map()
+    caller     ::  map(),
+    callee     ::  map(),
+    subscriber ::  map(),
+    publisher  ::  map()
 }).
 
 -type session()  ::  #session{}.
@@ -30,6 +30,10 @@
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([size/0]).
+
+%% -export([features/1]).
+%% -export([subscriptions/1]).
+%% -export([registrations/1]).
 
 
 
@@ -91,7 +95,7 @@ incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
     Tab = tuplespace:locate_table(?SESSION_TABLE_NAME, SessionId),
-    ets:update_counter(Tab, SessionId, {pos, ?SESSION_SEQ_POS}).
+    ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
 %% @doc Returns the number of realms in the tuplespace.
@@ -138,10 +142,10 @@ parse_details(Options, Session0)  when is_map(Options) ->
 
     case maps:fold(fun parse_details/3, Session0, Options) of
         #session{
-            caller_role = undefined,
-            callee_role = undefined,
-            subscriber_role = undefined,
-            publisher_role = undefined} ->
+            caller = undefined,
+            callee = undefined,
+            subscriber = undefined,
+            publisher = undefined} ->
                 error({invalid_options, missing_client_role});
         Session1 ->
             Session1
@@ -152,13 +156,13 @@ parse_details(Options, Session0)  when is_map(Options) ->
 parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
 parse_details(caller, V, Session) when is_map(V) ->
-    Session#session{caller_role = V};
+    Session#session{caller = V};
 parse_details(calle, V, Session) when is_map(V) ->
-    Session#session{callee_role = V};
+    Session#session{callee = V};
 parse_details(subscriber, V, Session) when is_map(V) ->
-    Session#session{subscriber_role = V};
+    Session#session{subscriber = V};
 parse_details(publisher, V, Session) when is_map(V) ->
-    Session#session{publisher_role = V};
+    Session#session{publisher = V};
 parse_details(_, _, Session) ->
     Session.
 

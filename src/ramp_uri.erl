@@ -5,7 +5,7 @@
 
 %% URI components SHOULD only contain letters, digits and "_".
 %% and allow empty uri components
-%% re.compile(r"^(([0-9a-z_]+\.)|\.)*([0-9a-z_]+)?$")
+%% re.compile("^(([0-9a-z_]+\.)|\.)*([0-9a-z_]+)?$")
 
 %% Further, application URIs MUST NOT use "wamp" as a first URI
 %% component, since this is reserved for URIs predefined with the WAMP

@@ -111,7 +111,7 @@ handle_session_message(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
     Topic = M#subscribe.topic_uri,
-    {ok, SubsId} = ramp_subscription:add(ReqId, Opts, Topic, Ctxt),
+    {ok, SubsId} = ramp_broker:subscribe(Topic, Opts, Ctxt),
     Reply = ramp_message:subscribed(ReqId, SubsId),
     {reply, Reply, Ctxt};
 

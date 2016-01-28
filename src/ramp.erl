@@ -19,7 +19,11 @@ start() ->
 
 
 %% @doc Sends a message over a trasport to a peer. If the transport is not open it fails with an exception.
-send(_Message, _Transport) ->
+send(#goodbye{} = _M, _Ctxt0) ->
+    %% do_send(M, Ctxt#{goodbye_initiated => true});
+    error(not_yet_implemented);
+
+send(_Message, _Ctxt) ->
     error(not_yet_implemented).
 
 is_open(_Transport) ->

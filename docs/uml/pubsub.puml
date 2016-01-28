@@ -1,0 +1,49 @@
+@startuml
+
+
+
+class session_subscription <<ordered_set>>{
+    key :: {realm_uri, session_id, subscription_id}
+    topic_uri
+    match_policy
+}
+
+
+
+
+class subscription <<ordered_set>>{
+    subscription_key :: {realm_uri, topic_uri, match_policy}
+    session_id
+    subscription_id
+    subscriber()
+}
+
+
+class session <<set>>{
+    id
+    realm_uri
+    handler_pid
+    customer_id
+    seq
+    caller_role
+    callee_role
+    subscriber_role
+    publisher_role
+    features
+    subscriptions()
+    registrations()
+    customer()
+}
+
+
+class customer {
+    customer_id
+}
+
+
+
+session --> customer
+session o-- session_subscription
+session --> realm
+session_subscription --> subscription
+@enduml

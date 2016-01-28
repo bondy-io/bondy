@@ -1,3 +1,12 @@
+%%
+%% WAMP needs to identify the following ephemeral entities each in the
+%% scope noted:
+%%
+%% 1. Sessions (_global scope_)
+%% 2. Publications (_global scope_)
+%% 3. Subscriptions (_router scope_)
+%% 4. Registrations (_router scope_)
+%% 5. Requests (_session scope_)
 -module(ramp_id).
 -include("ramp.hrl").
 
