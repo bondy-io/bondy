@@ -91,7 +91,7 @@ subscribe(TopicUri, Options, Ctxt) ->
     Tab = session_subscription_table({RealmUri,  SessionId}),
 
     case ets:match(Tab, SS0) of
-        [SubsId] ->
+        [[SubsId]] ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already subscribed topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
@@ -123,14 +123,15 @@ unsubscribe(SubsId, Ctxt) ->
     case ets:take(Tab, {RealmUri, SessionId, SubsId}) of
         [] ->
             %% The session had no subscription with subsId.
-            {error, invalid_subscription};
+            {error, no_such_subscription};
         [SS] ->
             #session_subscription{
                 topic_uri = TopicUri,
                 match_policy = MatchPolicy
             } = SS,
             true = ets:delete(
-                subscription_table(RealmUri), {RealmUri, TopicUri, MatchPolicy})
+                subscription_table(RealmUri), {RealmUri, TopicUri, MatchPolicy}),
+            ok
     end.
 
 
