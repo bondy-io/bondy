@@ -9,10 +9,10 @@
     realm_uri       ::  uri(),
     pid = self()    ::  pid(),
     seq = 0         ::  non_neg_integer(),
-    caller     ::  map(),
-    callee     ::  map(),
-    subscriber ::  map(),
-    publisher  ::  map()
+    caller          ::  map(),
+    callee          ::  map(),
+    subscriber      ::  map(),
+    publisher       ::  map()
 }).
 
 -type session()  ::  #session{}.
@@ -153,15 +153,15 @@ parse_details(Options, Session0)  when is_map(Options) ->
 
 
 %% @private
-parse_details(roles, Roles, Session) when is_map(Roles) ->
+parse_details(<<"roles">>, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
-parse_details(caller, V, Session) when is_map(V) ->
+parse_details(<<"caller">>, V, Session) when is_map(V) ->
     Session#session{caller = V};
-parse_details(calle, V, Session) when is_map(V) ->
+parse_details(<<"calle">>, V, Session) when is_map(V) ->
     Session#session{callee = V};
-parse_details(subscriber, V, Session) when is_map(V) ->
+parse_details(<<"subscriber">>, V, Session) when is_map(V) ->
     Session#session{subscriber = V};
-parse_details(publisher, V, Session) when is_map(V) ->
+parse_details(<<"publisher">>, V, Session) when is_map(V) ->
     Session#session{publisher = V};
 parse_details(_, _, Session) ->
     Session.

@@ -32,7 +32,7 @@ decode_text(Data, erl, Acc) ->
     M = unpack(Term),
     {[M | Acc], <<>>};
 decode_text(Data, json, Acc) ->
-    Term = jsx:decode(Data, [return_maps, {labels, existing_atom}]),
+    Term = jsx:decode(Data, [return_maps]),
     M = unpack(Term),
     {[M | Acc], <<>>}.
 
