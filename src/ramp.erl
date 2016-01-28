@@ -3,6 +3,7 @@
 
 -export([error/2]).
 -export([error/3]).
+-export([error_uri/1]).
 -export([send/2]).
 -export([is_open/1]).
 -export([start/0]).
@@ -70,6 +71,9 @@ is_open(_Transport) ->
 make() ->
     make:all([load]).
 
+error_uri(Reason) when is_atom(Reason) ->
+    R = list_to_binary(atom_to_list(Reason)),
+    <<"com.williamhill.error.", R/binary>>.
 
 error(Code, Description) ->
     #{

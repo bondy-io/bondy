@@ -115,6 +115,19 @@ handle_session_message(#subscribe{} = M, Ctxt) ->
     Reply = ramp_message:subscribed(ReqId, SubsId),
     {reply, Reply, Ctxt};
 
+handle_session_message(#unsubscribe{} =M, Ctxt) ->
+    ReqId = M#unsubscribe.request_id,
+    SubsId = M#unsubscribe.subscription_id,
+    Reply = case ramp_broker:unsubscribe(SubsId, Ctxt) of
+        ok ->
+            ramp_message:unsubscribed(ReqId);
+        {error, no_such_subscription} ->
+            ramp_error:error(
+                ?UNSUBSCRIBE, ReqId, #{}, ramp:error_uri(no_such_subscription)
+            )
+    end,
+    {reply, Reply, Ctxt};
+
 handle_session_message(_M, _Ctxt) ->
     error(not_yet_implemented).
 
