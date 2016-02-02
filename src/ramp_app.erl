@@ -7,6 +7,8 @@
 start(_Type, _Args) ->
     case ramp_sup:start_link() of
         {ok, Pid} ->
+            ok = ramp_broker:start_pool(),
+            ok = ramp_dealer:start_pool(),
             ok = maybe_start_router_services(),
             {ok, Pid};
         Other  ->

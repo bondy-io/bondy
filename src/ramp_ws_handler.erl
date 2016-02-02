@@ -138,6 +138,11 @@ websocket_info({stop, Reason}, Req, St) ->
     ]),
     {shutdown, Req, St};
 
+websocket_info(#event{} = M, Req, St) ->
+    %% We send the event to the client
+    {reply, ramp_encoding:encode(M), Req, St};
+
+
 websocket_info(_Info, Req, St) ->
     {ok, Req, St}.
 

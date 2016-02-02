@@ -1,23 +1,32 @@
 -module(ramp_config).
 
 -define(APP, ramp).
+-define(DEFAULT_RESOURCE_SIZE, 16 * erlang:system_info(schedulers)).
+-define(DEFAULT_RESOURCE_CAPACITY, 16 * erlang:system_info(schedulers) * 10000). % max messages in process queue
+-define(DEFAULT_POOL_TYPE, transient).
 
--export[automatically_create_realms/0].
--export[connection_lifetime/0].
--export[http_acceptors_pool_size/0].
--export[http_max_connections/0].
--export[http_port/0].
--export[https_acceptors_pool_size/0].
--export[https_max_connections/0].
--export[https_port/0].
--export[tcp_acceptors_pool_size/0].
--export[tcp_max_connections/0].
--export[tcp_port/0].
--export[tls_acceptors_pool_size/0].
--export[tls_max_connections/0].
--export[tls_port/0].
--export[ws_compress_enabled/0].
--export[is_router/0].
+-export([automatically_create_realms/0]).
+-export([connection_lifetime/0]).
+-export([coordinator_timeout/0]).
+-export([http_acceptors_pool_size/0]).
+-export([http_max_connections/0]).
+-export([http_port/0]).
+-export([https_acceptors_pool_size/0]).
+-export([https_max_connections/0]).
+-export([https_port/0]).
+-export([is_router/0]).
+-export([load_regulation_enabled/0]).
+-export([pool_capacity/1]).
+-export([pool_size/1]).
+-export([pool_type/1]).
+-export([tcp_acceptors_pool_size/0]).
+-export([tcp_max_connections/0]).
+-export([tcp_port/0]).
+-export([tls_acceptors_pool_size/0]).
+-export([tls_max_connections/0]).
+-export([tls_port/0]).
+-export([ws_compress_enabled/0]).
+
 
 
 
@@ -115,3 +124,55 @@ automatically_create_realms() ->
 -spec connection_lifetime() -> session | connection.
 connection_lifetime() ->
     application:get_env(?APP, connection_lifetime, session).
+
+
+%% =============================================================================
+%% API : LOAD REGULATION
+%% =============================================================================
+
+-spec load_regulation_enabled() -> boolean().
+load_regulation_enabled() ->
+    application:get_env(?APP, load_regulation_enabled, true).
+
+
+-spec coordinator_timeout() -> pos_integer().
+coordinator_timeout() ->
+    application:get_env(?APP, coordinator_timeout, 3000).
+
+
+%% @doc Returns the type of the pool with name PoolName. The type can be one of
+%% the following:
+%% * permanent - the pool contains a (size) number of permanent workers
+%% under a supervision tree. This is the "events as messages" design pattern.
+%%  * transient - the pool contains a (size) number of supervisors each one
+%% supervision a transient process. This is the "events as messages" design
+%% pattern.
+%% @end
+-spec pool_type(PoolName :: atom()) -> permanent | transient.
+pool_type(ramp_broker_pool) ->
+    application:get_env(
+        ?APP, ramp_broker_pool_type, permanent);
+
+pool_type(ramp_dealer_pool) ->
+    application:get_env(
+        ?APP, ramp_dealer_pool_type, permanent).
+
+
+-spec pool_size(Resource :: atom()) -> pos_integer().
+pool_size(ramp_broker_pool) ->
+    application:get_env(
+        ?APP, ramp_broker_pool_size, ?DEFAULT_RESOURCE_SIZE);
+
+pool_size(ramp_dealer_pool) ->
+    application:get_env(
+        ?APP, ramp_dealer_pool_size, ?DEFAULT_RESOURCE_SIZE).
+
+
+-spec pool_capacity(Resource :: atom()) -> pos_integer().
+pool_capacity(ramp_broker_pool) ->
+    application:get_env(
+        ?APP, ramp_broker_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
+
+pool_capacity(ramp_dealer_pool) ->
+    application:get_env(
+        ?APP, ramp_dealer_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).

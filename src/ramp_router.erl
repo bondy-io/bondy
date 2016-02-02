@@ -123,10 +123,32 @@ handle_session_message(#unsubscribe{} =M, Ctxt) ->
             ramp_message:unsubscribed(ReqId);
         {error, no_such_subscription} ->
             ramp_error:error(
-                ?UNSUBSCRIBE, ReqId, #{}, ramp:error_uri(no_such_subscription)
+                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
             )
     end,
     {reply, Reply, Ctxt};
+
+handle_session_message(#publish{} = M, Ctxt) ->
+    ReqId = M#publish.request_id,
+    Opts = M#publish.options,
+    %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
+    %% not respond, whether the publication was successful indeed or not.
+    %% This behavior can be changed with the option
+    %% "PUBLISH.Options.acknowledge|bool"
+    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
+    case ramp_broker:async_publish(M, Ctxt) of
+        {ok, _}->
+            %% The broker will conditionally reply when Acknowledge == true
+            {ok, Ctxt};
+        {error, Reason} when Acknowledge == true->
+            %% REVIEW are we using the right error uri?
+            Reply  = ramp_error:error(
+                ?PUBLISH, ReqId, ramp:error_dict(Reason), ?WAMP_ERROR_CANCELED
+            ),
+            {reply, Reply, Ctxt};
+        {error, _}->
+            {ok, Ctxt}
+    end;
 
 handle_session_message(_M, _Ctxt) ->
     error(not_yet_implemented).

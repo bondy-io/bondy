@@ -1,11 +1,11 @@
 -module(ramp).
 -include ("ramp.hrl").
 
--export([error/2]).
--export([error/3]).
+-export([error_dict/1]).
+-export([error_dict/2]).
+-export([error_dict/3]).
 -export([error_uri/1]).
 -export([send/2]).
--export([is_open/1]).
 -export([start/0]).
 -export([make/0]).
 
@@ -19,16 +19,17 @@ start() ->
     application:ensure_all_started(ramp).
 
 
-%% @doc Sends a message over a trasport to a peer. If the transport is not open it fails with an exception.
-send(#goodbye{} = _M, _Ctxt0) ->
-    %% do_send(M, Ctxt#{goodbye_initiated => true});
-    error(not_yet_implemented);
+%% @doc Sends a messageto a peer. If the transport is not open it fails with an exception.
+-spec send(Message :: message(), To :: pid()) -> ok.
+send(Message, To) ->
+    case is_process_alive(To) of
+        true ->
+            To ! Message,
+            ok;
+        false ->
+            error({unknown_peer, To})
+    end.
 
-send(_Message, _Ctxt) ->
-    error(not_yet_implemented).
-
-is_open(_Transport) ->
-    error(not_yet_implemented).
 
 
 %% =============================================================================
@@ -75,13 +76,19 @@ error_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
     <<"com.williamhill.error.", R/binary>>.
 
-error(Code, Description) ->
+
+error_dict(Code) ->
+    #{
+        <<"code">> => Code
+    }.
+
+error_dict(Code, Description) ->
     #{
         <<"code">> => Code,
         <<"description">> => Description
     }.
 
-error(Code, Description, UserInfo) ->
+error_dict(Code, Description, UserInfo) ->
     #{
     	<<"code">> => Code,
     	<<"description">> => Description,

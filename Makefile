@@ -1,11 +1,12 @@
 PROJECT = ramp
 PROJECT_VERSION = 0.1.0
-DEPS = ranch cowboy bullet gun msgpack jsx tuplespace cors trie
+DEPS = ranch cowboy bullet gun msgpack jsx tuplespace cors sidejob trie
 
 dep_trie = git https://github.com/okeuday/trie master
 dep_cowboy = git https://github.com/ninenines/cowboy master
 dep_tuplespace = git git@git.rand.dev.williamhill.plc:aramallo/tuplespace.git develop
 dep_cors = git git@gitlab.williamhill-dev.local:pmorgan/cors.git develop
+dep_sidejob = git https://github.com/basho/sidejob.git develop
 
 
 

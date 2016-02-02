@@ -12,6 +12,7 @@
 
 -export([new/0]).
 -export([session_id/1]).
+-export([session/1]).
 -export([set_session_id/2]).
 
 
@@ -27,3 +28,8 @@ session_id(#{session_id := S}) -> S.
 -spec set_session_id(context(), id()) -> context().
 set_session_id(Ctxt, SessionId) ->
     Ctxt#{session_id => SessionId}.
+
+
+-spec session(context()) -> ramp_session:session().
+session(#{session_id := SessionId}) ->
+    ramp_session:fetch(SessionId).
