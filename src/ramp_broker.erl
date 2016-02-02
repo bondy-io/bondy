@@ -517,7 +517,6 @@ index_ms(RealmUri, TopicUri) ->
         subscription_id = '$4'
     },
     Proj = [{{'$2', '$3', '$4'}}],
-    %% io:format("~nConds:~n~p~n", [Conds]),
     [
         { MP, [list_to_tuple(['or' | Conds])], Proj }
     ].
