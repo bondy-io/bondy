@@ -239,3 +239,6 @@
 -define(WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
     <<"wamp.error.procedure_already_exists">>).
 -define(WAMP_ERROR_SYSTEM_SHUTDOWN, <<"wamp.error.system_shutdown">>).
+
+-define(RAMP_ERROR_NOT_IN_SESSION, <<"ramp.error.not_in_session">>).
+-define(RAMP_SESSION_ALREADY_EXISTS, <<"ramp.error.session_already_exists">>).

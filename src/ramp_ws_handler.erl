@@ -30,7 +30,7 @@
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?TIMEOUT
--define(TIMEOUT, 60000*100).
+-define(TIMEOUT, 60000*10).
 
 -type state()       ::  #{
     context => ramp_router:context(),

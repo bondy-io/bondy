@@ -64,12 +64,13 @@
     | {stop, Reply :: message(), NewCtxt :: ramp_context:context()}.
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
+    %% RPC:
     %% It is a protocol error to receive a second "HELLO" message during the
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
     Abort = ramp_message:abort(
         #{message => <<"You've sent a HELLO message more than once.">>},
-        <<"wamp.error.session_already_exists">>
+        ?RAMP_SESSION_ALREADY_EXISTS
     ),
     {stop, Abort, Ctxt};
 
@@ -85,7 +86,7 @@ handle_message(_M, Ctxt) ->
     %% Client does not have a session and message is not HELLO
     Abort = ramp_message:abort(
         #{message => <<"You need to estalish a session first.">>},
-        <<"wamp.error.not_in_session">>
+        ?RAMP_ERROR_NOT_IN_SESSION
     ),
     {stop, Abort, Ctxt}.
 
@@ -158,6 +159,15 @@ handle_session_message(#unregister{} = M, Ctxt) ->
     ramp_dealer:handle_message(M, Ctxt);
 
 handle_session_message(#call{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(#cancel{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(#yield{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(#error{} = M, Ctxt) ->
     ramp_dealer:handle_message(M, Ctxt);
 
 handle_session_message(_M, _Ctxt) ->
