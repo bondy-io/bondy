@@ -19,16 +19,6 @@
 %% _Broker_ to do a time-consuming lookup in some database, whereas
 %% another subscribe request second might be permissible immediately.
 %%
-%% Prefix matching identical
-%% 1) Tokenize uris (works patially i.e. a.b.c will match a.b.c.d but not a.b.c-d)
-%% 2) use prefix matching from https://github.com/Feuerlabs/kvdb/tree/master/src
-%% a.b.*
-%% a.b.c.*
-
-%% a.b.c.d
-%% a.b.c.e
-%% {RealmUri, TopicUri, MatchPolicy} -> Id
-%% {RealmUri, Id} -> SessionId, MatchPolicy ...
 %% @end
 -module(ramp_broker).
 -behaviour(gen_server).
@@ -63,16 +53,18 @@
     subscription_id         ::  id()
 }).
 
+
 %% API
--export([async_publish/2]).
--export([subscriptions/1]).
--export([subscriptions/2]).
+-export([handle_message/2]).
 -export([matching_subscriptions/1]).
 -export([matching_subscriptions/2]).
 -export([publish/5]).
 -export([subscribe/3]).
--export([unsubscribe/2]).
+-export([subscriptions/1]).
+-export([subscriptions/2]).
+-export([subscriptions/3]).
 -export([unsubscribe_all/1]).
+-export([unsubscribe/2]).
 
 %% GEN_SERVER API
 -export([start_pool/0]).
@@ -87,34 +79,118 @@
 -export([handle_cast/2]).
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the list of subscriptions for the active session
+%% Handles a wamp message. This function is used by the ramp_router.
+%% The message might be handled asynchronously by sending the message to the
+%% broker worker pool.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(ramp_context:context()) -> [#subscription{}].
-subscriptions(#{realm_uri := RealmUri, session_id := SessionId}) ->
-    subscriptions(RealmUri, SessionId).
+-spec handle_message(M :: message(), Ctxt :: map()) ->
+    {ok, NewCtxt :: ramp_context:context()}
+    | {stop, NewCtxt :: ramp_context:context()}
+    | {reply, Reply :: message(), NewCtxt :: ramp_context:context()}
+    | {stop, Reply :: message(), NewCtxt :: ramp_context:context()}.
+handle_message(#subscribe{} = M, Ctxt) ->
+    ReqId = M#subscribe.request_id,
+    Opts = M#subscribe.options,
+    Topic = M#subscribe.topic_uri,
+    %% REVIEW We currently do this synchronously
+    {ok, SubsId} = subscribe(Topic, Opts, Ctxt),
+    Reply = ramp_message:subscribed(ReqId, SubsId),
+    {reply, Reply, Ctxt};
+
+handle_message(#unsubscribe{} = M, Ctxt) ->
+    ReqId = M#unsubscribe.request_id,
+    SubsId = M#unsubscribe.subscription_id,
+    %% REVIEW We currently do this synchronously
+    Reply = case unsubscribe(SubsId, Ctxt) of
+        ok ->
+            ramp_message:unsubscribed(ReqId);
+        {error, no_such_subscription} ->
+            ramp_error:error(
+                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
+            )
+    end,
+    {reply, Reply, Ctxt};
+
+handle_message(#publish{} = M, Ctxt) ->
+    %% (RFC) Asynchronously notifies all subscribers of the published event.
+    %% Note that the _Publisher_ of an event will never receive the
+    %% published event even if the _Publisher_ is also a _Subscriber_ of the
+    %% topic published to.
+    %% By default, publications are unacknowledged, and the _Broker_ will
+    %% not respond, whether the publication was successful indeed or not.
+    %% This behavior can be changed with the option
+    %% "PUBLISH.Options.acknowledge|bool"
+    ReqId = M#publish.request_id,
+    Opts = M#publish.options,
+    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
+    %% We ask a broker worker to handle the message
+    case cast(M, Ctxt) of
+        {ok, _}->
+            %% The broker will conditionally reply when Acknowledge == true
+            {ok, Ctxt};
+        {error, Reason} when Acknowledge == true ->
+            %% REVIEW are we using the right error uri?
+            Reply = ramp_error:error(
+                ?PUBLISH, ReqId, ramp:error_dict(Reason), ?WAMP_ERROR_CANCELED
+            ),
+            {reply, Reply, Ctxt};
+        {error, _}->
+            {ok, Ctxt}
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the list of subscriptions matching the realm and session id.
+%% Returns the list of subscriptions for the active session.
+%%
+%% When called with a ramp:context() it is equivalent to calling
+%% subscriptions/2 with the RealmUri and SessionId extracted from the Context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscriptions(
+    ContextOrCont :: ramp_context:context() | ets:continuation()) ->
+    [#subscription{}].
+subscriptions(#{realm_uri := RealmUri, session_id := SessionId}) ->
+    subscriptions(RealmUri, SessionId);
+subscriptions(Cont) ->
+    ets:match_object(Cont).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the complete list of subscriptions matching the RealmUri
+%% and SessionId.
+%%
+%% Use {@link subscriptions/3} and {@link subscriptions/1} to limit the number
+%% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscriptions(RealmUri :: uri(), SessionId :: id()) -> [#subscription{}].
 subscriptions(RealmUri, SessionId) ->
-    Pattern = #subscription{
-        key = {RealmUri,  SessionId, '_'},
-        topic_uri = '_',
-        match_policy = '_'
-    },
-    Tab = subscription_table({RealmUri,  SessionId}),
-    ets:match_object(Tab, Pattern).
+    session_subscriptions(RealmUri, SessionId, infinity).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the complete list of subscriptions matching the RealmUri
+%% and SessionId.
+%%
+%% Use {@link subscriptions/3} to limit the number of subscriptions returned.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+    {[#subscription{}], Cont :: '$end_of_table' | term()}.
+subscriptions(RealmUri, SessionId, Limit) ->
+    session_subscriptions(RealmUri, SessionId, Limit).
 
 
 %% -----------------------------------------------------------------------------
@@ -158,8 +234,44 @@ subscribe(TopicUri, Options, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unsubscribe_all(ramp_context:context()) -> ok | {error, any()}.
-unsubscribe_all(_Ctxt) ->
+unsubscribe_all(Ctxt) ->
+    #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
+    Pattern = #subscription{
+        key = {RealmUri, SessionId, '_'},
+        topic_uri = '_',
+        match_policy = '_',
+        criteria = '_'
+    },
+    Tab = subscription_table({RealmUri, SessionId}),
+    case ets:match_object(Tab, Pattern, 1) of
+        {[], '$end_of_table'} ->
+            %% There are no subscriptions for this session
+            ok;
+        {[First], _} ->
+            do_unsubscribe_all(First, Tab, Ctxt)
+    end.
+
+
+%% @private
+do_unsubscribe_all('$end_of_table', _, _) ->
+    ok;
+do_unsubscribe_all([], _, _) ->
+    ok;
+do_unsubscribe_all(#subscription{} = S, Tab, Ctxt) ->
+    {RealmUri, _, SubsId} = Key = S#subscription.key,
+    TopicUri = S#subscription.topic_uri,
+    MatchPolicy = S#subscription.match_policy,
+    IdxTab = subscription_index_table(RealmUri),
+    IdxEntry = index_entry(SubsId, TopicUri, MatchPolicy, Ctxt),
+    true = ets:delete_object(Tab, S),
+    true = ets:delete_object(IdxTab, IdxEntry),
+    do_unsubscribe_all(ets:next(Tab, Key), Tab, Ctxt);
+do_unsubscribe_all({_, Sid, _} = Key, Tab, #{session_id := Sid} = Ctxt) ->
+    do_unsubscribe_all(ets:lookup(Tab, Key), Tab, Ctxt);
+do_unsubscribe_all(_, _, _) ->
+    %% No longer our session
     ok.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -175,37 +287,12 @@ unsubscribe(SubsId, Ctxt) ->
         [] ->
             %% The session had no subscription with subsId.
             {error, no_such_subscription};
-        [#subscription{topic_uri = TopicUri}] ->
-            delete_inverted_index(SubsId, TopicUri, Ctxt)
+        [#subscription{topic_uri = TopicUri, match_policy = MP}] ->
+            IdxTab = subscription_index_table(RealmUri),
+            IdxEntry = index_entry(SubsId, TopicUri, MP, Ctxt),
+            true = ets:delete_object(IdxTab, IdxEntry),
+            ok
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Asynchronously notifies all subscribers of the published event.
-%% Note that the _Publisher_ of an event will never receive the
-%% published event even if the _Publisher_ is also a _Subscriber_ of the
-%% topic published to.
-%% @end
-%% -----------------------------------------------------------------------------
--spec async_publish(#publish{}, ramp_context:context()) -> ok | {error, any()}.
-async_publish(#publish{} = M, Ctxt) ->
-    PoolName = pool_name(),
-    Resp = case ramp_config:pool_type(PoolName) of
-        permanent ->
-            %% We send a request to an existing permanent worker
-            %% using sidejob_worker
-            sidejob:cast(PoolName, {M, Ctxt});
-        transient ->
-            %% We spawn a transient process with sidejob_supervisor
-            sidejob_supervisor:start_child(
-                PoolName,
-                gen_server,
-                start_link,
-                [ramp_broker, [{M, Ctxt}], []]
-            )
-    end,
-    return(Resp, PoolName, false).
 
 
 %% -----------------------------------------------------------------------------
@@ -215,18 +302,29 @@ async_publish(#publish{} = M, Ctxt) ->
 -spec publish(uri(), map(), list(), map(), ramp_context:context()) ->
     {ok, id()} | {error, any()}.
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
+    #{session_id := SessionId} = Ctxt,
     %% TODO Do publish
     PubId = ramp_id:new(global),
     Details = #{},
-    %% We need to parallelise this based on batches
+    %% REVIEW We need to parallelise this based on batches
     %% (RFC) When a single event matches more than one of a _Subscriber's_
     %% subscriptions, the event will be delivered for each subscription.
-    Fun = fun({_SessionId, Pid, SubsId}) ->
-        Pid ! ramp_message:event(SubsId, PubId, Details, Args, Payload)
+    Fun = fun
+        ({S, Pid, SubsId}) ->
+            case S =:= SessionId of
+                true ->
+                    %% We should not send the publication to the published
+                    %% (RFC) Note that the _Publisher_ of an event will never
+                    %% receive the published event even if the _Publisher_ is
+                    %% also a _Subscriber_ of the topic published to.
+                    ok;
+                false ->
+                    Pid ! ramp_message:event(
+                        SubsId, PubId, Details, Args, Payload)
+            end
     end,
     ok = publish(matching_subscriptions(TopicUri, Ctxt), Fun),
     {ok, PubId}.
-
 
 
 publish({[], _}, _Fun) ->
@@ -240,6 +338,43 @@ publish({L, Cont}, Fun ) ->
     publish(matching_subscriptions(Cont), Fun).
 
 
+%%
+%%
+%% %% @private
+%% -spec process_async({list(), any()}, list()) -> ok | overload.
+%% process_async({Bets, '$end_of_table'}, Updates) ->
+%%     %% The last batch, we do the settlement inline (sync)
+%%     process(Bets, Updates);
+%%
+%% process_async({Bets, ETSCont}, Updates) ->
+%%     %% We settle in parallel
+%%     case betflow:notify(?MODULE, settle, [Bets, Updates]) of
+%%         ok ->
+%%             process_async(betflow_selection:bets(ETSCont), Updates);
+%%         overload ->
+%%             throw(overload)
+%%     end.
+%%
+%% process(Bets, Updates) when is_list(Bets) ->
+%%     %% We do the settlement inline
+%%     {Results, Terminations, DropCount} = do_process(
+%%         Bets, Updates, {[], [], 0}),
+%%     betflow:publish(bet_termination, Terminations),
+%%     betflow:publish(bet_settlement, Results),
+%%     ok;
+%%
+%% process({Bets, '$end_of_table'}, Updates) ->
+%%     %% Only 1 batch, we do it inline.
+%%     process(Bets, Updates);
+%%
+%% process(Res, Updates) when is_tuple(Res) ->
+%%     %% We asynchronously settle
+%%     case process_async(Res, Updates) of
+%%         ok ->
+%%             ok;
+%%         overload ->
+%%             throw(overload)
+%%     end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -275,6 +410,22 @@ matching_subscriptions(TopicUri, Ctxt, Limit) ->
     {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
 matching_subscriptions(Cont) ->
     ets:select(Cont).
+
+
+%% @private
+session_subscriptions(RealmUri, SessionId, Limit) ->
+    Pattern = #subscription{
+        key = {RealmUri,  SessionId, '_'},
+        topic_uri = '_',
+        match_policy = '_'
+    },
+    Tab = subscription_table({RealmUri,  SessionId}),
+    case Limit of
+        infinity ->
+            ets:match_object(Tab, Pattern);
+        _ ->
+            ets:match_object(Tab, Pattern, Limit)
+    end.
 
 
 
@@ -316,13 +467,13 @@ start_pool() ->
 
 init([?POOL_NAME]) ->
     %% We've been called by sidejob_worker
-    %% TODO send metaevent
+    %% TODO publish metaevent
     {ok, #state{pool_type = permanent}};
 
 init([Event]) ->
     %% We've been called by sidejob_supervisor
     %% We immediately timeout so that we find ourselfs in handle_info.
-    %% TODO send metaevent
+    %% TODO publish metaevent
 
     State = #state{
         pool_type = transient,
@@ -334,13 +485,13 @@ init([Event]) ->
 handle_call(Event, _From, State) ->
     try
         Reply = handle_event(Event, State),
-        {reply, {ok, Reply}, State}
+        {reply, Reply, State}
     catch
         throw:abort ->
-            %% TODO send metaevent
+            %% TODO publish metaevent
             {reply, abort, State};
         _:Reason ->
-            %% TODO send metaevent
+            %% TODO publish metaevent
             error_logger:error_report([
                 {reason, Reason},
                 {stacktrace, erlang:get_stacktrace()}
@@ -355,10 +506,10 @@ handle_cast(Event, State) ->
         {noreply, State}
     catch
         throw:abort ->
-            %% TODO send metaevent
+            %% TODO publish metaevent
             {noreply, State};
         _:Reason ->
-            %% TODO send metaevent
+            %% TODO publish metaevent
             error_logger:error_report([
                 {reason, Reason},
                 {stacktrace, erlang:get_stacktrace()}
@@ -383,7 +534,7 @@ terminate(shutdown, _State) ->
 terminate({shutdown, _}, _State) ->
     ok;
 terminate(_Reason, _State) ->
-    %% TODO send metaevent
+    %% TODO publish metaevent
     ok.
 
 
@@ -396,6 +547,58 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE : GEN_SERVER
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Asynchronously handles a message by either calling an existing worker or
+%% spawning a new one depending on the ramp_broker_pool_type type.
+%% This message will be handled by the worker's (gen_server)
+%% handle_info callback function.
+%% @end.
+%% -----------------------------------------------------------------------------
+-spec cast(term(), ramp_context:context()) -> ok | overload | {error, any()}.
+cast(M, Ctxt) ->
+    PoolName = pool_name(),
+    Resp = case ramp_config:pool_type(PoolName) of
+        permanent ->
+            %% We send a request to an existing permanent worker
+            %% using sidejob_worker
+            sidejob:cast(PoolName, {M, Ctxt});
+        transient ->
+            %% We spawn a transient process with sidejob_supervisor
+            sidejob_supervisor:start_child(
+                PoolName,
+                gen_server,
+                start_link,
+                [ramp_broker, [{M, Ctxt}], []]
+            )
+    end,
+    return(Resp, PoolName, false).
+
+
+%% @private
+return(ok, _, _) ->
+    ok;
+return(overload, PoolName, _) ->
+    error_logger:info_report([
+        {reason, overload},
+        {pool, PoolName}
+    ]),
+    %% TODO publish metaevent
+    overload;
+return({ok, _}, _, _) ->
+    ok;
+return({error, overload}, PoolName, _) ->
+    error_logger:info_report([
+        {reason, overload},
+        {pool, PoolName}
+    ]),
+    overload;
+return({error, Reason}, _, true) ->
+    error(Reason);
+return({error, _} = Error, _, false) ->
+    Error.
 
 
 %% @private
@@ -426,20 +629,38 @@ handle_event({#publish{} = M, Ctxt}, _State) ->
         {ok, PubId} when Acknowledge == true ->
             Reply = ramp_message:published(ReqId, PubId),
             To = ramp_session:pid(ramp_context:session(Ctxt)),
-            ramp:send(Reply, To, Ctxt);
-        {ok, _}->
+            ramp:send(Reply, To, Ctxt),
+            %% TODO publish metaevent
+            ok;
+        {ok, _} ->
+            %% TODO publish metaevent
             ok;
         {error, Reason} when Acknowledge == true->
             %% REVIEW use the right error uri
             Reply = ramp_error:error(
                 ?PUBLISH, ReqId, ramp:error_dict(Reason), ?WAMP_ERROR_CANCELED
             ),
-            ramp:send(Reply, Ctxt);
+            ramp:send(Reply, Ctxt),
+            %% TODO publish metaevent
+            ok;
         {error, _} ->
-            %% TODO send metaevent
+            %% TODO publish metaevent
             ok
-    end.
+    end;
 
+handle_event({#unsubscribe{} = M, Ctxt}, _State) ->
+    ReqId = M#unsubscribe.request_id,
+    SubsId = M#unsubscribe.subscription_id,
+    Reply = case unsubscribe(SubsId, Ctxt) of
+        ok ->
+            ramp_message:unsubscribed(ReqId);
+        {error, no_such_subscription} ->
+            ramp_error:error(
+                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
+            )
+    end,
+    ramp:send(Reply, Ctxt),
+    ok.
 
 
 
@@ -456,11 +677,13 @@ validate_match_policy(Options) when is_map(Options) ->
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
+
 %% @private
 subscription_table({_, _} = Key) ->
     tuplespace:locate_table(?SESSION_SUBSCRIPTION_TABLE_NAME, Key).
 
 
+%% @private
 subscription_index_table(Key) ->
     tuplespace:locate_table(?SUBSCRIPTION_INDEX_TABLE_NAME, Key).
 
@@ -504,6 +727,7 @@ index_entry(SubsId, TopicUri, Policy, Ctxt) ->
     end.
 
 
+%% @private
 index_ms(RealmUri, TopicUri) ->
     Cs = [RealmUri | uri_components(TopicUri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
@@ -547,42 +771,3 @@ wilcard_conditions([H|T] = L) ->
     ],
     Cs1 = [{'=:=',{element, 1, '$1'}, {const, H}}, {'=:=', {size, '$1'}, {const, length(L)}} | Cs0],
     [list_to_tuple(['and' | Cs1])].
-
-
-%% @private
-delete_inverted_index(_SubsId, _TopicUri, _Ctxt) ->
-    %% #{realm_uri := RealmUri} = Ctxt,
-    %% true = ets:delete(Tab, Entries),
-    %% ok.
-    error(not_yet_implemented).
-
-
-
-%% =============================================================================
-%% PRIVATE - UTILS
-%% =============================================================================
-
-
-
-%% @private
-return(ok, _, _) ->
-    ok;
-return(overload, PoolName, _) ->
-    error_logger:info_report([
-        {reason, overload},
-        {pool, PoolName}
-    ]),
-    %% TODO send metaevent
-    overload;
-return({ok, _}, _, _) ->
-    ok;
-return({error, overload}, PoolName, _) ->
-    error_logger:info_report([
-        {reason, overload},
-        {pool, PoolName}
-    ]),
-    overload;
-return({error, Reason}, _, true) ->
-    error(Reason);
-return({error, _} = Error, _, false) ->
-    Error.

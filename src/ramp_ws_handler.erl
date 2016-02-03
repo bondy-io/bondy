@@ -30,7 +30,7 @@
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?TIMEOUT
--define(TIMEOUT, 60000).
+-define(TIMEOUT, 60000*100).
 
 -type state()       ::  #{
     context => ramp_router:context(),
@@ -139,8 +139,9 @@ websocket_info({stop, Reason}, Req, St) ->
     {shutdown, Req, St};
 
 websocket_info(#event{} = M, Req, St) ->
+    #{subprotocol := #{encoding := E, frame_type := T}} = St,
     %% We send the event to the client
-    {reply, ramp_encoding:encode(M), Req, St};
+    {reply, frame(T, ramp_encoding:encode(M, E)), Req, St};
 
 
 websocket_info(_Info, Req, St) ->
@@ -169,7 +170,11 @@ terminate({error, badframe}, _Req, St) ->
 terminate({error, _Other}, _Req, St) ->
     maybe_close_session(St);
 
-terminate({crash, error, _Other}, _Req, St) ->
+terminate({crash, error, Reason}, _Req, St) ->
+    error_logger:error_report([
+        {reason, Reason},
+        {stacktrace, erlang:get_stacktrace()}
+    ]),
     maybe_close_session(St);
 terminate({crash, exit, _Other}, _Req, St) ->
     maybe_close_session(St);
@@ -336,8 +341,11 @@ maybe_close_session(St) ->
     case session_id(St) of
         undefined ->
             ok;
-            SessionId ->
-                ramp_session:close(SessionId)
+        SessionId ->
+            #{context := Ctxt} = St,
+            ramp_session:close(SessionId),
+            ramp_broker:unsubscribe_all(Ctxt),
+            ramp_dealer:unregister_all(Ctxt)
     end.
 
 %% =============================================================================

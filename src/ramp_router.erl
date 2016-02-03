@@ -42,13 +42,18 @@
 -include("ramp.hrl").
 
 -export([handle_message/2]).
+%% -export([has_role/2]). ur, ctxt
+%% -export([add_role/2]). uri, ctxt
+%% -export([remove_role/2]). uri, ctxt
+%% -export([authorise/4]). session, uri, action, ctxt
+%% -export([start_realm/2]). uri, ctxt
+%% -export([stop_realm/2]). uri, ctxt
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 
 
@@ -70,7 +75,7 @@ handle_message(#hello{}, #{session_id := _} = Ctxt) ->
 
 handle_message(#hello{} = M, Ctxt0) ->
     %% Client does not have a session and wants to open one
-    handle_open_session(M#hello.realm_uri, M#hello.details, Ctxt0);
+    open_session(M#hello.realm_uri, M#hello.details, Ctxt0);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
@@ -93,69 +98,7 @@ handle_message(_M, Ctxt) ->
 
 
 %% @private
-handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
-    %% The client is replying our goodbye.
-    {stop, Ctxt};
-
-handle_session_message(#goodbye{} = M, Ctxt) ->
-    %% Goodbye initiated by client, we reply with goodbye.
-    #{session_id := SessionId} = Ctxt,
-    error_logger:info_report(
-        "Session ~p closed as per client request. Reason: ~p~n",
-        [SessionId, M#goodbye.reason_uri]
-    ),
-    Reply = ramp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
-    {stop, Reply, Ctxt};
-
-handle_session_message(#subscribe{} = M, Ctxt) ->
-    ReqId = M#subscribe.request_id,
-    Opts = M#subscribe.options,
-    Topic = M#subscribe.topic_uri,
-    {ok, SubsId} = ramp_broker:subscribe(Topic, Opts, Ctxt),
-    Reply = ramp_message:subscribed(ReqId, SubsId),
-    {reply, Reply, Ctxt};
-
-handle_session_message(#unsubscribe{} =M, Ctxt) ->
-    ReqId = M#unsubscribe.request_id,
-    SubsId = M#unsubscribe.subscription_id,
-    Reply = case ramp_broker:unsubscribe(SubsId, Ctxt) of
-        ok ->
-            ramp_message:unsubscribed(ReqId);
-        {error, no_such_subscription} ->
-            ramp_error:error(
-                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
-            )
-    end,
-    {reply, Reply, Ctxt};
-
-handle_session_message(#publish{} = M, Ctxt) ->
-    ReqId = M#publish.request_id,
-    Opts = M#publish.options,
-    %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
-    %% not respond, whether the publication was successful indeed or not.
-    %% This behavior can be changed with the option
-    %% "PUBLISH.Options.acknowledge|bool"
-    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
-    case ramp_broker:async_publish(M, Ctxt) of
-        {ok, _}->
-            %% The broker will conditionally reply when Acknowledge == true
-            {ok, Ctxt};
-        {error, Reason} when Acknowledge == true->
-            %% REVIEW are we using the right error uri?
-            Reply  = ramp_error:error(
-                ?PUBLISH, ReqId, ramp:error_dict(Reason), ?WAMP_ERROR_CANCELED
-            ),
-            {reply, Reply, Ctxt};
-        {error, _}->
-            {ok, Ctxt}
-    end;
-
-handle_session_message(_M, _Ctxt) ->
-    error(not_yet_implemented).
-
-
-%% @private
-handle_open_session(RealmUri, Details, Ctxt0) ->
+open_session(RealmUri, Details, Ctxt0) ->
     try
         Session = ramp_session:open(RealmUri, Details),
         SessionId = ramp_session:id(Session),
@@ -182,3 +125,40 @@ handle_open_session(RealmUri, Details, Ctxt0) ->
             ),
             {stop, Abort, Ctxt0}
     end.
+
+
+%% @private
+handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
+    %% The client is replying to our goodbye() message.
+    {stop, Ctxt};
+
+handle_session_message(#goodbye{} = M, Ctxt) ->
+    %% Goodbye initiated by client, we reply with goodbye().
+    #{session_id := SessionId} = Ctxt,
+    error_logger:info_report(
+        "Session ~p closed as per client request. Reason: ~p~n",
+        [SessionId, M#goodbye.reason_uri]
+    ),
+    Reply = ramp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
+    {stop, Reply, Ctxt};
+
+handle_session_message(#subscribe{} = M, Ctxt) ->
+    ramp_broker:handle_message(M, Ctxt);
+
+handle_session_message(#unsubscribe{} = M, Ctxt) ->
+    ramp_broker:handle_message(M, Ctxt);
+
+handle_session_message(#publish{} = M, Ctxt) ->
+    ramp_broker:handle_message(M, Ctxt);
+
+handle_session_message(#register{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(#unregister{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(#call{} = M, Ctxt) ->
+    ramp_dealer:handle_message(M, Ctxt);
+
+handle_session_message(_M, _Ctxt) ->
+    error(not_yet_implemented).
