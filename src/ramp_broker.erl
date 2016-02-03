@@ -326,10 +326,9 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     ok = publish(matching_subscriptions(TopicUri, Ctxt), Fun),
     {ok, PubId}.
 
-
-publish({[], _}, _Fun) ->
+publish('$end_of_table', _Fun) ->
     ok;
-
+        
 publish({L, '$end_of_table'}, Fun) ->
     lists:foreach(Fun, L);
 
