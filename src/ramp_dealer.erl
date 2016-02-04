@@ -11,7 +11,9 @@
 }).
 
 %% API
--export([async_call/2]).
+-export([handle_message/2]).
+-export([unregister_all/1]).
+-export([cast/2]).
 
 %% GEN_SERVER API
 -export([start_pool/0]).
@@ -32,28 +34,26 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec async_call(#call{}, ramp_context:context()) -> ok | {error, any()}.
-async_call(#call{} = M, Ctxt) ->
-    PoolName = pool_name(),
-    Resp = case ramp_config:pool_type(PoolName) of
-        permanent ->
-            %% We send a request to an existing permanent worker
-            %% using sidejob_worker
-            sidejob:cast(PoolName, {M, Ctxt});
-        transient ->
-            %% We spawn a transient process with sidejob_supervisor
-            sidejob_supervisor:start_child(
-                PoolName,
-                gen_server,
-                start_link,
-                [ramp_dealer, [{M, Ctxt}], []]
-            )
-    end,
-    return(Resp, PoolName, false).
+-spec handle_message(M :: message(), Ctxt :: map()) ->
+    {ok, NewCtxt :: ramp_context:context()}
+    | {stop, NewCtxt :: ramp_context:context()}
+    | {reply, Reply :: message(), NewCtxt :: ramp_context:context()}
+    | {stop, Reply :: message(), NewCtxt :: ramp_context:context()}.
+handle_message(#register{} = _M, Ctxt) ->
+    {ok, Ctxt};
+
+handle_message(#unregister{} = _M, Ctxt) ->
+    {ok, Ctxt};
+
+handle_message(#call{} = _M, Ctxt) ->
+    {ok, Ctxt}.
+
+
+
+
+unregister_all(_) ->
+    ok.
+
 
 
 %% =============================================================================
@@ -173,6 +173,30 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE : GEN_SERVER
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec cast(#call{}, ramp_context:context()) -> ok | {error, any()}.
+cast(#call{} = M, Ctxt) ->
+    PoolName = pool_name(),
+    Resp = case ramp_config:pool_type(PoolName) of
+        permanent ->
+            %% We send a request to an existing permanent worker
+            %% using sidejob_worker
+            sidejob:cast(PoolName, {M, Ctxt});
+        transient ->
+            %% We spawn a transient process with sidejob_supervisor
+            sidejob_supervisor:start_child(
+                PoolName,
+                gen_server,
+                start_link,
+                [ramp_dealer, [{M, Ctxt}], []]
+            )
+    end,
+    return(Resp, PoolName, false).
 
 
 %% @private

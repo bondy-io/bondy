@@ -119,6 +119,12 @@ open_session(RealmUri, Details, Ctxt0) ->
         ),
         {reply, Welcome, Ctxt1}
     catch
+        error:{not_found, RealmUri} ->
+            Abort = ramp_message:abort(
+                #{message => <<"Real does not exist.">>},
+                ?WAMP_ERROR_NO_SUCH_REALM
+            ),
+            {stop, Abort, Ctxt0};
         error:{invalid_options, missing_client_role} ->
             Abort = ramp_message:abort(
                 #{message => <<"Please provide at least one client role.">>},
@@ -167,8 +173,8 @@ handle_session_message(#cancel{} = M, Ctxt) ->
 handle_session_message(#yield{} = M, Ctxt) ->
     ramp_dealer:handle_message(M, Ctxt);
 
-handle_session_message(#error{} = M, Ctxt) ->
+handle_session_message(#error{request_type = ?INVOCATION} = M, Ctxt) ->
     ramp_dealer:handle_message(M, Ctxt);
 
 handle_session_message(_M, _Ctxt) ->
-    error(not_yet_implemented).
+    error(unexpected_message).

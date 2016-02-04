@@ -45,7 +45,7 @@ lookup(Uri) ->
 fetch(Uri) ->
     case lookup(Uri) of
         not_found ->
-            error({badarg, Uri});
+            error({not_found, Uri});
         Realm ->
             Realm
     end.

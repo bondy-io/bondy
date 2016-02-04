@@ -44,8 +44,14 @@
 
 -spec open(uri(), session_opts()) -> session().
 open(RealmUri, Details) when is_map(Details) ->
-    %% REVIEW We force the creation of a new realm if it does not exist
-    _Realm = ramp_realm:get(RealmUri),
+    _Realm = case ramp_config:automatically_create_realms() of
+        true ->
+            %% We force the creation of a new realm if it does not exist
+            ramp_realm:get(RealmUri);
+        false ->
+            %% Will throw an exception if it does not exist
+            ramp_realm:fetch(RealmUri)
+    end,
     SessionId = ramp_id:new(global),
     Session0 = #session{
         id = SessionId,

@@ -169,7 +169,6 @@ terminate({error, badframe}, _Req, St) ->
     maybe_close_session(St);
 terminate({error, _Other}, _Req, St) ->
     maybe_close_session(St);
-
 terminate({crash, error, Reason}, _Req, St) ->
     error_logger:error_report([
         {reason, Reason},
@@ -343,9 +342,9 @@ maybe_close_session(St) ->
             ok;
         SessionId ->
             #{context := Ctxt} = St,
-            ramp_session:close(SessionId),
             ramp_broker:unsubscribe_all(Ctxt),
-            ramp_dealer:unregister_all(Ctxt)
+            ramp_dealer:unregister_all(Ctxt),
+            ramp_session:close(SessionId)
     end.
 
 %% =============================================================================

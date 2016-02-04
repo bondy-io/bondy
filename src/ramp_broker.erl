@@ -244,7 +244,7 @@ unsubscribe_all(Ctxt) ->
     },
     Tab = subscription_table({RealmUri, SessionId}),
     case ets:match_object(Tab, Pattern, 1) of
-        {[], '$end_of_table'} ->
+        '$end_of_table' ->
             %% There are no subscriptions for this session
             ok;
         {[First], _} ->
@@ -326,9 +326,11 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     ok = publish(matching_subscriptions(TopicUri, Ctxt), Fun),
     {ok, PubId}.
 
+
+%% @private
 publish('$end_of_table', _Fun) ->
     ok;
-        
+
 publish({L, '$end_of_table'}, Fun) ->
     lists:foreach(Fun, L);
 
@@ -337,43 +339,6 @@ publish({L, Cont}, Fun ) ->
     publish(matching_subscriptions(Cont), Fun).
 
 
-%%
-%%
-%% %% @private
-%% -spec process_async({list(), any()}, list()) -> ok | overload.
-%% process_async({Bets, '$end_of_table'}, Updates) ->
-%%     %% The last batch, we do the settlement inline (sync)
-%%     process(Bets, Updates);
-%%
-%% process_async({Bets, ETSCont}, Updates) ->
-%%     %% We settle in parallel
-%%     case betflow:notify(?MODULE, settle, [Bets, Updates]) of
-%%         ok ->
-%%             process_async(betflow_selection:bets(ETSCont), Updates);
-%%         overload ->
-%%             throw(overload)
-%%     end.
-%%
-%% process(Bets, Updates) when is_list(Bets) ->
-%%     %% We do the settlement inline
-%%     {Results, Terminations, DropCount} = do_process(
-%%         Bets, Updates, {[], [], 0}),
-%%     betflow:publish(bet_termination, Terminations),
-%%     betflow:publish(bet_settlement, Results),
-%%     ok;
-%%
-%% process({Bets, '$end_of_table'}, Updates) ->
-%%     %% Only 1 batch, we do it inline.
-%%     process(Bets, Updates);
-%%
-%% process(Res, Updates) when is_tuple(Res) ->
-%%     %% We asynchronously settle
-%%     case process_async(Res, Updates) of
-%%         ok ->
-%%             ok;
-%%         overload ->
-%%             throw(overload)
-%%     end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
