@@ -67,9 +67,9 @@
     | {reply, Reply :: message(), NewCtxt :: juno_context:context()}
     | {stop, Reply :: message(), NewCtxt :: juno_context:context()}.
 handle_message(#register{} = _M, Ctxt) ->
-    ReqId = M#register.request_id,
-    Opts = M#register.options,
-    ProcUri = M#register.procedure_uri,
+    %% ReqId = M#register.request_id,
+    %% Opts = M#register.options,
+    %% ProcUri = M#register.procedure_uri,
     {ok, Ctxt};
 
 handle_message(#unregister{} = _M, Ctxt) ->

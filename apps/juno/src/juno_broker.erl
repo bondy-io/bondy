@@ -126,7 +126,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
                 ?WAMP_ERROR_CANCELED
             ),
             {reply, Error, Ctxt}
-    end.
+    end;
 
 handle_message(#publish{} = M, Ctxt) ->
     %% (RFC) Asynchronously notifies all subscribers of the published event.
