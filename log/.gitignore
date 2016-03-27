@@ -1,7 +1,0 @@
-[1-9]*
-*.log.[0-9]*
-*.idx
-*.siz
-index
-kernel.log
-sasl.log

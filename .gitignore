@@ -16,3 +16,4 @@ db
 .erlang.mk
 *.d
 *.beam
+_build

@@ -1,0 +1,20 @@
+{application, juno,
+ [{description, "Juno is an API gateway which enables unified real-time communication between applications and services."},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { juno_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    tuplespace,
+    ranch,
+    cowboy,
+    sidejob
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, []},
+  {licenses, []},
+  {links, []}
+ ]}.
