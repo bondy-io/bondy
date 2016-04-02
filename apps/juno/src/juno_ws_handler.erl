@@ -225,21 +225,25 @@ subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
 %% i.e. determined by the client
 %% @end
 %% -----------------------------------------------------------------------------
+%% TODO Maybe share this with all protocol handlers e.g. tcp.
 -spec select_subprotocol(list(binary())) -> map() | not_found.
 select_subprotocol([]) ->
     undefined;
+
 select_subprotocol([?WAMP2_JSON | _T]) ->
     #{
         frame_type => text,
         encoding => json,
         id => ?WAMP2_JSON
     };
+
 select_subprotocol([?WAMP2_MSGPACK | _T]) ->
     #{
         frame_type => binary,
         encoding => msgpack,
         id => ?WAMP2_MSGPACK
     };
+
 select_subprotocol([?WAMP2_JSON_BATCHED | _T]) ->
     #{
         frame_type => text,
