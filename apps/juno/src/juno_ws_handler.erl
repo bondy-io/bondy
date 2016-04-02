@@ -142,11 +142,12 @@ websocket_info({stop, Reason}, Req, St) ->
     ]),
     {shutdown, Req, St};
 
-websocket_info(M, Req, St) ->
+websocket_info({M, Ctxt}, Req, St) ->
     #{subprotocol := #{encoding := E, frame_type := T}} = St,
     %% We send the event to the client
     try
-        {reply, frame(T, wamp_encoding:encode(M, E)), Req, St}
+        Reply = frame(T, wamp_encoding:encode(M, E)),
+        {reply, Reply, Req, St#{context => Ctxt}}
     catch
         _:_ ->
             {ok, Req, St}

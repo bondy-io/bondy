@@ -39,7 +39,7 @@ send(Message, Ctxt) ->
     Pid = juno_session:pid(juno_context:session(Ctxt)),
     case is_process_alive(Pid) of
         true ->
-            Pid ! Message,
+            Pid ! {Message, Ctxt},
             ok;
         false ->
             error({unknown_peer, Pid})

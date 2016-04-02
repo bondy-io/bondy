@@ -9,7 +9,9 @@
     tuplespace,
     ranch,
     cowboy,
-    sidejob
+    sidejob,
+    lager,
+    exometer_core
    ]},
   {env,[]},
   {modules, []},
