@@ -273,7 +273,8 @@ frame(Type, E) when Type == text orelse Type == binary ->
 
 %% @private
 should_hibernate(_St) ->
-    %% @TODO define condition
+    %% @TODO define condition. We mights need to do this to scale
+    %% to millions of connections per node
     false.
 
 
@@ -342,27 +343,11 @@ handle_wamp_messages([H|T], Req, Ctxt0, Acc, StopFlag) ->
             handle_wamp_messages(T, Req, Ctxt1, [Reply | Acc], StopFlag)
     end.
 
-maybe_close_session(St) ->
-    case session_id(St) of
-        undefined ->
-            ok;
-        SessionId ->
-            #{context := Ctxt} = St,
-            juno_pubsub:unsubscribe_all(Ctxt),
-            juno_rpc:unregister_all(Ctxt),
-            juno_session:close(SessionId)
-    end.
 
-
-
-%% =============================================================================
-%% PRIVATE STATE ACCESSORS
-%% =============================================================================
-
-
-
-%% @private
-session_id(#{context := #{session_id := SessionId}}) ->
-    SessionId;
-session_id(_) ->
-    undefined.
+maybe_close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
+    %% We cleanup session and router data for this Ctxt
+    juno_pubsub:unsubscribe_all(Ctxt),
+    juno_rpc:unregister_all(Ctxt),
+    juno_session:close(SessionId);
+maybe_close_session(_) ->
+    ok.
