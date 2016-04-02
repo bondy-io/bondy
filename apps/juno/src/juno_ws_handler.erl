@@ -95,7 +95,8 @@ init(Req, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_handle(Msg, Req, #{subprotocol := undefined} = St) ->
-    %% At the moment we only support wamp, so we stop.
+    %% At the moment we only support WAMP, so we stop.
+    %% TODO use lager
     error_logger:error_report([
         {error, {unsupported_message, Msg}},
         {state, St},
@@ -116,6 +117,7 @@ websocket_handle({pong, _Msg}, Req, St) ->
     {ok, Req, St};
 
 websocket_handle(Data, Req, St) ->
+    %% TODO use lager
     error_logger:error_report([
         {error, {unsupported_message, Data}},
         {state, St},
@@ -127,7 +129,8 @@ websocket_handle(Data, Req, St) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Handles internal erlang messages
+%% Handles internal erlang messages and WAMP messages JUNO wants to send to the
+%% client. See {@link juno:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_info({timeout, _Ref, _Msg}, Req, St) ->
@@ -136,6 +139,7 @@ websocket_info({timeout, _Ref, _Msg}, Req, St) ->
     {ok, Req, St};
 
 websocket_info({stop, Reason}, Req, St) ->
+    %% TODO use lager
     error_logger:error_report([
         {description, <<"WAMP session shutdown">>},
         {reason, Reason}
@@ -143,15 +147,10 @@ websocket_info({stop, Reason}, Req, St) ->
     {shutdown, Req, St};
 
 websocket_info({M, Ctxt}, Req, St) ->
+    %% We send a WAMP message to the client
     #{subprotocol := #{encoding := E, frame_type := T}} = St,
-    %% We send the event to the client
-    try
-        Reply = frame(T, wamp_encoding:encode(M, E)),
-        {reply, Reply, Req, St#{context => Ctxt}}
-    catch
-        _:_ ->
-            {ok, Req, St}
-    end.
+    Reply = frame(T, wamp_encoding:encode(M, E)),
+    {reply, Reply, Req, St#{context => Ctxt}}.
 
 
 %% -----------------------------------------------------------------------------
@@ -160,33 +159,34 @@ websocket_info({M, Ctxt}, Req, St) ->
 %% @end
 %% -----------------------------------------------------------------------------
 terminate(normal, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate(stop, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate(timeout, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate(remote, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({error, closed}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({error, badencoding}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({error, badframe}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({error, _Other}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({crash, error, Reason}, _Req, St) ->
+    %% TODO use lager
     error_logger:error_report([
         {reason, Reason},
         {stacktrace, erlang:get_stacktrace()}
     ]),
-    maybe_close_session(St);
+    close_session(St);
 terminate({crash, exit, _Other}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({crash, throw, _Other}, _Req, St) ->
-    maybe_close_session(St);
+    close_session(St);
 terminate({remote, _Code, _Binary}, _Req, St) ->
-    maybe_close_session(St).
+    close_session(St).
 
 
 %% =============================================================================
@@ -344,10 +344,11 @@ handle_wamp_messages([H|T], Req, Ctxt0, Acc, StopFlag) ->
     end.
 
 
-maybe_close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
+%% @private
+close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
     %% We cleanup session and router data for this Ctxt
     juno_pubsub:unsubscribe_all(Ctxt),
     juno_rpc:unregister_all(Ctxt),
     juno_session:close(SessionId);
-maybe_close_session(_) ->
+close_session(_) ->
     ok.
