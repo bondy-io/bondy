@@ -6,14 +6,14 @@
 %% @doc
 %% A Juno Context lets you access information that define the context of an
 %% interaction. In a typical interacion, several actors or objects have a hand
-%% in what is going on e.g. juno_session, juno_realm, etc.
+%% in what is going on e.g. juno_session, wamp_realm, etc.
 %%
 %% The Juno Context is passed as an argument through the whole request-response
 %%  loop to provide access to that information.
 %% @end
 %% =============================================================================
 -module(juno_context).
--include ("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 
 -type context()       ::  #{

@@ -8,15 +8,15 @@
 %% @end
 %% =============================================================================
 -module(juno).
--include ("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -export([error_dict/1]).
 -export([error_dict/2]).
 -export([error_dict/3]).
 -export([error_uri/1]).
+-export([make/0]).
 -export([send/2]).
 -export([start/0]).
--export([make/0]).
 
 
 %% =============================================================================
@@ -28,15 +28,21 @@ start() ->
     application:ensure_all_started(juno).
 
 
-%% @doc Sends a messageto a peer. If the transport is not open it fails with an exception.
--spec send(Message :: message(), To :: pid()) -> ok.
-send(Message, To) ->
-    case is_process_alive(To) of
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sends a message to a peer.
+%% If the transport is not open it fails with an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec send(Message :: message(), Ctxt :: juno_context:context()) -> ok.
+send(Message, Ctxt) ->
+    Pid = juno_session:pid(juno_context:session(Ctxt)),
+    case is_process_alive(Pid) of
         true ->
-            To ! Message,
+            Pid ! Message,
             ok;
         false ->
-            error({unknown_peer, To})
+            error({unknown_peer, Pid})
     end.
 
 
@@ -103,3 +109,7 @@ error_dict(Code, Description, UserInfo) ->
     	<<"description">> => Description,
         <<"userInfo">> => UserInfo
     }.
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================

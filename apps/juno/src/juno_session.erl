@@ -12,12 +12,14 @@
 %% i.e. establish a new transport-layer connection as part of each new
 %% session establishment.
 %%
-%% A Juno Session is a not an application Session and is not a generic store.
+%% A Juno Session is a not an application Session and is not a store for
+%% application specific content (an application session store should be
+%% implemented as a service i.e. a Callee).
 %%
 %% @end
 %% =============================================================================
 -module(juno_session).
--include ("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -define(SESSION_TABLE_NAME, session).
 -define(SESSION_SEQ_POS, 5).
@@ -72,12 +74,12 @@ open(RealmUri, Opts) when is_map(Opts) ->
     _Realm = case juno_config:automatically_create_realms() of
         true ->
             %% We force the creation of a new realm if it does not exist
-            juno_realm:get(RealmUri);
+            wamp_realm:get(RealmUri);
         false ->
             %% Will throw an exception if it does not exist
-            juno_realm:fetch(RealmUri)
+            wamp_realm:fetch(RealmUri)
     end,
-    SessionId = juno_id:new(global),
+    SessionId = wamp_id:new(global),
     Session0 = #session{
         id = SessionId,
         realm_uri = RealmUri

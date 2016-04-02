@@ -23,7 +23,7 @@ start_http() ->
         juno_http_listener,
         PoolSize,
         [{port, Port}],
-        [{env, [{dispatch, dispatch_table()}]}]
+        [{env, [{dispatch, dispatch_table()}, {max_connections, infinity}]}]
     ).
 
 -spec start_https() -> {ok, Pid :: pid()} | {error, any()}.
@@ -34,8 +34,9 @@ start_https() ->
         juno_https_listener,
         PoolSize,
         [{port, Port}],
-        [{env, [{dispatch, dispatch_table()}]}]
+        [{env, [{dispatch, dispatch_table()}, {max_connections, infinity}]}]
     ).
+
 
 
 %% ============================================================================

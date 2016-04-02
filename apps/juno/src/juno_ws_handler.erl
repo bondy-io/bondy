@@ -30,7 +30,7 @@
 %% @end
 %% =============================================================================
 -module(juno_ws_handler).
--include ("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?TIMEOUT
@@ -142,14 +142,15 @@ websocket_info({stop, Reason}, Req, St) ->
     ]),
     {shutdown, Req, St};
 
-websocket_info(#event{} = M, Req, St) ->
+websocket_info(M, Req, St) ->
     #{subprotocol := #{encoding := E, frame_type := T}} = St,
     %% We send the event to the client
-    {reply, frame(T, juno_encoding:encode(M, E)), Req, St};
-
-
-websocket_info(_Info, Req, St) ->
-    {ok, Req, St}.
+    try
+        {reply, frame(T, wamp_encoding:encode(M, E)), Req, St}
+    catch
+        _:_ ->
+            {ok, Req, St}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -296,7 +297,7 @@ handle_wamp_data(Data1, Req, St0) ->
     } = St0,
 
     Data2 = <<Data0/binary, Data1/binary>>,
-    {Messages, Data3} = juno_encoding:decode(Data2, T, E),
+    {Messages, Data3} = wamp_encoding:decode(Data2, T, E),
     St1 = St0#{data => Data3},
 
     case handle_wamp_messages(Messages, Req, Ctxt0) of
@@ -305,11 +306,11 @@ handle_wamp_data(Data1, Req, St0) ->
         {stop, Ctxt1} ->
             {shutdown, Req, St1#{context => Ctxt1}};
         {reply, Replies, Ctxt1} ->
-            ReplyFrames = [juno_encoding:encode(R, E) || R <- Replies],
+            ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
             reply(T, ReplyFrames, Req, St1#{context => Ctxt1});
         {stop, Replies, Ctxt1} ->
             self() ! {stop, <<"Router dropped session.">>},
-            ReplyFrames = [juno_encoding:encode(R, E) || R <- Replies],
+            ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
             reply(T, ReplyFrames, Req, St1#{context => Ctxt1})
     end.
 
@@ -346,10 +347,12 @@ maybe_close_session(St) ->
             ok;
         SessionId ->
             #{context := Ctxt} = St,
-            juno_broker:unsubscribe_all(Ctxt),
-            juno_dealer:unregister_all(Ctxt),
+            juno_pubsub:unsubscribe_all(Ctxt),
+            juno_rpc:unregister_all(Ctxt),
             juno_session:close(SessionId)
     end.
+
+
 
 %% =============================================================================
 %% PRIVATE STATE ACCESSORS

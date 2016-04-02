@@ -158,30 +158,18 @@ coordinator_timeout() ->
 %% pattern.
 %% @end
 -spec pool_type(PoolName :: atom()) -> permanent | transient.
-pool_type(juno_broker_pool) ->
+pool_type(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_broker_pool_type, permanent);
-
-pool_type(juno_dealer_pool) ->
-    application:get_env(
-        ?APP, juno_dealer_pool_type, permanent).
+        ?APP, juno_router_pool_type, permanent).
 
 
 -spec pool_size(Resource :: atom()) -> pos_integer().
-pool_size(juno_broker_pool) ->
+pool_size(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_broker_pool_size, ?DEFAULT_RESOURCE_SIZE);
-
-pool_size(juno_dealer_pool) ->
-    application:get_env(
-        ?APP, juno_dealer_pool_size, ?DEFAULT_RESOURCE_SIZE).
+        ?APP, juno_router_pool_size, ?DEFAULT_RESOURCE_SIZE).
 
 
 -spec pool_capacity(Resource :: atom()) -> pos_integer().
-pool_capacity(juno_broker_pool) ->
+pool_capacity(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_broker_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
-
-pool_capacity(juno_dealer_pool) ->
-    application:get_env(
-        ?APP, juno_dealer_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
+        ?APP, juno_router_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).

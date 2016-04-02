@@ -16,8 +16,7 @@
 start(_Type, _Args) ->
     case juno_sup:start_link() of
         {ok, Pid} ->
-            ok = juno_broker:start_pool(),
-            ok = juno_dealer:start_pool(),
+            ok = juno_router:start_pool(),
             ok = maybe_start_router_services(),
             {ok, Pid};
         Other  ->

@@ -40,4 +40,8 @@
  {<<"time_compat">>,
   {git,"git://github.com/lasp-lang/time_compat.git",
        {ref,"adfae4409187cc1a9f79028986e92e8730b5eda5"}},
-  1}].
+  1},
+ {<<"wamp">>,
+  {git,"git@gitlab.com:leapsight/wamp.git",
+       {ref,"a763b6454687417f856f6015e7e248f30387b0d8"}},
+  0}].
