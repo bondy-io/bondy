@@ -22,7 +22,7 @@ set_error_resp_body(Reason, Req) ->
 -spec location_uri(Id :: binary(), Req :: cowboy_req:req()) ->
     URI :: binary().
 location_uri(Id, Req) when is_binary(Id) ->
-    {Path, _} = cowboy_req:path(Req),
+    Path = cowboy_req:path(Req),
     <<Path/binary, "/", Id/binary>>;
 
 location_uri(Id, Req) when is_integer(Id) ->
