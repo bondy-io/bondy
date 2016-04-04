@@ -36,15 +36,27 @@ start() ->
 %% -----------------------------------------------------------------------------
 -spec send(Message :: message(), Ctxt :: juno_context:context()) -> ok.
 send(Message, Ctxt) ->
-    Pid = juno_session:pid(juno_context:session(Ctxt)),
+    send(juno_context:session(Ctxt), Message, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sends a message to a peer.
+%% If the transport is not open it fails with an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec send(
+    pid() | id(), Message :: message(), Ctxt :: juno_context:context()) -> ok.
+send(Pid, Message, _Ctxt) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
-            Pid ! {Message, Ctxt},
+            Pid ! Message,
             ok;
         false ->
             error({unknown_peer, Pid})
-    end.
-
+    end;
+send(SessionId, Message, Ctxt) ->
+    send(juno_session:pid(SessionId), Message, Ctxt).
 
 
 %% =============================================================================

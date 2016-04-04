@@ -23,6 +23,29 @@
 %% subsequent subscribe requests.  A subscribe request might require the
 %% _Broker_ to do a time-consuming lookup in some database, whereas
 %% another subscribe request second might be permissible immediately.
+%%
+%% ,---------.          ,------.             ,----------.
+%% |Publisher|          |Broker|             |Subscriber|
+%% `----+----'          `--+---'             `----+-----'
+%%      |                  |                      |
+%%      |                  |                      |
+%%      |                  |       SUBSCRIBE      |
+%%      |                  | <---------------------
+%%      |                  |                      |
+%%      |                  |  SUBSCRIBED or ERROR |
+%%      |                  | --------------------->
+%%      |                  |                      |
+%%      |                  |                      |
+%%      |                  |                      |
+%%      |                  |                      |
+%%      |                  |      UNSUBSCRIBE     |
+%%      |                  | <---------------------
+%%      |                  |                      |
+%%      |                  | UNSUBSCRIBED or ERROR|
+%%      |                  | --------------------->
+%% ,----+----.          ,--+---.             ,----+-----.
+%% |Publisher|          |Broker|             |Subscriber|
+%% `---------'          `------'             `----------'
 %% @end
 %% =============================================================================
 -module(juno_broker).
@@ -53,6 +76,7 @@ handle_message(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
     Topic = M#subscribe.topic_uri,
+    %% TODO check authorization and reply with wamp.error.not_authorized if not
     {ok, SubsId} = juno_pubsub:subscribe(Topic, Opts, Ctxt),
     Reply = wamp_message:subscribed(ReqId, SubsId),
     juno:send(Reply, Ctxt),
@@ -61,11 +85,12 @@ handle_message(#subscribe{} = M, Ctxt) ->
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
     SubsId = M#unsubscribe.subscription_id,
-    Reply = case juno_pubsub:unsubscribe(SubsId, Ctxt) of
-        ok ->
-            wamp_message:unsubscribed(ReqId);
-        {error, no_such_subscription} ->
-            juno_error:error(
+    Reply = try
+        juno_pubsub:unsubscribe(SubsId, Ctxt),
+        wamp_message:unsubscribed(ReqId)
+    catch
+        error:no_such_subscription ->
+            wamp_message:error(
                 ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
             )
     end,
@@ -87,7 +112,7 @@ handle_message(#publish{} = M, Ctxt) ->
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
-    case juno_pubsub:publish(TopicUri, Opts, Args, Payload, Ctxt) of
+    try juno_pubsub:publish(TopicUri, Opts, Args, Payload, Ctxt) of
         {ok, PubId} when Acknowledge == true ->
             Reply = wamp_message:published(ReqId, PubId),
             juno:send(Reply, Ctxt),
@@ -95,16 +120,20 @@ handle_message(#publish{} = M, Ctxt) ->
             ok;
         {ok, _} ->
             %% TODO publish metaevent
-            ok;
-        {error, Reason} when Acknowledge == true->
-            %% REVIEW use the right error uri
-            Reply = juno_error:error(
-                ?PUBLISH, ReqId, juno:error_dict(Reason), ?WAMP_ERROR_CANCELED
-            ),
+            ok
+    catch
+        error:not_authorized when Acknowledge == true ->
+            Reply = wamp_message:error(
+                ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
             juno:send(Reply, Ctxt),
             %% TODO publish metaevent
             ok;
-        {error, _} ->
+        _:Reason when Acknowledge == true ->
+            Reply = wamp_message:error(
+                ?PUBLISH, ReqId, juno:error_dict(Reason), ?WAMP_ERROR_CANCELED),
+            juno:send(Reply, Ctxt),
             %% TODO publish metaevent
+            ok;
+        _:_ ->
             ok
     end.

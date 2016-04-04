@@ -146,11 +146,11 @@ websocket_info({stop, Reason}, Req, St) ->
     ]),
     {shutdown, Req, St};
 
-websocket_info({M, Ctxt}, Req, St) ->
+websocket_info(M, Req, St) ->
     %% We send a WAMP message to the client
     #{subprotocol := #{encoding := E, frame_type := T}} = St,
     Reply = frame(T, wamp_encoding:encode(M, E)),
-    {reply, Reply, Req, St#{context => Ctxt}}.
+    {reply, Reply, Req, St}.
 
 
 %% -----------------------------------------------------------------------------
@@ -306,7 +306,7 @@ handle_wamp_data(Data1, Req, St0) ->
     {Messages, Data3} = wamp_encoding:decode(Data2, T, E),
     St1 = St0#{data => Data3},
 
-    case handle_wamp_messages(Messages, Req, Ctxt0) of
+    case handle_wamp_messages(Messages, Ctxt0) of
         {ok, Ctxt1} ->
             {ok, Req, St1#{context => Ctxt1}};
         {stop, Ctxt1} ->
@@ -322,29 +322,36 @@ handle_wamp_data(Data1, Req, St0) ->
 
 
 %% @private
-handle_wamp_messages(Ms, Req, Ctxt) ->
-    handle_wamp_messages(Ms, Req, Ctxt, [], false).
+handle_wamp_messages(Ms, Ctxt) ->
+    handle_wamp_messages(Ms, Ctxt, []).
 
 
 %% @private
-handle_wamp_messages([], _Req, Ctxt, [], true) ->
-    {stop, Ctxt};
-handle_wamp_messages([], _Req, Ctxt, [], false) ->
+handle_wamp_messages([], Ctxt, []) ->
+    %% We have no replies
     {ok, Ctxt};
-handle_wamp_messages([], _Req, Ctxt, Acc, true) ->
-    {stop, lists:reverse(Acc), Ctxt};
-handle_wamp_messages([], _Req, Ctxt, Acc, false) ->
+handle_wamp_messages([], Ctxt, Acc) ->
     {reply, lists:reverse(Acc), Ctxt};
-handle_wamp_messages([H|T], Req, Ctxt0, Acc, StopFlag) ->
+handle_wamp_messages(
+    [#goodbye{}|_], #{goodbye_initiated := true} = Ctxt, _) ->
+    %% The client is replying to our goodbye
+    {stop, Ctxt};
+handle_wamp_messages(
+    [#goodbye{} = M|_], #{goodbye_initiated := false} = Ctxt, _) ->
+    %% The client initiated a goodbye, so we will not process
+    %% any subsequent messages
+    juno_router:handle_message(M, Ctxt#{goodbye_initiated => true});
+
+handle_wamp_messages([H|T], Ctxt0, Acc) ->
     case juno_router:handle_message(H, Ctxt0) of
         {ok, Ctxt1} ->
-            handle_wamp_messages(T, Req, Ctxt1, Acc, StopFlag);
+            handle_wamp_messages(T, Ctxt1, Acc);
         {stop, Ctxt1} ->
-            handle_wamp_messages(T, Req, Ctxt1, Acc, true);
+            {stop, Ctxt1};
         {stop, Reply, Ctxt1} ->
-            handle_wamp_messages(T, Req, Ctxt1, [Reply | Acc], true);
+            {stop, Reply, Ctxt1};
         {reply, Reply, Ctxt1} ->
-            handle_wamp_messages(T, Req, Ctxt1, [Reply | Acc], StopFlag)
+            handle_wamp_messages(T, Ctxt1, [Reply | Acc])
     end.
 
 

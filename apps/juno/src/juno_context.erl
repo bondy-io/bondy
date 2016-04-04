@@ -19,7 +19,6 @@
 -type context()       ::  #{
     session_id => id(),
     realm_uri => uri(),
-    subprotocol => subprotocol(),
     goodbye_initiated => false
 }.
 -export_type([context/0]).

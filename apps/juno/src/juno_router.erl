@@ -57,6 +57,18 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(POOL_NAME, juno_router_pool).
+-define(BROKER_FEATURES, #{}).
+-define(DEALER_FEATURES, #{
+    progressive_call_results => false,
+    call_timeout => false,
+    call_canceling => false,
+    caller_identification => false,
+    call_trustlevels => false,
+    session_meta_api => false,
+    pattern_based_registration => true,
+    shared_registration => false,
+    sharded_registration => false
+}).
 
 -type event()                   ::  {message(), juno_context:context()}.
 
@@ -115,11 +127,11 @@ start_pool() ->
 %% message to the router worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) ->
-    {ok, NewCtxt :: juno_context:context()}
-    | {stop, NewCtxt :: juno_context:context()}
-    | {reply, Reply :: message(), NewCtxt :: juno_context:context()}
-    | {stop, Reply :: message(), NewCtxt :: juno_context:context()}.
+-spec handle_message(M :: message(), Ctxt :: juno_context:context()) ->
+    {ok, juno_context:context()}
+    | {stop, juno_context:context()}
+    | {reply, Reply :: message(), juno_context:context()}
+    | {stop, Reply :: message(), juno_context:context()}.
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
     %% RPC:
@@ -132,9 +144,9 @@ handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     ),
     {stop, Abort, Ctxt};
 
-handle_message(#hello{} = M, Ctxt0) ->
+handle_message(#hello{} = M, Ctxt) ->
     %% Client does not have a session and wants to open one
-    open_session(M#hello.realm_uri, M#hello.details, Ctxt0);
+    open_session(M#hello.realm_uri, M#hello.details, Ctxt);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
     %% Client has a session so this should be either a message
@@ -244,7 +256,17 @@ do_start_pool() ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec open_session(uri(), map(), juno_context:context()) ->
+    {ok, juno_context:context()}
+    | {stop, juno_context:context()}
+    | {reply, Reply :: message()}
+    | {stop, Reply :: message()}.
 open_session(RealmUri, Details, Ctxt0) ->
     try
         Session = juno_session:open(RealmUri, Details),
@@ -258,8 +280,12 @@ open_session(RealmUri, Details, Ctxt0) ->
             #{
                 agent => ?JUNO_VERSION_STRING,
                 roles => #{
-                    dealer => #{},
-                    broker => #{}
+                    dealer => #{
+                        features => ?DEALER_FEATURES
+                    },
+                    broker => #{
+                        features => ?BROKER_FEATURES
+                    }
                 }
             }
         ),
@@ -280,13 +306,17 @@ open_session(RealmUri, Details, Ctxt0) ->
     end.
 
 
-
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%%
+%% @end
+%% -----------------------------------------------------------------------------
 -spec handle_session_message(M :: message(), Ctxt :: map()) ->
-    {ok, NewCtxt :: juno_context:context()}
-    | {stop, NewCtxt :: juno_context:context()}
-    | {reply, Reply :: message(), NewCtxt :: juno_context:context()}
-    | {stop, Reply :: message(), NewCtxt :: juno_context:context()}.
+    {ok, juno_context:context()}
+    | {stop, juno_context:context()}
+    | {reply, Reply :: message()}
+    | {stop, Reply :: message()}.
 handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message.
     {stop, Ctxt};
@@ -301,7 +331,7 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 
-handle_session_message(M, Ctxt0) ->
+handle_session_message(M, Ctxt) ->
     %% Client already has a session.
     %% By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
@@ -309,22 +339,28 @@ handle_session_message(M, Ctxt0) ->
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
     %% We asynchronously handle the message by sending it to the router pool
-    case cast_session_message(?POOL_NAME, M, Ctxt0) of
-        {ok, Ctxt1} ->
-            {ok, Ctxt1};
-        {error, Reason, Ctxt1} when Acknowledge == true ->
+    try cast_session_message(?POOL_NAME, M, Ctxt) of
+        ok ->
+            {ok, Ctxt};
+        overload ->
+            error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
+            %% TODO publish metaevent
+            %% We do it synchronously i.e. blocking the caller
+            handle_event({M, Ctxt})
+    catch
+        error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
-            Error = juno_error:error(
+            Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
                 juno:error_dict(Reason),
                 ?WAMP_ERROR_CANCELED
             ),
-            {reply, Error, Ctxt1};
-        {error, Ctxt1}->
+            {reply, Reply, Ctxt};
+        _:_ ->
             %% TODO Maybe publish metaevent
-            {ok, Ctxt1}
+            {ok, Ctxt}
     end.
 
 
@@ -350,37 +386,34 @@ acknowledge_message(_) ->
 %% handle_info callback function.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec cast_session_message(atom(), term(), juno_context:context()) ->
-    {ok, juno_context:context()}
-    | {error, overload, juno_context:context()}
-    | {error, any(), juno_context:context()}.
+-spec cast_session_message(atom(), message(), juno_context:context()) ->
+    ok.
 cast_session_message(PoolName, M, Ctxt) ->
-    Resp = case juno_config:pool_type(PoolName) of
-        permanent ->
-            %% We send a request to an existing permanent worker
-            %% using sidejob_worker
-            sidejob:cast(PoolName, {M, Ctxt});
-        transient ->
-            %% We spawn a transient worker using sidejob_supervisor
-            sidejob_supervisor:start_child(
-                PoolName,
-                gen_server,
-                start_link,
-                [juno_broker, [{M, Ctxt}], []]
-            )
-    end,
-    return(Resp, Ctxt).
+    PoolType = juno_config:pool_type(PoolName),
+    case cast_session_message(PoolType, PoolName, M, Ctxt) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        overload ->
+            overload
+    end.
 
 
 %% @private
-return(ok, Ctxt) ->
-    {ok, Ctxt};
-return(overload, Ctxt) ->
-    error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
-    %% TODO publish metaevent
-    {error, overload, Ctxt};
-return({error, Reason}, Ctxt) ->
-    {error, Reason, Ctxt}.
+cast_session_message(permanent, PoolName, M, Ctxt) ->
+    %% We send a request to an existing permanent worker
+    %% using sidejob_worker
+    sidejob:cast(PoolName, {M, Ctxt});
+cast_session_message(transient, PoolName, M, Ctxt) ->
+    %% We spawn a transient worker using sidejob_supervisor
+    sidejob_supervisor:start_child(
+        PoolName,
+        gen_server,
+        start_link,
+        [?MODULE, [{M, Ctxt}], []]
+    ).
+
 
 
 %% -----------------------------------------------------------------------------

@@ -2,10 +2,7 @@
 %% Copyright (C) Ngineo Limited 2015 - 2016. All rights reserved.
 %% -----------------------------------------------------------------------------
 
-%% @doc
-%%
-%% @end
--module(juno_pubsub).
+-module(juno_registry).
 -include_lib("wamp/include/wamp.hrl").
 
 -define(ANY, <<"*">>).
@@ -13,39 +10,55 @@
 -define(PREFIX_MATCH, <<"prefix">>).
 -define(WILDCARD_MATCH, <<"wildcard">>).
 -define(DEFAULT_LIMIT, 1000).
--define(SESSION_SUBSCRIPTION_TABLE_NAME, subscription).
+-define(SUBSCRIPTION_TABLE_NAME, subscription).
 -define(SUBSCRIPTION_INDEX_TABLE_NAME, subscription_index).
+-define(REGISTRATION_TABLE_NAME, registration).
+-define(REGISTRATION_INDEX_TABLE_NAME, registration_index).
 
 
--record(subscription, {
+-record(entry, {
     key                     ::  {
-                                    RealmUri :: uri() | atom(),
-                                    SessionId :: id() | atom(),
-                                    SubsId :: id() | atom()
+                                    RealmUri    ::  uri(),
+                                    SessionId   ::  id(),
+                                    EntryId     ::  id()
                                 },
-    topic_uri               ::  uri(),
+    uri                     ::  uri(),
     match_policy            ::  binary(),
-    criteria                ::  [{'=:=', Field :: binary(), Value :: any()}]
+    criteria                ::  [{'=:=', Field :: binary(), Value :: any()}],
+    info                    ::  map()
 
 }).
 
--record(subscription_index, {
+-record(index, {
     key                     ::  tuple(),
     session_id              ::  id(),
     session_pid             ::  pid(),
-    subscription_id         ::  id()
+    entry_id                ::  id()
 }).
 
+-type entry()               ::  #entry{}.
+-type entry_type()          ::  registration | subscription.
 
--export([matching_subscriptions/1]).
--export([matching_subscriptions/2]).
--export([publish/5]).
--export([subscribe/3]).
--export([subscriptions/1]).
--export([subscriptions/2]).
--export([subscriptions/3]).
--export([unsubscribe_all/1]).
--export([unsubscribe/2]).
+-export_type([entry/0]).
+-export_type([entry_type/0]).
+
+-export([about/1]).
+-export([add/4]).
+-export([criteria/1]).
+-export([entries/1]).
+-export([entries/2]).
+-export([entries/3]).
+-export([entries/4]).
+-export([id/1]).
+-export([info/1]).
+-export([match_policy/1]).
+-export([match/1]).
+-export([match/3]).
+-export([match/4]).
+-export([realm_uri/1]).
+-export([remove_all/2]).
+-export([remove/3]).
+-export([session_id/1]).
 
 
 
@@ -54,39 +67,75 @@
 %% =============================================================================
 
 
+-spec id(entry()) -> id().
+id(#entry{key = {_, _, Val}}) -> Val.
+
+
+-spec realm_uri(entry()) -> uri().
+realm_uri(#entry{key = {Val, _, _}}) -> Val.
+
+
+-spec session_id(entry()) -> id().
+session_id(#entry{key = {_, Val, _}}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the uri this entry is about i.e. either  subscription topic_uri or
+%% a registration procedure_uri.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec about(entry()) -> uri().
+about(#entry{uri = Val}) -> Val.
+
+-spec match_policy(entry()) -> binary().
+match_policy(#entry{match_policy = Val}) -> Val.
+
+-spec criteria(entry()) -> list().
+criteria(#entry{criteria = Val}) -> Val.
+
+-spec info(entry()) -> map().
+info(#entry{info = Val}) -> Val.
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(uri(), map(), juno_context:context()) -> {ok, id()}.
-subscribe(TopicUri, Options, Ctxt) ->
+-spec add(entry_type(), uri(), map(), juno_context:context()) -> {ok, id()}.
+add(Type, Uri, Options, Ctxt) ->
     #{ realm_uri := RealmUri, session_id := SessionId} = Ctxt,
     MatchPolicy = validate_match_policy(Options),
-    SSKey = {RealmUri,  SessionId, '$1'},
-    SS0 = #subscription{
+    SSKey = {RealmUri, SessionId, '$1'},
+    SS0 = #entry{
         key = SSKey,
-        topic_uri = TopicUri,
-        match_policy = MatchPolicy
+        uri = Uri,
+        match_policy = MatchPolicy,
+        criteria = [],
+        info = extract_info(Options)
+
     },
-    Tab = subscription_table({RealmUri,  SessionId}),
+    Tab = entry_table(Type, RealmUri, SessionId),
 
     case ets:match(Tab, SS0) of
-        [[SubsId]] ->
+        [[EntryId]] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
-            %% _Subscriber_ and to already subscribed topic, _Broker_ should
+            %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
-            {ok, SubsId};
-        [] ->
-            SubsId = wamp_id:new(global),
-            SS1 = SS0#subscription{key = setelement(3, SSKey, SubsId)},
-            IdxEntry = index_entry(SubsId, TopicUri, MatchPolicy, Ctxt),
-            SSTab = subscription_table({RealmUri, SessionId}),
-            IdxTab = subscription_index_table(RealmUri),
+            {ok, EntryId};
+        _ ->
+            %% No entry or existing registration entry.
+            %% JUNO supports Shared Registration (RFC 13.3.9)
+            EntryId = wamp_id:new(global),
+            SS1 = SS0#entry{key = setelement(3, SSKey, EntryId)},
+            IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
+            SSTab = entry_table(Type, RealmUri, SessionId),
+            IdxTab = index_table(Type, RealmUri),
             true = ets:insert(SSTab, SS1),
             true = ets:insert(IdxTab, IdxEntry),
-            {ok, SubsId}
+            {ok, EntryId}
     end.
 
 
@@ -94,22 +143,23 @@ subscribe(TopicUri, Options, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe_all(juno_context:context()) -> ok.
-unsubscribe_all(Ctxt) ->
+-spec remove_all(entry_type(), juno_context:context()) -> ok.
+remove_all(Type, Ctxt) ->
     #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
-    Pattern = #subscription{
+    Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
-        topic_uri = '_',
+        uri = '_',
         match_policy = '_',
-        criteria = '_'
+        criteria = '_',
+        info = '_'
     },
-    Tab = subscription_table({RealmUri, SessionId}),
+    Tab = entry_table(Type, RealmUri, SessionId),
     case ets:match_object(Tab, Pattern, 1) of
         '$end_of_table' ->
-            %% There are no subscriptions for this session
+            %% There are no entries for this session
             ok;
         {[First], _} ->
-            do_unsubscribe_all(First, Tab, Ctxt)
+            do_remove_all(First, Type, Tab, Ctxt)
     end.
 
 
@@ -117,18 +167,18 @@ unsubscribe_all(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id(), juno_context:context()) -> ok.
-unsubscribe(SubsId, Ctxt) ->
+-spec remove(entry_type(), id(), juno_context:context()) -> ok.
+remove(Type, EntryId, Ctxt) ->
     #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
-    Tab = subscription_table({RealmUri, SessionId}),
-    Key = {RealmUri, SessionId, SubsId},
+    Tab = entry_table(Type, RealmUri, SessionId),
+    Key = {RealmUri, SessionId, EntryId},
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no subscription with subsId.
             error(no_such_subscription);
-        [#subscription{topic_uri = TopicUri, match_policy = MP}] ->
-            IdxTab = subscription_index_table(RealmUri),
-            IdxEntry = index_entry(SubsId, TopicUri, MP, Ctxt),
+        [#entry{uri = Uri, match_policy = MP}] ->
+            IdxTab = index_table(Type, RealmUri),
+            IdxEntry = index_entry(EntryId, Uri, MP, Ctxt),
             true = ets:delete_object(IdxTab, IdxEntry),
             ok
     end.
@@ -136,106 +186,75 @@ unsubscribe(SubsId, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Throws not_authorized
-%% @end
-%% -----------------------------------------------------------------------------
--spec publish(uri(), map(), list(), map(), juno_context:context()) ->
-    {ok, id()}.
-publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
-    #{session_id := SessionId} = Ctxt,
-    %% TODO check if authorized and if not throw wamp.error.not_authorized
-    PubId = wamp_id:new(global),
-    Details = #{},
-    %% REVIEW We need to parallelise this based on batches
-    %% (RFC) When a single event matches more than one of a _Subscriber's_
-    %% subscriptions, the event will be delivered for each subscription.
-    Fun = fun
-        ({S, Pid, SubsId}) ->
-            case S =:= SessionId of
-                true ->
-                    %% We should not send the publication to the published
-                    %% (RFC) Note that the _Publisher_ of an event will never
-                    %% receive the published event even if the _Publisher_ is
-                    %% also a _Subscriber_ of the topic published to.
-                    ok;
-                false ->
-                    Pid ! wamp_message:event(
-                        SubsId, PubId, Details, Args, Payload)
-            end
-    end,
-    ok = publish(matching_subscriptions(TopicUri, Ctxt), Fun),
-    {ok, PubId}.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the list of subscriptions for the active session.
+%% Returns the list of entries for the active session.
 %%
 %% When called with a juno:context() it is equivalent to calling
-%% subscriptions/2 with the RealmUri and SessionId extracted from the Context.
+%% entries/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(
-    ContextOrCont :: juno_context:context() | ets:continuation()) ->
-    [#subscription{}].
-subscriptions(#{realm_uri := RealmUri, session_id := SessionId}) ->
-    subscriptions(RealmUri, SessionId);
-subscriptions(Cont) ->
+-spec entries(entry_type(), juno_context:context()) ->
+    [#entry{}].
+entries(Type, #{realm_uri := RealmUri, session_id := SessionId}) ->
+    entries(Type, RealmUri, SessionId).
+
+
+-spec entries(ets:continuation()) -> [#entry{}].
+entries(Cont) ->
     ets:match_object(Cont).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the complete list of subscriptions matching the RealmUri
+%% Returns the complete list of entries matching the RealmUri
 %% and SessionId.
 %%
-%% Use {@link subscriptions/3} and {@link subscriptions/1} to limit the number
-%% of subscriptions returned.
+%% Use {@link entries/3} and {@link entries/1} to limit the number
+%% of entries returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id()) -> [#subscription{}].
-subscriptions(RealmUri, SessionId) ->
-    session_subscriptions(RealmUri, SessionId, infinity).
+-spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [#entry{}].
+entries(Type, RealmUri, SessionId) ->
+    session_entries(Type, RealmUri, SessionId, infinity).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the complete list of subscriptions matching the RealmUri
+%% Returns the complete list of entries matching the RealmUri
 %% and SessionId.
 %%
-%% Use {@link subscriptions/3} to limit the number of subscriptions returned.
+%% Use {@link entries/3} to limit the number of entries returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
-    {[#subscription{}], Cont :: '$end_of_table' | term()}.
-subscriptions(RealmUri, SessionId, Limit) ->
-    session_subscriptions(RealmUri, SessionId, Limit).
+-spec entries(
+    entry_type(), RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+    {[#entry{}], Cont :: '$end_of_table' | term()}.
+entries(Type, RealmUri, SessionId, Limit) ->
+    session_entries(Type, RealmUri, SessionId, Limit).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec matching_subscriptions(uri(), juno_context:context()) ->
+-spec match(entry_type(), uri(), juno_context:context()) ->
     {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
     | '$end_of_table'.
-matching_subscriptions(TopicUri, Ctxt) ->
-    matching_subscriptions(TopicUri, Ctxt, ?DEFAULT_LIMIT).
+match(Type, Uri, Ctxt) ->
+    match(Type, Uri, Ctxt, ?DEFAULT_LIMIT).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec matching_subscriptions(
-    uri(), juno_context:context(), non_neg_integer()) ->
+-spec match(
+    entry_type(), uri(), juno_context:context(), non_neg_integer()) ->
     {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
     | '$end_of_table'.
-matching_subscriptions(TopicUri, Ctxt, Limit) ->
+match(Type, Uri, Ctxt, Limit) ->
     #{realm_uri := RealmUri} = Ctxt,
-    MS = index_ms(RealmUri, TopicUri),
-    Tab = subscription_index_table(RealmUri),
+    MS = index_ms(RealmUri, Uri),
+    Tab = index_table(Type, RealmUri),
     ets:select(Tab, MS, Limit).
 
 
@@ -243,9 +262,9 @@ matching_subscriptions(TopicUri, Ctxt, Limit) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec matching_subscriptions(ets:continuation()) ->
+-spec match(ets:continuation()) ->
     {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
-matching_subscriptions(Cont) ->
+match(Cont) ->
     ets:select(Cont).
 
 
@@ -257,46 +276,36 @@ matching_subscriptions(Cont) ->
 
 
 %% @private
-do_unsubscribe_all('$end_of_table', _, _) ->
+do_remove_all('$end_of_table', _, _, _) ->
     ok;
-do_unsubscribe_all([], _, _) ->
+do_remove_all([], _, _, _) ->
     ok;
-do_unsubscribe_all(#subscription{} = S, Tab, Ctxt) ->
-    {RealmUri, _, SubsId} = Key = S#subscription.key,
-    TopicUri = S#subscription.topic_uri,
-    MatchPolicy = S#subscription.match_policy,
-    IdxTab = subscription_index_table(RealmUri),
-    IdxEntry = index_entry(SubsId, TopicUri, MatchPolicy, Ctxt),
+do_remove_all(#entry{} = S, Type, Tab, Ctxt) ->
+    {RealmUri, _, SubsId} = Key = S#entry.key,
+    Uri = S#entry.uri,
+    MatchPolicy = S#entry.match_policy,
+    IdxTab = index_table(Type, RealmUri),
+    IdxEntry = index_entry(SubsId, Uri, MatchPolicy, Ctxt),
     true = ets:delete_object(Tab, S),
     true = ets:delete_object(IdxTab, IdxEntry),
-    do_unsubscribe_all(ets:next(Tab, Key), Tab, Ctxt);
-do_unsubscribe_all({_, Sid, _} = Key, Tab, #{session_id := Sid} = Ctxt) ->
-    do_unsubscribe_all(ets:lookup(Tab, Key), Tab, Ctxt);
-do_unsubscribe_all(_, _, _) ->
+    do_remove_all(ets:next(Tab, Key), Type, Tab, Ctxt);
+do_remove_all({_, Sid, _} = Key, Type, Tab, #{session_id := Sid} = Ctxt) ->
+    do_remove_all(ets:lookup(Tab, Key), Type, Tab, Ctxt);
+do_remove_all(_, _, _, _) ->
     %% No longer our session
     ok.
 
 
 %% @private
-publish('$end_of_table', _Fun) ->
-    ok;
-
-publish({L, '$end_of_table'}, Fun) ->
-    lists:foreach(Fun, L);
-
-publish({L, Cont}, Fun ) ->
-    ok = lists:foreach(Fun, L),
-    publish(matching_subscriptions(Cont), Fun).
-
-
-%% @private
-session_subscriptions(RealmUri, SessionId, Limit) ->
-    Pattern = #subscription{
-        key = {RealmUri,  SessionId, '_'},
-        topic_uri = '_',
-        match_policy = '_'
+session_entries(Type, RealmUri, SessionId, Limit) ->
+    Pattern = #entry{
+        key = {RealmUri, SessionId, '_'},
+        uri = '_',
+        match_policy = '_',
+        criteria = '_',
+        info = '_'
     },
-    Tab = subscription_table({RealmUri,  SessionId}),
+    Tab = entry_table(Type, RealmUri, SessionId),
     case Limit of
         infinity ->
             ets:match_object(Tab, Pattern);
@@ -320,17 +329,27 @@ validate_match_policy(Options) when is_map(Options) ->
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
-
 %% @private
--spec subscription_table(tuple()) -> ets:tid().
-subscription_table({_, _} = Key) ->
-    tuplespace:locate_table(?SESSION_SUBSCRIPTION_TABLE_NAME, Key).
+extract_info(Options) ->
+    maps:without([<<"match">>], Options).
 
 
 %% @private
--spec subscription_index_table(any()) -> ets:tid().
-subscription_index_table(Key) ->
-    tuplespace:locate_table(?SUBSCRIPTION_INDEX_TABLE_NAME, Key).
+-spec entry_table(entry_type(), uri(), id()) -> ets:tid().
+entry_table(subscription, RealmUri, SessionId) ->
+    tuplespace:locate_table(
+        ?SUBSCRIPTION_TABLE_NAME, {RealmUri, SessionId});
+entry_table(registration, RealmUri, SessionId) ->
+    tuplespace:locate_table(
+        ?REGISTRATION_TABLE_NAME, {RealmUri, SessionId}).
+
+
+%% @private
+-spec index_table(entry_type(), uri()) -> ets:tid().
+index_table(subscription, RealmUri) ->
+    tuplespace:locate_table(?SUBSCRIPTION_INDEX_TABLE_NAME, RealmUri);
+index_table(registration, RealmUri) ->
+    tuplespace:locate_table(?REGISTRATION_INDEX_TABLE_NAME, RealmUri).
 
 
 %% @private
@@ -353,40 +372,40 @@ uri_components(Uri) ->
 
 %% @private
 -spec index_entry(id(), uri(), binary(), juno_context:context()) ->
-    #subscription_index{}.
-index_entry(SubsId, TopicUri, Policy, Ctxt) ->
+    #index{}.
+index_entry(EntryId, Uri, Policy, Ctxt) ->
     #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
-    Entry = #subscription_index{
+    Entry = #index{
         session_id = SessionId,
         session_pid = juno_session:pid(SessionId),
-        subscription_id = SubsId
+        entry_id = EntryId
     },
-    Cs = [RealmUri | uri_components(TopicUri)],
+    Cs = [RealmUri | uri_components(Uri)],
     case Policy of
         ?EXACT_MATCH ->
-            Entry#subscription_index{key = list_to_tuple(Cs)};
+            Entry#index{key = list_to_tuple(Cs)};
         ?PREFIX_MATCH ->
-            Entry#subscription_index{key = list_to_tuple(Cs ++ [?ANY])};
+            Entry#index{key = list_to_tuple(Cs ++ [?ANY])};
         ?WILDCARD_MATCH ->
             %% Wildcard-matching allows to provide wildcards for *whole* URI
             %% components.
-            Entry#subscription_index{key = list_to_tuple(Cs)}
+            Entry#index{key = list_to_tuple(Cs)}
     end.
 
 
 %% @private
 -spec index_ms(uri(), uri()) -> ets:match_spec().
-index_ms(RealmUri, TopicUri) ->
-    Cs = [RealmUri | uri_components(TopicUri)],
+index_ms(RealmUri, Uri) ->
+    Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
     WildcardConds = wilcard_conditions(Cs),
     Conds = lists:append([ExactConds, PrefixConds, WildcardConds]),
-    MP = #subscription_index{
+    MP = #index{
         key = '$1',
         session_id = '$2',
         session_pid = '$3',
-        subscription_id = '$4'
+        entry_id = '$4'
     },
     Proj = [{{'$2', '$3', '$4'}}],
     [

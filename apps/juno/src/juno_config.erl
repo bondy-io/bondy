@@ -15,6 +15,7 @@
 -define(DEFAULT_POOL_TYPE, transient).
 
 -export([automatically_create_realms/0]).
+-export([call_timeout/0]).
 -export([connection_lifetime/0]).
 -export([coordinator_timeout/0]).
 -export([http_acceptors_pool_size/0]).
@@ -173,3 +174,10 @@ pool_size(juno_router_pool) ->
 pool_capacity(juno_router_pool) ->
     application:get_env(
         ?APP, juno_router_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
+
+
+%% CALL
+
+call_timeout() ->
+    application:get_env(
+        ?APP, call_timeout, infinity).
