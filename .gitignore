@@ -17,3 +17,6 @@ db
 *.d
 *.beam
 _build
+log/index
+log/4
+log/3
