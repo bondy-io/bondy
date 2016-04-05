@@ -5,9 +5,20 @@
 %% =============================================================================
 %% @doc
 %% The Juno Router provides the routing logic for all interactions.
-%% It delegates the actual handling of a WAMP message to either juno_dealer or juno_broker.
+%% In general juno_router handles all messages asynchonouly. It does this by
+%% using either a static or a dynamic pool of workers based on configuration.
+%% A dynamic pool actually spawns a new erlang process for each message.
+%% By default a Juno Router uses a dynamic pool.
 %%
-%% The Juno Router is not a process i.e. all function calls are performed by the calling process.
+%% A router provides load regulation, in case a maximum capacity has been
+%% reached, the router will handle the message synchronously i.e. blocking the
+%% calling processes (usually the one that handles the transport connection
+%% e.g. {@link juno_ws_handler}).
+%%
+%% This module handles only the general logic delegating the rest to either
+%%  {@link juno_broker} or {@link juno_dealer}.
+%%
+%%
 %%
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
