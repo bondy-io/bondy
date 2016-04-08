@@ -56,15 +56,15 @@ error_json_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 publish_json_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 publish_json_2_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>, []),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>, []),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 publish_json_3_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>, [], #{}),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>, [], #{}),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 published_json_test(_) ->
@@ -72,7 +72,7 @@ published_json_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 subscribe_json_test(_) ->
-    M = wamp_message:subscribe(1, #{}, <<"com.williamhill.topic1">>),
+    M = wamp_message:subscribe(1, #{}, <<"com.leapsight.topic1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 subscribed_json_test(_) ->
@@ -100,15 +100,15 @@ event_json_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 call_json_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 call_json_2_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>, []),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>, []),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 call_json_3_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>, [], #{}),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>, [], #{}),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 cancel_json_test(_) ->
@@ -128,7 +128,7 @@ result_json_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 register_json_test(_) ->
-    M = wamp_message:register(1, #{}, <<"com.williamhill.myprocedure1">>),
+    M = wamp_message:register(1, #{}, <<"com.leapsight.myprocedure1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, json), text, json).
 
 registered_json_2_test(_) ->
@@ -221,15 +221,15 @@ error_erl_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 publish_erl_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 publish_erl_2_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>, []),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>, []),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 publish_erl_3_test(_) ->
-    M = wamp_message:publish(1, #{}, <<"com.williamhill.topic1">>, [], #{}),
+    M = wamp_message:publish(1, #{}, <<"com.leapsight.topic1">>, [], #{}),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 published_erl_test(_) ->
@@ -237,7 +237,7 @@ published_erl_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 subscribe_erl_test(_) ->
-    M = wamp_message:subscribe(1, #{}, <<"com.williamhill.topic1">>),
+    M = wamp_message:subscribe(1, #{}, <<"com.leapsight.topic1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 subscribed_erl_test(_) ->
@@ -265,15 +265,15 @@ event_erl_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 call_erl_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 call_erl_2_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>, []),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>, []),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 call_erl_3_test(_) ->
-    M = wamp_message:call(1, #{}, <<"com.williamhill.myprocedure1">>, [], #{}),
+    M = wamp_message:call(1, #{}, <<"com.leapsight.myprocedure1">>, [], #{}),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 cancel_erl_test(_) ->
@@ -293,7 +293,7 @@ result_erl_3_test(_) ->
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 register_erl_test(_) ->
-    M = wamp_message:register(1, #{}, <<"com.williamhill.myprocedure1">>),
+    M = wamp_message:register(1, #{}, <<"com.leapsight.myprocedure1">>),
     {[M], <<>>} = wamp_encoding:decode(wamp_encoding:encode(M, erl), text, erl).
 
 registered_erl_2_test(_) ->
