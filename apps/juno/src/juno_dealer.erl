@@ -151,8 +151,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) ->
-    {ok, juno_context:context()}.
+-spec handle_message(M :: message(), Ctxt :: map()) -> ok.
 handle_message(#register{} = M, Ctxt) ->
     Reply  = try
         {ok, RegId} = juno_rpc:register(
