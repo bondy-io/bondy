@@ -101,7 +101,7 @@ make() ->
 
 error_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
-    <<"com.williamhill.error.", R/binary>>.
+    <<"com.leapsight.error.", R/binary>>.
 
 
 error_dict(Code) ->

@@ -5,20 +5,24 @@
 -module(juno_rpc).
 -include_lib("wamp/include/wamp.hrl").
 
+-define(DEFAULT_LIMIT, 1000).
 
--export([unregister_all/1]).
+-export([match_registrations/1]).
+-export([match_registrations/2]).
+-export([match_registrations/3]).
 -export([register/3]).
--export([unregister/2]).
 -export([registrations/1]).
 -export([registrations/2]).
 -export([registrations/3]).
+-export([unregister_all/1]).
+-export([unregister/2]).
+-export([call/5]).
 %% -export([callees/2]).
 %% -export([count_callees/2]).
-%% -export([registrations/2]).
 %% -export([count_registrations/2]).
 %% -export([lookup_registration/2]).
 %% -export([fetch_registration/2]). % wamp.registration.get
-%% -export([match_registrations/2]).
+
 
 
 
@@ -53,6 +57,35 @@ unregister(RegId, Ctxt) ->
 %% -----------------------------------------------------------------------------
 unregister_all(Ctxt) ->
     juno_registry:remove_all(registration, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Throws not_authorized
+%% @end
+%% -----------------------------------------------------------------------------
+-spec call(uri(), map(), list(), map(), juno_context:context()) -> ok.
+call(ProcUri, _Opts, Args, Payload, Ctxt) ->
+    #{session_id := SessionId} = Ctxt,
+    %% TODO check if authorized and if not throw wamp.error.not_authorized
+
+    %% We asume that as with pubsub, the _Caller_ should not receive the
+    %% invocation even if the _Caller_ is also a _Callee_ registered
+    %% for that procedure.
+    Regs = match_registrations(ProcUri, Ctxt, #{exclude => [SessionId]}),
+
+    %% We will use the caller's {node, pid} to get back the result to him.
+    Details = #{
+        caller_node => atom_to_list(node()),
+        caller_pid => pid_to_list(juno_session:pid(SessionId))
+    },
+
+    Fun = fun
+        ({_Sid, Pid, RegId}) ->
+            Pid ! wamp_message:invocation(
+                wamp_id:new(global), RegId, Details, Args, Payload)
+    end,
+    send_invocations(Regs, Fun).
 
 
 %% -----------------------------------------------------------------------------
@@ -103,6 +136,53 @@ registrations(RealmUri, SessionId, Limit) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_registrations(uri(), juno_context:context()) ->
+    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    | '$end_of_table'.
+match_registrations(ProcUri, Ctxt) ->
+    juno_registry:match(registration, ProcUri, Ctxt, #{limit => infinity}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_registrations(
+    uri(), juno_context:context(), map()) ->
+    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    | '$end_of_table'.
+match_registrations(ProcUri, Ctxt, Opts) ->
+    juno_registry:match(registration, ProcUri, Ctxt, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_registrations(ets:continuation()) ->
+    {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
+match_registrations(Cont) ->
+    ets:select(Cont).
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+send_invocations('$end_of_table', _Fun) ->
+    ok;
+
+send_invocations({L, '$end_of_table'}, Fun) ->
+    lists:foreach(Fun, L);
+
+send_invocations({L, Cont}, Fun ) ->
+    ok = lists:foreach(Fun, L),
+    send_invocations(match_registrations(Cont), Fun).

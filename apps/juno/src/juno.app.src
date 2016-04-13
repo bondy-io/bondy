@@ -6,6 +6,8 @@
   {applications,
    [kernel,
     stdlib,
+    jsx,
+    msgpack,
     tuplespace,
     ranch,
     cowboy,

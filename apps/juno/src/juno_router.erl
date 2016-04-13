@@ -68,7 +68,19 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(POOL_NAME, juno_router_pool).
--define(BROKER_FEATURES, #{}).
+-define(BROKER_FEATURES, #{
+    event_history => false,
+    pattern_based_subscription => true,
+    publication_trustlevels => false,
+    publisher_exclusion => false,
+    publisher_identification => false,
+    session_meta_api => false,
+    sharded_registration => false,
+    sharded_subscription => false,
+    subscriber_blackwhite_listing => false,
+    subscription_meta_api => false,
+    topic_reflection => false
+}).
 -define(DEALER_FEATURES, #{
     progressive_call_results => false,
     call_timeout => false,
@@ -77,6 +89,7 @@
     call_trustlevels => false,
     session_meta_api => false,
     pattern_based_registration => true,
+    procedure_reflection => false,
     shared_registration => false,
     sharded_registration => false
 }).
@@ -376,7 +389,7 @@ handle_session_message(M, Ctxt) ->
 
 
 acknowledge_message(#publish{options = Opts}) ->
-    maps:get(<<"acknowledge">>, Opts, false);
+    maps:get(acknowledge, Opts, false);
 acknowledge_message(_) ->
     true.
 
