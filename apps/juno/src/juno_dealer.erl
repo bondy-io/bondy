@@ -183,13 +183,13 @@ handle_message(#unregister{} = M, Ctxt) ->
     juno:send(Reply, Ctxt),
     ok;
 
-handle_message(#call{} = _M, _Ctxt) ->
+handle_message(#call{} = M, _Ctxt) ->
     %% ReqId = M#call.request_id,
-    %% Opts = M#call.options,
+    Opts = M#call.options,
     %% ProcUri = M#call.procedure_uri,
     %% Args = M#call.arguments,
     %% Pay = M#call.Payload,
-    %% T = timeout(Opts),
+    _T = timeout(Opts),
     ok.
 
 
@@ -200,7 +200,7 @@ handle_message(#call{} = _M, _Ctxt) ->
 
 
 
-timeout(#{<<"timeout">> := T}) when is_integer(T) ->
+timeout(#{timeout := T}) when is_integer(T) ->
     T;
 timeout(_) ->
     juno_config:call_timeout().

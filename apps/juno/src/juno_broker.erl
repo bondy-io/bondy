@@ -107,7 +107,7 @@ handle_message(#publish{} = M, Ctxt) ->
     TopicUri = M#publish.topic_uri,
     Args = M#publish.arguments,
     Payload = M#publish.payload,
-    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
+    Acknowledge = maps:get(acknowledge, Opts, false),
     %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option

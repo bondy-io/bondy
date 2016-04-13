@@ -6,10 +6,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(ANY, <<"*">>).
--define(EXACT_MATCH, <<"exact">>).
--define(PREFIX_MATCH, <<"prefix">>).
--define(WILDCARD_MATCH, <<"wildcard">>).
--define(DEFAULT_LIMIT, 1000).
+
+%% -define(DEFAULT_LIMIT, 1000).
 -define(SUBSCRIPTION_TABLE_NAME, subscription).
 -define(SUBSCRIPTION_INDEX_TABLE_NAME, subscription_index).
 -define(REGISTRATION_TABLE_NAME, registration).
@@ -23,9 +21,9 @@
                                     EntryId     ::  id()
                                 },
     uri                     ::  uri(),
-    match_policy            ::  binary(),
+    match_policy            ::  match_policy(),
     criteria                ::  [{'=:=', Field :: binary(), Value :: any()}],
-    info                    ::  map()
+    options                 ::  map()
 
 }).
 
@@ -50,7 +48,7 @@
 -export([entries/3]).
 -export([entries/4]).
 -export([id/1]).
--export([info/1]).
+-export([options/1]).
 -export([match_policy/1]).
 -export([match/1]).
 -export([match/3]).
@@ -88,14 +86,17 @@ session_id(#entry{key = {_, Val, _}}) -> Val.
 -spec about(entry()) -> uri().
 about(#entry{uri = Val}) -> Val.
 
+
 -spec match_policy(entry()) -> binary().
 match_policy(#entry{match_policy = Val}) -> Val.
+
 
 -spec criteria(entry()) -> list().
 criteria(#entry{criteria = Val}) -> Val.
 
--spec info(entry()) -> map().
-info(#entry{info = Val}) -> Val.
+
+-spec options(entry()) -> map().
+options(#entry{options = Val}) -> Val.
 
 
 
@@ -113,7 +114,7 @@ add(Type, Uri, Options, Ctxt) ->
         uri = Uri,
         match_policy = MatchPolicy,
         criteria = [],
-        info = extract_info(Options)
+        options = parse_options(Type, Options)
 
     },
     Tab = entry_table(Type, RealmUri, SessionId),
@@ -151,7 +152,7 @@ remove_all(Type, Ctxt) ->
         uri = '_',
         match_policy = '_',
         criteria = '_',
-        info = '_'
+        options = '_'
     },
     Tab = entry_table(Type, RealmUri, SessionId),
     case ets:match_object(Tab, Pattern, 1) of
@@ -212,9 +213,10 @@ entries(Cont) ->
 %% of entries returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [#entry{}].
+-spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) ->
+    [#entry{}].
 entries(Type, RealmUri, SessionId) ->
-    session_entries(Type, RealmUri, SessionId, infinity).
+    session_entries(Type, RealmUri, SessionId, #{limit => infinity}).
 
 
 %% -----------------------------------------------------------------------------
@@ -226,10 +228,10 @@ entries(Type, RealmUri, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(
-    entry_type(), RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+    entry_type(), RealmUri :: uri(), SessionId :: id(), Opts :: map()) ->
     {[#entry{}], Cont :: '$end_of_table' | term()}.
-entries(Type, RealmUri, SessionId, Limit) ->
-    session_entries(Type, RealmUri, SessionId, Limit).
+entries(Type, RealmUri, SessionId, Opts) ->
+    session_entries(Type, RealmUri, SessionId, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -237,10 +239,12 @@ entries(Type, RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context()) ->
-    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
-    | '$end_of_table'.
+    [{SessionId :: id(), pid(), SubsId :: id()}].
 match(Type, Uri, Ctxt) ->
-    match(Type, Uri, Ctxt, ?DEFAULT_LIMIT).
+    #{realm_uri := RealmUri} = Ctxt,
+    MS = index_ms(RealmUri, Uri),
+    Tab = index_table(Type, RealmUri),
+    ets:select(Tab, MS).
 
 
 %% -----------------------------------------------------------------------------
@@ -248,14 +252,20 @@ match(Type, Uri, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(
-    entry_type(), uri(), juno_context:context(), non_neg_integer()) ->
-    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    entry_type(), uri(), juno_context:context(), map()) ->
+    [{SessionId :: id(), pid(), EntryId :: id()}]
+    | {[{SessionId :: id(), pid(), EntryId :: id()}], ets:continuation()}
     | '$end_of_table'.
-match(Type, Uri, Ctxt, Limit) ->
+match(Type, Uri, Ctxt, Opts) ->
     #{realm_uri := RealmUri} = Ctxt,
-    MS = index_ms(RealmUri, Uri),
+    MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
-    ets:select(Tab, MS, Limit).
+    case maps:get(limit, Opts, infinity) of
+        infinity ->
+            ets:select(Tab, MS);
+        Limit ->
+            ets:select(Tab, MS, Limit)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -263,7 +273,8 @@ match(Type, Uri, Ctxt, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(ets:continuation()) ->
-    {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
+    {[{SessionId :: id(), pid(), EntryId :: id()}], ets:continuation()}
+    | '$end_of_table'.
 match(Cont) ->
     ets:select(Cont).
 
@@ -297,19 +308,19 @@ do_remove_all(_, _, _, _) ->
 
 
 %% @private
-session_entries(Type, RealmUri, SessionId, Limit) ->
+session_entries(Type, RealmUri, SessionId, Opts) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
         uri = '_',
         match_policy = '_',
         criteria = '_',
-        info = '_'
+        options = '_'
     },
     Tab = entry_table(Type, RealmUri, SessionId),
-    case Limit of
+    case maps:get(limit, Opts, infinity) of
         infinity ->
             ets:match_object(Tab, Pattern);
-        _ ->
+        Limit ->
             ets:match_object(Tab, Pattern, Limit)
     end.
 
@@ -324,14 +335,27 @@ session_entries(Type, RealmUri, SessionId, Limit) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(<<"match">>, Options, ?EXACT_MATCH),
-    P == ?EXACT_MATCH orelse P == ?PREFIX_MATCH orelse P == ?WILDCARD_MATCH
+    P = maps:get(match, Options, exact),
+    P == exact orelse P == prefix orelse P == wildcard
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
+
 %% @private
-extract_info(Options) ->
-    maps:without([<<"match">>], Options).
+parse_options(subscription, Opts) ->
+    parse_subscription_options(Opts);
+parse_options(registration, Opts) ->
+    parse_registration_options(Opts).
+
+
+%% @private
+parse_subscription_options(Opts) ->
+    maps:without([match], Opts).
+
+
+%% @private
+parse_registration_options(Opts) ->
+    maps:without([match], Opts).
 
 
 %% @private
@@ -352,11 +376,12 @@ index_table(registration, RealmUri) ->
     tuplespace:locate_table(?REGISTRATION_INDEX_TABLE_NAME, RealmUri).
 
 
+%% TODO move to wamp project
 %% @private
 %% @doc
 %% Example:
 %% uri_components(<<"com.mycompany.foo.bar">>) ->
-%% {<<"com.mycompany">>, [<<"foo">>, <<"bar">>]}.
+%% [<<"com.mycompany">>, <<"foo">>, <<"bar">>].
 %% @end
 -spec uri_components(uri()) -> [binary()].
 uri_components(Uri) ->
@@ -382,11 +407,11 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
     },
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of
-        ?EXACT_MATCH ->
+        exact ->
             Entry#index{key = list_to_tuple(Cs)};
-        ?PREFIX_MATCH ->
+        prefix ->
             Entry#index{key = list_to_tuple(Cs ++ [?ANY])};
-        ?WILDCARD_MATCH ->
+        wildcard ->
             %% Wildcard-matching allows to provide wildcards for *whole* URI
             %% components.
             Entry#index{key = list_to_tuple(Cs)}
@@ -396,11 +421,24 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
 %% @private
 -spec index_ms(uri(), uri()) -> ets:match_spec().
 index_ms(RealmUri, Uri) ->
+    index_ms(RealmUri, Uri, #{}).
+
+
+%% @private
+-spec index_ms(uri(), uri(), map()) -> ets:match_spec().
+index_ms(RealmUri, Uri, Opts) ->
     Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
     WildcardConds = wilcard_conditions(Cs),
-    Conds = lists:append([ExactConds, PrefixConds, WildcardConds]),
+    ExclConds = case maps:get(exclude, Opts, []) of
+        [] ->
+            [];
+        SessionIds ->
+            %% We exclude the provided SessionIds
+            [{'=/=', '$2', {const, S}} || S <- SessionIds]
+    end,
+    Conds = lists:append([ExactConds, PrefixConds, WildcardConds, ExclConds]),
     MP = #index{
         key = '$1',
         session_id = '$2',
