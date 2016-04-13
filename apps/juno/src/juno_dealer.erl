@@ -151,7 +151,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) -> ok.
+-spec handle_message(M :: message(), Ctxt :: map()) ->
+    {ok, juno_context:context()}.
 handle_message(#register{} = M, Ctxt) ->
     Reply  = try
         {ok, RegId} = juno_rpc:register(
@@ -183,12 +184,15 @@ handle_message(#unregister{} = M, Ctxt) ->
     juno:send(Reply, Ctxt),
     ok;
 
-handle_message(#call{} = M, _Ctxt) ->
-    %% ReqId = M#call.request_id,
+handle_message(#call{} = M, Ctxt) ->
     Opts = M#call.options,
-    %% ProcUri = M#call.procedure_uri,
-    %% Args = M#call.arguments,
-    %% Pay = M#call.Payload,
+    ok = juno_rpc:call(
+        M#call.request_id,
+        M#call.procedure_uri,
+        Opts,
+        M#call.arguments,
+        M#call.payload,
+        Ctxt),
     _T = timeout(Opts),
     ok.
 

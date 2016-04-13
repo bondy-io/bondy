@@ -37,7 +37,7 @@
 -define(TIMEOUT, 60000*10).
 
 -type state()       ::  #{
-    context => juno_router:context(),
+    context => juno_context:context(),
     data => binary(),
     subprotocol => subprotocol()
 }.
@@ -308,16 +308,16 @@ handle_wamp_data(Data1, Req, St0) ->
 
     case handle_wamp_messages(Messages, Ctxt0) of
         {ok, Ctxt1} ->
-            {ok, Req, St1#{context => Ctxt1}};
+            {ok, Req, set_ctxt(St1, Ctxt1)};
         {stop, Ctxt1} ->
-            {shutdown, Req, St1#{context => Ctxt1}};
+            {shutdown, Req, set_ctxt(St1, Ctxt1)};
         {reply, Replies, Ctxt1} ->
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
-            reply(T, ReplyFrames, Req, St1#{context => Ctxt1});
+            reply(T, ReplyFrames, Req, set_ctxt(St1, Ctxt1));
         {stop, Replies, Ctxt1} ->
             self() ! {stop, <<"Router dropped session.">>},
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
-            reply(T, ReplyFrames, Req, St1#{context => Ctxt1})
+            reply(T, ReplyFrames, Req, set_ctxt(St1, Ctxt1))
     end.
 
 
@@ -363,3 +363,7 @@ close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
     juno_session:close(SessionId);
 close_session(_) ->
     ok.
+
+%% @private
+set_ctxt(St, Ctxt) ->
+    St#{context => juno_context:reset(Ctxt)}.

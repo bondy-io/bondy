@@ -355,7 +355,7 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 
-handle_session_message(M, Ctxt) ->
+handle_session_message(M, Ctxt0) ->
     %% Client already has a session.
     %% By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
@@ -363,14 +363,15 @@ handle_session_message(M, Ctxt) ->
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
     %% We asynchronously handle the message by sending it to the router pool
-    try cast_session_message(?POOL_NAME, M, Ctxt) of
+    try cast_session_message(?POOL_NAME, M, Ctxt0) of
         ok ->
-            {ok, Ctxt};
+            {ok, Ctxt0};
         overload ->
             error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
             %% TODO publish metaevent
             %% We do it synchronously i.e. blocking the caller
-            handle_event({M, Ctxt})
+            ok = handle_event({M, Ctxt0}),
+            {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
@@ -381,10 +382,10 @@ handle_session_message(M, Ctxt) ->
                 juno:error_dict(Reason),
                 ?WAMP_ERROR_CANCELED
             ),
-            {reply, Reply, Ctxt};
+            {reply, Reply, Ctxt0};
         _:_ ->
             %% TODO Maybe publish metaevent
-            {ok, Ctxt}
+            {ok, Ctxt0}
     end.
 
 

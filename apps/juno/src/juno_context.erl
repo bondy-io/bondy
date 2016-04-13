@@ -19,13 +19,20 @@
 -type context()       ::  #{
     session_id => id(),
     realm_uri => uri(),
-    goodbye_initiated => false
+    goodbye_initiated => boolean(),
+    request_id => id(),
+    request_timeout => non_neg_integer()
 }.
 -export_type([context/0]).
 
 -export([new/0]).
+-export([request_id/1]).
+-export([request_timeout/1]).
+-export([reset/1]).
 -export([session_id/1]).
 -export([session/1]).
+-export([set_request_id/2]).
+-export([set_request_timeout/2]).
 -export([set_session_id/2]).
 
 
@@ -36,8 +43,26 @@
 %% -----------------------------------------------------------------------------
 -spec new() -> context().
 new() ->
-    #{}.
+    #{
+        goodbye_initiated => false,
+        request_id => undefined,
+        request_timeout => 0
+    }.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Resets the context. Returns a copy of Ctxt where the following attributes
+%% have been reset: request_id, request_timeout.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec reset(context()) -> context().
+reset(Ctxt) ->
+    Ctxt#{
+        request_id => undefined,
+        request_timeout => 0
+    }.
+    
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -66,3 +91,43 @@ set_session_id(Ctxt, SessionId) ->
 -spec session(context()) -> juno_session:session().
 session(#{session_id := SessionId}) ->
     juno_session:fetch(SessionId).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current request id
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_id(context()) -> id().
+request_id(#{request_id := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request id to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_id(context(), id()) -> context().
+set_request_id(Ctxt, ReqId) ->
+    Ctxt#{set_request_id => ReqId}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current request timeout.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_timeout(context()) -> non_neg_integer().
+request_timeout(#{request_timeout := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request timeout to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_timeout(context(), non_neg_integer()) -> context().
+set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    Ctxt#{request_timeout => Timeout}.

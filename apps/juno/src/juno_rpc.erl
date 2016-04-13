@@ -16,7 +16,7 @@
 -export([registrations/3]).
 -export([unregister_all/1]).
 -export([unregister/2]).
--export([call/5]).
+-export([call/6]).
 %% -export([callees/2]).
 %% -export([count_callees/2]).
 %% -export([count_registrations/2]).
@@ -64,8 +64,9 @@ unregister_all(Ctxt) ->
 %% Throws not_authorized
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(uri(), map(), list(), map(), juno_context:context()) -> ok.
-call(ProcUri, _Opts, Args, Payload, Ctxt) ->
+-spec call(id(), uri(), map(), list(), map(), juno_context:context()) ->
+    ok.
+call(_ReqId, ProcUri, _Opts, Args, Payload, Ctxt) ->
     #{session_id := SessionId} = Ctxt,
     %% TODO check if authorized and if not throw wamp.error.not_authorized
 

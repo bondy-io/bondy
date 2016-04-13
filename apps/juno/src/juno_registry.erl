@@ -335,8 +335,8 @@ session_entries(Type, RealmUri, SessionId, Opts) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(match, Options, exact),
-    P == exact orelse P == prefix orelse P == wildcard
+    P = maps:get(match, Options, <<"exact">>),
+    P == <<"exact">> orelse P == <<"prefix">> orelse P == <<"wildcard">>
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
@@ -407,11 +407,11 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
     },
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of
-        exact ->
+        <<"exact">> ->
             Entry#index{key = list_to_tuple(Cs)};
-        prefix ->
+        <<"prefix">> ->
             Entry#index{key = list_to_tuple(Cs ++ [?ANY])};
-        wildcard ->
+        <<"wildcard">> ->
             %% Wildcard-matching allows to provide wildcards for *whole* URI
             %% components.
             Entry#index{key = list_to_tuple(Cs)}

@@ -71,7 +71,8 @@
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) -> ok.
+-spec handle_message(M :: message(), Ctxt :: map()) ->
+    {ok, juno_context:context()}.
 handle_message(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
