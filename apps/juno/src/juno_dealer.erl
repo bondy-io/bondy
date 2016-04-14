@@ -135,15 +135,28 @@
 %% =============================================================================
 -module(juno_dealer).
 -include_lib("wamp/include/wamp.hrl").
-
+-include("juno.hrl").
 
 %% API
+-export([features/0]).
 -export([handle_message/2]).
+-export([is_feature_enabled/1]).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+
+-spec features() -> map().
+features() ->
+    ?DEALER_FEATURES.
+
+
+-spec is_feature_enabled(dealer_features()) -> boolean().
+is_feature_enabled(F) ->
+    maps:get(F, ?DEALER_FEATURES).
 
 
 
@@ -184,26 +197,19 @@ handle_message(#unregister{} = M, Ctxt) ->
     ok;
 
 handle_message(#call{} = M, Ctxt) ->
-    Opts = M#call.options,
-    ok = juno_rpc:call(
+    %% TODO check if authorized and if not throw wamp.error.not_authorized
+
+    %% A reponse might be send asynchronously
+    juno_rpc:call(
         M#call.request_id,
         M#call.procedure_uri,
-        Opts,
+        M#call.options,
         M#call.arguments,
         M#call.payload,
-        Ctxt),
-    _T = timeout(Opts),
-    ok.
+        Ctxt).
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
-timeout(#{timeout := T}) when is_integer(T) ->
-    T;
-timeout(_) ->
-    juno_config:call_timeout().

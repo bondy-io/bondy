@@ -65,33 +65,13 @@
 %% =============================================================================
 -module(juno_router).
 -behaviour(gen_server).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(POOL_NAME, juno_router_pool).
--define(BROKER_FEATURES, #{
-    event_history => false,
-    pattern_based_subscription => true,
-    publication_trustlevels => false,
-    publisher_exclusion => false,
-    publisher_identification => false,
-    session_meta_api => false,
-    sharded_registration => false,
-    sharded_subscription => false,
-    subscriber_blackwhite_listing => false,
-    subscription_meta_api => false,
-    topic_reflection => false
-}).
--define(DEALER_FEATURES, #{
-    progressive_call_results => false,
-    call_timeout => false,
-    call_canceling => false,
-    caller_identification => false,
-    call_trustlevels => false,
-    session_meta_api => false,
-    pattern_based_registration => true,
-    procedure_reflection => false,
-    shared_registration => false,
-    sharded_registration => false
+-define(ROUTER_ROLES, #{
+    broker => ?BROKER_FEATURES,
+    dealer => ?DEALER_FEATURES
 }).
 
 -type event()                   ::  {message(), juno_context:context()}.
@@ -102,8 +82,9 @@
 }).
 
 %% API
--export([start_pool/0]).
+-export([roles/0]).
 -export([handle_message/2]).
+-export([start_pool/0]).
 %% -export([has_role/2]). ur, ctxt
 %% -export([add_role/2]). uri, ctxt
 %% -export([remove_role/2]). uri, ctxt
@@ -126,6 +107,10 @@
 %% =============================================================================
 
 
+
+-spec roles() -> #{broker => map(), dealer => map()}.
+roles() ->
+    ?ROUTER_ROLES.
 
 
 %% -----------------------------------------------------------------------------
@@ -297,20 +282,15 @@ open_session(RealmUri, Details, Ctxt0) ->
         SessionId = juno_session:id(Session),
         Ctxt1 = Ctxt0#{
             session_id => SessionId,
-            realm_uri => RealmUri
+            realm_uri => RealmUri,
+            roles => parse_roles(maps:get(roles, Details))
         },
+
         Welcome = wamp_message:welcome(
             SessionId,
             #{
                 agent => ?JUNO_VERSION_STRING,
-                roles => #{
-                    dealer => #{
-                        features => ?DEALER_FEATURES
-                    },
-                    broker => #{
-                        features => ?BROKER_FEATURES
-                    }
-                }
+                roles => ?ROUTER_ROLES
             }
         ),
         {reply, Welcome, Ctxt1}
@@ -476,3 +456,43 @@ handle_event({#error{request_type = ?INVOCATION} = M, Ctxt}) ->
 
 handle_event({_M, _Ctxt}) ->
     error(unexpected_message).
+
+
+%% ------------------------------------------------------------------------
+%% private
+%% @doc
+%% Merges the client provided role features with the ones provided by
+%% the router. This will become the feature set used by the router on
+%% every session request.
+%% @end
+%% ------------------------------------------------------------------------
+parse_roles(Roles) ->
+    parse_roles(maps:keys(Roles), Roles).
+
+
+%% @private
+parse_roles([], Roles) ->
+    Roles;
+
+parse_roles([caller|T], Roles) ->
+    F = juno_utils:merge_map_flags(
+        maps:get(caller, Roles), ?CALLER_FEATURES),
+    parse_roles(T, Roles#{caller => F});
+
+parse_roles([callee|T], Roles) ->
+    F = juno_utils:merge_map_flags(
+        maps:get(callee, Roles), ?CALLEE_FEATURES),
+    parse_roles(T, Roles#{callee => F});
+
+parse_roles([subscriber|T], Roles) ->
+    F = juno_utils:merge_map_flags(
+        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
+    parse_roles(T, Roles#{subscriber => F});
+
+parse_roles([publisher|T], Roles) ->
+    F = juno_utils:merge_map_flags(
+        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
+    parse_roles(T, Roles#{publisher => F});
+
+parse_roles([_|T], Roles) ->
+    parse_roles(T, Roles).

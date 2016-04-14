@@ -20,6 +20,7 @@
     session_id => id(),
     realm_uri => uri(),
     goodbye_initiated => boolean(),
+    roles => map(),
     request_id => id(),
     request_timeout => non_neg_integer()
 }.
@@ -29,10 +30,12 @@
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
+-export([roles/1]).
 -export([session_id/1]).
 -export([session/1]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
+-export([set_roles/2]).
 -export([set_session_id/2]).
 
 
@@ -43,11 +46,12 @@
 %% -----------------------------------------------------------------------------
 -spec new() -> context().
 new() ->
-    #{
+    Ctxt = #{
         goodbye_initiated => false,
         request_id => undefined,
-        request_timeout => 0
-    }.
+        request_timeout => juno_config:request_timeout()
+    },
+    set_roles(Ctxt, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -62,7 +66,27 @@ reset(Ctxt) ->
         request_id => undefined,
         request_timeout => 0
     }.
-    
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the roles of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec roles(context()) -> map().
+roles(#{roles := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the roles to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_roles(context(), map()) -> context().
+set_roles(Ctxt, Roles) when is_map(Ctxt), is_map(Roles) ->
+    Ctxt#{roles => Roles}.
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc

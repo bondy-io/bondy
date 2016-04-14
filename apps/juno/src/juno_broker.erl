@@ -50,17 +50,30 @@
 %% =============================================================================
 -module(juno_broker).
 -include_lib("wamp/include/wamp.hrl").
+-include("juno.hrl").
 
 
 %% API
+-export([features/0]).
 -export([handle_message/2]).
-
+-export([is_feature_enabled/1]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+-spec features() -> map().
+features() ->
+    ?BROKER_FEATURES.
+
+
+-spec is_feature_enabled(broker_features()) -> boolean().
+is_feature_enabled(F) ->
+    maps:get(F, ?BROKER_FEATURES).
+
 
 
 %% -----------------------------------------------------------------------------

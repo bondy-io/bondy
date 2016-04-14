@@ -6,6 +6,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(DEFAULT_LIMIT, 1000).
+-define(INVOCATION_QUEUE, invocations).
 
 -export([match_registrations/1]).
 -export([match_registrations/2]).
@@ -66,9 +67,8 @@ unregister_all(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec call(id(), uri(), map(), list(), map(), juno_context:context()) ->
     ok.
-call(_ReqId, ProcUri, _Opts, Args, Payload, Ctxt) ->
+call(_ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
     #{session_id := SessionId} = Ctxt,
-    %% TODO check if authorized and if not throw wamp.error.not_authorized
 
     %% We asume that as with pubsub, the _Caller_ should not receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
@@ -76,15 +76,21 @@ call(_ReqId, ProcUri, _Opts, Args, Payload, Ctxt) ->
     Regs = match_registrations(ProcUri, Ctxt, #{exclude => [SessionId]}),
 
     %% We will use the caller's {node, pid} to get back the result to him.
-    Details = #{
+    Caller = #{
         caller_node => atom_to_list(node()),
         caller_pid => pid_to_list(juno_session:pid(SessionId))
     },
+    Details = #{},
 
     Fun = fun
         ({_Sid, Pid, RegId}) ->
-            Pid ! wamp_message:invocation(
-                wamp_id:new(global), RegId, Details, Args, Payload)
+            Id = wamp_id:new(global),
+            %% We enqueue the call request i.e. a form of promise.
+            ok = tuplespace_queue:enqueue(
+                ?INVOCATION_QUEUE,
+                Caller,
+                #{key => Id, timeout => timeout(Opts)}),
+            Pid ! wamp_message:invocation(Id, RegId, Details, Args, Payload)
     end,
     send_invocations(Regs, Fun).
 
@@ -97,8 +103,7 @@ call(_ReqId, ProcUri, _Opts, Args, Payload, Ctxt) ->
 %% registrations/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(
-    ContextOrCont :: juno_context:context() | ets:continuation()) ->
+-spec registrations(juno_context:context() | ets:continuation()) ->
     [juno_registry:entry()].
 registrations(#{realm_uri := RealmUri, session_id := SessionId}) ->
     registrations(RealmUri, SessionId);
@@ -175,6 +180,15 @@ match_registrations(Cont) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+timeout(#{timeout := T}) when is_integer(T), T > 0 ->
+    T;
+timeout(#{timeout := 0}) ->
+    infinity;
+timeout(_) ->
+    juno_config:request_timeout().
 
 
 %% @private
