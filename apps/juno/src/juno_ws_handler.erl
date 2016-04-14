@@ -147,10 +147,17 @@ websocket_info({stop, Reason}, Req, St) ->
     {shutdown, Req, St};
 
 websocket_info(M, Req, St) ->
-    %% We send a WAMP message to the client
-    #{subprotocol := #{encoding := E, frame_type := T}} = St,
-    Reply = frame(T, wamp_encoding:encode(M, E)),
-    {reply, Reply, Req, St}.
+    case wamp_message:is_message(M) of
+        true ->
+            %% We send a WAMP message to the client
+            #{subprotocol := #{encoding := E, frame_type := T}} = St,
+            Reply = frame(T, wamp_encoding:encode(M, E)),
+            {reply, Reply, Req, St};
+        false ->
+            %% All other erlang messages
+            {ok, Req, St}
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
