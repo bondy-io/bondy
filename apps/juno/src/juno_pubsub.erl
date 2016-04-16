@@ -139,7 +139,7 @@ subscriptions(RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), juno_context:context()) ->
-    [{SessionId :: id(), pid(), SubsId :: id()}].
+    [{SessionId :: id(), pid(), SubsId :: id(), Opts :: map()}].
 match_subscriptions(TopicUri, Ctxt) ->
     juno_registry:match(subscription, TopicUri, Ctxt).
 
@@ -150,7 +150,7 @@ match_subscriptions(TopicUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(
     uri(), juno_context:context(), non_neg_integer()) ->
-    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    {[juno_registry:entry()], ets:continuation()}
     | '$end_of_table'.
 match_subscriptions(TopicUri, Ctxt, Limit) ->
     juno_registry:match(subscription, TopicUri, Ctxt, Limit).
@@ -161,7 +161,7 @@ match_subscriptions(TopicUri, Ctxt, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(ets:continuation()) ->
-    {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
+    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
 match_subscriptions(Cont) ->
     ets:select(Cont).
 

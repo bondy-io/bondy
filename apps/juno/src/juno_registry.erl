@@ -15,25 +15,24 @@
 
 
 -record(entry, {
-    key                     ::  {
-                                    RealmUri    ::  uri(),
-                                    SessionId   ::  id(),
-                                    EntryId     ::  id()
-                                },
+    key                     ::  entry_key(),
     uri                     ::  uri(),
     match_policy            ::  match_policy(),
     criteria                ::  [{'=:=', Field :: binary(), Value :: any()}],
+    created                 ::  calendar:date_time(),
     options                 ::  map()
-
 }).
 
 -record(index, {
-    key                     ::  tuple(),
-    session_id              ::  id(),
-    session_pid             ::  pid(),
-    entry_id                ::  id()
+    key                     ::  tuple(),  % dynamically generated
+    entry_key               ::  entry_key()
 }).
 
+-type entry_key()           ::  {
+                                    RealmUri    ::  uri(),
+                                    SessionId   ::  id(),   % the owner
+                                    EntryId     ::  id()
+                                }.
 -type entry()               ::  #entry{}.
 -type entry_type()          ::  registration | subscription.
 
@@ -42,17 +41,18 @@
 
 -export([about/1]).
 -export([add/4]).
+-export([created/1]).
 -export([criteria/1]).
 -export([entries/1]).
 -export([entries/2]).
 -export([entries/3]).
 -export([entries/4]).
 -export([id/1]).
--export([options/1]).
 -export([match_policy/1]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
+-export([options/1]).
 -export([realm_uri/1]).
 -export([remove_all/2]).
 -export([remove/3]).
@@ -79,7 +79,7 @@ session_id(#entry{key = {_, Val, _}}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the uri this entry is about i.e. either  subscription topic_uri or
+%% Returns the uri this entry is about i.e. either a subscription topic_uri or
 %% a registration procedure_uri.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -95,6 +95,10 @@ match_policy(#entry{match_policy = Val}) -> Val.
 criteria(#entry{criteria = Val}) -> Val.
 
 
+-spec created(entry()) -> calendar:date_time().
+created(#entry{created = Val}) -> Val.
+
+
 -spec options(entry()) -> map().
 options(#entry{options = Val}) -> Val.
 
@@ -108,35 +112,69 @@ options(#entry{options = Val}) -> Val.
 add(Type, Uri, Options, Ctxt) ->
     #{ realm_uri := RealmUri, session_id := SessionId} = Ctxt,
     MatchPolicy = validate_match_policy(Options),
-    SSKey = {RealmUri, SessionId, '$1'},
-    SS0 = #entry{
-        key = SSKey,
+    MatchSessionId = case Type of
+        registration -> '_';
+        subscription -> SessionId
+    end,
+    Pattern = #entry{
+        key = {RealmUri, MatchSessionId, '$1'},
         uri = Uri,
         match_policy = MatchPolicy,
-        criteria = [],
-        options = parse_options(Type, Options)
-
+        criteria = [], % TODO Criteria
+        created = '_',
+        options = '_'
     },
-    Tab = entry_table(Type, RealmUri, SessionId),
+    Tab = entry_table(Type, RealmUri),
 
-    case ets:match(Tab, SS0) of
-        [[EntryId]] when Type == subscription ->
+    MaybeAdd = fun
+        (true) ->
+            Entry = #entry{
+                key = {RealmUri, SessionId, wamp_id:new(global)},
+                uri = Uri,
+                match_policy = MatchPolicy,
+                criteria = [], % TODO Criteria
+                created = calendar:local_time(),
+                options = parse_options(Type, Options)
+            },
+            do_add(Type, Entry, Ctxt);
+        (false) ->
+            error(procedure_already_exists)
+    end,
+
+    case ets:match_object(Tab, Pattern) of
+        [] ->
+            %% No matching entry exists.
+            MaybeAdd(true);
+
+        [#entry{key = {_, _, EntryId}}] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
             {ok, EntryId};
-        _ ->
-            %% No entry or existing registration entry.
-            %% JUNO supports Shared Registration (RFC 13.3.9)
-            EntryId = wamp_id:new(global),
-            SS1 = SS0#entry{key = setelement(3, SSKey, EntryId)},
-            IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
-            SSTab = entry_table(Type, RealmUri, SessionId),
-            IdxTab = index_table(Type, RealmUri),
-            true = ets:insert(SSTab, SS1),
-            true = ets:insert(IdxTab, IdxEntry),
-            {ok, EntryId}
+
+        [#entry{options = EOpts} | _] when Type == registration ->
+            SharedEnabled = juno_context:is_feature_enabled(
+                Ctxt, callee, shared_registration),
+            NewPolicy = maps:get(invoke, Options, <<"single">>),
+            PrevPolicy = maps:get(invoke, EOpts, <<"single">>),
+            %% As a default, only a single Callee may register a procedure
+            %% for an URI.
+            %% Shared Registration (RFC 13.3.9)
+            %% When shared registrations are supported, then the first
+            %% Callee to register a procedure for a particular URI
+            %% MAY determine that additional registrations for this URI
+            %% are allowed, and what Invocation Rules to apply in case
+            %% such additional registrations are made.
+            %% When invoke is not 'single', Dealer MUST fail
+            %% all subsequent attempts to register a procedure for the URI
+            %% where the value for the invoke option does not match that of
+            %% the initial registration.
+            Flag = SharedEnabled andalso
+                NewPolicy =/= <<"single">> andalso
+                NewPolicy == PrevPolicy,
+
+            MaybeAdd(Flag)
     end.
 
 
@@ -154,7 +192,7 @@ remove_all(Type, Ctxt) ->
         criteria = '_',
         options = '_'
     },
-    Tab = entry_table(Type, RealmUri, SessionId),
+    Tab = entry_table(Type, RealmUri),
     case ets:match_object(Tab, Pattern, 1) of
         '$end_of_table' ->
             %% There are no entries for this session
@@ -171,11 +209,11 @@ remove_all(Type, Ctxt) ->
 -spec remove(entry_type(), id(), juno_context:context()) -> ok.
 remove(Type, EntryId, Ctxt) ->
     #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
-    Tab = entry_table(Type, RealmUri, SessionId),
+    Tab = entry_table(Type, RealmUri),
     Key = {RealmUri, SessionId, EntryId},
     case ets:take(Tab, Key) of
         [] ->
-            %% The session had no subscription with subsId.
+            %% The session had no entries with EntryId.
             error(no_such_subscription);
         [#entry{uri = Uri, match_policy = MP}] ->
             IdxTab = index_table(Type, RealmUri),
@@ -193,13 +231,12 @@ remove(Type, EntryId, Ctxt) ->
 %% entries/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(entry_type(), juno_context:context()) ->
-    [#entry{}].
+-spec entries(entry_type(), juno_context:context()) -> [entry()].
 entries(Type, #{realm_uri := RealmUri, session_id := SessionId}) ->
     entries(Type, RealmUri, SessionId).
 
 
--spec entries(ets:continuation()) -> [#entry{}].
+-spec entries(ets:continuation()) -> [entry()].
 entries(Cont) ->
     ets:match_object(Cont).
 
@@ -213,8 +250,7 @@ entries(Cont) ->
 %% of entries returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) ->
-    [#entry{}].
+-spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [entry()].
 entries(Type, RealmUri, SessionId) ->
     session_entries(Type, RealmUri, SessionId, #{limit => infinity}).
 
@@ -229,7 +265,7 @@ entries(Type, RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec entries(
     entry_type(), RealmUri :: uri(), SessionId :: id(), Opts :: map()) ->
-    {[#entry{}], Cont :: '$end_of_table' | term()}.
+    {[entry()], Cont :: '$end_of_table' | term()}.
 entries(Type, RealmUri, SessionId, Opts) ->
     session_entries(Type, RealmUri, SessionId, Opts).
 
@@ -239,12 +275,13 @@ entries(Type, RealmUri, SessionId, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context()) ->
-    [{SessionId :: id(), pid(), SubsId :: id()}].
+    [{SessionId :: id(), pid(), EntryId :: id()}].
 match(Type, Uri, Ctxt) ->
     #{realm_uri := RealmUri} = Ctxt,
     MS = index_ms(RealmUri, Uri),
+    io:format("~nMS ~p~n", [MS]),
     Tab = index_table(Type, RealmUri),
-    ets:select(Tab, MS).
+    lookup_entries(Type, ets:select(Tab, MS)).
 
 
 %% -----------------------------------------------------------------------------
@@ -253,8 +290,8 @@ match(Type, Uri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match(
     entry_type(), uri(), juno_context:context(), map()) ->
-    [{SessionId :: id(), pid(), EntryId :: id()}]
-    | {[{SessionId :: id(), pid(), EntryId :: id()}], ets:continuation()}
+    [entry()]
+    | {[entry()], ets:continuation()}
     | '$end_of_table'.
 match(Type, Uri, Ctxt, Opts) ->
     #{realm_uri := RealmUri} = Ctxt,
@@ -262,9 +299,9 @@ match(Type, Uri, Ctxt, Opts) ->
     Tab = index_table(Type, RealmUri),
     case maps:get(limit, Opts, infinity) of
         infinity ->
-            ets:select(Tab, MS);
+            lookup_entries(Type, ets:select(Tab, MS));
         Limit ->
-            ets:select(Tab, MS, Limit)
+            lookup_entries(Type, ets:select(Tab, MS, Limit))
     end.
 
 
@@ -273,10 +310,9 @@ match(Type, Uri, Ctxt, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(ets:continuation()) ->
-    {[{SessionId :: id(), pid(), EntryId :: id()}], ets:continuation()}
-    | '$end_of_table'.
-match(Cont) ->
-    ets:select(Cont).
+    {[entry()], ets:continuation()} | '$end_of_table'.
+match({Type, Cont}) when Type == registration orelse Type == subscription ->
+    lookup_entries(Type, ets:select(Cont)).
 
 
 
@@ -292,11 +328,11 @@ do_remove_all('$end_of_table', _, _, _) ->
 do_remove_all([], _, _, _) ->
     ok;
 do_remove_all(#entry{} = S, Type, Tab, Ctxt) ->
-    {RealmUri, _, SubsId} = Key = S#entry.key,
+    {RealmUri, _, EntryId} = Key = S#entry.key,
     Uri = S#entry.uri,
     MatchPolicy = S#entry.match_policy,
     IdxTab = index_table(Type, RealmUri),
-    IdxEntry = index_entry(SubsId, Uri, MatchPolicy, Ctxt),
+    IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
     true = ets:delete_object(Tab, S),
     true = ets:delete_object(IdxTab, IdxEntry),
     do_remove_all(ets:next(Tab, Key), Type, Tab, Ctxt);
@@ -316,7 +352,7 @@ session_entries(Type, RealmUri, SessionId, Opts) ->
         criteria = '_',
         options = '_'
     },
-    Tab = entry_table(Type, RealmUri, SessionId),
+    Tab = entry_table(Type, RealmUri),
     case maps:get(limit, Opts, infinity) of
         infinity ->
             ets:match_object(Tab, Pattern);
@@ -359,13 +395,13 @@ parse_registration_options(Opts) ->
 
 
 %% @private
--spec entry_table(entry_type(), uri(), id()) -> ets:tid().
-entry_table(subscription, RealmUri, SessionId) ->
+-spec entry_table(entry_type(), uri()) -> ets:tid().
+entry_table(subscription, RealmUri) ->
     tuplespace:locate_table(
-        ?SUBSCRIPTION_TABLE_NAME, {RealmUri, SessionId});
-entry_table(registration, RealmUri, SessionId) ->
+        ?SUBSCRIPTION_TABLE_NAME, RealmUri);
+entry_table(registration, RealmUri) ->
     tuplespace:locate_table(
-        ?REGISTRATION_TABLE_NAME, {RealmUri, SessionId}).
+        ?REGISTRATION_TABLE_NAME, RealmUri).
 
 
 %% @private
@@ -396,15 +432,29 @@ uri_components(Uri) ->
 
 
 %% @private
--spec index_entry(id(), uri(), binary(), juno_context:context()) ->
-    #index{}.
+do_add(Type, Entry, Ctxt) ->
+    #entry{
+        key = {RealmUri, _, EntryId},
+        uri = Uri,
+        match_policy = MatchPolicy
+    } = Entry,
+
+    SSTab = entry_table(Type, RealmUri),
+
+    true = ets:insert(SSTab, Entry),
+
+    IdxTab = index_table(Type, RealmUri),
+    IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
+    true = ets:insert(IdxTab, IdxEntry),
+    {ok, EntryId}.
+
+
+%% @private
+-spec index_entry(
+    id(), uri(), binary(), juno_context:context()) -> #index{}.
 index_entry(EntryId, Uri, Policy, Ctxt) ->
     #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
-    Entry = #index{
-        session_id = SessionId,
-        session_pid = juno_session:pid(SessionId),
-        entry_id = EntryId
-    },
+    Entry = #index{entry_key = {RealmUri, SessionId, EntryId}},
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of
         <<"exact">> ->
@@ -430,24 +480,28 @@ index_ms(RealmUri, Uri, Opts) ->
     Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
-    WildcardConds = wilcard_conditions(Cs),
-    ExclConds = case maps:get(exclude, Opts, []) of
+    WildcardCond = wilcard_conditions(Cs),
+    AllConds = list_to_tuple(
+        lists:append([['or'], ExactConds, PrefixConds, WildcardCond])),
+    Conds = case maps:get(exclude, Opts, []) of
         [] ->
-            [];
+            [AllConds];
         SessionIds ->
             %% We exclude the provided SessionIds
-            [{'=/=', '$2', {const, S}} || S <- SessionIds]
+            ExclConds = list_to_tuple([
+                'and' |
+                [{'=/=', '$2', {const, S}} || S <- SessionIds]
+            ]),
+            [list_to_tuple(lists:append(['andalso', AllConds, ExclConds]))]
     end,
-    Conds = lists:append([ExactConds, PrefixConds, WildcardConds, ExclConds]),
     MP = #index{
         key = '$1',
-        session_id = '$2',
-        session_pid = '$3',
-        entry_id = '$4'
+        entry_key = {RealmUri, '$2', '$3'}
     },
-    Proj = [{{'$2', '$3', '$4'}}],
+    Proj = [{{RealmUri, '$2', '$3'}}],
+
     [
-        { MP, [list_to_tuple(['or' | Conds])], Proj }
+        { MP, Conds, Proj }
     ].
 
 
@@ -459,7 +513,7 @@ prefix_conditions(L) ->
 
 %% @private
 -spec prefix_conditions(list(), list()) -> list().
-prefix_conditions(L, Acc) when length(L) == 3 ->
+prefix_conditions(L, Acc) when length(L) == 2 ->
     lists:reverse(Acc);
 prefix_conditions(L0, Acc) ->
     L1 = lists:droplast(L0),
@@ -477,5 +531,33 @@ wilcard_conditions([H|T] = L) ->
             {'=:=', {element, N, '$1'}, {const, <<>>}}
         } || {E, N} <- Ordered
     ],
-    Cs1 = [{'=:=',{element, 1, '$1'}, {const, H}}, {'=:=', {size, '$1'}, {const, length(L)}} | Cs0],
-    [list_to_tuple(['and' | Cs1])].
+    Cs1 = [
+        {'=:=',{element, 1, '$1'}, {const, H}},
+        {'=:=', {size, '$1'}, {const, length(L)}} | Cs0],
+    %% We need to use 'andalso' here and not 'and', otherwise the match spec
+    %% will break when the {size, '$1'} /= {const, length(L)}
+    %% This happens also because the evaluation order of 'or' and 'and' is
+    %% undefined in match specs
+    [list_to_tuple(['andalso' | Cs1])].
+
+
+%% @private
+lookup_entries(_Type, '$end_of_table') ->
+    '$end_of_table';
+lookup_entries(Type, {Keys, Cont}) ->
+    {do_lookup_entries(Type, Keys), {Type, Cont}};
+lookup_entries(Type, Keys) when is_list(Keys) ->
+    do_lookup_entries(Type, Keys).
+
+%% @private
+do_lookup_entries(Type, Keys) ->
+    do_lookup_entries(Keys, Type, []).
+
+%% @private
+do_lookup_entries([], _, Acc) ->
+    lists:reverse(Acc);
+do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
+    case ets:lookup(entry_table(Type, RealmUri), Key) of
+        [] -> do_lookup_entries(T, Type, Acc);
+        [Entry] -> do_lookup_entries(T, Type, [Entry|Acc])
+    end.

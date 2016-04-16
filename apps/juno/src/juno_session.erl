@@ -26,26 +26,36 @@
 
 -record(session, {
     id              ::  id(),
+    created         ::  calendar:date_time(),
     realm_uri       ::  uri(),
     pid = self()    ::  pid(),
+    peer            ::  peer(),
+    host            ::  binary(),
     seq = 0         ::  non_neg_integer(),
+    agent           ::  binary(),
     caller          ::  map(),
     callee          ::  map(),
     subscriber      ::  map(),
     publisher       ::  map()
 }).
 
--type session()  ::  #session{}.
--type session_opts() :: #{
+-type peer()        ::  {inet:ip_address(), inet:port_number()}.
+-type session()     ::  #session{}.
+-type session_opts()::  #{
     roles => map()
 }.
 
+-export_type([peer/0]).
+
+
 -export([close/1]).
+-export([created/1]).
 -export([fetch/1]).
 -export([id/1]).
 -export([incr_seq/1]).
 -export([lookup/1]).
--export([open/2]).
+-export([open/3]).
+-export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([size/0]).
@@ -69,27 +79,24 @@
 %% Otherwise, it will fail with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(uri(), session_opts()) -> session().
-open(RealmUri, Opts) when is_map(Opts) ->
-    _Realm = case juno_config:automatically_create_realms() of
-        true ->
-            %% We force the creation of a new realm if it does not exist
-            wamp_realm:get(RealmUri);
-        false ->
-            %% Will throw an exception if it does not exist
-            wamp_realm:fetch(RealmUri)
-    end,
-    SessionId = wamp_id:new(global),
-    Session0 = #session{
-        id = SessionId,
-        realm_uri = RealmUri
+-spec open(peer(), uri(), session_opts()) -> session().
+open(Peer, RealmUri, Opts) when is_map(Opts) ->
+    _Realm = maybe_create_realm(RealmUri),
+    Id = wamp_id:new(global),
+    S0 = #session{
+        id = Id,
+        peer = Peer,
+        realm_uri = RealmUri,
+        created = calendar:local_time()
     },
-    Session1 = parse_details(Opts, Session0),
-    case ets:insert_new(table(SessionId), Session1) of
+    S1 = parse_details(Opts, S0),
+
+    case ets:insert_new(table(Id), S1) of
         true ->
-            Session1;
+            ok = start_stats(S1),
+            S1;
         false ->
-            error({integrity_constraint_violation, SessionId})
+            error({integrity_constraint_violation, Id})
     end.
 
 
@@ -98,11 +105,13 @@ open(RealmUri, Opts) when is_map(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(id() | session()) -> ok.
-close(#session{id = Id}) ->
-    close(Id);
-close(Id) ->
+close(#session{id = Id} = S) ->
+    ok = stop_stats(S),
     true = ets:delete(table(Id), Id),
-    ok.
+    ok;
+close(Id) ->
+    close(fetch(Id)).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -111,6 +120,7 @@ close(Id) ->
 -spec id(session()) -> id().
 id(#session{id = Id}) ->
     Id.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -123,6 +133,7 @@ realm_uri(Id) ->
     #session{realm_uri = Uri} = fetch(Id),
     Uri.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the pid of the process managing the transport that the session
@@ -134,6 +145,22 @@ pid(#session{pid = Pid}) ->
     Pid;
 pid(Id) ->
     pid(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec created(session()) -> calendar:date_time().
+created(#session{created = Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer(session()) -> peer().
+peer(#session{peer = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -198,6 +225,30 @@ fetch(Id) ->
 
 
 %% @private
+maybe_create_realm(RealmUri) ->
+    case juno_config:automatically_create_realms() of
+        true ->
+            %% We force the creation of a new realm if it does not exist
+            wamp_realm:get(RealmUri);
+        false ->
+            %% Will throw an exception if it does not exist
+            wamp_realm:fetch(RealmUri)
+    end.
+
+
+%% @private
+start_stats(#session{id = Id}) ->
+    exometer:new([juno, requests, Id], spiral),
+    ok.
+
+
+%% @private
+stop_stats(#session{id = Id}) ->
+    exometer:delete([juno, requests, Id]),
+    ok.
+
+
+%% @private
 parse_details(Opts, Session0)  when is_map(Opts) ->
     case maps:fold(fun parse_details/3, Session0, Opts) of
         #session{
@@ -214,6 +265,8 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 %% @private
 parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
+parse_details(agent, V, Session) when is_binary(V) ->
+    Session#session{agent = V};
 parse_details(caller, V, Session) when is_map(V) ->
     Session#session{caller = V};
 parse_details(calle, V, Session) when is_map(V) ->

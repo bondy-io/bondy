@@ -42,6 +42,7 @@
 register(ProcUri, Options, Ctxt) ->
     juno_registry:add(registration, ProcUri, Options, Ctxt).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% If the registration does not exist, it fails with a 'no_such_registration'
@@ -51,6 +52,7 @@ register(ProcUri, Options, Ctxt) ->
 -spec unregister(id(), juno_context:context()) -> ok.
 unregister(RegId, Ctxt) ->
     juno_registry:remove(registration, RegId, Ctxt).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -67,6 +69,45 @@ unregister_all(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec call(id(), uri(), map(), list(), map(), juno_context:context()) ->
     ok.
+call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
+    Res = #{
+        <<"exact">> => [], % @TODO
+        <<"prefix">> => [], % @TODO
+        <<"wildcard">> => [] % @TODO
+    },
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
+call(ReqId, <<"wamp.registration.lookup">>, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
+call(ReqId, <<"wamp.registration.match">>, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
+call(ReqId, <<"wamp.registration.get">>, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
+call(ReqId, <<"wamp.registration.list_callees">>, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
+call(ReqId, <<"wamp.registration.count_callees">>, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{count => 0},
+    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    juno:send(M, Ctxt);
+
 call(_ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
     #{session_id := SessionId} = Ctxt,
 
@@ -147,7 +188,7 @@ registrations(RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), juno_context:context()) ->
-    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    {[juno_registry:entry()], ets:continuation()}
     | '$end_of_table'.
 match_registrations(ProcUri, Ctxt) ->
     juno_registry:match(registration, ProcUri, Ctxt, #{limit => infinity}).
@@ -159,7 +200,7 @@ match_registrations(ProcUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(
     uri(), juno_context:context(), map()) ->
-    {[{SessionId :: id(), pid(), SubsId :: id()}], ets:continuation()}
+    {[juno_registry:entry()], ets:continuation()}
     | '$end_of_table'.
 match_registrations(ProcUri, Ctxt, Opts) ->
     juno_registry:match(registration, ProcUri, Ctxt, Opts).
@@ -170,7 +211,7 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(ets:continuation()) ->
-    {[SessionId :: id()], ets:continuation()} | '$end_of_table'.
+    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
 match_registrations(Cont) ->
     ets:select(Cont).
 

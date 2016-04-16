@@ -11,7 +11,7 @@
     session_meta_api => false,
     pattern_based_registration => true,
     procedure_reflection => false,
-    shared_registration => false,
+    shared_registration => true,
     sharded_registration => false
 }).
 
@@ -25,7 +25,7 @@
     registration_revocation => false,
     session_meta_api => false,
     pattern_based_registration => true,
-    shared_registration => false,
+    shared_registration => true,
     sharded_registration => false
 }).
 

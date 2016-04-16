@@ -166,6 +166,7 @@ is_feature_enabled(F) ->
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: message(), Ctxt :: map()) -> ok.
 handle_message(#register{} = M, Ctxt) ->
+    %% Check if it has callee role?
     Reply  = try
         {ok, RegId} = juno_rpc:register(
             M#register.procedure_uri, M#register.options, Ctxt),
@@ -199,7 +200,7 @@ handle_message(#unregister{} = M, Ctxt) ->
 handle_message(#call{} = M, Ctxt) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
 
-    %% A reponse might be send asynchronously
+    %% A response will be send asynchronously by another router process instance
     juno_rpc:call(
         M#call.request_id,
         M#call.procedure_uri,

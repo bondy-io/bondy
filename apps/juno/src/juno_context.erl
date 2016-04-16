@@ -17,22 +17,26 @@
 
 
 -type context()       ::  #{
-    session_id => id(),
-    realm_uri => uri(),
     goodbye_initiated => boolean(),
-    roles => map(),
+    realm_uri => uri(),
     request_id => id(),
-    request_timeout => non_neg_integer()
+    request_timeout => non_neg_integer(),
+    roles => map(),
+    session_id => id(),
+    peer => juno_session:peer()
 }.
 -export_type([context/0]).
 
+-export([is_feature_enabled/3]).
 -export([new/0]).
+-export([peer/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
 -export([roles/1]).
 -export([session_id/1]).
 -export([session/1]).
+-export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
@@ -66,6 +70,25 @@ reset(Ctxt) ->
         request_id => undefined,
         request_timeout => 0
     }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer(context()) -> juno_session:peer().
+peer(#{peer := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the roles to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_peer(context(), juno_session:peer()) -> context().
+set_peer(Ctxt, Peer) when is_map(Ctxt) ->
+    Ctxt#{peer => Peer}.
 
 
 %% -----------------------------------------------------------------------------
@@ -155,3 +178,13 @@ request_timeout(#{request_timeout := Val}) ->
 -spec set_request_timeout(context(), non_neg_integer()) -> context().
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the feature Feature is enabled for role Role.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_feature_enabled(context(), atom(), atom()) -> boolean().
+is_feature_enabled(#{roles := Roles}, Role, Feature) ->
+    maps:get(Feature, maps:get(Role, Roles, #{}), false).

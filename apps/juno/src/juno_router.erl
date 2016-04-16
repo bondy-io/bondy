@@ -154,7 +154,6 @@ handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     {stop, Abort, Ctxt};
 
 handle_message(#hello{} = M, Ctxt) ->
-    %% Client does not have a session and wants to open one
     open_session(M#hello.realm_uri, M#hello.details, Ctxt);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
@@ -278,7 +277,7 @@ do_start_pool() ->
     | {stop, Reply :: message()}.
 open_session(RealmUri, Details, Ctxt0) ->
     try
-        Session = juno_session:open(RealmUri, Details),
+        Session = juno_session:open(maps:get(peer, Ctxt0), RealmUri, Details),
         SessionId = juno_session:id(Session),
         Ctxt1 = Ctxt0#{
             session_id => SessionId,

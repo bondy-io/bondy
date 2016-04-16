@@ -73,8 +73,10 @@ init(Req, Opts) ->
             ]),
             {ok, Req, Opts};
         Subprotocols ->
+            Ctxt = juno_context:set_peer(
+                juno_context:new(), cowboy_req:peer(Req)),
             St = #{
-                context => juno_context:new(),
+                context => Ctxt,
                 subprotocol => undefined,
                 data => <<>>
             },
