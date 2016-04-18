@@ -57,6 +57,7 @@
 -export([remove_all/2]).
 -export([remove/3]).
 -export([session_id/1]).
+-export([entry_id/1]).
 
 
 
@@ -75,6 +76,10 @@ realm_uri(#entry{key = {Val, _, _}}) -> Val.
 
 -spec session_id(entry()) -> id().
 session_id(#entry{key = {_, Val, _}}) -> Val.
+
+
+-spec entry_id(entry()) -> id().
+entry_id(#entry{key = {_, _, Val}}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -276,11 +281,10 @@ entries(Type, RealmUri, SessionId, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context()) ->
-    [{SessionId :: id(), pid(), EntryId :: id()}].
+    [entry()].
 match(Type, Uri, Ctxt) ->
     #{realm_uri := RealmUri} = Ctxt,
     MS = index_ms(RealmUri, Uri),
-    io:format("~nMS ~p~n", [MS]),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, ets:select(Tab, MS)).
 
@@ -493,7 +497,7 @@ index_ms(RealmUri, Uri, Opts) ->
                 'and' |
                 [{'=/=', '$2', {const, S}} || S <- SessionIds]
             ]),
-            [list_to_tuple(lists:append(['andalso', AllConds, ExclConds]))]
+            [list_to_tuple(['andalso', AllConds, ExclConds])]
     end,
     MP = #index{
         key = '$1',
