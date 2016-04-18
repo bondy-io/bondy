@@ -190,7 +190,8 @@ remove_all(Type, Ctxt) ->
         uri = '_',
         match_policy = '_',
         criteria = '_',
-        options = '_'
+        options = '_',
+        created = '_'
     },
     Tab = entry_table(Type, RealmUri),
     case ets:match_object(Tab, Pattern, 1) of
