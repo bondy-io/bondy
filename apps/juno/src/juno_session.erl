@@ -93,7 +93,7 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = start_stats(S1),
+            ok = create_metrics(S1),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -106,7 +106,7 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 %% -----------------------------------------------------------------------------
 -spec close(id() | session()) -> ok.
 close(#session{id = Id} = S) ->
-    ok = stop_stats(S),
+    ok = delete_metrics(S),
     true = ets:delete(table(Id), Id),
     ok;
 close(Id) ->
@@ -237,13 +237,13 @@ maybe_create_realm(RealmUri) ->
 
 
 %% @private
-start_stats(#session{id = Id}) ->
+create_metrics(#session{id = Id}) ->
     exometer:new([juno, requests, Id], spiral),
     ok.
 
 
 %% @private
-stop_stats(#session{id = Id}) ->
+delete_metrics(#session{id = Id}) ->
     exometer:delete([juno, requests, Id]),
     ok.
 
