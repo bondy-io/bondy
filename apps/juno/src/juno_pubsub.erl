@@ -78,7 +78,9 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     %% also a _Subscriber_ of the topic published to.
     Subs = match_subscriptions(TopicUri, Ctxt, #{exclude => [SessionId]}),
     Fun = fun
-        ({_Sid, Pid, SubsId}) ->
+        (Entry) ->
+            SubsId = juno_registry:entry_id(Entry),
+            Pid = juno_session:pid(juno_registry:session_id(Entry)),
             Pid ! wamp_message:event(SubsId, PubId, Details, Args, Payload)
     end,
     ok = publish(Subs, Fun),
@@ -182,4 +184,7 @@ publish({L, '$end_of_table'}, Fun) ->
 
 publish({L, Cont}, Fun ) ->
     ok = lists:foreach(Fun, L),
-    publish(match_subscriptions(Cont), Fun).
+    publish(match_subscriptions(Cont), Fun);
+
+publish(L, Fun ) when is_list(L) ->
+    lists:foreach(Fun, L).
