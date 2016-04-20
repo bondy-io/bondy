@@ -24,6 +24,8 @@
 -export_type([value_spec/0]).
 -export_type([map_spec/0]).
 
+-export([append/3]).
+-export([append_list/3]).
 -export([collect/2]).
 -export([validate/2]).
 
@@ -31,6 +33,36 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This function appends a new Value to the current list of values associated
+%% with Key.
+%% @end
+%% -----------------------------------------------------------------------------
+append(Key, Value, Map) ->
+    case maps:get(Key, Map, []) of
+        Values when is_list(Values) ->
+            maps:update(Key, [Value|Values]);
+        Prev ->
+            maps:put(Key, [Value, Prev], Map)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This function appends a list of values Values to the current list of values
+%% associated with Key. An exception is generated if the initial value
+%% associated with Key is not a list of values.
+%% @end
+%% -----------------------------------------------------------------------------
+append_list(Key, Values, Map) when is_list(Values) ->
+    case maps:get(Key, Map, []) of
+        OldValues when is_list(OldValues) ->
+            maps:update(Key, lists:append(OldValues, Values), Map);
+        _ ->
+            error(badarg)
+    end.
 
 
 %% @doc Collects the values for Keys preserving its order

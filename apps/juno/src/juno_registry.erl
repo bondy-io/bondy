@@ -39,7 +39,7 @@
 -export_type([entry/0]).
 -export_type([entry_type/0]).
 
--export([about/1]).
+-export([uri/1]).
 -export([add/4]).
 -export([created/1]).
 -export([criteria/1]).
@@ -88,8 +88,8 @@ entry_id(#entry{key = {_, _, Val}}) -> Val.
 %% a registration procedure_uri.
 %% @end
 %% -----------------------------------------------------------------------------
--spec about(entry()) -> uri().
-about(#entry{uri = Val}) -> Val.
+-spec uri(entry()) -> uri().
+uri(#entry{uri = Val}) -> Val.
 
 
 -spec match_policy(entry()) -> binary().
