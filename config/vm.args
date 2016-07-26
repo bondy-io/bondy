@@ -1,4 +1,3 @@
-%% -*- mode: erlang -*-
 -sname juno
 -setcookie juno_cookie
 +P 5000000
