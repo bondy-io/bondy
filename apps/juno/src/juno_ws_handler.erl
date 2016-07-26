@@ -330,7 +330,13 @@ handle_wamp_data(Data1, Req, St0) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Handles one or more messages, routing them and returning a reply 
+%% when required.
+%% @end
+%% -----------------------------------------------------------------------------
 handle_wamp_messages(Ms, Ctxt) ->
     handle_wamp_messages(Ms, Ctxt, []).
 
@@ -339,12 +345,15 @@ handle_wamp_messages(Ms, Ctxt) ->
 handle_wamp_messages([], Ctxt, []) ->
     %% We have no replies
     {ok, Ctxt};
+
 handle_wamp_messages([], Ctxt, Acc) ->
     {reply, lists:reverse(Acc), Ctxt};
+
 handle_wamp_messages(
     [#goodbye{}|_], #{goodbye_initiated := true} = Ctxt, _) ->
     %% The client is replying to our goodbye
     {stop, Ctxt};
+    
 handle_wamp_messages(
     [#goodbye{} = M|_], #{goodbye_initiated := false} = Ctxt, _) ->
     %% The client initiated a goodbye, so we will not process

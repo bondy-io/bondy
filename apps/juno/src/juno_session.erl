@@ -16,6 +16,9 @@
 %% application specific content (an application session store should be
 %% implemented as a service i.e. a Callee).
 %%
+%% Currently sessions are not persistent i.e. if the connection closes the 
+%% session data will be lost.
+%%
 %% @end
 %% =============================================================================
 -module(juno_session).
@@ -80,6 +83,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open(peer(), uri(), session_opts()) -> session().
+
 open(Peer, RealmUri, Opts) when is_map(Opts) ->
     _Realm = maybe_create_realm(RealmUri),
     Id = wamp_id:new(global),
@@ -105,6 +109,7 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(id() | session()) -> ok.
+
 close(#session{id = Id} = S) ->
     ok = delete_metrics(S),
     true = ets:delete(table(Id), Id),
@@ -118,6 +123,7 @@ close(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec id(session()) -> id().
+
 id(#session{id = Id}) ->
     Id.
 
@@ -127,6 +133,7 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
+
 realm_uri(#session{realm_uri = Uri}) ->
     Uri;
 realm_uri(Id) ->
@@ -141,6 +148,7 @@ realm_uri(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec pid(id() | session()) -> pid().
+
 pid(#session{pid = Pid}) ->
     Pid;
 pid(Id) ->
@@ -152,6 +160,7 @@ pid(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec created(session()) -> calendar:date_time().
+
 created(#session{created = Val}) -> Val.
 
 
@@ -160,6 +169,7 @@ created(#session{created = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec peer(session()) -> peer().
+
 peer(#session{peer = Val}) -> Val.
 
 
@@ -168,6 +178,7 @@ peer(#session{peer = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec incr_seq(id() | session()) -> dict().
+
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
@@ -181,6 +192,7 @@ incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec size() -> non_neg_integer().
+
 size() ->
     tuplespace:size(?SESSION_TABLE_NAME).
 
@@ -192,6 +204,7 @@ size() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(id()) -> session() | not_found.
+
 lookup(Id) ->
     case do_lookup(Id)  of
         #session{} = Session ->
@@ -208,6 +221,7 @@ lookup(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec fetch(id()) -> session().
+
 fetch(Id) ->
     case lookup(Id) of
         not_found ->
@@ -286,6 +300,7 @@ table(Id) ->
 
 %% @private
 -spec do_lookup(id()) -> session() | not_found.
+
 do_lookup(Id) ->
     Tab = table(Id),
     case ets:lookup(Tab, Id)  of

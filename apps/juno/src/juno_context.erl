@@ -18,18 +18,20 @@
 
 -type context()       ::  #{
     goodbye_initiated => boolean(),
+    peer => juno_session:peer(),
     realm_uri => uri(),
     request_id => id(),
     request_timeout => non_neg_integer(),
     roles => map(),
     session_id => id(),
-    peer => juno_session:peer()
-}.
+    user_id => binary()
+}.  
 -export_type([context/0]).
 
 -export([is_feature_enabled/3]).
 -export([new/0]).
 -export([peer/1]).
+-export([realm_uri/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
@@ -49,6 +51,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec new() -> context().
+
 new() ->
     Ctxt = #{
         goodbye_initiated => false,
@@ -65,6 +68,7 @@ new() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec reset(context()) -> context().
+
 reset(Ctxt) ->
     Ctxt#{
         request_id => undefined,
@@ -78,15 +82,17 @@ reset(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec peer(context()) -> juno_session:peer().
+
 peer(#{peer := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Sets the roles to the provided context.
+%% Set the peer to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_peer(context(), juno_session:peer()) -> context().
+
 set_peer(Ctxt, Peer) when is_map(Ctxt) ->
     Ctxt#{peer => Peer}.
 
@@ -97,6 +103,7 @@ set_peer(Ctxt, Peer) when is_map(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles(context()) -> map().
+
 roles(#{roles := Val}) -> Val.
 
 
@@ -106,9 +113,19 @@ roles(#{roles := Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_roles(context(), map()) -> context().
+
 set_roles(Ctxt, Roles) when is_map(Ctxt), is_map(Roles) ->
     Ctxt#{roles => Roles}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the realm uri of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec realm_uri(context()) -> uri().
+
+realm_uri(#{realm_uri := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -116,8 +133,10 @@ set_roles(Ctxt, Roles) when is_map(Ctxt), is_map(Roles) ->
 %% Returns the sessionId of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(context()) -> id().
-session_id(#{session_id := S}) -> S.
+-spec session_id(context()) -> id() | undefined.
+
+session_id(#{session_id := S}) -> S;
+session_id(#{}) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -126,6 +145,7 @@ session_id(#{session_id := S}) -> S.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_session_id(context(), id()) -> context().
+
 set_session_id(Ctxt, SessionId) ->
     Ctxt#{session_id => SessionId}.
 
@@ -136,6 +156,7 @@ set_session_id(Ctxt, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session(context()) -> juno_session:session().
+
 session(#{session_id := SessionId}) ->
     juno_session:fetch(SessionId).
 
@@ -146,6 +167,7 @@ session(#{session_id := SessionId}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec request_id(context()) -> id().
+
 request_id(#{request_id := Val}) ->
     Val.
 
@@ -156,6 +178,7 @@ request_id(#{request_id := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_request_id(context(), id()) -> context().
+
 set_request_id(Ctxt, ReqId) ->
     Ctxt#{set_request_id => ReqId}.
 
@@ -166,6 +189,7 @@ set_request_id(Ctxt, ReqId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec request_timeout(context()) -> non_neg_integer().
+
 request_timeout(#{request_timeout := Val}) ->
     Val.
 
@@ -176,6 +200,7 @@ request_timeout(#{request_timeout := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_request_timeout(context(), non_neg_integer()) -> context().
+
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
 
@@ -186,5 +211,6 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_feature_enabled(context(), atom(), atom()) -> boolean().
+
 is_feature_enabled(#{roles := Roles}, Role, Feature) ->
     maps:get(Feature, maps:get(Role, Roles, #{}), false).

@@ -67,18 +67,22 @@
 
 
 -spec id(entry()) -> id().
+
 id(#entry{key = {_, _, Val}}) -> Val.
 
 
 -spec realm_uri(entry()) -> uri().
+
 realm_uri(#entry{key = {Val, _, _}}) -> Val.
 
 
 -spec session_id(entry()) -> id().
+
 session_id(#entry{key = {_, Val, _}}) -> Val.
 
 
 -spec entry_id(entry()) -> id().
+
 entry_id(#entry{key = {_, _, Val}}) -> Val.
 
 
@@ -115,7 +119,8 @@ options(#entry{options = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> {ok, id()}.
 add(Type, Uri, Options, Ctxt) ->
-    #{ realm_uri := RealmUri, session_id := SessionId} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     MatchPolicy = validate_match_policy(Options),
     MatchSessionId = case Type of
         registration -> '_';
@@ -189,7 +194,8 @@ add(Type, Uri, Options, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), juno_context:context()) -> ok.
 remove_all(Type, Ctxt) ->
-    #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
         uri = '_',
@@ -214,7 +220,8 @@ remove_all(Type, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec remove(entry_type(), id(), juno_context:context()) -> ok.
 remove(Type, EntryId, Ctxt) ->
-    #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     Tab = entry_table(Type, RealmUri),
     Key = {RealmUri, SessionId, EntryId},
     case ets:take(Tab, Key) of
@@ -238,11 +245,15 @@ remove(Type, EntryId, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(entry_type(), juno_context:context()) -> [entry()].
-entries(Type, #{realm_uri := RealmUri, session_id := SessionId}) ->
+
+entries(Type, Ctxt) ->
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     entries(Type, RealmUri, SessionId).
 
 
 -spec entries(ets:continuation()) -> [entry()].
+
 entries(Cont) ->
     ets:match_object(Cont).
 
@@ -257,6 +268,7 @@ entries(Cont) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [entry()].
+
 entries(Type, RealmUri, SessionId) ->
     session_entries(Type, RealmUri, SessionId, #{limit => infinity}).
 
@@ -272,6 +284,7 @@ entries(Type, RealmUri, SessionId) ->
 -spec entries(
     entry_type(), RealmUri :: uri(), SessionId :: id(), Opts :: map()) ->
     {[entry()], Cont :: '$end_of_table' | term()}.
+
 entries(Type, RealmUri, SessionId, Opts) ->
     session_entries(Type, RealmUri, SessionId, Opts).
 
@@ -282,8 +295,9 @@ entries(Type, RealmUri, SessionId, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context()) ->
     [entry()].
+
 match(Type, Uri, Ctxt) ->
-    #{realm_uri := RealmUri} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, ets:select(Tab, MS)).
@@ -298,8 +312,9 @@ match(Type, Uri, Ctxt) ->
     [entry()]
     | {[entry()], ets:continuation()}
     | '$end_of_table'.
+
 match(Type, Uri, Ctxt, Opts) ->
-    #{realm_uri := RealmUri} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     case maps:get(limit, Opts, infinity) of
@@ -316,6 +331,7 @@ match(Type, Uri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match(ets:continuation()) ->
     {[entry()], ets:continuation()} | '$end_of_table'.
+
 match({Type, Cont}) when Type == registration orelse Type == subscription ->
     lookup_entries(Type, ets:select(Cont)).
 
@@ -458,7 +474,8 @@ do_add(Type, Entry, Ctxt) ->
 -spec index_entry(
     id(), uri(), binary(), juno_context:context()) -> #index{}.
 index_entry(EntryId, Uri, Policy, Ctxt) ->
-    #{realm_uri := RealmUri, session_id := SessionId} = Ctxt,
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     Entry = #index{entry_key = {RealmUri, SessionId, EntryId}},
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of

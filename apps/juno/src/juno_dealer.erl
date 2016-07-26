@@ -4,6 +4,9 @@
 
 %% =============================================================================
 %% @doc
+%% This module implements the capabilities of a Dealer. It is used by 
+%% {@link juno_router}.
+%%
 %% A Dealer is one of the two roles a Router plays. In particular a Dealer is
 %% the middleman between an Caller and a Callee in an RPC interaction,
 %% i.e. it works as a generic router for remote procedure calls

@@ -61,10 +61,11 @@ unsubscribe(SubsId, Ctxt) ->
 %% Throws not_authorized
 %% @end
 %% -----------------------------------------------------------------------------
--spec publish(uri(), map(), list(), map(), juno_context:context()) ->
+-spec publish(uri(), map(), list(), map(), juno_context:context()) -> 
     {ok, id()}.
+
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
-    #{session_id := SessionId} = Ctxt,
+    SessionId = juno_context:session_id(Ctxt),
     %% TODO check if authorized and if not throw wamp.error.not_authorized
     PubId = wamp_id:new(global),
     Details = #{},
@@ -99,7 +100,9 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 -spec subscriptions(
     ContextOrCont :: juno_context:context() | ets:continuation()) ->
     [juno_registry:entry()].
-subscriptions(#{realm_uri := RealmUri, session_id := SessionId}) ->
+subscriptions(Ctxt) when is_map(Ctxt) ->
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
     juno_registry:entries(
         subscription, RealmUri, SessionId);
 subscriptions(Cont) ->
@@ -186,5 +189,5 @@ publish({L, Cont}, Fun ) ->
     ok = lists:foreach(Fun, L),
     publish(match_subscriptions(Cont), Fun);
 
-publish(L, Fun ) when is_list(L) ->
+publish(L, Fun) when is_list(L) ->
     lists:foreach(Fun, L).

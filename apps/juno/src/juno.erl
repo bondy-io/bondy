@@ -36,7 +36,8 @@ start() ->
 %% -----------------------------------------------------------------------------
 -spec send(Message :: message(), Ctxt :: juno_context:context()) -> ok.
 send(Message, Ctxt) ->
-    send(juno_context:session(Ctxt), Message, Ctxt).
+    Pid = juno_session:pid(juno_context:session(Ctxt)),
+    send(Pid, Message, Ctxt).
 
 
 %% -----------------------------------------------------------------------------

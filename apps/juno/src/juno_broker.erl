@@ -4,6 +4,9 @@
 
 %% =============================================================================
 %% @doc
+%% This module implements the capabilities of a Broker. It is used by 
+%% {@link juno_router}.
+
 %% Regarding *Publish & Subscribe*, the ordering guarantees are as
 %% follows:
 %%

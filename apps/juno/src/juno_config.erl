@@ -14,8 +14,8 @@
 -define(DEFAULT_RESOURCE_CAPACITY, 16 * erlang:system_info(schedulers) * 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
+-export([admin_http_port/0]).
 -export([automatically_create_realms/0]).
--export([request_timeout/0]).
 -export([connection_lifetime/0]).
 -export([coordinator_timeout/0]).
 -export([http_acceptors_pool_size/0]).
@@ -29,6 +29,7 @@
 -export([pool_capacity/1]).
 -export([pool_size/1]).
 -export([pool_type/1]).
+-export([request_timeout/0]).
 -export([tcp_acceptors_pool_size/0]).
 -export([tcp_max_connections/0]).
 -export([tcp_port/0]).
@@ -67,6 +68,9 @@ http_max_connections() ->
 http_port() ->
     application:get_env(?APP, http_port, 8080).
 
+admin_http_port() ->
+    application:get_env(?APP, admin_http_port, 8081).
+
 
 %% @doc
 %% x-webkit-deflate-frame compression draft which is being used by some
@@ -85,7 +89,7 @@ https_max_connections() ->
     application:get_env(?APP, https_max_connections, 1000000).
 
 https_port() ->
-    application:get_env(?APP, https_port, 8043).
+    application:get_env(?APP, https_port, 8443).
 
 
 %% =============================================================================

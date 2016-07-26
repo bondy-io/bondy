@@ -141,6 +141,7 @@ start_pool() ->
     | {stop, juno_context:context()}
     | {reply, Reply :: message(), juno_context:context()}
     | {stop, Reply :: message(), juno_context:context()}.
+
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
     %% RPC:
@@ -179,13 +180,13 @@ handle_message(_M, Ctxt) ->
 
 init([?POOL_NAME]) ->
     %% We've been called by sidejob_worker
-    %% TODO publish metaevent
+    %% TODO publish metaevent and stats
     {ok, #state{pool_type = permanent}};
 
 init([Event]) ->
     %% We've been called by sidejob_supervisor
     %% We immediately timeout so that we find ourselfs in handle_info.
-    %% TODO publish metaevent
+    %% TODO publish metaevent and stats
 
     State = #state{
         pool_type = transient,
@@ -275,6 +276,7 @@ do_start_pool() ->
     | {stop, juno_context:context()}
     | {reply, Reply :: message()}
     | {stop, Reply :: message()}.
+
 open_session(RealmUri, Details, Ctxt0) ->
     try
         Session = juno_session:open(maps:get(peer, Ctxt0), RealmUri, Details),
@@ -320,6 +322,7 @@ open_session(RealmUri, Details, Ctxt0) ->
     | {stop, juno_context:context()}
     | {reply, Reply :: message()}
     | {stop, Reply :: message()}.
+
 handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message.
     {stop, Ctxt};
@@ -347,13 +350,13 @@ handle_session_message(M, Ctxt0) ->
             {ok, Ctxt0};
         overload ->
             error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
-            %% TODO publish metaevent
+            %% TODO publish metaevent and stats
             %% We do it synchronously i.e. blocking the caller
             ok = handle_event({M, Ctxt0}),
             {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
-            %% TODO Maybe publish metaevent
+            %% TODO Maybe publish metaevent and stats
             %% REVIEW are we using the right error uri?
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
@@ -363,7 +366,7 @@ handle_session_message(M, Ctxt0) ->
             ),
             {reply, Reply, Ctxt0};
         _:_ ->
-            %% TODO Maybe publish metaevent
+            %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}
     end.
 
@@ -390,8 +393,8 @@ acknowledge_message(_) ->
 %% handle_info callback function.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec cast_session_message(atom(), message(), juno_context:context()) ->
-    ok.
+-spec cast_session_message(atom(), message(), juno_context:context()) -> ok.
+
 cast_session_message(PoolName, M, Ctxt) ->
     PoolType = juno_config:pool_type(PoolName),
     case cast_session_message(PoolType, PoolName, M, Ctxt) of
@@ -426,6 +429,7 @@ cast_session_message(transient, PoolName, M, Ctxt) ->
 %% @end.
 %% -----------------------------------------------------------------------------
 -spec handle_event(event()) -> ok.
+
 handle_event({#subscribe{} = M, Ctxt}) ->
     juno_broker:handle_message(M, Ctxt);
 

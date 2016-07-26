@@ -40,22 +40,26 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
 %% 'procedure_already_exists' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), juno_context:context()) -> {ok, id()}.
+
 register(ProcUri, Options, Ctxt) ->
     juno_registry:add(registration, ProcUri, Options, Ctxt).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Unregisters an RPC endpoint.
 %% If the registration does not exist, it fails with a 'no_such_registration'
 %% error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unregister(id(), juno_context:context()) -> ok.
+
 unregister(RegId, Ctxt) ->
     juno_registry:remove(registration, RegId, Ctxt).
 
@@ -64,6 +68,8 @@ unregister(RegId, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec unregister_all(juno_context:context()) -> ok.
+
 unregister_all(Ctxt) ->
     juno_registry:remove_all(registration, Ctxt).
 
@@ -73,8 +79,8 @@ unregister_all(Ctxt) ->
 %% Throws not_authorized
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(id(), uri(), map(), list(), map(), juno_context:context()) ->
-    ok.
+-spec call(id(), uri(), map(), list(), map(), juno_context:context()) -> ok.
+
 call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
     Res = #{
         <<"exact">> => [], % @TODO
@@ -121,6 +127,7 @@ call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
         request_id => ReqId,
         session_id => SessionId
     },
+    %% TODO
     Details = #{},
 
     Fun = fun(Entry) ->
@@ -153,6 +160,7 @@ call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(juno_context:context() | ets:continuation()) ->
     [juno_registry:entry()].
+
 registrations(#{realm_uri := RealmUri, session_id := SessionId}) ->
     registrations(RealmUri, SessionId);
 registrations(Cont) ->
@@ -171,6 +179,7 @@ registrations(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id()) ->
     [juno_registry:entry()].
+
 registrations(RealmUri, SessionId) ->
     juno_registry:entries(registration, RealmUri, SessionId, infinity).
 
@@ -185,6 +194,7 @@ registrations(RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
     {[juno_registry:entry()], Cont :: '$end_of_table' | term()}.
+
 registrations(RealmUri, SessionId, Limit) ->
     juno_registry:entries(registration, RealmUri, SessionId, Limit).
 
@@ -197,6 +207,7 @@ registrations(RealmUri, SessionId, Limit) ->
 -spec match_registrations(uri(), juno_context:context()) ->
     {[juno_registry:entry()], ets:continuation()}
     | '$end_of_table'.
+
 match_registrations(ProcUri, Ctxt) ->
     juno_registry:match(registration, ProcUri, Ctxt, #{limit => infinity}).
 
@@ -209,6 +220,7 @@ match_registrations(ProcUri, Ctxt) ->
     uri(), juno_context:context(), map()) ->
     {[juno_registry:entry()], ets:continuation()}
     | '$end_of_table'.
+
 match_registrations(ProcUri, Ctxt, Opts) ->
     juno_registry:match(registration, ProcUri, Ctxt, Opts).
 
@@ -219,6 +231,7 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(ets:continuation()) ->
     {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
+    
 match_registrations(Cont) ->
     ets:select(Cont).
 

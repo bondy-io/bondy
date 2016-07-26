@@ -38,6 +38,7 @@ maybe_start_router_services() ->
         true ->
             ok = start_tcp_handlers(),
             %% {ok, _} = juno_api_http:start_https(),
+            {ok, _} = juno_api_http:start_admin_http(),
             {ok, _} = juno_api_http:start_http(),
             ok;
         false ->
