@@ -61,7 +61,7 @@ unsubscribe(SubsId, Ctxt) ->
 %% Throws not_authorized
 %% @end
 %% -----------------------------------------------------------------------------
--spec publish(uri(), map(), list(), map(), juno_context:context()) -> 
+-spec publish(uri(), map(), list(), map(), juno_context:context()) ->
     {ok, id()}.
 
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->

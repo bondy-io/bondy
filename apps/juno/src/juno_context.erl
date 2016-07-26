@@ -25,7 +25,7 @@
     roles => map(),
     session_id => id(),
     user_id => binary()
-}.  
+}.
 -export_type([context/0]).
 
 -export([is_feature_enabled/3]).

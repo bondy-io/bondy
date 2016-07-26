@@ -4,7 +4,7 @@
 
 %% =============================================================================
 %% @doc
-%% This module implements the capabilities of a Dealer. It is used by 
+%% This module implements the capabilities of a Dealer. It is used by
 %% {@link juno_router}.
 %%
 %% A Dealer is one of the two roles a Router plays. In particular a Dealer is

@@ -98,7 +98,7 @@ resource_existed(Req, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 from_json(Req0, St) ->
-    try 
+    try
         {ok, Data, Req1} = cowboy_req:body(Req0),
         Obj = jsx:decode(Data, [return_maps]),
         do_from_json(Obj, Req1, St)

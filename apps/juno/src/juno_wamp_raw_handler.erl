@@ -44,7 +44,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 init(Ref, Socket, Transport, _Opts) ->
     ok = ranch:accept_ack(Ref),
-    Transport:setopts(Socket, [{packet,4}]),
+    Transport:setopts(Socket, [{packet, 4}]),
     State = #state{
         socket = Socket,
         transport = Transport

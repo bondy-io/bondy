@@ -11,7 +11,7 @@
 -export([set_resp_link_header/4]).
 -export([set_resp_link_header/2]).
 
-%% The StateFun should receive 
+%% The StateFun should receive
 -spec is_authorized(Req :: cowboy_req:req(), StateFun :: state_fun()) ->
     stop | true | {false, WWWAuthHeader :: binary()}.
 is_authorized(Req0, StateFun) ->

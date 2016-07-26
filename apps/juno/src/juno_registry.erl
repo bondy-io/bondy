@@ -554,7 +554,7 @@ wilcard_conditions([H|T] = L) ->
         } || {E, N} <- Ordered
     ],
     Cs1 = [
-        {'=:=',{element, 1, '$1'}, {const, H}},
+        {'=:=', {element, 1, '$1'}, {const, H}},
         {'=:=', {size, '$1'}, {const, length(L)}} | Cs0],
     %% We need to use 'andalso' here and not 'and', otherwise the match spec
     %% will break when the {size, '$1'} /= {const, length(L)}

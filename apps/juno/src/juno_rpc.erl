@@ -231,7 +231,7 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(ets:continuation()) ->
     {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
-    
+
 match_registrations(Cont) ->
     ets:select(Cont).
 

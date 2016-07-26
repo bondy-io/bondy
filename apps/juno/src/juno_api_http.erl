@@ -73,30 +73,30 @@ admin_dispatch_table() ->
 dispatch_table() ->
     List = [
         {'_', [
-            {"/", 
+            {"/",
                 juno_http_bridge_rh, [#{resource => entry_point}]},
             %% JUNO HTTP/REST - WAMP BRIDGE
             % Used by HTTP publishers to publish an event
-            {"/events", 
+            {"/events",
                 juno_http_bridge_rh, [#{resource => event}]},
             % Used by HTTP callers to make a call
-            {"/calls", 
+            {"/calls",
                 juno_http_bridge_rh, [#{resource => call}]},
             % Used by HTTP subscribers to list, add and remove HTTP subscriptions
-            {"/subscriptions", 
+            {"/subscriptions",
                 juno_http_bridge_rh, [#{resource => subscription}]},
-            {"/subscriptions/:id", 
+            {"/subscriptions/:id",
                 juno_http_bridge_rh, [#{resource => subscription}]},
             %% Used by HTTP callees to list, register and unregister HTTP endpoints
-            {"/registrations", 
+            {"/registrations",
                 juno_http_bridge_rh, [#{resource => registration}]},
-            {"/registrations/:id", 
+            {"/registrations/:id",
                 juno_http_bridge_rh, [#{resource => registration}]},
             %% Used to establish a websockets connection
-            {"/ws", 
+            {"/ws",
                 juno_ws_handler, []},
             %% JUNO API GATEWAY
-            {"/api/:version/[...]", 
+            {"/api/:version/[...]",
                 juno_gateway_rh, []}
         ]}
     ],

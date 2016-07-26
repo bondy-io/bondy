@@ -16,7 +16,7 @@
 %% application specific content (an application session store should be
 %% implemented as a service i.e. a Callee).
 %%
-%% Currently sessions are not persistent i.e. if the connection closes the 
+%% Currently sessions are not persistent i.e. if the connection closes the
 %% session data will be lost.
 %%
 %% @end

@@ -118,8 +118,8 @@ error_dict(Code, Description) ->
 
 error_dict(Code, Description, UserInfo) ->
     #{
-    	<<"code">> => Code,
-    	<<"description">> => Description,
+        <<"code">> => Code,
+        <<"description">> => Description,
         <<"userInfo">> => UserInfo
     }.
 
