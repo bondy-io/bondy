@@ -25,3 +25,22 @@ stage:
 
 dialyzer:
 	$(REBAR) dialyzer
+
+gen_nodes:
+	-rm -r _build/prod
+	-rm -rf _build/node1
+	-rm -rf _build/node2
+	-rm -rf _build/node3
+	$(REBAR) as prod release
+	-cp -r _build/prod _build/node1
+	-cp -r _build/prod _build/node2
+	-cp -r _build/prod _build/node3
+
+node1:
+	RELX_REPLACE_OS_VARS=true NODE_NAME=juno_1@127.0.0.1 HTTP_PORT=18080 ADMIN_HTTP_PORT=18081 TCP_PORT=18082 _build/node1/rel/juno/bin/juno console
+
+node2:
+	RELX_REPLACE_OS_VARS=true NODE_NAME=juno_2@127.0.0.1 HTTP_PORT=18083 ADMIN_HTTP_PORT=18084 TCP_PORT=18085 _build/node2/rel/juno/bin/juno console
+
+node3:
+	RELX_REPLACE_OS_VARS=true NODE_NAME=juno_3@127.0.0.1 HTTP_PORT=18086 ADMIN_HTTP_PORT=18087 TCP_PORT=18088 _build/node3/rel/juno/bin/juno console
