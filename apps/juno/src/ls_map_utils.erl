@@ -43,7 +43,7 @@
 append(Key, Value, Map) ->
     case maps:get(Key, Map, []) of
         Values when is_list(Values) ->
-            maps:update(Key, [Value|Values]);
+            maps:update(Key, [Value|Values], Map);
         Prev ->
             maps:put(Key, [Value, Prev], Map)
     end.

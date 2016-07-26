@@ -147,7 +147,7 @@ set_session_id(Ctxt, SessionId) ->
 %% Fetches and returns the juno_session for the associated sessionId.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session(context()) -> juno_session:session().
+-spec session(context()) -> juno_session:session() | no_return().
 session(#{session_id := SessionId}) ->
     juno_session:fetch(SessionId).
 
@@ -158,7 +158,6 @@ session(#{session_id := SessionId}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec request_id(context()) -> id().
-
 request_id(#{request_id := Val}) ->
     Val.
 

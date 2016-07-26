@@ -1,6 +1,6 @@
 -module(juno_rest_utils).
 
--type state_fun() :: fun((Client :: pbs_client:pbs_client() | undefined) -> NewState :: any()).
+-type state_fun() :: fun((any()) -> any()).
 -export_type([state_fun/0]).
 
 
@@ -13,7 +13,7 @@
 
 %% The StateFun should receive
 -spec is_authorized(Req :: cowboy_req:req(), StateFun :: state_fun()) ->
-    stop | true | {false, WWWAuthHeader :: binary()}.
+   {stop | true | {false, binary()}, cowboy_req:req(), any()}.
 is_authorized(Req0, StateFun) ->
     % We only allow the client to issue requests for a known tenant key
     TenantKey = cowboy_req:header(<<"authorization">>, Req0),

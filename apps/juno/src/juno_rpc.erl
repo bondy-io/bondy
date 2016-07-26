@@ -87,37 +87,37 @@ call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
         <<"prefix">> => [], % @TODO
         <<"wildcard">> => [] % @TODO
     },
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.lookup">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.match">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.get">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.list_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.count_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{count => 0},
-    M = wamp_message:result(ReqId, #{}, [], Res, Ctxt),
+    M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
 call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
@@ -158,11 +158,14 @@ call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
 %% registrations/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(juno_context:context() | ets:continuation()) ->
-    [juno_registry:entry()].
+-spec registrations(juno_context:context() | juno_registry:continuation()) ->
+    [juno_registry:entry()] 
+    | {[juno_registry:entry()], juno_registry:continuation()}
+    | '$end_of_table'. 
 
 registrations(#{realm_uri := RealmUri, session_id := SessionId}) ->
     registrations(RealmUri, SessionId);
+
 registrations(Cont) ->
     juno_registry:entries(Cont).
 
@@ -205,22 +208,20 @@ registrations(RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), juno_context:context()) ->
-    {[juno_registry:entry()], ets:continuation()}
-    | '$end_of_table'.
-
+    [juno_registry:entry()].
 match_registrations(ProcUri, Ctxt) ->
-    juno_registry:match(registration, ProcUri, Ctxt, #{limit => infinity}).
+    case juno_registry:match(registration, ProcUri, Ctxt) of
+        {L, '$end_of_table'} -> L;
+        '$end_of_table' -> []
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(
-    uri(), juno_context:context(), map()) ->
-    {[juno_registry:entry()], ets:continuation()}
-    | '$end_of_table'.
-
+-spec match_registrations(uri(), juno_context:context(), map()) ->
+    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
 match_registrations(ProcUri, Ctxt, Opts) ->
     juno_registry:match(registration, ProcUri, Ctxt, Opts).
 
@@ -229,9 +230,8 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(ets:continuation()) ->
-    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
-
+-spec match_registrations(juno_registry:continuation()) ->
+    {[juno_registry:entry()], juno_registry:continuation()} | '$end_of_table'.
 match_registrations(Cont) ->
     ets:select(Cont).
 

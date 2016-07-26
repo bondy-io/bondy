@@ -87,7 +87,7 @@ is_feature_enabled(F) ->
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) -> ok.
+-spec handle_message(M :: message(), Ctxt :: juno_context:context()) -> ok.
 handle_message(#subscribe{} = M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,

@@ -39,7 +39,8 @@
 -type state()       ::  #{
     context => juno_context:context(),
     data => binary(),
-    subprotocol => subprotocol()
+    subprotocol => subprotocol(),
+    hibernate => boolean() 
 }.
 
 -export([init/2]).
@@ -78,7 +79,8 @@ init(Req, Opts) ->
             St = #{
                 context => Ctxt,
                 subprotocol => undefined,
-                data => <<>>
+                data => <<>>,
+                hibernate => false %% TODO define business logic
             },
             %% The client provided subprotocol options
             subprotocol_init(select_subprotocol(Subprotocols), Req, St)
@@ -269,13 +271,11 @@ select_subprotocol([?WAMP2_MSGPACK_BATCHED | _T]) ->
 
 
 %% @private
-reply(FrameType, Frames, Req, St) ->
-    case should_hibernate(St) of
-        true ->
-            {reply, frame(FrameType, Frames), Req, St, hibernate};
-        false ->
-            {reply, frame(FrameType, Frames), Req, St}
-    end.
+reply(FrameType, Frames, Req, #{hibernate := true} = St) ->
+    {reply, frame(FrameType, Frames), Req, St, hibernate};
+
+reply(FrameType, Frames, Req, #{hibernate := false} = St) ->
+    {reply, frame(FrameType, Frames), Req, St}.
 
 %% @private
 frame(Type, L) when is_list(L) ->
@@ -283,12 +283,6 @@ frame(Type, L) when is_list(L) ->
 frame(Type, E) when Type == text orelse Type == binary ->
     {Type, E}.
 
-
-%% @private
-should_hibernate(_St) ->
-    %% @TODO define condition. We mights need to do this to scale
-    %% to millions of connections per node
-    false.
 
 
 %% -----------------------------------------------------------------------------
@@ -337,6 +331,11 @@ handle_wamp_data(Data1, Req, St0) ->
 %% when required.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec handle_wamp_messages([message()], juno_context:context()) ->
+    {ok, juno_context:context()} 
+    | {reply, [message()], juno_context:context()} 
+    | {stop, juno_context:context()}
+    | {stop, [message()], juno_context:context()}.
 handle_wamp_messages(Ms, Ctxt) ->
     handle_wamp_messages(Ms, Ctxt, []).
 
@@ -350,15 +349,15 @@ handle_wamp_messages([], Ctxt, Acc) ->
     {reply, lists:reverse(Acc), Ctxt};
 
 handle_wamp_messages(
-    [#goodbye{}|_], #{goodbye_initiated := true} = Ctxt, _) ->
-    %% The client is replying to our goodbye
-    {stop, Ctxt};
-
-handle_wamp_messages(
-    [#goodbye{} = M|_], #{goodbye_initiated := false} = Ctxt, _) ->
+    [#goodbye{} = M|_], Ctxt, Acc) ->
     %% The client initiated a goodbye, so we will not process
     %% any subsequent messages
-    juno_router:handle_message(M, Ctxt#{goodbye_initiated => true});
+   case juno_router:handle_message(M, Ctxt) of
+        {stop, Ctxt1} ->
+            {stop, lists:reverse(Acc), Ctxt1};
+        {stop, Reply, Ctxt1} ->
+            {stop, lists:reverse([Reply|Acc]), Ctxt1}
+    end;
 
 handle_wamp_messages([H|T], Ctxt0, Acc) ->
     case juno_router:handle_message(H, Ctxt0) of
@@ -378,7 +377,14 @@ close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
     %% We cleanup session and router data for this Ctxt
     juno_pubsub:unsubscribe_all(Ctxt),
     juno_rpc:unregister_all(Ctxt),
-    juno_session:close(SessionId);
+    case juno_session:lookup(SessionId) of
+        not_found ->
+            ok;
+        Session ->
+            juno_session:close(Session),
+            ok
+    end;
+    
 close_session(_) ->
     ok.
 

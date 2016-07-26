@@ -272,10 +272,8 @@ do_start_pool() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open_session(uri(), map(), juno_context:context()) ->
-    {ok, juno_context:context()}
-    | {stop, juno_context:context()}
-    | {reply, Reply :: message()}
-    | {stop, Reply :: message()}.
+    {reply, message(), juno_context:context()}
+    | {stop, message(), juno_context:context()}.
 
 open_session(RealmUri, Details, Ctxt0) ->
     try
@@ -393,7 +391,8 @@ acknowledge_message(_) ->
 %% handle_info callback function.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec cast_session_message(atom(), message(), juno_context:context()) -> ok.
+-spec cast_session_message(atom(), message(), juno_context:context()) -> 
+    ok | overload.
 
 cast_session_message(PoolName, M, Ctxt) ->
     PoolType = juno_config:pool_type(PoolName),

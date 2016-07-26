@@ -33,7 +33,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(uri(), map(), juno_context:context()) -> {ok, id()}.
+-spec subscribe(uri(), map(), juno_context:context()) ->
+    {ok, id()} | no_return().
 subscribe(TopicUri, Options, Ctxt) ->
     juno_registry:add(subscription, TopicUri, Options, Ctxt).
 
@@ -81,7 +82,8 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     Fun = fun
         (Entry) ->
             SubsId = juno_registry:entry_id(Entry),
-            Pid = juno_session:pid(juno_registry:session_id(Entry)),
+            Session = juno_session:fetch(juno_registry:session_id(Entry)),
+            Pid = juno_session:pid(Session),
             Pid ! wamp_message:event(SubsId, PubId, Details, Args, Payload)
     end,
     ok = publish(Subs, Fun),
@@ -98,13 +100,16 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscriptions(
-    ContextOrCont :: juno_context:context() | ets:continuation()) ->
-    [juno_registry:entry()].
+    ContextOrCont :: juno_context:context() | juno_registry:continuation()) ->
+    [juno_registry:entry()]
+    | {[juno_registry:entry()], juno_registry:continuation()}
+    | '$end_of_table'.
 subscriptions(Ctxt) when is_map(Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
     juno_registry:entries(
         subscription, RealmUri, SessionId);
+
 subscriptions(Cont) ->
     juno_registry:entries(Cont).
 
@@ -118,7 +123,8 @@ subscriptions(Cont) ->
 %% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id()) -> [juno_registry:entry()].
+-spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->       
+    [juno_registry:entry()].
 subscriptions(RealmUri, SessionId) ->
     juno_registry:entries(
         subscription, RealmUri, SessionId, infinity).
@@ -133,7 +139,8 @@ subscriptions(RealmUri, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
-    {[juno_registry:entry()], Cont :: '$end_of_table' | term()}.
+    {[juno_registry:entry()], juno_registry:continuation()}
+    | '$end_of_table'.
 subscriptions(RealmUri, SessionId, Limit) ->
     juno_registry:entries(
         subscription, RealmUri, SessionId, Limit).
@@ -146,8 +153,10 @@ subscriptions(RealmUri, SessionId, Limit) ->
 -spec match_subscriptions(uri(), juno_context:context()) ->
     [{SessionId :: id(), pid(), SubsId :: id(), Opts :: map()}].
 match_subscriptions(TopicUri, Ctxt) ->
-    juno_registry:match(subscription, TopicUri, Ctxt).
-
+    case juno_registry:match(subscription, TopicUri, Ctxt) of
+        {L, '$end_of_table'} -> L;
+        '$end_of_table' -> []
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -155,18 +164,18 @@ match_subscriptions(TopicUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(
     uri(), juno_context:context(), non_neg_integer()) ->
-    {[juno_registry:entry()], ets:continuation()}
+    {[juno_registry:entry()], juno_registry:continuation()}
     | '$end_of_table'.
-match_subscriptions(TopicUri, Ctxt, Limit) ->
-    juno_registry:match(subscription, TopicUri, Ctxt, Limit).
+match_subscriptions(TopicUri, Ctxt, Limit) when is_integer(Limit), Limit > 0 ->
+    juno_registry:match(subscription, TopicUri, Ctxt, #{limit => Limit}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_subscriptions(ets:continuation()) ->
-    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
+-spec match_subscriptions(juno_registry:continuation()) ->
+    {[juno_registry:entry()], juno_registry:continuation()} | '$end_of_table'.
 match_subscriptions(Cont) ->
     ets:select(Cont).
 

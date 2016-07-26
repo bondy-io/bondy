@@ -167,7 +167,7 @@ is_feature_enabled(F) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) -> ok.
+-spec handle_message(M :: message(), Ctxt :: map()) -> ok | no_return().
 handle_message(#register{} = M, Ctxt) ->
     %% Check if it has callee role?
     Reply  = try

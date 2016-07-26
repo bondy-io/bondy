@@ -82,7 +82,7 @@
 %% Otherwise, it will fail with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec open(peer(), uri(), session_opts()) -> session().
+-spec open(peer(), uri(), session_opts()) -> session() | no_return().
 
 open(Peer, RealmUri, Opts) when is_map(Opts) ->
     _Realm = maybe_create_realm(RealmUri),
@@ -108,14 +108,11 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(id() | session()) -> ok.
-
-close(#session{id = Id} = S) ->
-    ok = delete_metrics(S),
+-spec close(session()) -> ok.
+close(#session{id = Id}) ->
+    ok = exometer:delete([juno, requests, Id]),
     true = ets:delete(table(Id), Id),
-    ok;
-close(Id) ->
-    close(fetch(Id)).
+    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -147,12 +144,10 @@ realm_uri(Id) ->
 %% identified by Id runs on.
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(id() | session()) -> pid().
+-spec pid(session()) -> pid().
 
 pid(#session{pid = Pid}) ->
-    Pid;
-pid(Id) ->
-    pid(fetch(Id)).
+    Pid.
 
 
 %% -----------------------------------------------------------------------------
@@ -206,7 +201,7 @@ size() ->
 -spec lookup(id()) -> session() | not_found.
 
 lookup(Id) ->
-    case do_lookup(Id)  of
+    case do_lookup(Id) of
         #session{} = Session ->
             Session;
         not_found ->
@@ -220,7 +215,7 @@ lookup(Id) ->
 %% does not exist it fails with reason '{badarg, Id}'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(id()) -> session().
+-spec fetch(id()) -> session() | no_return().
 
 fetch(Id) ->
     case lookup(Id) of
@@ -253,12 +248,6 @@ maybe_create_realm(RealmUri) ->
 %% @private
 create_metrics(#session{id = Id}) ->
     exometer:new([juno, requests, Id], spiral),
-    ok.
-
-
-%% @private
-delete_metrics(#session{id = Id}) ->
-    exometer:delete([juno, requests, Id]),
     ok.
 
 
