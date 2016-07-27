@@ -59,11 +59,24 @@ admin_dispatch_table() ->
     List = [
         %% ADMIN API
         {'_', [
-            {"/", juno_admin_rh, [#{resource => entry_point}]},
-            {"/ping", juno_admin_rh, [#{resource => ping}]},
-            {"/stats", juno_admin_rh, [#{resource => stats}]},
-            {"/apis", juno_admin_collection_rh, [#{resource => api}]},
-            {"/apis/:id", juno_admin_rh, [#{resource => api}]}
+            {"/",
+                juno_admin_rh, #{resource => entry_point}},
+            {"/ping",
+                juno_admin_rh, #{resource => ping}},
+            {"/stats",
+                juno_admin_rh, #{resource => stats}},
+            {"/nodes", 
+                juno_admin_rh, #{resource => node}},
+            {"/nodes/:node", 
+                juno_admin_rh, #{resource => node}},
+            {"/realms",
+                juno_realm_rh, #{resource => realm}},
+            {"/realms/:realm", 
+                juno_realm_rh, #{resource => realm}},
+            {"/apis", 
+                juno_admin_collection_rh, #{resource => api}},
+            {"/apis/:id", 
+                juno_admin_rh, #{resource => api}}
         ]}
     ],
     cowboy_router:compile(List).
@@ -74,30 +87,30 @@ dispatch_table() ->
     List = [
         {'_', [
             {"/",
-                juno_http_bridge_rh, [#{resource => entry_point}]},
+                juno_http_bridge_rh, #{resource => entry_point}},
             %% JUNO HTTP/REST - WAMP BRIDGE
             % Used by HTTP publishers to publish an event
             {"/events",
-                juno_http_bridge_rh, [#{resource => event}]},
+                juno_http_bridge_rh, #{resource => event}},
             % Used by HTTP callers to make a call
             {"/calls",
-                juno_http_bridge_rh, [#{resource => call}]},
+                juno_http_bridge_rh, #{resource => call}},
             % Used by HTTP subscribers to list, add and remove HTTP subscriptions
             {"/subscriptions",
-                juno_http_bridge_rh, [#{resource => subscription}]},
+                juno_http_bridge_rh, #{resource => subscription}},
             {"/subscriptions/:id",
-                juno_http_bridge_rh, [#{resource => subscription}]},
+                juno_http_bridge_rh, #{resource => subscription}},
             %% Used by HTTP callees to list, register and unregister HTTP endpoints
             {"/registrations",
-                juno_http_bridge_rh, [#{resource => registration}]},
+                juno_http_bridge_rh, #{resource => registration}},
             {"/registrations/:id",
-                juno_http_bridge_rh, [#{resource => registration}]},
+                juno_http_bridge_rh, #{resource => registration}},
             %% Used to establish a websockets connection
             {"/ws",
-                juno_ws_handler, []},
+                juno_ws_handler, #{}},
             %% JUNO API GATEWAY
             {"/api/:version/[...]",
-                juno_gateway_rh, []}
+                juno_gateway_rh, #{}}
         ]}
     ],
     cowboy_router:compile(List).

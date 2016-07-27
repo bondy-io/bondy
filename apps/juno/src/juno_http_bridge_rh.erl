@@ -4,8 +4,11 @@
 
 
 -module(juno_http_bridge_rh).
+-include_lib("wamp/include/wamp.hrl").
+% -include("juno.hrl").
 
 -record(state, {
+    realm_uri :: uri(),
     resource :: atom(),
     context :: juno_context:context()
 }).
@@ -20,8 +23,7 @@
 -export([allowed_methods/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
--export([init/3]).
--export([rest_init/2]).
+-export([init/2]).
 -export([is_authorized/2]).
 -export([resource_exists/2]).
 -export([resource_existed/2]).
@@ -34,17 +36,13 @@
 %% ============================================================================
 
 
-init({tcp, http}, _Req, _Opts) ->
-    {upgrade, protocol, cowboy_rest}.
-
-
-rest_init(Req, #{resource := R}) ->
+init(Req, #{resource := R}) ->
     Ctxt = juno_context:set_peer(juno_context:new(), cowboy_req:peer(Req)),
     St = #state{
         context = Ctxt,
         resource = R
     },
-    {ok, Req, St}.
+    {cowboy_rest, Req, St}.    
 
 
 allowed_methods(Req, #state{resource = entry_point} = St) ->
@@ -81,7 +79,8 @@ content_types_accepted(Req, State) ->
 
 is_authorized(Req, State) ->
     % @TODO
-    juno_rest_utils:is_authorized(Req, fun(_) -> State end).
+    juno_rest_utils:is_authorized(
+        Req, fun(Realm) -> State#state{realm_uri = Realm} end).
 
 
 resource_exists(Req, State) ->

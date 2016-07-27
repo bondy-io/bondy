@@ -66,15 +66,25 @@ http_max_connections() ->
     application:get_env(?APP, http_max_connections, 1000).
 
 http_port() ->
-    case application:get_env(?APP, http_port, 8080) of
-        Int when is_integer(Int) -> Int;
-        Str -> list_to_integer(Str)
+    Default = 8080,
+    try 
+        case application:get_env(?APP, http_port, Default) of
+            Int when is_integer(Int) -> Int;
+            Str -> list_to_integer(Str)
+        end
+    catch
+        _:_ -> Default
     end.
 
 admin_http_port() ->
-    case application:get_env(?APP, admin_http_port, 8081) of
-        Int when is_integer(Int) -> Int;
-        Str -> list_to_integer(Str)
+    Default = 8081,
+    try 
+        case application:get_env(?APP, admin_http_port, Default) of
+            Int when is_integer(Int) -> Int;
+            Str -> list_to_integer(Str)
+        end
+    catch
+        _:_ -> Default
     end.
 
 
@@ -110,9 +120,14 @@ tcp_max_connections() ->
     application:get_env(?APP, tcp_max_connections, 1000000).
 
 tcp_port() ->
-    case application:get_env(?APP, tcp_port, 10082) of
-        Int when is_integer(Int) -> Int;
-        Str -> list_to_integer(Str)
+    Default = 8083,
+    try 
+        case application:get_env(?APP, tcp_port, Default) of
+            Int when is_integer(Int) -> Int;
+            Str -> list_to_integer(Str)
+        end
+    catch
+        _:_ -> Default
     end.
 
 

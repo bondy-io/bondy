@@ -26,6 +26,9 @@ stage:
 dialyzer:
 	$(REBAR) dialyzer
 
+shell:
+	$(REBAR) shell
+
 gen_nodes:
 	-rm -r _build/prod
 	-rm -rf _build/node1

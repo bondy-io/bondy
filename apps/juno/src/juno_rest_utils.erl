@@ -15,17 +15,19 @@
 -spec is_authorized(Req :: cowboy_req:req(), StateFun :: state_fun()) ->
    {stop | true | {false, binary()}, cowboy_req:req(), any()}.
 is_authorized(Req0, StateFun) ->
-    % We only allow the client to issue requests for a known tenant key
-    TenantKey = cowboy_req:header(<<"authorization">>, Req0),
+    Realm = cowboy_req:header(<<"www-authenticate">>, Req0),
     try
-        TenantKey /= undefined orelse throw({unknown_tenant_key, TenantKey}),
-        C = pbs_client:new(TenantKey),
-        {true, Req0, StateFun(C)}
+        case wamp_uri:is_valid(Realm) of
+            true ->
+                {true, Req0, StateFun(Realm)};
+            false ->
+                throw({unknown_realm, Realm})
+        end
     catch
-        throw:Reason = {unknown_tenant_key, TenantKey} ->
+        throw:{unknown_realm, Realm} = Reason ->
             % We set a useless WWWAuthHeader
             Req1 = set_resp_error_body(Reason, Req0),
-            {{false, <<"unknown_tenant_key">>}, Req1, StateFun(undefined)};
+            {{false, <<"unknown_realm">>}, Req1, StateFun(undefined)};
         _:Reason ->
             % We force a JSON error object as body
             Req1 = set_resp_error_body(Reason, Req0),
@@ -34,7 +36,7 @@ is_authorized(Req0, StateFun) ->
     end.
 
 set_resp_error_body(Reason, Req) ->
-    Body = pbs_json_utils:error(Reason),
+    Body = juno_json_utils:error(Reason),
     %% cowboy_req:reply(500, [?CT_JSON], Body, Req).
     cowboy_req:set_resp_body(Body, Req).
 

@@ -76,16 +76,15 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% If a realm exists for RealmUri or if
-%% {@link juno_config:automatically_create_realms/0} returns true, this function
-%% will return a new session with Opts as options.
-%% Otherwise, it will fail with an exception.
-%% @end
+%% Creates a new session provided the RealmUri exists or can be dynamically
+%% created.
+%% It calls {@link juno_utils:get_realm/1} which will fail with an exception
+%% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
 -spec open(peer(), uri(), session_opts()) -> session() | no_return().
 
 open(Peer, RealmUri, Opts) when is_map(Opts) ->
-    _Realm = maybe_create_realm(RealmUri),
+    _Realm = juno_utils:get_realm(RealmUri),
     Id = wamp_id:new(global),
     S0 = #session{
         id = Id,
@@ -231,18 +230,6 @@ fetch(Id) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
-maybe_create_realm(RealmUri) ->
-    case juno_config:automatically_create_realms() of
-        true ->
-            %% We force the creation of a new realm if it does not exist
-            wamp_realm:get(RealmUri);
-        false ->
-            %% Will throw an exception if it does not exist
-            wamp_realm:fetch(RealmUri)
-    end.
 
 
 %% @private
