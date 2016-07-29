@@ -104,15 +104,16 @@ fetch(Id) ->
 
 
 %% @private
-to_map({{_Username, _CIDR}, [{_Source, _Opts}]} = _Obj) ->
-    % Map0 = proplists:get_value(<<"info">>, Opts, #{}),
-    % {Addr, Mask} = CIDR,
-    % CIDRStr = io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask]).
-    % Map0#{
-    %     <<"cidr">> => CIDRStr
-    % }.
-    % TODO
-    #{}.
+to_map({{_Username, CIDR}, [{Source, Opts}]} = _Obj) ->
+    Map0 = proplists:get_value(<<"info">>, Opts, #{}),
+    {Addr, Mask} = CIDR,
+    CIDRStr = list_to_binary(
+        io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])),
+    Map0#{
+        <<"cidr">> => CIDRStr,
+        <<"source">> => list_to_binary(atom_to_list(Source)),
+        <<"options">> => <<"TBD">> %%TODO
+    }.
 
 
 

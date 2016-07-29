@@ -106,12 +106,13 @@ to_map({Username, Opts} = User) ->
         <<"has_password">> => has_password(Opts),
         <<"groups">> => juno_security:user_groups(User)
     },
-    case juno_source:lookup(Username) of
+    Source = case juno_source:lookup(Username) of
         not_found ->
-            Map1;
-        Source ->
-            Map1#{<<"source">> => Source}
-    end.
+            #{};
+        Obj ->
+            Obj
+    end,
+    Map1#{<<"source">> => Source}.
 
 
 %% @private
