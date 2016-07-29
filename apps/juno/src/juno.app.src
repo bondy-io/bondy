@@ -1,6 +1,6 @@
 {application, juno,
  [
-     {description, "Juno is an API gateway which enables unified real-time communication between applications and services."},
+     {description, "Juno is an API Gateway and WAMP Router which enables unified real-time communication between applications and services."},
     {vsn, "0.1.0"},
     {registered, []},
     {mod, { juno_app, []}},
@@ -25,7 +25,7 @@
         ]},
     {env,[]},
     {modules, []},
-    {maintainers, []},
-    {licenses, []},
-    {links, []}
+    {maintainers, ["Leapsight"]},
+    {licenses, ["Apache"]},
+    {links, [{"Github", "https://github.com/leapsight/juno"}]}
  ]}.
