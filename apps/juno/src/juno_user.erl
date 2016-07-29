@@ -110,7 +110,7 @@ to_map({Username, Opts} = User) ->
         not_found ->
             #{};
         Obj ->
-            Obj
+            maps:without([<<"username">>], Obj)
     end,
     Map1#{<<"source">> => Source}.
 

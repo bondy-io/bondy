@@ -159,7 +159,10 @@ list(user, _State) ->
     juno_user:list();
 
 list(group, _State) ->
-    juno_group:list().
+    juno_group:list();
+
+list(source, _State) ->
+    juno_source:list().
 
 %% @private
 % add_user(Username, Password, Info) ->

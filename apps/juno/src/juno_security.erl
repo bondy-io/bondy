@@ -1430,9 +1430,12 @@ lookup_user_source(Username) ->
         {<<"security">>, <<"sources">>}, [{match, {name2bin(Username), '_'}}]),
     Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
     case lists:filter(Pred, L) of
-        [Source] -> Source;
-        [] -> not_found
+        [{{BinName, CIDR}, [{Source, Options}]}] -> 
+            {BinName, CIDR, Source, Options};
+        [] -> 
+            not_found
     end.
+
 
 
 %% @private

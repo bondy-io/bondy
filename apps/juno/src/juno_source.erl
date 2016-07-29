@@ -13,7 +13,7 @@
 % -export([add/1]).
 % -export([remove/1]).
 -export([fetch/1]).
-% -export([list/0]).
+-export([list/0]).
 
 
 % %% -----------------------------------------------------------------------------
@@ -85,13 +85,13 @@ fetch(Id) ->
     end.
 
 
-% %% -----------------------------------------------------------------------------
-% %% @doc
-% %% @end
-% %% -----------------------------------------------------------------------------
-% -spec list() -> list(source()).
-% list() ->
-%     [to_map(User) || User <- juno_security:list(user)].
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec list() -> list(source()).
+list() ->
+    [to_map(Obj) || Obj <- juno_security:list(source)].
 
 
 
@@ -104,12 +104,13 @@ fetch(Id) ->
 
 
 %% @private
-to_map({{_Username, CIDR}, [{Source, Opts}]} = _Obj) ->
+to_map({Username, CIDR, Source, Opts} = _Obj) ->
     Map0 = proplists:get_value(<<"info">>, Opts, #{}),
     {Addr, Mask} = CIDR,
     CIDRStr = list_to_binary(
         io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])),
     Map0#{
+        <<"username">> => Username,
         <<"cidr">> => CIDRStr,
         <<"source">> => list_to_binary(atom_to_list(Source)),
         <<"options">> => <<"TBD">> %%TODO
