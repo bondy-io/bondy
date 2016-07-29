@@ -80,7 +80,7 @@ admin_dispatch_table() ->
                 #{entity => permission, is_collection => true}},
             {"/users/:id/source",
                 juno_security_admin_rh, 
-                #{entity => user, property => source, is_collection => false}},
+                #{entity => source, master => user, is_collection => false}},
             {"/sources/",
                 juno_security_admin_rh, 
                 #{entity => source, is_collection => true}},

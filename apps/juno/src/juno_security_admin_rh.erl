@@ -10,7 +10,7 @@
 -record(state, {
     realm_uri :: uri(),
     entity :: atom(),
-    property :: atom(),
+    master :: atom(),
     resource :: any(),
     is_collection :: boolean(),
     is_immutable :: boolean(),
@@ -40,7 +40,7 @@ init(Req, Opts) ->
     St = #state{
         context = Ctxt,
         entity = maps:get(entity, Opts),
-        property = maps:get(property, Opts, undefined),
+        master = maps:get(master, Opts, undefined),
         is_collection = maps:get(is_collection, Opts, false),
         is_immutable = maps:get(is_immutable, Opts, false),
         bindings = cowboy_req:bindings(maps:from_list(Req))
@@ -80,11 +80,12 @@ is_authorized(Req, State) ->
     %% Check that the user has RBAC permissions
     {true, Req, State}.
 
-
 resource_exists(Req, #state{is_collection = true} = State0) ->
-    case maps:get(id, State0#state.bindings, undefined) of
+    case id(State0) of
         undefined ->
-            {true, Req, State0};
+            R = list(State0#state.resource, State0),
+            State1 = State0#state{resource = R},
+            {true, Req, State1};
         Id ->
             case lookup(State0#state.entity, Id) of
                 not_found ->
@@ -92,6 +93,14 @@ resource_exists(Req, #state{is_collection = true} = State0) ->
                 R ->
                     {true, Req, State0#state{resource = R}}
             end
+    end;
+
+resource_exists(Req, State0) ->
+    case lookup(State0#state.entity, id(State0)) of
+        not_found ->
+            {false, Req, State0};
+        R ->
+            {true, Req, State0#state{resource = R}}
     end.
 
 
@@ -110,13 +119,8 @@ delete_resource(Req0, State) ->
 
 
 to_json(Req, State) ->
-    Map = #{
-        <<"ws">> => <<"/ws">>,
-        <<"publications">> => <<"/publications">>,
-        <<"calls">> => <<"/calls">>
-    },
-    JSON = jsx:encode(Map),
-    {JSON, Req, State}.
+    Body = jsx:encode(State#state.resource),
+    {Body, Req, State}.
 
 
 from_json(Req, St) ->
@@ -136,22 +140,28 @@ id(State) ->
 
 %% @private
 lookup(user, Id) ->
-    juno_security:lookup_user(Id);
+    juno_user:lookup(Id);
 
 lookup(group, Id) ->
-    juno_security:lookup_group(Id).
+    juno_group:lookup(Id).
 
 
 %% @private
-delete(user, #state{property = source} = State) ->
-    juno_security:del_user_source(id(State));
-
 delete(user, State) ->
     juno_security:del_user(id(State));
 
 delete(group, State) ->
-    juno_security:del_group(id(State)).
+    juno_security:del_group(id(State));
 
+delete(source, #state{master = user} = State) ->
+    juno_security:del_user_source(id(State)).
+
+
+list(user, State) ->
+    juno_user:list();
+
+list(group, State) ->
+    juno_group:list().
 
 %% @private
 % add_user(Username, Password, Info) ->

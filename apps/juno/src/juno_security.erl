@@ -42,6 +42,7 @@
 -export([lookup_group/1]).
 -export([lookup_user_source/1]).
 -export([del_user_source/1]).
+-export([user_groups/1]).
 -export([list/1]).
 %% =============================================================================
 
@@ -1398,6 +1399,7 @@ list(user) ->
         [], 
         {<<"security">>, <<"users">>}
     );
+
 list(group) ->
     plumtree_metadata:fold(
         fun
@@ -1408,7 +1410,20 @@ list(group) ->
         end, 
         [], 
         {<<"security">>, <<"groups">>}
+    );
+
+list(source) ->
+    plumtree_metadata:fold(
+        fun
+            ({{Username, CIDR}, [{Source, Options}]}, Acc) ->
+                [{Username, CIDR, Source, Options}|Acc];
+            ({{_, _}, [?TOMBSTONE]}, Acc) ->
+                Acc
+        end, 
+        [], 
+        {<<"security">>, <<"sources">>}
     ).
+
 
 lookup_user_source(Username) ->
     L = plumtree_metadata:to_list(
@@ -1420,6 +1435,14 @@ lookup_user_source(Username) ->
     end.
 
 
+%% @private
 del_user_source(Username) ->
     {{_, CIDR}, _} = lookup_user_source(Username),
     del_source([Username], CIDR).
+
+
+%% @private
+user_groups({_, Opts}) ->
+    [R || R <- proplists:get_value("groups", Opts, []), group_exists(R)].
+
+
