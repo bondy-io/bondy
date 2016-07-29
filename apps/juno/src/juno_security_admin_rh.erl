@@ -43,7 +43,7 @@ init(Req, Opts) ->
         master = maps:get(master, Opts, undefined),
         is_collection = maps:get(is_collection, Opts, false),
         is_immutable = maps:get(is_immutable, Opts, false),
-        bindings = cowboy_req:bindings(maps:from_list(Req))
+        bindings = maps:from_list(cowboy_req:bindings(Req))
     },
     {cowboy_rest, Req, St}.  
 
@@ -81,18 +81,16 @@ is_authorized(Req, State) ->
     {true, Req, State}.
 
 resource_exists(Req, #state{is_collection = true} = State0) ->
-    case id(State0) of
-        undefined ->
-            R = list(State0#state.resource, State0),
+    try lookup(State0#state.entity, id(State0)) of
+        not_found ->
+            {false, Req, State0};
+        R ->
+            {true, Req, State0#state{resource = R}}
+    catch
+        _:{badkey, id} ->
+            R = list(State0#state.entity, State0),
             State1 = State0#state{resource = R},
-            {true, Req, State1};
-        Id ->
-            case lookup(State0#state.entity, Id) of
-                not_found ->
-                    {false, Req, State0};
-                R ->
-                    {true, Req, State0#state{resource = R}}
-            end
+            {true, Req, State1}
     end;
 
 resource_exists(Req, State0) ->
@@ -157,10 +155,10 @@ delete(source, #state{master = user} = State) ->
     juno_security:del_user_source(id(State)).
 
 
-list(user, State) ->
+list(user, _State) ->
     juno_user:list();
 
-list(group, State) ->
+list(group, _State) ->
     juno_group:list().
 
 %% @private

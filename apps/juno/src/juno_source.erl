@@ -7,7 +7,7 @@
 
 -type source() :: map().
 
--define(INFO_KEYS, [<<"first_name">>, <<"last_name">>, <<"email">>]).
+-define(INFO_KEYS, [<<"description">>]).
 
 -export([lookup/1]).
 % -export([add/1]).

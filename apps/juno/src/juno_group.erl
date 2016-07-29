@@ -3,11 +3,11 @@
 %% =============================================================================
 
 
--module(juno_user).
+-module(juno_group).
 
--type user() :: map().
+-type group() :: map().
 
--define(INFO_KEYS, [<<"first_name">>, <<"last_name">>, <<"email">>]).
+-define(INFO_KEYS, [<<"description">>]).
 
 -export([lookup/1]).
 -export([add/1]).
@@ -20,17 +20,17 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(user()) -> ok.
-add(User) ->
-    Info = maps:with(?INFO_KEYS, User),
+-spec add(group()) -> ok.
+add(Group) ->
+    Info = maps:with(?INFO_KEYS, Group),
     #{
-        <<"username">> := BinName
-    } = User,
-    Username = unicode:characters_to_list(BinName, utf8),
+        <<"name">> := BinName
+    } = Group,
+    Name = unicode:characters_to_list(BinName, utf8),
     Opts = [
         {<<"info">>, Info}
     ],
-    juno_security:add_user(Username, Opts).
+    juno_security:add_group(Name, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -42,11 +42,11 @@ remove(Id) when is_binary(Id) ->
     remove(unicode:characters_to_list(Id, utf8));
 
 remove(Id) ->
-    case juno_security:del_user(Id) of
+    case juno_security:del_group(Id) of
         ok -> 
             ok;
-        {error, {unknown_user, Id}} ->
-            {error, unknown_user}
+        {error, {unknown_group, Id}} ->
+            {error, unknown_group}
     end.
 
 
@@ -54,14 +54,14 @@ remove(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(list() | binary()) -> user() | not_found.
+-spec lookup(list() | binary()) -> group() | not_found.
 lookup(Id) when is_binary(Id) ->
     lookup(unicode:characters_to_list(Id, utf8));
 
 lookup(Id) ->
-    case juno_security:lookup_user(Id) of
+    case juno_security:lookup_group(Id) of
         not_found -> not_found;
-        User -> to_map(User)
+        Obj -> to_map(Obj)
     end.
 
 
@@ -69,14 +69,14 @@ lookup(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(list() | binary()) -> user() | no_return().
+-spec fetch(list() | binary()) -> group() | no_return().
 fetch(Id) when is_binary(Id) ->
     fetch(unicode:characters_to_list(Id, utf8));
     
 fetch(Id) ->
     case lookup(Id) of
         not_found -> error(not_found);
-        User -> User
+        Obj -> Obj
     end.
 
 
@@ -84,9 +84,9 @@ fetch(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list() -> list(user()).
+-spec list() -> list(group()).
 list() ->
-    [to_map(User) || User <- juno_security:list(user)].
+    [to_map(Obj) || Obj <- juno_security:list(group)].
 
 
 
@@ -99,27 +99,11 @@ list() ->
 
 
 %% @private
-to_map({Username, Opts} = User) ->
+to_map({Id, Opts}) ->
     Map0 = proplists:get_value(<<"info">>, Opts, #{}),
-    Map1 = Map0#{
-        <<"username">> => Username,
-        <<"has_password">> => has_password(Opts),
-        <<"groups">> => juno_security:user_groups(User)
-    },
-    case juno_source:lookup(Username) of
-        not_found ->
-            Map1;
-        Source ->
-            Map1#{<<"source">> => Source}
-    end.
-
-
-%% @private
-has_password(Opts) ->
-    case proplists:get_value("password", Opts) of
-        undefined -> false;
-        _ -> true
-    end.
+    Map0#{
+        <<"name">> => Id
+    }.
 
 
 
