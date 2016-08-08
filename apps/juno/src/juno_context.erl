@@ -23,7 +23,7 @@
     request_id => id(),
     request_timeout => non_neg_integer(),
     roles => map(),
-    session_id => id(),
+    session_id => id() | undefined,
     user_id => binary()
 }.
 -export_type([context/0]).

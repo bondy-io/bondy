@@ -63,3 +63,46 @@
     publisher_identification => false,
     subscriber_blackwhite_listing => false
 }).
+
+
+
+
+
+%% =============================================================================
+%% META EVENTS & PROCEDURES
+%% =============================================================================
+
+% USER
+-define(JUNO_USER_ADD, <<"juno.security.user.add">>).
+-define(JUNO_USER_DELETE, <<"juno.security.user.delete">>).
+-define(JUNO_USER_LIST, <<"juno.security.user.list">>).
+-define(JUNO_USER_LOOKUP, <<"juno.security.user.get">>).
+-define(JUNO_USER_LOOKUP, <<"juno.security.user.update">>).
+
+-define(JUNO_USER_ON_ADD, <<"juno.security.user.on_add">>).
+-define(JUNO_USER_ON_DELETE, <<"juno.security.user.on_delete">>).
+-define(JUNO_USER_ON_UPDATE, <<"juno.security.user.on_update">>).
+
+
+% GROUP
+-define(JUNO_GROUP_ADD, <<"juno.security.group.add">>).
+-define(JUNO_GROUP_DELETE, <<"juno.security.group.delete">>).
+-define(JUNO_GROUP_LIST, <<"juno.security.group.list">>).
+-define(JUNO_GROUP_LOOKUP, <<"juno.security.group.get">>).
+-define(JUNO_GROUP_LOOKUP, <<"juno.security.group.update">>).
+
+-define(JUNO_GROUP_ON_ADD, <<"juno.security.group.on_add">>).
+-define(JUNO_GROUP_ON_DELETE, <<"juno.security.group.on_delete">>).
+-define(JUNO_GROUP_ON_UPDATE, <<"juno.security.group.on_update">>).
+
+
+% SOURCE
+-define(JUNO_SOURCE_ADD, <<"juno.security.source.add">>).
+-define(JUNO_SOURCE_DELETE, <<"juno.security.source.delete">>).
+-define(JUNO_SOURCE_LIST, <<"juno.security.source.list">>).
+-define(JUNO_SOURCE_LOOKUP, <<"juno.security.source.get">>).
+
+-define(JUNO_SOURCE_ON_ADD, <<"juno.security.source.on_add">>).
+-define(JUNO_SOURCE_ON_DELETE, <<"juno.security.source.on_delete">>).
+
+

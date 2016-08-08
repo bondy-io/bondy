@@ -46,8 +46,8 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
 
 %% @private
 merge_fun(K, V, Acc) ->
-    case {maps:get(K, Acc, false), V} of
+    case {maps:get(K, Acc, undefined), V} of
         {true, true} -> Acc;
         {false, false} -> Acc;
-        _ -> maps:update(K, false, Acc)
+        _ -> maps:put(K, false, Acc)
     end.

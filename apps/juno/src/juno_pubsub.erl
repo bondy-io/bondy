@@ -101,9 +101,7 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec subscriptions(
     ContextOrCont :: juno_context:context() | juno_registry:continuation()) ->
-    [juno_registry:entry()]
-    | {[juno_registry:entry()], juno_registry:continuation()}
-    | '$end_of_table'.
+    [juno_registry:entry()].
 subscriptions(Ctxt) when is_map(Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),

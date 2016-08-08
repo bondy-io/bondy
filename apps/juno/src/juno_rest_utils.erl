@@ -4,36 +4,56 @@
 -export_type([state_fun/0]).
 
 
--export([is_authorized/2]).
 -export([location_uri/2]).
 -export([set_resp_error_body/2]).
 -export([bindings_to_map/2]).
 -export([set_resp_link_header/4]).
 -export([set_resp_link_header/2]).
 
-%% The StateFun should receive
--spec is_authorized(Req :: cowboy_req:req(), StateFun :: state_fun()) ->
-   {stop | true | {false, binary()}, cowboy_req:req(), any()}.
-is_authorized(Req0, StateFun) ->
-    Realm = cowboy_req:header(<<"www-authenticate">>, Req0),
-    try
-        case wamp_uri:is_valid(Realm) of
-            true ->
-                {true, Req0, StateFun(Realm)};
-            false ->
-                throw({unknown_realm, Realm})
-        end
-    catch
-        throw:{unknown_realm, Realm} = Reason ->
-            % We set a useless WWWAuthHeader
-            Req1 = set_resp_error_body(Reason, Req0),
-            {{false, <<"unknown_realm">>}, Req1, StateFun(undefined)};
-        _:Reason ->
-            % We force a JSON error object as body
-            Req1 = set_resp_error_body(Reason, Req0),
-            Req2 = cowboy_req:reply(500, Req1),
-            {stop, Req2, StateFun(undefined)}
-    end.
+% %% The StateFun should receive
+% -spec is_authorized(Req :: cowboy_req:req(), juno_context:context()) ->
+%    {stop | true | {false, binary()}, cowboy_req:req(), juno_context:context()}.
+% is_authorized(Req0, Ctxt) ->
+%     case cowboy_req:header(<<"authorization">>, Req0) of
+%         <<"Basic ", Bin/binary>> ->
+%             UserPass = base64:decode_to_string(Base64),
+%             [User, Pass] = [list_to_binary(X) 
+%                 || X <- string:tokens(UserPass, ":")],
+%             {ok, Peer} = inet_parse:address(cowboy_req:peer(Req0)),
+%             case juno_security:authenticate(User, Pass, [{ip, Peer}]) of
+%                 {ok, Sec} ->
+%                     {true, Req, Ctxt};
+%                 {error, _} ->
+%                     false
+%             end;
+%         _ ->
+%             throw(unauthorized)
+%     end,
+
+%     Auth = base64:decode_to_string(Base64),
+%     try
+%         case wamp_uri:is_valid(Realm) of
+%             true ->
+%                 {true, Req0, StateFun(Realm)};
+%             false ->
+%                 throw({unknown_realm, Realm})
+%         end
+%     catch
+%         throw:{unknown_realm, Realm} = Reason ->
+%             % We set a useless WWWAuthHeader
+%             Req1 = set_resp_error_body(Reason, Req0),
+%             Req2 = cowboy_req:set_resp_header(
+%                 <<"www-authenticate">>, 
+%                 <<"Basic realm=\"", Realm/binary, "\"">>, 
+%                 Req1),
+%             {{false, <<"unknown_realm">>}, Req2, StateFun(undefined)};
+%         _:Reason ->
+%             % We force a JSON error object as body
+%             Req1 = set_resp_error_body(Reason, Req0),
+%             Req2 = cowboy_req:reply(500, Req1),
+%             {stop, Req2, StateFun(undefined)}
+%     end.
+
 
 set_resp_error_body(Reason, Req) ->
     Body = juno_json_utils:error(Reason),

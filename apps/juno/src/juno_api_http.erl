@@ -24,7 +24,19 @@ start_admin_http() ->
         juno_admin_http_listener,
         PoolSize,
         [{port, Port}],
-        [{env, [{dispatch, admin_dispatch_table()}, {max_connections, infinity}]}]
+        [
+            {env,[
+                {auth, #{
+                    realm_uri => <<"com.leapsight.juno">>,
+                    schemes => [basic, digest]
+                }},
+                {dispatch, admin_dispatch_table()}, 
+                {max_connections, infinity}
+            ]},
+            {middlewares, [
+                    cowboy_router, juno_auth_middleware, cowboy_handler
+            ]}
+        ]
     ).
 
 -spec start_http() -> {ok, Pid :: pid()} | {error, any()}.
@@ -35,7 +47,18 @@ start_http() ->
         juno_http_listener,
         PoolSize,
         [{port, Port}],
-        [{env, [{dispatch, dispatch_table()}, {max_connections, infinity}]}]
+        [
+            {env,[
+                {auth, #{
+                    schemes => [basic, digest]
+                }},
+                {dispatch, admin_dispatch_table()}, 
+                {max_connections, infinity}
+            ]},
+            {middlewares, [
+                    cowboy_router, juno_auth_middleware, cowboy_handler
+            ]}
+        ]
     ).
 
 -spec start_https() -> {ok, Pid :: pid()} | {error, any()}.
@@ -61,6 +84,9 @@ admin_dispatch_table() ->
         {'_', [
             {"/",
                 juno_admin_rh, #{entity => entry_point}},
+            %% Used to establish a websockets connection
+            {"/ws",
+                juno_ws_handler, #{}},
             {"/ping",
                 juno_admin_rh, #{entity => ping}},
             %% MULTI-TENANCY CAPABILITY
@@ -102,10 +128,15 @@ admin_dispatch_table() ->
                 juno_admin_rh, #{entity => node}},
             %% GATEWAY CAPABILITY
             {"/apis", 
-                juno_admin_collection_rh, 
+                juno_gateway_rh, 
                 #{entity => api, is_collection => true}},
             {"/apis/:id", 
-                juno_admin_rh, #{entity => api}}
+                juno_gateway_rh, #{entity => api}},
+            {"/apis/:id/procedures", 
+                juno_gateway_rh, 
+                #{entity => api, is_collection => true}},
+            {"/apis/:id/procedures/:uri", 
+                juno_gateway_rh, #{entity => api}}
         ]}
     ],
     cowboy_router:compile(List).
@@ -138,7 +169,7 @@ dispatch_table() ->
             {"/ws",
                 juno_ws_handler, #{}},
             %% JUNO API GATEWAY
-            {"/api/:version/[...]",
+            {"/api/:version/realms/:realm/[...]",
                 juno_gateway_rh, #{}}
         ]}
     ],

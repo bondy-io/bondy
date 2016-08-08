@@ -78,10 +78,7 @@ content_types_accepted(Req, State) ->
 
 
 is_authorized(Req, State) ->
-    % @TODO
-    juno_rest_utils:is_authorized(
-        Req, fun(Realm) -> State#state{realm_uri = Realm} end).
-
+    {true, Req, State}.
 
 resource_exists(Req, State) ->
     {true, Req, State}.

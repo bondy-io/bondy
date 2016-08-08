@@ -7,7 +7,12 @@
 
 -type user() :: map().
 
--define(INFO_KEYS, [<<"first_name">>, <<"last_name">>, <<"email">>]).
+-define(INFO_KEYS, [
+    <<"first_name">>, 
+    <<"last_name">>,
+    <<"email">>, 
+    <<"external_id">>
+]).
 
 -export([lookup/1]).
 -export([add/1]).

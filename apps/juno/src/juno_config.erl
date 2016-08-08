@@ -66,7 +66,7 @@ http_max_connections() ->
     application:get_env(?APP, http_max_connections, 1000).
 
 http_port() ->
-    Default = 8080,
+    Default = 18080,
     try 
         case application:get_env(?APP, http_port, Default) of
             Int when is_integer(Int) -> Int;
@@ -77,7 +77,7 @@ http_port() ->
     end.
 
 admin_http_port() ->
-    Default = 8081,
+    Default = 18081,
     try 
         case application:get_env(?APP, admin_http_port, Default) of
             Int when is_integer(Int) -> Int;

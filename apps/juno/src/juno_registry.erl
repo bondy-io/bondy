@@ -287,6 +287,7 @@ entries(Type, RealmUri, SessionId) ->
         uri = '_',
         match_policy = '_',
         criteria = '_',
+        created = '_',
         options = '_'
     },
     ets:match_object(entry_table(Type, RealmUri), Pattern).
@@ -315,12 +316,16 @@ entries(Cont) ->
 -spec entries(
     entry_type(), Realm :: uri(), SessionId :: id(), Limit :: pos_integer()) ->
     {[entry()], continuation()} | '$end_of_table'.
+entries(Type, RealmUri, SessionId, infinity) ->
+    entries(Type, RealmUri, SessionId);
+    
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
         uri = '_',
         match_policy = '_',
         criteria = '_',
+        created = '_',
         options = '_'
     },
     ets:match_object(entry_table(Type, RealmUri), Pattern, Limit).
@@ -587,6 +592,10 @@ do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri_components(uri()) -> [binary()].
+uri_components(<<"wamp.", Rest/binary>>) ->
+    [<<"wamp">> , Rest];
+uri_components(<<"juno.", Rest/binary>>) ->
+    [<<"juno">> , Rest];
 uri_components(Uri) ->
     case binary:split(Uri, <<".">>, [global]) of
         [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
