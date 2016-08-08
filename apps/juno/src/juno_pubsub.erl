@@ -164,8 +164,8 @@ match_subscriptions(TopicUri, Ctxt) ->
     uri(), juno_context:context(), non_neg_integer()) ->
     {[juno_registry:entry()], juno_registry:continuation()}
     | '$end_of_table'.
-match_subscriptions(TopicUri, Ctxt, Limit) when is_integer(Limit), Limit > 0 ->
-    juno_registry:match(subscription, TopicUri, Ctxt, #{limit => Limit}).
+match_subscriptions(TopicUri, Ctxt, Opts) ->
+    juno_registry:match(subscription, TopicUri, Ctxt, Opts).
 
 
 %% -----------------------------------------------------------------------------

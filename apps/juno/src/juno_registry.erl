@@ -318,7 +318,7 @@ entries(Cont) ->
     {[entry()], continuation()} | '$end_of_table'.
 entries(Type, RealmUri, SessionId, infinity) ->
     entries(Type, RealmUri, SessionId);
-    
+
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
@@ -356,6 +356,7 @@ match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
 match(Type, Uri, Ctxt, Opts) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri, Opts),
+    io:format("MS ~p~n", [MS]),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, {ets:select(Tab, MS), '$end_of_table'}).
 
@@ -593,9 +594,11 @@ do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
 %% -----------------------------------------------------------------------------
 -spec uri_components(uri()) -> [binary()].
 uri_components(<<"wamp.", Rest/binary>>) ->
-    [<<"wamp">> , Rest];
+    L = binary:split(Rest, <<".">>, [global]),
+    [<<"wamp">> | L];
 uri_components(<<"juno.", Rest/binary>>) ->
-    [<<"juno">> , Rest];
+    L = binary:split(Rest, <<".">>, [global]),
+    [<<"juno">> | L];
 uri_components(Uri) ->
     case binary:split(Uri, <<".">>, [global]) of
         [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
