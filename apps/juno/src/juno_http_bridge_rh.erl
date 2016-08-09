@@ -144,11 +144,15 @@ do_from_json(_Obj, Req, #state{resource = subscription} = St) ->
     % TODO
     {ok, Req, St};
 
-do_from_json(Obj, Req0, #state{resource = registration} = St) ->
-    #{<<"procedure">> := ProcUri} = Obj,
-    Opts = maps:without([<<"procedure">>], Obj),
-    {ok, Id} = juno_rpc:register(ProcUri, Opts, St#state.context),
-    Body = jsx:encode(#{registration_id => Id}),
-    Req1 = cowboy_req:set_resp_body(Body, Req0),
-    {ok, Req1, St}.
+do_from_json(_Obj, Req0, #state{resource = registration} = St) ->
+    % #{<<"procedure">> := ProcUri} = Obj,
+    % Opts = maps:without([<<"procedure">>], Obj),
+    % case juno_rpc:register(ProcUri, Opts, St#state.context) of
+    %     {ok, Id} ->
+    %         Body = jsx:encode(#{registration_id => Id}),
+    %         Req1 = cowboy_req:set_resp_body(Body, Req0),
+    %         {ok, Req1, St};
+    %     {error, procedure_already_exists} ->
+
+    {ok, Req0, St}.
 

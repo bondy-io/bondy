@@ -46,12 +46,13 @@
 %% 'procedure_already_exists' or 'not_authorized' error.
 %% @end
 %% -----------------------------------------------------------------------------
--spec register(uri(), map(), juno_context:context()) -> {ok, id()}.
+-spec register(uri(), map(), juno_context:context()) -> 
+    {ok, id()} | {error, not_authorized | procedure_already_exists}.
 register(<<"juno.", _/binary>>, _, _) ->
-    error(not_authorized);
+    {error, not_authorized};
 
 register(<<"wamp.", _/binary>>, _, _) ->
-    error(not_authorized);
+    {error, not_authorized};
 
 register(ProcUri, Options, Ctxt) ->
     juno_registry:add(registration, ProcUri, Options, Ctxt).
@@ -64,14 +65,15 @@ register(ProcUri, Options, Ctxt) ->
 %% 'not_authorized' error.
 %% @end
 %% -----------------------------------------------------------------------------
--spec unregister(id(), juno_context:context()) -> ok.
+-spec unregister(id(), juno_context:context()) -> 
+    ok | {error, not_authorized | not_found}.
 unregister(<<"juno.", _/binary>>, _) ->
     % TODO throw a different reason
-    error(not_authorized);
+    {error, not_authorized};
 
 unregister(<<"wamp.", _/binary>>, _) ->
     % TODO throw a different reason
-    error(not_authorized);
+    {error, not_authorized};
 
 unregister(RegId, Ctxt) ->
     juno_registry:remove(registration, RegId, Ctxt).

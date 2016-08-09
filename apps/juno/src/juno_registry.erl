@@ -134,7 +134,7 @@ options(#entry{options = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> 
-    {ok, id()} |  no_return().
+    {ok, id()} |  {error, procedure_already_exists}.
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -165,7 +165,7 @@ add(Type, Uri, Options, Ctxt) ->
             },
             do_add(Type, Entry, Ctxt);
         (false) ->
-            error(procedure_already_exists)
+            {error, procedure_already_exists}
     end,
 
     case ets:match_object(Tab, Pattern) of
@@ -237,7 +237,8 @@ remove_all(Type, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(entry_type(), id(), juno_context:context()) -> ok.
+-spec remove(entry_type(), id(), juno_context:context()) -> 
+    ok | {error, not_found}.
 remove(Type, EntryId, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -247,8 +248,7 @@ remove(Type, EntryId, Ctxt) ->
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no entries with EntryId.
-            %% {error, {no_such_subscription, EntryId}};
-            error(no_such_subscription);
+            {error, not_found};
         [#entry{uri = Uri, match_policy = MP}] ->
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(EntryId, Uri, MP, Ctxt),

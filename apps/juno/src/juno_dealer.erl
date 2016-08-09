@@ -168,43 +168,41 @@ is_feature_enabled(F) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: message(), Ctxt :: map()) -> ok | no_return().
-handle_message(#register{} = M, Ctxt) ->
+handle_message(
+    #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
     %% Check if it has callee role?
-    Reply  = try
-        {ok, RegId} = juno_rpc:register(
-            M#register.procedure_uri, M#register.options, Ctxt),
-        wamp_message:registered(M#register.request_id, RegId)
-    catch
-        error:not_authorized ->
+    Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
+        {ok, RegId} ->
+            wamp_message:registered(ReqId, RegId);
+
+        {error, not_authorized} ->
             wamp_message:error(
-                ?REGISTER,
-                M#register.request_id,
-                #{},
-                 <<"wamp.error.not_authorized">>);
-        error:procedure_already_exists ->
+                ?REGISTER, ReqId, #{}, <<"wamp.error.not_authorized">>);
+
+        {error, procedure_already_exists} ->
             wamp_message:error(
-                ?REGISTER,
-                M#register.request_id,
-                #{},
-                ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
+                ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
     end,
-    juno:send(Reply, Ctxt),
-    ok;
+    juno:send(Reply, Ctxt);
 
 handle_message(#unregister{} = M, Ctxt) ->
-    Reply  = try
-        ok = juno_rpc:unregister(M#unregister.registration_id, Ctxt),
-        wamp_message:unregistered(M#unregister.request_id)
-    catch
-        error:no_such_registration ->
+    Reply  = case juno_rpc:unregister(M#unregister.registration_id, Ctxt) of
+        ok ->
+            wamp_message:unregistered(M#unregister.request_id);
+        {error, not_authorized} ->
+            wamp_message:error(
+                ?UNREGISTER,
+                M#unregister.request_id,
+                #{},
+                <<"wamp.error.not_authorized">>);
+        {error, not_found} ->
             wamp_message:error(
                 ?UNREGISTER,
                 M#unregister.request_id,
                 #{},
                 ?WAMP_ERROR_NO_SUCH_REGISTRATION)
     end,
-    juno:send(Reply, Ctxt),
-    ok;
+    juno:send(Reply, Ctxt);
 
 handle_message(#call{} = M, Ctxt) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized

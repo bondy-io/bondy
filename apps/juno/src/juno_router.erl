@@ -133,6 +133,7 @@ start_pool() ->
     end.
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles a wamp message.
@@ -143,7 +144,6 @@ start_pool() ->
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: message(), Ctxt :: juno_context:context()) ->
     {ok, juno_context:context()}
-    | {stop, juno_context:context()}
     | {reply, Reply :: message(), juno_context:context()}
     | {stop, Reply :: message(), juno_context:context()}.
 
@@ -327,9 +327,8 @@ open_session(RealmUri, Details, Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec handle_session_message(M :: message(), Ctxt :: map()) ->
     {ok, juno_context:context()}
-    | {stop, juno_context:context()}
-    | {reply, Reply :: message()}
-    | {stop, Reply :: message()}.
+    | {stop, Reply :: message(), juno_context:context()}
+    | {reply, Reply :: message(), juno_context:context()}.
 
 handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message.
@@ -479,8 +478,8 @@ route_event({#yield{} = M, Ctxt}) ->
 route_event({#error{request_type = ?INVOCATION} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-route_event({_M, _Ctxt}) ->
-    error(unexpected_message).
+route_event({M, _Ctxt}) ->
+    error({unexpected_message, M}).
 
 
 %% ------------------------------------------------------------------------

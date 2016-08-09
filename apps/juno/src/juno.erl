@@ -53,11 +53,11 @@ send(Message, Ctxt) ->
 send(Pid, Message, _Ctxt) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
-            Pid ! Message;
+            Pid ! Message,
+            ok;
         false ->
             error({unknown_peer, Pid})
-    end,
-    ok.
+    end.
 
 
 %% =============================================================================

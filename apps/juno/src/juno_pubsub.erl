@@ -33,9 +33,9 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(uri(), map(), juno_context:context()) ->
-    {ok, id()} | no_return().
+-spec subscribe(uri(), map(), juno_context:context()) -> {ok, id()}.
 subscribe(TopicUri, Options, Ctxt) ->
+    %% add will return an existing Id if the subscription exists
     juno_registry:add(subscription, TopicUri, Options, Ctxt).
 
 
@@ -52,7 +52,7 @@ unsubscribe_all(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id(), juno_context:context()) -> ok.
+-spec unsubscribe(id(), juno_context:context()) -> ok | {error, not_found}.
 unsubscribe(SubsId, Ctxt) ->
     juno_registry:remove(subscription, SubsId, Ctxt).
 
@@ -64,7 +64,6 @@ unsubscribe(SubsId, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec publish(uri(), map(), list(), map(), juno_context:context()) ->
     {ok, id()}.
-
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     SessionId = juno_context:session_id(Ctxt),
     %% TODO check if authorized and if not throw wamp.error.not_authorized

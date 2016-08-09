@@ -151,14 +151,15 @@ websocket_info({stop, Reason}, Req, St) ->
     {shutdown, Req, St};
 
 websocket_info(M, Req, St) ->
+    %% Here we receive the messages another peer sent using juno:send/2
     case wamp_message:is_message(M) of
         true ->
-            %% We send a WAMP message to the client
+            %% We encode and send the message to the client
             #{subprotocol := #{encoding := E, frame_type := T}} = St,
             Reply = frame(T, wamp_encoding:encode(M, E)),
             {reply, Reply, Req, St};
         false ->
-            %% All other erlang messages
+            %% Any other unwanted erlang messages
             {ok, Req, St}
     end.
 
@@ -378,8 +379,6 @@ handle_wamp_messages([H|T], Ctxt0, Acc) ->
     case juno_router:handle_message(H, Ctxt0) of
         {ok, Ctxt1} ->
             handle_wamp_messages(T, Ctxt1, Acc);
-        {stop, Ctxt1} ->
-            {stop, Ctxt1};
         {stop, Reply, Ctxt1} ->
             {stop, Reply, Ctxt1};
         {reply, Reply, Ctxt1} ->

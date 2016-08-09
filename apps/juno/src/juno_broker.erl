@@ -105,7 +105,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
         juno_pubsub:unsubscribe(SubsId, Ctxt),
         wamp_message:unsubscribed(ReqId)
     catch
-        error:no_such_subscription ->
+        error:not_found ->
             wamp_message:error(
                 ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
             )
