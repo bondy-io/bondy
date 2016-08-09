@@ -133,7 +133,6 @@ start_pool() ->
     end.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles a wamp message.
@@ -147,24 +146,29 @@ start_pool() ->
     | {reply, Reply :: message(), juno_context:context()}
     | {stop, Reply :: message(), juno_context:context()}.
 
-handle_message(#hello{}, #{session_id := _} = Ctxt) ->
+handle_message(#hello{} = M, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
     %% RFC:
     %% It is a protocol error to receive a second "HELLO" message during the
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
+    ok = update_stats(M, Ctxt),
     Abort = wamp_message:abort(
         #{message => <<"You've sent a HELLO message more than once.">>},
         ?JUNO_SESSION_ALREADY_EXISTS
     ),
+    ok = update_stats(Abort, Ctxt),
     {stop, Abort, Ctxt};
 
-handle_message(#hello{} = M, Ctxt) ->
-    open_session(M#hello.realm_uri, M#hello.details, Ctxt);
+handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
+    Ctxt1 = Ctxt0#{realm_uri => Uri},
+    ok = update_stats(M, Ctxt1),
+    open_session(M#hello.realm_uri, M#hello.details, Ctxt1);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
+    ok = update_stats(M, Ctxt),
     handle_session_message(M, Ctxt);
 
 handle_message(_M, Ctxt) ->
@@ -173,7 +177,9 @@ handle_message(_M, Ctxt) ->
         #{message => <<"You need to establish a session first.">>},
         ?JUNO_ERROR_NOT_IN_SESSION
     ),
+    ok = update_stats(Abort, Ctxt),
     {stop, Abort, Ctxt}.
+
 
 
 
@@ -342,6 +348,7 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
         [SessionId, M#goodbye.reason_uri]
     ),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
+    ok = update_stats(Reply, Ctxt),
     {stop, Reply, Ctxt};
 
 handle_session_message(M, Ctxt0) ->
@@ -372,6 +379,7 @@ handle_session_message(M, Ctxt0) ->
                 juno:error_dict(Reason),
                 ?WAMP_ERROR_CANCELED
             ),
+            ok = update_stats(Reply, Ctxt0),
             {reply, Reply, Ctxt0};
         _:_ ->
             %% TODO Maybe publish metaevent and stats
@@ -520,3 +528,23 @@ parse_roles([publisher|T], Roles) ->
 
 parse_roles([_|T], Roles) ->
     parse_roles(T, Roles).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_stats(wamp_message:message(), juno_context:context()) -> ok.
+update_stats(M, Ctxt) ->
+    Type = element(1, M),
+    Size = erts_debug:flat_size(M) * 8,
+    Realm = juno_context:realm_uri(Ctxt),
+    {IP, _} = juno_context:peer(Ctxt),
+    case juno_context:session_id(Ctxt) of
+        undefined ->
+            juno_stats:update(
+                {message, Realm, IP, Type, Size});
+        SessionId ->
+            juno_stats:update(
+                {message, Realm, SessionId, IP, Type, Size})
+    end.
