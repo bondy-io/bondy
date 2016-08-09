@@ -175,6 +175,12 @@ handle_message(#register{} = M, Ctxt) ->
             M#register.procedure_uri, M#register.options, Ctxt),
         wamp_message:registered(M#register.request_id, RegId)
     catch
+        error:not_authorized ->
+            wamp_message:error(
+                ?REGISTER,
+                M#register.request_id,
+                #{},
+                 <<"wamp.error.not_authorized">>);
         error:procedure_already_exists ->
             wamp_message:error(
                 ?REGISTER,

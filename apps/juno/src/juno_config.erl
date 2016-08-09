@@ -10,8 +10,8 @@
 -module(juno_config).
 
 -define(APP, juno).
--define(DEFAULT_RESOURCE_SIZE, 16 * erlang:system_info(schedulers)).
--define(DEFAULT_RESOURCE_CAPACITY, 16 * erlang:system_info(schedulers) * 10000). % max messages in process queue
+-define(DEFAULT_RESOURCE_SIZE, erlang:system_info(schedulers)).
+-define(DEFAULT_RESOURCE_CAPACITY, erlang:system_info(schedulers) * 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
 -export([admin_http_port/0]).
@@ -189,19 +189,31 @@ coordinator_timeout() ->
 -spec pool_type(PoolName :: atom()) -> permanent | transient.
 pool_type(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_router_pool_type, permanent).
+        ?APP, juno_router_pool_type, permanent);
+
+pool_type(juno_stats_pool) ->
+    application:get_env(
+        ?APP, juno_stats_pool_type, permanent).
 
 
 -spec pool_size(Resource :: atom()) -> pos_integer().
 pool_size(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_router_pool_size, ?DEFAULT_RESOURCE_SIZE).
+        ?APP, juno_router_pool_size, ?DEFAULT_RESOURCE_SIZE);
+
+pool_size(juno_stats_pool) ->
+    application:get_env(
+        ?APP, juno_stats_pool_size, ?DEFAULT_RESOURCE_SIZE).
 
 
 -spec pool_capacity(Resource :: atom()) -> pos_integer().
 pool_capacity(juno_router_pool) ->
     application:get_env(
-        ?APP, juno_router_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
+        ?APP, juno_router_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
+
+pool_capacity(juno_stats_pool) ->
+    application:get_env(
+        ?APP, juno_stats_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
 
 
 %% CALL

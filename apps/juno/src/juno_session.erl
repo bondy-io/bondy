@@ -62,6 +62,7 @@
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([size/0]).
+% -export([stats/0]).
 
 %% -export([features/1]).
 %% -export([subscriptions/1]).
@@ -83,7 +84,7 @@
 %% -----------------------------------------------------------------------------
 -spec open(peer(), uri(), session_opts()) -> session() | no_return().
 
-open(Peer, RealmUri, Opts) when is_map(Opts) ->
+open({IP, _} = Peer, RealmUri, Opts) when is_map(Opts) ->
     _Realm = juno_utils:get_realm(RealmUri),
     Id = wamp_id:new(global),
     S0 = #session{
@@ -96,7 +97,8 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = create_metrics(S1),
+            ok = juno_stats:update(
+                {session_opened, RealmUri, Id, IP}),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -108,8 +110,12 @@ open(Peer, RealmUri, Opts) when is_map(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(session()) -> ok.
-close(#session{id = Id}) ->
-    ok = exometer:delete([juno, requests, Id]),
+close(#session{id = Id} = S) ->
+    {IP, _} = S#session.peer,
+    Realm = S#session.realm_uri,
+    Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created), 
+    ok = juno_stats:update(
+        {session_closed, Realm, IP, Id, Secs}),
     true = ets:delete(table(Id), Id),
     ok.
 
@@ -226,16 +232,12 @@ fetch(Id) ->
 
 
 
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
-create_metrics(#session{id = Id}) ->
-    exometer:new([juno, requests, Id], spiral),
-    ok.
 
 
 %% @private

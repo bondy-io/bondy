@@ -134,7 +134,7 @@ options(#entry{options = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> 
-    {ok, id()} | no_return().
+    {ok, id()} |  no_return().
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -247,6 +247,7 @@ remove(Type, EntryId, Ctxt) ->
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no entries with EntryId.
+            %% {error, {no_such_subscription, EntryId}};
             error(no_such_subscription);
         [#entry{uri = Uri, match_policy = MP}] ->
             IdxTab = index_table(Type, RealmUri),
@@ -356,7 +357,7 @@ match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
 match(Type, Uri, Ctxt, Opts) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri, Opts),
-    io:format("MS ~p~n", [MS]),
+    % io:format("MS ~p~n", [MS]),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, {ets:select(Tab, MS), '$end_of_table'}).
 

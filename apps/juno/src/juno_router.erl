@@ -5,26 +5,28 @@
 %% =============================================================================
 %% @doc
 %% The Juno Router provides the routing logic for all interactions.
-%% In general juno_router handles all messages asynchonouly. It does this by
+%% In general juno_router handles all messages asynchronously. It does this by
 %% using either a static or a dynamic pool of workers based on configuration.
 %% A dynamic pool actually spawns a new erlang process for each message.
 %% By default a Juno Router uses a dynamic pool.
+%%
+%% This module implements both type of workers as a gen_server.
 %%
 %% A router provides load regulation, in case a maximum capacity has been
 %% reached, the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
 %% e.g. {@link juno_ws_handler}).
 %%
-%% This module handles only the general logic delegating the rest to either
-%%  {@link juno_broker} or {@link juno_dealer}.
+%% This module handles only the concurrency and basic routing logic, 
+%% delegating the rest to either {@link juno_broker} or {@link juno_dealer}.
 %%
 %%
 %%
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
 %% `--+---'                                    `--+---'
-%%
-%%                   TCP established
+%%    |                                           |
+%%    |               TCP established             |
 %%    |<----------------------------------------->|
 %%    |                                           |
 %%    |               TLS established             |
@@ -56,7 +58,7 @@
 %%    |                                           |
 %%    |               TCP closed                  |
 %%    |<----------------------------------------->|
-%%
+%%    |                                           |
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
@@ -107,7 +109,10 @@
 %% =============================================================================
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec roles() -> #{broker => map(), dealer => map()}.
 roles() ->
     ?ROUTER_ROLES.
@@ -144,7 +149,7 @@ start_pool() ->
 
 handle_message(#hello{}, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
-    %% RPC:
+    %% RFC:
     %% It is a protocol error to receive a second "HELLO" message during the
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
@@ -180,14 +185,14 @@ handle_message(_M, Ctxt) ->
 
 init([?POOL_NAME]) ->
     %% We've been called by sidejob_worker
+    %% We will be called via a a cast (handle_cast/2)
     %% TODO publish metaevent and stats
     {ok, #state{pool_type = permanent}};
 
 init([Event]) ->
     %% We've been called by sidejob_supervisor
-    %% We immediately timeout so that we find ourselfs in handle_info.
+    %% We immediately timeout so that we find ourselfs in handle_info/2.
     %% TODO publish metaevent and stats
-
     State = #state{
         pool_type = transient,
         event = Event
@@ -205,7 +210,7 @@ handle_call(Event, _From, State) ->
 
 handle_cast(Event, State) ->
     try
-        ok = handle_event(Event),
+        ok = route_event(Event),
         {noreply, State}
     catch
         throw:abort ->
@@ -221,10 +226,10 @@ handle_cast(Event, State) ->
     end.
 
 
-
-handle_info(timeout, #state{pool_type = transient} = State) ->
+handle_info(timeout, #state{pool_type = transient, event = Event} = State)
+when Event /= undefined ->
     %% We've been spawned to handle this single event, so we should stop after
-    ok = handle_event(State#state.event),
+    ok = route_event(Event),
     {stop, normal, State};
 
 handle_info(_Info, State) ->
@@ -252,7 +257,12 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Actually starts a sidejob pool based on system configuration.
+%% @end
+%% -----------------------------------------------------------------------------
 do_start_pool() ->
     Size = juno_config:pool_size(?POOL_NAME),
     Capacity = juno_config:pool_capacity(?POOL_NAME),
@@ -343,14 +353,15 @@ handle_session_message(M, Ctxt0) ->
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
     %% We asynchronously handle the message by sending it to the router pool
-    try cast_session_message(?POOL_NAME, M, Ctxt0) of
+    try async_route_event(M, Ctxt0) of
         ok ->
             {ok, Ctxt0};
         overload ->
             error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
             %% TODO publish metaevent and stats
+            %% TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
-            ok = handle_event({M, Ctxt0}),
+            ok = route_event({M, Ctxt0}),
             {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
@@ -369,8 +380,15 @@ handle_session_message(M, Ctxt0) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec acknowledge_message(map()) -> boolean().
 acknowledge_message(#publish{options = Opts}) ->
     maps:get(acknowledge, Opts, false);
+
 acknowledge_message(_) ->
     true.
 
@@ -385,18 +403,18 @@ acknowledge_message(_) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Asynchronously handles a message by either calling an existing worker or
-%% spawning a new one depending on the juno_broker_pool_type type.
+%% Asynchronously handles a message by either sending it to an 
+%% existing worker or spawning a new one depending on the juno_broker_pool_type 
+%% type.
 %% This message will be handled by the worker's (gen_server)
 %% handle_info callback function.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec cast_session_message(atom(), message(), juno_context:context()) -> 
-    ok | overload.
-
-cast_session_message(PoolName, M, Ctxt) ->
+-spec async_route_event(message(), juno_context:context()) -> ok | overload.
+async_route_event(M, Ctxt) ->
+    PoolName = ?POOL_NAME,
     PoolType = juno_config:pool_type(PoolName),
-    case cast_session_message(PoolType, PoolName, M, Ctxt) of
+    case async_route_event(PoolType, PoolName, M, Ctxt) of
         ok ->
             ok;
         {ok, _} ->
@@ -406,12 +424,18 @@ cast_session_message(PoolName, M, Ctxt) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-cast_session_message(permanent, PoolName, M, Ctxt) ->
+%% @doc
+%% Helper function for {@link async_route_event/2}
+%% @end
+%% -----------------------------------------------------------------------------
+async_route_event(permanent, PoolName, M, Ctxt) ->
     %% We send a request to an existing permanent worker
-    %% using sidejob_worker
+    %% using juno_router acting as a sidejob_worker
     sidejob:cast(PoolName, {M, Ctxt});
-cast_session_message(transient, PoolName, M, Ctxt) ->
+
+async_route_event(transient, PoolName, M, Ctxt) ->
     %% We spawn a transient worker using sidejob_supervisor
     sidejob_supervisor:start_child(
         PoolName,
@@ -427,36 +451,35 @@ cast_session_message(transient, PoolName, M, Ctxt) ->
 %% @doc
 %% @end.
 %% -----------------------------------------------------------------------------
--spec handle_event(event()) -> ok.
-
-handle_event({#subscribe{} = M, Ctxt}) ->
+-spec route_event(event()) -> ok.
+route_event({#subscribe{} = M, Ctxt}) ->
     juno_broker:handle_message(M, Ctxt);
 
-handle_event({#unsubscribe{} = M, Ctxt}) ->
+route_event({#unsubscribe{} = M, Ctxt}) ->
     juno_broker:handle_message(M, Ctxt);
 
-handle_event({#publish{} = M, Ctxt}) ->
+route_event({#publish{} = M, Ctxt}) ->
     juno_broker:handle_message(M, Ctxt);
 
-handle_event({#register{} = M, Ctxt}) ->
+route_event({#register{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({#unregister{} = M, Ctxt}) ->
+route_event({#unregister{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({#call{} = M, Ctxt}) ->
+route_event({#call{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({#cancel{} = M, Ctxt}) ->
+route_event({#cancel{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({#yield{} = M, Ctxt}) ->
+route_event({#yield{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({#error{request_type = ?INVOCATION} = M, Ctxt}) ->
+route_event({#error{request_type = ?INVOCATION} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 
-handle_event({_M, _Ctxt}) ->
+route_event({_M, _Ctxt}) ->
     error(unexpected_message).
 
 

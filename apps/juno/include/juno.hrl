@@ -77,7 +77,7 @@
 -define(JUNO_USER_DELETE, <<"juno.security.user.delete">>).
 -define(JUNO_USER_LIST, <<"juno.security.user.list">>).
 -define(JUNO_USER_LOOKUP, <<"juno.security.user.get">>).
--define(JUNO_USER_LOOKUP, <<"juno.security.user.update">>).
+-define(JUNO_USER_UPDATE, <<"juno.security.user.update">>).
 
 -define(JUNO_USER_ON_ADD, <<"juno.security.user.on_add">>).
 -define(JUNO_USER_ON_DELETE, <<"juno.security.user.on_delete">>).
@@ -89,7 +89,7 @@
 -define(JUNO_GROUP_DELETE, <<"juno.security.group.delete">>).
 -define(JUNO_GROUP_LIST, <<"juno.security.group.list">>).
 -define(JUNO_GROUP_LOOKUP, <<"juno.security.group.get">>).
--define(JUNO_GROUP_LOOKUP, <<"juno.security.group.update">>).
+-define(JUNO_GROUP_UPDATE, <<"juno.security.group.update">>).
 
 -define(JUNO_GROUP_ON_ADD, <<"juno.security.group.on_add">>).
 -define(JUNO_GROUP_ON_DELETE, <<"juno.security.group.on_delete">>).

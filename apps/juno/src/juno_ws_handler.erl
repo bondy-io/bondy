@@ -169,6 +169,8 @@ websocket_info(M, Req, St) ->
 %% Termination
 %% @end
 %% -----------------------------------------------------------------------------
+%% From : http://ninenines.eu/docs/en/cowboy/2.0/guide/handlers/
+%% Note that while this function may be called in a Websocket handler, it is generally not useful to do any clean up as the process terminates immediately after calling this callback when using Websocket.
 terminate(normal, _Req, St) ->
     close_session(St);
 terminate(stop, _Req, St) ->
@@ -177,6 +179,7 @@ terminate(timeout, _Req, St) ->
     close_session(St);
 terminate(remote, _Req, St) ->
     close_session(St);
+
 terminate({error, closed}, _Req, St) ->
     close_session(St);
 terminate({error, badencoding}, _Req, St) ->
@@ -185,6 +188,7 @@ terminate({error, badframe}, _Req, St) ->
     close_session(St);
 terminate({error, _Other}, _Req, St) ->
     close_session(St);
+
 terminate({crash, error, Reason}, _Req, St) ->
     %% TODO use lager
     error_logger:error_report([
@@ -192,10 +196,21 @@ terminate({crash, error, Reason}, _Req, St) ->
         {stacktrace, erlang:get_stacktrace()}
     ]),
     close_session(St);
-terminate({crash, exit, _Other}, _Req, St) ->
+terminate({crash, exit, Reason}, _Req, St) ->
+    %% TODO use lager
+    error_logger:error_report([
+        {reason, Reason},
+        {stacktrace, erlang:get_stacktrace()}
+    ]),
     close_session(St);
-terminate({crash, throw, _Other}, _Req, St) ->
+terminate({crash, throw, Reason}, _Req, St) ->
+    %% TODO use lager
+    error_logger:error_report([
+        {reason, Reason},
+        {stacktrace, erlang:get_stacktrace()}
+    ]),
     close_session(St);
+
 terminate({remote, _Code, _Binary}, _Req, St) ->
     close_session(St).
 

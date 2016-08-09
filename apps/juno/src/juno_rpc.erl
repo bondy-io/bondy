@@ -4,6 +4,7 @@
 
 -module(juno_rpc).
 -include_lib("wamp/include/wamp.hrl").
+-include("juno.hrl").
 
 -define(DEFAULT_LIMIT, 1000).
 -define(INVOCATION_QUEUE, invocations).
@@ -42,10 +43,15 @@
 %% @doc
 %% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
-%% 'procedure_already_exists' error.
+%% 'procedure_already_exists' or 'not_authorized' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), juno_context:context()) -> {ok, id()}.
+register(<<"juno.", _/binary>>, _, _) ->
+    error(not_authorized);
+
+register(<<"wamp.", _/binary>>, _, _) ->
+    error(not_authorized);
 
 register(ProcUri, Options, Ctxt) ->
     juno_registry:add(registration, ProcUri, Options, Ctxt).
@@ -54,11 +60,18 @@ register(ProcUri, Options, Ctxt) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Unregisters an RPC endpoint.
-%% If the registration does not exist, it fails with a 'no_such_registration'
-%% error.
+%% If the registration does not exist, it fails with a 'no_such_registration' or
+%% 'not_authorized' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unregister(id(), juno_context:context()) -> ok.
+unregister(<<"juno.", _/binary>>, _) ->
+    % TODO throw a different reason
+    error(not_authorized);
+
+unregister(<<"wamp.", _/binary>>, _) ->
+    % TODO throw a different reason
+    error(not_authorized);
 
 unregister(RegId, Ctxt) ->
     juno_registry:remove(registration, RegId, Ctxt).
@@ -69,7 +82,6 @@ unregister(RegId, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unregister_all(juno_context:context()) -> ok.
-
 unregister_all(Ctxt) ->
     juno_registry:remove_all(registration, Ctxt).
 
@@ -80,6 +92,89 @@ unregister_all(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec call(id(), uri(), map(), list(), map(), juno_context:context()) -> ok.
+call(ReqId, ?JUNO_USER_ADD, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_USER_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_USER_LIST, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_USER_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_USER_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_GROUP_ADD, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_GROUP_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_GROUP_LIST, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_GROUP_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_GROUP_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_SOURCE_ADD, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_SOURCE_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_SOURCE_LIST, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+call(ReqId, ?JUNO_SOURCE_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+    %% @TODO
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
 
 call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
     Res = #{
@@ -162,7 +257,6 @@ call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
     [juno_registry:entry()] 
     | {[juno_registry:entry()], juno_registry:continuation()}
     | '$end_of_table'. 
-
 registrations(#{realm_uri := RealmUri, session_id := SessionId}) ->
     registrations(RealmUri, SessionId);
 
@@ -182,7 +276,6 @@ registrations(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id()) ->
     [juno_registry:entry()].
-
 registrations(RealmUri, SessionId) ->
     juno_registry:entries(registration, RealmUri, SessionId, infinity).
 
@@ -197,7 +290,6 @@ registrations(RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
     {[juno_registry:entry()], Cont :: '$end_of_table' | term()}.
-
 registrations(RealmUri, SessionId, Limit) ->
     juno_registry:entries(registration, RealmUri, SessionId, Limit).
 
