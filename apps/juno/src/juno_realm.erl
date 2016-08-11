@@ -14,7 +14,7 @@
 
 -define(PREFIX, {global, realms}).
 
--define(DEFAULT_AUTH_METHOD, <<"ticket">>).
+-define(DEFAULT_AUTH_METHOD, ?WAMPCRA_AUTH).
 -define(JUNO_REALM_URI, <<"juno">>).
 -define(JUNO_REALM, #realm{
     uri = ?JUNO_REALM_URI,
