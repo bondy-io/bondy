@@ -15,8 +15,9 @@
                             | {user_not_found, binary()}.
 
 
-
-
+%% =============================================================================
+%% API
+%% =============================================================================
 
 
 
@@ -43,10 +44,18 @@ authenticate(Details, #{realm_uri := Uri} = Ctxt) when is_map(Details) ->
 authenticate(Signature, Extra, #{authid := _, realm_uri := _Uri} = Ctxt) 
 when is_binary(Signature), is_map(Extra) ->
     %% TODO    
+    % S = base64:decode(Signature),
+    % io:format("Auth sign ~p extra ~p~n", [S, Extra]),
     {ok, Ctxt}.
 
 
-% authenticate(UserId, Details, Realm, Ctxt) ->
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
 
 
 
@@ -73,6 +82,7 @@ maybe_challenge(#{authid := UserId} = Details, Realm, Ctxt0) ->
             {ok, Ctxt1}
     end;
 
+%% @private
 maybe_challenge(_, _, Ctxt) ->
     {error, {missing_param, <<"authid">>}, Ctxt}.
 
