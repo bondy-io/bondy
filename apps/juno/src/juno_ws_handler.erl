@@ -148,7 +148,7 @@ websocket_info({stop, Reason}, Req, St) ->
         {description, <<"WAMP session shutdown">>},
         {reason, Reason}
     ]),
-    {shutdown, Req, St};
+    {stop, Req, St};
 
 websocket_info(M, Req, St) ->
     %% Here we receive the messages another peer sent using juno:send/2
@@ -380,7 +380,7 @@ handle_wamp_messages([H|T], Ctxt0, Acc) ->
         {ok, Ctxt1} ->
             handle_wamp_messages(T, Ctxt1, Acc);
         {stop, Reply, Ctxt1} ->
-            {stop, Reply, Ctxt1};
+            {stop, [Reply], Ctxt1};
         {reply, Reply, Ctxt1} ->
             handle_wamp_messages(T, Ctxt1, [Reply | Acc])
     end.
