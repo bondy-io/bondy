@@ -32,11 +32,13 @@
 add(User) ->
     Info = maps:with(?INFO_KEYS, User),
     #{
-        <<"username">> := BinName
+        <<"username">> := BinName,
+        <<"password">> := Pass
     } = User,
     Username = unicode:characters_to_list(BinName, utf8),
     Opts = [
-        {<<"info">>, Info}
+        {<<"info">>, Info},
+        {"password", binary_to_list(Pass)}
     ],
     juno_security:add_user(Username, Opts).
 
