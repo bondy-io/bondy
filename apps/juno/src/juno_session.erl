@@ -39,7 +39,8 @@
     caller          ::  map(),
     callee          ::  map(),
     subscriber      ::  map(),
-    publisher       ::  map()
+    publisher       ::  map(),
+    authid          ::  binary()
 }).
 
 -type peer()        ::  {inet:ip_address(), inet:port_number()}.
@@ -58,6 +59,7 @@
 -export([incr_seq/1]).
 -export([lookup/1]).
 -export([open/3]).
+-export([open/4]).
 -export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
@@ -78,15 +80,34 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Creates a new session provided the RealmUri exists or can be dynamically
+%% created. It assigns a new Id.
+%% It calls {@link juno_utils:get_realm/1} which will fail with an exception
+%% if the realm does not exist or cannot be created
+%% -----------------------------------------------------------------------------
+-spec open(peer(), uri() | juno_realm:realm(), session_opts()) -> 
+    session() | no_return().
+
+open(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    open(wamp_id:new(global), Peer, juno_realm:fetch(RealmUri), Opts);
+
+open(Peer, Realm, Opts) when is_map(Opts) ->
+    open(wamp_id:new(global), Peer, Realm, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Creates a new session provided the RealmUri exists or can be dynamically
 %% created.
 %% It calls {@link juno_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec open(peer(), uri(), session_opts()) -> session() | no_return().
+-spec open(id(), peer(), uri() | juno_realm:realm(), session_opts()) -> 
+    session() | no_return().
+open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    open(Id, Peer, juno_realm:fetch(RealmUri), Opts);
 
-open({IP, _} = Peer, RealmUri, Opts) when is_map(Opts) ->
-    _Realm = juno_utils:get_realm(RealmUri),
-    Id = wamp_id:new(global),
+open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
+    RealmUri = juno_realm:uri(Realm),
     S0 = #session{
         id = Id,
         peer = Peer,
@@ -135,7 +156,6 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
-
 realm_uri(#session{realm_uri = Uri}) ->
     Uri;
 realm_uri(Id) ->
@@ -255,6 +275,8 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 
 
 %% @private
+parse_details(authid, V, Session) when is_binary(V) ->
+    Session#session{authid = V};
 parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
 parse_details(agent, V, Session) when is_binary(V) ->
@@ -287,3 +309,4 @@ do_lookup(Id) ->
         [] ->
             not_found
     end.
+

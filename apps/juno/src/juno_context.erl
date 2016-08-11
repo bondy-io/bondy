@@ -17,6 +17,7 @@
 
 
 -type context()       ::  #{
+    auth_method => binary(),
     goodbye_initiated => boolean(),
     peer => juno_session:peer(),
     realm_uri => uri(),
@@ -24,7 +25,11 @@
     request_timeout => non_neg_integer(),
     roles => map(),
     session_id => id() | undefined,
-    user_id => binary()
+    id => id(),
+    request_details => map(),
+    challenge_sent => boolean(),
+    authmethod => binary(),
+    authid => binary()
 }.
 -export_type([context/0]).
 
@@ -53,6 +58,7 @@
 -spec new() -> context().
 new() ->
     Ctxt = #{
+        id => wamp_id:new(global),
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => juno_config:request_timeout()

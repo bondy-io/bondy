@@ -2,7 +2,10 @@
 
 
 -export([merge_map_flags/2]).
--export([get_realm/1]).
+-export([get_nonce/0]).
+-export([get_random_string/2]).
+
+
 
 
 %% =============================================================================
@@ -10,22 +13,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the realm for the provided Uri if the realm exists or if
-%% {@link juno_config:automatically_create_realms/0} returns true 
-%% (creating a new realm).
-%% @end
-%% -----------------------------------------------------------------------------
-get_realm(Uri) ->
-    case juno_config:automatically_create_realms() of
-        true ->
-            %% We force the creation of a new realm if it does not exist
-            wamp_realm:get(Uri);
-        false ->
-            %% Will throw an exception if it does not exist
-            wamp_realm:fetch(Uri)
-    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -51,3 +38,25 @@ merge_fun(K, V, Acc) ->
         _ -> maps:put(K, false, Acc)
     end.
 
+
+get_nonce() ->
+    get_random_string(
+        32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789").
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% borrowed from 
+%% http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/
+%% @end
+%% -----------------------------------------------------------------------------
+get_random_string(Length, AllowedChars) ->
+    lists:foldl(
+        fun(_, Acc) ->
+            [lists:nth(random:uniform(length(AllowedChars)),
+            AllowedChars)]
+            ++ Acc
+        end, 
+        [], 
+        lists:seq(1, Length)).

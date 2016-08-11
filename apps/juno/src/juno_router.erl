@@ -153,17 +153,51 @@ handle_message(#hello{} = M, #{session_id := _} = Ctxt) ->
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
     ok = update_stats(M, Ctxt),
-    Abort = wamp_message:abort(
-        #{message => <<"You've sent a HELLO message more than once.">>},
-        ?JUNO_SESSION_ALREADY_EXISTS
-    ),
-    ok = update_stats(Abort, Ctxt),
-    {stop, Abort, Ctxt};
+    abort(
+        ?JUNO_SESSION_ALREADY_EXISTS, 
+        <<"You've sent a HELLO message more than once.">>, Ctxt);
+
+handle_message(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
+    %% Client does not have a session but we already sent a challenge message
+    %% Similar case as above
+    ok = update_stats(M, Ctxt),
+    abort(
+        ?WAMP_ERROR_CANCELED, 
+        <<"You've sent a HELLO message more than once.">>, Ctxt);
 
 handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
+    %% Client is requesting a session
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     ok = update_stats(M, Ctxt1),
-    open_session(M#hello.realm_uri, M#hello.details, Ctxt1);
+    %% This will return either reply with wamp_welcome() | wamp_challenge()
+    %% or abort 
+    maybe_open_session(
+        juno_auth:authenticate(M#hello.details, Ctxt1));
+
+handle_message(#authenticate{} = M, #{session_id := _} = Ctxt) ->
+    %% Client already has a session so is already authenticated.
+    ok = update_stats(M, Ctxt),
+    abort(
+        ?JUNO_SESSION_ALREADY_EXISTS, 
+        <<"You've sent an AUTHENTICATE message more than once.">>, 
+        Ctxt);
+
+handle_message(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
+    %% Client is responding to a challenge
+    ok = update_stats(M, Ctxt0),
+    #authenticate{signature = Signature, extra = Extra} = M,
+    case juno_auth:authenticate(Signature, Extra, Ctxt0) of
+        {ok, Ctxt1} ->
+            open_session(Ctxt1);
+        {error, Reason, Ctxt1} ->
+            abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, Ctxt1)
+    end;
+            
+handle_message(#authenticate{} = M, Ctxt) ->
+    %% Client does not have a session and has not been sent a challenge?
+    ok = update_stats(M, Ctxt),
+    abort(
+        ?WAMP_ERROR_CANCELED, <<"You've sent an AUTHENTICATE message.">>, Ctxt);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
     %% Client has a session so this should be either a message
@@ -173,12 +207,10 @@ handle_message(M, #{session_id := _} = Ctxt) ->
 
 handle_message(_M, Ctxt) ->
     %% Client does not have a session and message is not HELLO
-    Abort = wamp_message:abort(
-        #{message => <<"You need to establish a session first.">>},
-        ?JUNO_ERROR_NOT_IN_SESSION
-    ),
-    ok = update_stats(Abort, Ctxt),
-    {stop, Abort, Ctxt}.
+    abort(
+        ?JUNO_ERROR_NOT_IN_SESSION, 
+        <<"You need to establish a session first.">>, 
+        Ctxt).
 
 
 
@@ -281,47 +313,80 @@ do_start_pool() ->
 
 
 
+
+%% @private
+maybe_open_session({ok, Ctxt}) ->
+    open_session(Ctxt);
+
+maybe_open_session({error, {realm_not_found, Uri}, Ctxt}) ->
+    abort(
+        ?WAMP_ERROR_NO_SUCH_REALM,
+        <<"Realm '", Uri/binary, "' does not exist.">>,
+        Ctxt
+    );
+
+maybe_open_session({error, {missing_param, Param}, Ctxt}) ->
+    abort(
+        ?WAMP_ERROR_CANCELED,
+        <<"Missing value for required parameter '", Param/binary, "'.">>,
+        Ctxt
+    );
+
+maybe_open_session({error, {user_not_found, AuthId}, Ctxt}) ->
+    abort(
+        ?WAMP_ERROR_CANCELED,
+        <<"User '", AuthId/binary, "' does not exist.">>,
+        Ctxt
+    );
+
+maybe_open_session({challenge, AuthMethod, Challenge, Ctxt0}) ->
+    M = wamp_message:challenge(AuthMethod, Challenge),
+    Ctxt1 = Ctxt0#{
+        challenge_sent => true % to avoid multiple hellos
+    },
+    ok = update_stats(M, Ctxt1),
+    {reply, M, Ctxt1}.
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec open_session(uri(), map(), juno_context:context()) ->
+-spec open_session(juno_context:context()) ->
     {reply, message(), juno_context:context()}
     | {stop, message(), juno_context:context()}.
 
-open_session(RealmUri, Details, Ctxt0) ->
-    try
-        Session = juno_session:open(maps:get(peer, Ctxt0), RealmUri, Details),
-        SessionId = juno_session:id(Session),
+open_session(Ctxt0) ->
+    try 
+        #{
+            realm_uri := Uri, 
+            id := Id, 
+            request_details := Details
+        } = Ctxt0,
+        _Session = juno_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
+    
         Ctxt1 = Ctxt0#{
-            session_id => SessionId,
-            realm_uri => RealmUri,
+            session_id => Id,
             roles => parse_roles(maps:get(roles, Details))
         },
 
         Welcome = wamp_message:welcome(
-            SessionId,
+            Id,
             #{
                 agent => ?JUNO_VERSION_STRING,
                 roles => ?ROUTER_ROLES
             }
         ),
+        ok = update_stats(Welcome, Ctxt1),
         {reply, Welcome, Ctxt1}
     catch
-        error:{not_found, RealmUri} ->
-            Abort = wamp_message:abort(
-                #{message => <<"Real does not exist.">>},
-                ?WAMP_ERROR_NO_SUCH_REALM
-            ),
-            {stop, Abort, Ctxt0};
         error:{invalid_options, missing_client_role} ->
-            Abort = wamp_message:abort(
-                #{message => <<"Please provide at least one client role.">>},
-                <<"wamp.error.missing_client_role">>
-            ),
-            {stop, Abort, Ctxt0}
+            abort(
+                <<"wamp.error.missing_client_role">>, 
+                <<"Please provide at least one client role.">>,
+                Ctxt0)
     end.
 
 
@@ -548,3 +613,10 @@ update_stats(M, Ctxt) ->
             juno_stats:update(
                 {message, Realm, SessionId, IP, Type, Size})
     end.
+
+
+%% @private
+abort(Type, Reason, Ctxt) ->
+    M = wamp_message:abort(#{message => Reason}, Type),
+    ok = update_stats(M, Ctxt),
+    {stop, M, Ctxt}.

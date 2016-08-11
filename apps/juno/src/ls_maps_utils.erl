@@ -207,7 +207,11 @@ is_valid_datatype(V, #{datatype := string}) when is_list(V) ->
     true;
 is_valid_datatype(V, #{datatype := binary}) when is_binary(V) ->
     true;
-is_valid_datatype(V, #{datatype := {enum, L}}) ->
+is_valid_datatype(V, #{datatype := {any, L}}) when is_list(V) ->
+    A = sets:from_list(V),
+    B = sets:from_list(L),
+    A == sets:intersection([A, B]);
+is_valid_datatype(V, #{datatype := {one, L}}) ->
     lists:member(V, L);
 is_valid_datatype(_, #{datatype := _}) ->
     false;

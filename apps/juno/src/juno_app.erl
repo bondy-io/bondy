@@ -20,6 +20,7 @@ start(_Type, _Args) ->
             ok = juno_stats:start_pool(),
             ok = juno_stats:create_metrics(),
             ok = maybe_start_router_services(),
+            qdate:register_parser(iso8601, date_parser()),
             {ok, Pid};
         Other  ->
             Other
@@ -63,3 +64,28 @@ start_tcp_handlers() ->
         juno_wamp_raw_handler, []),
     ranch:set_max_connections(ServiceName, MaxConnections),
     ok.
+
+%% A custom qdate parser for the ISO8601 dates where timezone == Z.
+date_parser() ->
+    fun
+        (RawDate) when length(RawDate) == 20 ->
+            try 
+                re:run(RawDate,"^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})Z",[{capture,all_but_first,list}]) 
+            of
+                nomatch -> undefined;
+                {match, [Y,M,D,H,I,S]} ->
+                    Date = {list_to_integer(Y), list_to_integer(M), list_to_integer(D)},
+                    Time = {list_to_integer(H), list_to_integer(I), list_to_integer(S)},
+                    case calendar:valid_date(Date) of
+                        true -> 
+                            {{Date, Time}, "UTC"};
+                        false -> 
+                            undefined
+                    end
+            catch 
+                _:_ -> 
+                    undefined
+            end;
+        (_) -> 
+            undefined
+    end.

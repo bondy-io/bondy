@@ -174,11 +174,9 @@ handle_message(
     Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
         {ok, RegId} ->
             wamp_message:registered(ReqId, RegId);
-
         {error, not_authorized} ->
             wamp_message:error(
-                ?REGISTER, ReqId, #{}, <<"wamp.error.not_authorized">>);
-
+                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
         {error, procedure_already_exists} ->
             wamp_message:error(
                 ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
@@ -194,7 +192,7 @@ handle_message(#unregister{} = M, Ctxt) ->
                 ?UNREGISTER,
                 M#unregister.request_id,
                 #{},
-                <<"wamp.error.not_authorized">>);
+                ?WAMP_ERROR_NOT_AUTHORIZED);
         {error, not_found} ->
             wamp_message:error(
                 ?UNREGISTER,
