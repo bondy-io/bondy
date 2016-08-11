@@ -58,5 +58,5 @@
   0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"29aab17928b1480e7a3ed6f1a04049965b9d2f90"}},
+       {ref,"631ee12c75ef20f1a2e5544f06ba0fdc351b256b"}},
   0}].

@@ -1372,18 +1372,18 @@ print_ciphers(CipherList) ->
 %% ADDED BY US
 %% =============================================================================
 
--spec lookup_user(list()) -> tuple() | not_found.
-lookup_user(Username) ->
+-spec lookup_user(binary()) -> tuple() | not_found.
+lookup_user(Username) when is_binary(Username) ->
     case plumtree_metadata:get({<<"security">>, <<"users">>}, Username) of
         undefined -> not_found;
-        Val -> Val
+        Val -> {Username, Val}
     end.
 
--spec lookup_group(list()) -> tuple() | not_found.
-lookup_group(Id) ->
-    case plumtree_metadata:get({<<"security">>, <<"groups">>}, Id) of
+-spec lookup_group(binary()) -> tuple() | not_found.
+lookup_group(Name) when is_binary(Name) ->
+    case plumtree_metadata:get({<<"security">>, <<"groups">>}, Name) of
         undefined -> not_found;
-        Val -> Val
+        Val -> {Name, Val}
     end.
 
 

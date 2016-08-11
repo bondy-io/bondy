@@ -146,7 +146,7 @@ handle_message(#publish{} = M, Ctxt) ->
             ok;
         _:Reason when Acknowledge == true ->
             Reply = wamp_message:error(
-                ?PUBLISH, ReqId, juno:error_dict(Reason), ?WAMP_ERROR_CANCELED),
+                ?PUBLISH, ReqId, juno:error_dict(Reason), ?WAMP_ERROR_CANCELLED),
             juno:send(Reply, Ctxt),
             %% TODO publish metaevent
             ok;

@@ -62,8 +62,13 @@ maybe_challenge(#{authid := UserId} = Details, Realm, Ctxt0) ->
             AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
-            Ch = challenge(AuthMethod, UserId, Details, Ctxt1),
-            {challenge, AuthMethod, Ch, Ctxt1};
+            case juno_user:lookup(UserId) of
+                not_found ->
+                    {error, {user_not_found, UserId}, Ctxt1};
+                User ->
+                    Ch = challenge(AuthMethod, User, Details, Ctxt1),
+                    {challenge, AuthMethod, Ch, Ctxt1}
+            end;
         false ->
             {ok, Ctxt1}
     end;
@@ -72,12 +77,12 @@ maybe_challenge(_, _, Ctxt) ->
     {error, {missing_param, <<"authid">>}, Ctxt}.
 
 
-
-
-challenge(?WAMPCRA_AUTH, UserId, Details, #{id := Id}) ->
-    #{
+%% @private
+challenge(?WAMPCRA_AUTH, User, Details, #{id := Id}) ->
+    #{<<"username">> := UserId} = User,
+    Ch0 = #{
         challenge => #{
-            auhtmethod => ?WAMPCRA_AUTH,
+            authmethod => ?WAMPCRA_AUTH,
             authid => UserId,
             authprovider => <<"juno">>, 
             authrole => maps:get(authrole, Details, <<"user">>), % @TODO
@@ -85,11 +90,27 @@ challenge(?WAMPCRA_AUTH, UserId, Details, #{id := Id}) ->
             session => Id,
             timestamp => calendar:universal_time()
         }
-    };
+    },
+    
+    case juno_user:password(User) of
+        undefined ->
+            Ch0;
+        Pass ->
+            #{
+                auth_name := pbkdf2,
+                hash_func := sha,
+                iterations := Iter,
+                salt := Salt
+            } = Pass,
+            Ch0#{
+                salt => Salt,
+                keylen => 16, % see juno_pw_auth.erl
+                iterations => Iter
+            }
+    end;
 
 challenge(?TICKET_AUTH, _UserId, _Details, _Ctxt) ->
-    #{
-    }.
+    #{}.
 
 
 

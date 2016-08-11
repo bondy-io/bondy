@@ -162,7 +162,7 @@ handle_message(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
     %% Similar case as above
     ok = update_stats(M, Ctxt),
     abort(
-        ?WAMP_ERROR_CANCELED, 
+        ?WAMP_ERROR_CANCELLED, 
         <<"You've sent a HELLO message more than once.">>, Ctxt);
 
 handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
@@ -197,7 +197,9 @@ handle_message(#authenticate{} = M, Ctxt) ->
     %% Client does not have a session and has not been sent a challenge?
     ok = update_stats(M, Ctxt),
     abort(
-        ?WAMP_ERROR_CANCELED, <<"You've sent an AUTHENTICATE message.">>, Ctxt);
+        ?WAMP_ERROR_CANCELLED, 
+        <<"You've sent an AUTHENTICATE message.">>, 
+        Ctxt);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
     %% Client has a session so this should be either a message
@@ -327,14 +329,14 @@ maybe_open_session({error, {realm_not_found, Uri}, Ctxt}) ->
 
 maybe_open_session({error, {missing_param, Param}, Ctxt}) ->
     abort(
-        ?WAMP_ERROR_CANCELED,
+        ?WAMP_ERROR_CANCELLED,
         <<"Missing value for required parameter '", Param/binary, "'.">>,
         Ctxt
     );
 
 maybe_open_session({error, {user_not_found, AuthId}, Ctxt}) ->
     abort(
-        ?WAMP_ERROR_CANCELED,
+        ?WAMP_ERROR_CANCELLED,
         <<"User '", AuthId/binary, "' does not exist.">>,
         Ctxt
     );
@@ -442,7 +444,7 @@ handle_session_message(M, Ctxt0) ->
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
                 juno:error_dict(Reason),
-                ?WAMP_ERROR_CANCELED
+                ?WAMP_ERROR_CANCELLED
             ),
             ok = update_stats(Reply, Ctxt0),
             {reply, Reply, Ctxt0};

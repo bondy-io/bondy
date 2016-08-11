@@ -17,7 +17,8 @@ execute(Req0, Env0) ->
             juno_ws_handler -> 
                 Env1 = set_ctxt(Ctxt0, Env0),
                 {ok, Req0, Env1};
-            Other ->
+            _Other ->
+                %% TODO
                 Ctxt1 = case get_realm_uri(Env0) of
                     undefined -> Ctxt0;
                     Uri -> Ctxt0#{realm_uri => Uri}

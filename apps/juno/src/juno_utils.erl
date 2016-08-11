@@ -40,8 +40,10 @@ merge_fun(K, V, Acc) ->
 
 
 get_nonce() ->
-    get_random_string(
-        32, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789").
+    list_to_binary(
+        get_random_string(
+            32, 
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
 
 
 

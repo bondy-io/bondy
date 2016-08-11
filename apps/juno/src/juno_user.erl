@@ -4,6 +4,8 @@
 
 
 -module(juno_user).
+-include("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -type user() :: map().
 
@@ -19,6 +21,7 @@
 -export([remove/1]).
 -export([fetch/1]).
 -export([list/0]).
+-export([password/1]).
 
 
 %% -----------------------------------------------------------------------------
@@ -44,7 +47,7 @@ add(User) ->
 %% -----------------------------------------------------------------------------
 -spec remove(list() | binary()) -> ok.
 remove(Id) when is_binary(Id) ->
-    remove(unicode:characters_to_list(Id, utf8));
+    remove(unicode:characters_to_binary(Id, utf8, utf8));
 
 remove(Id) ->
     case juno_security:del_user(Id) of
@@ -60,8 +63,8 @@ remove(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(list() | binary()) -> user() | not_found.
-lookup(Id) when is_binary(Id) ->
-    lookup(unicode:characters_to_list(Id, utf8));
+lookup(Id) when is_list(Id) ->
+    lookup(unicode:characters_to_binary(Id, utf8, utf8));
 
 lookup(Id) ->
     case juno_security:lookup_user(Id) of
@@ -75,8 +78,8 @@ lookup(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec fetch(list() | binary()) -> user() | no_return().
-fetch(Id) when is_binary(Id) ->
-    fetch(unicode:characters_to_list(Id, utf8));
+fetch(Id) when is_list(Id) ->
+    fetch(unicode:characters_to_binary(Id, utf8, utf8));
     
 fetch(Id) ->
     case lookup(Id) of
@@ -92,6 +95,26 @@ fetch(Id) ->
 -spec list() -> list(user()).
 list() ->
     [to_map(User) || User <- juno_security:list(user)].
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec password(user() | id()) -> map() | no_return().
+password(#{<<"username">> := Username}) ->
+    password(Username);
+
+password(Username) ->
+    case juno_security:lookup_user(Username) of
+        not_found -> 
+            error(not_found);
+        {Username, Opts} ->
+            case proplists:get_value("password", Opts) of
+                undefined -> undefined;
+                L -> maps:from_list(L)
+            end
+    end.
 
 
 
@@ -126,6 +149,7 @@ has_password(Opts) ->
         undefined -> false;
         _ -> true
     end.
+
 
 
 
