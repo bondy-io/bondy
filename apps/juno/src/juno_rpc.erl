@@ -43,12 +43,12 @@
 
 
 -spec close_context(juno_context:context()) -> juno_context:context().
-close_context(Ctxt0) ->
-    %% Cleanup invocations queue
-    Ctxt1 = cleanup_queue(Ctxt0),
+close_context(Ctxt) ->
+    
     %% Cleanup callee role registrations
-    ok = unregister_all(Ctxt1),
-    Ctxt1.
+    ok = unregister_all(Ctxt),
+    %% Cleanup invocations queue
+    cleanup_queue(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
