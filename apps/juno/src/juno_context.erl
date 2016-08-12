@@ -29,20 +29,25 @@
     request_details => map(),
     challenge_sent => boolean(),
     authmethod => binary(),
-    authid => binary()
+    authid => binary(),
+    awaiting_call_ids => sets:set()
 }.
 -export_type([context/0]).
 
+-export([add_awaiting_call_id/2]).
+-export([awaiting_call_ids/1]).
+-export([close/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
 -export([peer/1]).
 -export([realm_uri/1]).
+-export([remove_awaiting_call_id/2]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
 -export([roles/1]).
--export([session_id/1]).
 -export([session/1]).
+-export([session_id/1]).
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
@@ -61,7 +66,8 @@ new() ->
         id => wamp_id:new(global),
         goodbye_initiated => false,
         request_id => undefined,
-        request_timeout => juno_config:request_timeout()
+        request_timeout => juno_config:request_timeout(),
+        awaiting_call_ids => sets:new()
     },
     set_roles(Ctxt, #{}).
 
@@ -78,6 +84,27 @@ reset(Ctxt) ->
         request_id => undefined,
         request_timeout => 0
     }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close(context()) -> ok.
+
+close(#{session_id := SessionId} = Ctxt) ->
+    %% We close the session
+    case juno_session:lookup(SessionId) of
+        not_found ->
+            ok;
+        Session ->
+            juno_session:close(Session)
+    end,
+    close(maps:without([session_id], Ctxt));
+
+close(Ctxt0) ->
+    %% We cleanup session and router data for this Ctxt
+    _Ctxt1 = juno_router:close_context(Ctxt0),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -206,3 +233,32 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 -spec is_feature_enabled(context(), atom(), atom()) -> boolean().
 is_feature_enabled(#{roles := Roles}, Role, Feature) ->
     maps:get(Feature, maps:get(Role, Roles, #{}), false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec awaiting_call_ids(context()) -> [id()].
+awaiting_call_ids(#{awaiting_call_ids := S}) ->
+    sets:to_list(S).
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_awaiting_call_id(context(), id()) -> ok.
+add_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
+    C#{awaiting_call_ids => sets:add_element(Id, S)}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_awaiting_call_id(context(), id()) -> ok.
+remove_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
+    C#{awaiting_call_ids => sets:del_element(Id, S)}.

@@ -84,8 +84,9 @@
 }).
 
 %% API
--export([roles/0]).
+-export([close_context/1]).
 -export([handle_message/2]).
+-export([roles/0]).
 -export([start_pool/0]).
 %% -export([has_role/2]). ur, ctxt
 %% -export([add_role/2]). uri, ctxt
@@ -94,7 +95,7 @@
 %% -export([start_realm/2]). uri, ctxt
 %% -export([stop_realm/2]). uri, ctxt
 
-%% GEN_SERVER CALLBACKS
+%% GEN_SERVER CALLBACKS 
 -export([init/1]).
 -export([handle_info/2]).
 -export([terminate/2]).
@@ -107,6 +108,10 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+-spec close_context(juno_context:context()) -> juno_context:context().
+close_context(Ctxt) -> 
+    juno_dealer:close_context(juno_broker:close_context(Ctxt)).
 
 
 %% -----------------------------------------------------------------------------
@@ -218,7 +223,7 @@ handle_message(_M, Ctxt) ->
 
 
 %% =============================================================================
-%% API : GEN_SERVER CALLBACKS
+%% API : GEN_SERVER CALLBACKS FOR SIDEJOB WORKER
 %% =============================================================================
 
 

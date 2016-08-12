@@ -10,6 +10,7 @@
 
 -define(DEFAULT_LIMIT, 1000).
 
+-export([close_context/1]).
 -export([match_subscriptions/1]).
 -export([match_subscriptions/2]).
 -export([match_subscriptions/3]).
@@ -18,8 +19,8 @@
 -export([subscriptions/1]).
 -export([subscriptions/2]).
 -export([subscriptions/3]).
--export([unsubscribe_all/1]).
 -export([unsubscribe/2]).
+-export([unsubscribe_all/1]).
 
 
 
@@ -27,6 +28,12 @@
 %% API
 %% =============================================================================
 
+
+
+-spec close_context(juno_context:context()) -> juno_context:context().
+close_context(Ctxt) -> 
+    ok = unsubscribe_all(Ctxt),
+    Ctxt.
 
 
 %% -----------------------------------------------------------------------------

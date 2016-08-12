@@ -144,12 +144,16 @@
 -export([features/0]).
 -export([handle_message/2]).
 -export([is_feature_enabled/1]).
-
+-export([close_context/1]).
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
+
+-spec close_context(juno_context:context()) -> juno_context:context().
+close_context(Ctxt) -> 
+    juno_rpc:close_context(Ctxt).
 
 
 -spec features() -> map().
@@ -212,8 +216,17 @@ handle_message(#call{} = M, Ctxt) ->
         M#call.options,
         M#call.arguments,
         M#call.payload,
-        Ctxt).
+        Ctxt);
 
+handle_message(#yield{} = M, Ctxt) ->
+    %% A Callee is replying to a previous wamp_invocation() message 
+    %% which we generated based on a Caller wamp_call() message
+    %% We need to match the the wamp_yield() with the originating
+    %% wamp_invocation() using the request_id, and with that match the
+    %% wamp_call() request_id and find the caller pid.
+
+    %% @TODO
+    ok.
 
 
 %% =============================================================================

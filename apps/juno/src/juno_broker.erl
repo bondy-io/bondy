@@ -60,13 +60,18 @@
 -export([features/0]).
 -export([handle_message/2]).
 -export([is_feature_enabled/1]).
-
+-export([close_context/1]).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
+
+-spec close_context(juno_context:context()) -> juno_context:context().
+close_context(Ctxt) -> 
+    juno_pubsub:close_context(Ctxt).
+    
 
 -spec features() -> map().
 features() ->

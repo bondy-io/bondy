@@ -15,6 +15,8 @@
     value   ::  id()
 }).
 
+-export([call/6]).
+-export([close_context/1]).
 -export([match_registrations/1]).
 -export([match_registrations/2]).
 -export([match_registrations/3]).
@@ -22,9 +24,8 @@
 -export([registrations/1]).
 -export([registrations/2]).
 -export([registrations/3]).
--export([unregister_all/1]).
 -export([unregister/2]).
--export([call/6]).
+-export([unregister_all/1]).
 %% -export([callees/2]).
 %% -export([count_callees/2]).
 %% -export([count_registrations/2]).
@@ -38,6 +39,17 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+
+-spec close_context(juno_context:context()) -> juno_context:context().
+close_context(Ctxt0) ->
+    %% Cleanup invocations queue
+    Ctxt1 = cleanup_queue(Ctxt0),
+    %% Cleanup callee role registrations
+    ok = unregister_all(Ctxt1),
+    Ctxt1.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -205,39 +217,44 @@ call(ReqId, <<"wamp.registration.get">>, _Opts, _Args, _Payload, Ctxt) ->
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.list_callees">>, _Opts, _Args, _Payload, Ctxt) ->
+call(
+    ReqId, <<"wamp.registration.list_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.count_callees">>, _Opts, _Args, _Payload, Ctxt) ->
+call(
+    ReqId, <<"wamp.registration.count_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{count => 0},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ProcUri, Opts, Args, Payload, Ctxt) ->
+call(ReqId, ProcUri, Opts, Args, ArgMap, Ctxt) ->
     #{session_id := SessionId} = Ctxt,
-
+    Caller = juno_session:pid(SessionId),
     Call = #{
-        request_id => ReqId,
-        session_id => SessionId
+        caller_pid => Caller,
+        session_id => SessionId,
+        call_request_id => ReqId
     },
     %% TODO
     Details = #{},
 
-    Fun = fun(Entry) ->
+    Fun = fun(Entry, Ctxt0) ->
         Id = wamp_id:new(global),
         %% We enqueue the call request i.e. a form of promise.
-        ok = tuplespace_queue:enqueue(
-            ?INVOCATION_QUEUE,
-            Call,
-            #{key => Id, timeout => timeout(Opts)}),
-        Pid = juno_session:pid(juno_registry:session_id(Entry)),
-        Pid ! wamp_message:invocation(
-            Id, juno_registry:entry_id(Entry), Details, Args, Payload),
-        ok
+        {ok, Ctxt1} = enqueue(
+            {Id, Caller},
+            Call#{invocation_request_id => Id}, 
+            timeout(Opts),
+            Ctxt0
+        ),
+        Callee = juno_session:pid(juno_registry:session_id(Entry)),
+        Callee ! wamp_message:invocation(
+            Id, juno_registry:entry_id(Entry), Details, Args, ArgMap),
+        {ok, Ctxt1}
     end,
 
     %% We asume that as with pubsub, the _Caller_ should not receive the
@@ -360,9 +377,9 @@ do_call(L, Fun, Ctxt) ->
 do_call([], undefined, _, _) ->
     ok;
 
-do_call([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt) ->
-    ok = send(E, Fun, Ctxt),
-    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt);
+do_call([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt0) ->
+    {ok, Ctxt1} = send(E, Fun, Ctxt0),
+    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt1);
 
 do_call([{Uri, <<"single">>, _}|T], {Uri, <<"single">>, _} = Last, Fun, Ctxt) ->
     %% We drop subsequent entries for same Uri.
@@ -379,28 +396,30 @@ do_call([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
     %% in the registry
     do_call(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
 
-do_call([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt) ->
-    ok = send({Invoke, L}, Fun, Ctxt),
-    ok = send(E, Fun, Ctxt),
-    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt);
+do_call([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+    {ok, Ctxt1} = send({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt2} = send(E, Fun, Ctxt1),
+    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt2);
 
-do_call([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt)  ->
-    ok = send({Invoke, L}, Fun, Ctxt),
+do_call([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+    {ok, Ctxt1} = send({Invoke, L}, Fun, Ctxt0),
     %% We build a list for subsequent entries for same Uri.
-    do_call(T, {Uri, Invoke, [E]}, Fun, Ctxt).
+    do_call(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
 
 
+%% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %% Implements load balancing and fail over invocation strategies
 %% @end
+%% -----------------------------------------------------------------------------
+-spec send(tuple(), function(), juno_context:context()) -> 
+    {ok, juno_context:context()}.
 send({<<"first">>, L}, Fun, Ctxt) ->
-    send_first_available(L, Fun, Ctxt),
-    ok;
+    send_first_available(L, Fun, Ctxt);
 
 send({<<"last">>, L}, Fun, Ctxt) ->
-    send_first_available(lists:reverse(L), Fun, Ctxt),
-    ok;
+    send_first_available(lists:reverse(L), Fun, Ctxt);
 
 send({<<"random">>, L}, Fun, Ctxt) ->
     send_first_available(shuffle(L), Fun, Ctxt);
@@ -408,13 +427,13 @@ send({<<"random">>, L}, Fun, Ctxt) ->
 send({<<"roundrobin">>, L}, Fun, Ctxt) ->
     send_round_robin(L, Fun, Ctxt);
 
-send(Entry, Fun, _Ctxt) ->
-    Fun(Entry).
+send(Entry, Fun, Ctxt) ->
+    Fun(Entry, Ctxt).
 
 
 %% @private
-send_first_available([], _, _) ->
-    ok;
+send_first_available([], _, Ctxt) ->
+    {ok, Ctxt};
 
 send_first_available([H|T], Fun, Ctxt) ->
     Pid = juno_session:pid(juno_registry:session_id(H)),
@@ -422,13 +441,15 @@ send_first_available([H|T], Fun, Ctxt) ->
         true ->
             send_first_available(T, Fun, Ctxt);
         false ->
-            Fun(H)
+            Fun(H, Ctxt)
     end.
 
 
 %% @private
-send_round_robin([], _, _) ->
-    ok;
+-spec send_round_robin(list(), function(), juno_context:context()) -> 
+    {ok, juno_context:context()}.
+send_round_robin([], _, Ctxt) ->
+    {ok, Ctxt};
 
 send_round_robin([H|_] = L, Fun, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
@@ -437,8 +458,8 @@ send_round_robin([H|_] = L, Fun, Ctxt) ->
 
 
 %% @private
-send_round_robin(_, [], _, _) ->
-    ok;
+send_round_robin(_, [], _, Ctxt) ->
+    {ok, Ctxt};
 
 send_round_robin(undefined, [H|T], Fun, Ctxt) ->
     Pid = juno_session:pid(juno_registry:session_id(H)),
@@ -446,12 +467,12 @@ send_round_robin(undefined, [H|T], Fun, Ctxt) ->
         undefined ->
             send_round_robin(undefined, T, Fun, Ctxt);
         _ ->
-            update_last_call(
+            ok = update_last_call(
                 juno_context:realm_uri(Ctxt),
                 juno_registry:uri(H),
                 juno_registry:id(H)
             ),
-            Fun(H)
+            Fun(H, Ctxt)
     end;
 
 send_round_robin(RegId, L0, Fun, Ctxt) ->
@@ -486,7 +507,14 @@ update_last_call(RealmUri, Uri, Val) ->
     true = ets:insert(rpc_state_table(RealmUri, Uri), Entry),
     ok.
 
+
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% A table that persists across calls and maintains the state of the load 
+%% balancing of invocations 
+%% @end
+%% -----------------------------------------------------------------------------
 rpc_state_table(RealmUri, Uri) ->
     tuplespace:locate_table(?RPC_STATE_TABLE, {RealmUri, Uri}).
 
@@ -496,6 +524,38 @@ rpc_state_table(RealmUri, Uri) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+enqueue(Key, Call, Timeout, Ctxt0) ->
+    Opts = #{key => Key, timeout => Timeout},
+    ok = tuplespace_queue:enqueue(?INVOCATION_QUEUE, Call, Opts),
+    Ctxt1 = juno_context:add_awaiting_call_id(Ctxt0, Key),
+    {ok, Ctxt1}.
+
+
+% @private
+% dequeue(Id, Ctxt) ->
+%     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Id}) of
+%         empty ->
+%             {ok, Ctxt};
+%         Val ->
+%             {ok, Val, Ctxt}
+%     end.
+
+%% @private
+cleanup_queue(Ctxt) ->
+    lists:foldl(
+        fun(Id, Acc) ->
+            ok = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Id}),
+            juno_context:remove_awaiting_call_id(Acc, Id)
+        end,
+        Ctxt,
+        juno_context:awaiting_call_ids(Ctxt)
+    ).
+
+
+    
 
 
 %% @private
@@ -509,19 +569,22 @@ timeout(_) ->
 
 %% From https://erlangcentral.org/wiki/index.php/RandomShuffle
 shuffle(List) ->
-%% Determine the log n portion then randomize the list.
-   randomize(round(math:log(length(List)) + 0.5), List).
+    %% Determine the log n portion then randomize the list.
+    randomize(round(math:log(length(List)) + 0.5), List).
 
+
+%% @private
 randomize(1, List) ->
-   randomize(List);
+    randomize(List);
 randomize(T, List) ->
-   lists:foldl(fun(_E, Acc) ->
-                  randomize(Acc)
-               end, randomize(List), lists:seq(1, (T - 1))).
+    lists:foldl(
+        fun(_E, Acc) -> randomize(Acc) end, 
+        randomize(List), 
+        lists:seq(1, (T - 1))).
 
+
+%% @private
 randomize(List) ->
-   D = lists:map(fun(A) ->
-                    {random:uniform(), A}
-             end, List),
-   {_, D1} = lists:unzip(lists:keysort(1, D)),
-   D1.
+    D = lists:map(fun(A) -> {random:uniform(), A} end, List),
+    {_, D1} = lists:unzip(lists:keysort(1, D)),
+    D1.

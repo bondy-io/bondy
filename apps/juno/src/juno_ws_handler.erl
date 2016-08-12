@@ -173,22 +173,22 @@ websocket_info(M, Req, St) ->
 %% From : http://ninenines.eu/docs/en/cowboy/2.0/guide/handlers/
 %% Note that while this function may be called in a Websocket handler, it is generally not useful to do any clean up as the process terminates immediately after calling this callback when using Websocket.
 terminate(normal, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate(stop, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate(timeout, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate(remote, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 
 terminate({error, closed}, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate({error, badencoding}, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate({error, badframe}, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 terminate({error, _Other}, _Req, St) ->
-    close_session(St);
+    do_terminate(St);
 
 terminate({crash, error, Reason}, _Req, St) ->
     %% TODO use lager
@@ -196,24 +196,24 @@ terminate({crash, error, Reason}, _Req, St) ->
         {reason, Reason},
         {stacktrace, erlang:get_stacktrace()}
     ]),
-    close_session(St);
+    do_terminate(St);
 terminate({crash, exit, Reason}, _Req, St) ->
     %% TODO use lager
     error_logger:error_report([
         {reason, Reason},
         {stacktrace, erlang:get_stacktrace()}
     ]),
-    close_session(St);
+    do_terminate(St);
 terminate({crash, throw, Reason}, _Req, St) ->
     %% TODO use lager
     error_logger:error_report([
         {reason, Reason},
         {stacktrace, erlang:get_stacktrace()}
     ]),
-    close_session(St);
+    do_terminate(St);
 
 terminate({remote, _Code, _Binary}, _Req, St) ->
-    close_session(St).
+    do_terminate(St).
 
 
 %% =============================================================================
@@ -387,20 +387,9 @@ handle_wamp_messages([H|T], Ctxt0, Acc) ->
 
 
 %% @private
-close_session(#{context := #{session_id := SessionId} = Ctxt}) ->
-    %% We cleanup session and router data for this Ctxt
-    juno_pubsub:unsubscribe_all(Ctxt),
-    juno_rpc:unregister_all(Ctxt),
-    case juno_session:lookup(SessionId) of
-        not_found ->
-            ok;
-        Session ->
-            juno_session:close(Session),
-            ok
-    end;
-    
-close_session(_) ->
-    ok.
+do_terminate(#{context := Ctxt}) ->
+    juno_context:close(Ctxt).
+
 
 %% @private
 set_ctxt(St, Ctxt) ->

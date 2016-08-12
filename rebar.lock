@@ -54,7 +54,7 @@
   1},
  {<<"tuplespace">>,
   {git,"git@gitlab.com:leapsight/tuplespace.git",
-       {ref,"33d701e0dbb7148d09db8e65798fcf27704a50d2"}},
+       {ref,"e584b7d1bf4604303a1a59f6947339b25b8b9934"}},
   0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
