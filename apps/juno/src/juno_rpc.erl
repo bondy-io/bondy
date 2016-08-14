@@ -7,15 +7,28 @@
 -include("juno.hrl").
 
 -define(DEFAULT_LIMIT, 1000).
--define(INVOCATION_QUEUE, invocations).
--define(RPC_STATE_TABLE, rpc_state).
+-define(INVOCATION_QUEUE, juno_rpc_promise).
+-define(RPC_STATE_TABLE, juno_rpc_state).
 
--record(last_call, {
+-record(last_invocation, {
     key     ::  {uri(), uri()},
     value   ::  id()
 }).
 
--export([call/6]).
+-record(promise, {
+    invocation_request_id   ::  id(),
+    procedure_uri           ::  uri(),
+    call_request_id         ::  id(),
+    caller_pid              ::  pid(),
+    caller_session_id       ::  id(),
+    callee_pid              ::  pid(),
+    callee_session_id       ::  id()
+}).
+-type promise() :: #promise{}.
+
+
+-export([invoke/6]).
+-export([interrupt/3]).
 -export([close_context/1]).
 -export([match_registrations/1]).
 -export([match_registrations/2]).
@@ -24,6 +37,8 @@
 -export([registrations/1]).
 -export([registrations/2]).
 -export([registrations/3]).
+-export([result/5]).
+-export([error/6]).
 -export([unregister/2]).
 -export([unregister_all/1]).
 %% -export([callees/2]).
@@ -31,7 +46,6 @@
 %% -export([count_registrations/2]).
 %% -export([lookup_registration/2]).
 %% -export([fetch_registration/2]). % wamp.registration.get
-
 
 
 
@@ -44,7 +58,6 @@
 
 -spec close_context(juno_context:context()) -> juno_context:context().
 close_context(Ctxt) ->
-    
     %% Cleanup callee role registrations
     ok = unregister_all(Ctxt),
     %% Cleanup invocations queue
@@ -105,92 +118,92 @@ unregister_all(Ctxt) ->
 %% Throws not_authorized
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(id(), uri(), map(), list(), map(), juno_context:context()) -> ok.
-call(ReqId, ?JUNO_USER_ADD, _Opts, _Args, _Payload, Ctxt) ->
+-spec invoke(id(), uri(), map(), list(), map(), juno_context:context()) -> ok.
+invoke(ReqId, ?JUNO_USER_ADD, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_USER_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_USER_DELETE, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_USER_LIST, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_USER_LIST, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_USER_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_USER_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_USER_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_USER_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_GROUP_ADD, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_GROUP_ADD, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_GROUP_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_GROUP_DELETE, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_GROUP_LIST, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_GROUP_LIST, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_GROUP_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_GROUP_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_GROUP_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_GROUP_UPDATE, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_SOURCE_ADD, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_SOURCE_ADD, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_SOURCE_DELETE, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_SOURCE_DELETE, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_SOURCE_LIST, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_SOURCE_LIST, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ?JUNO_SOURCE_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, ?JUNO_SOURCE_LOOKUP, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
     Res = #{
         <<"exact">> => [], % @TODO
         <<"prefix">> => [], % @TODO
@@ -199,61 +212,74 @@ call(ReqId, <<"wamp.registration.list">>, _Opts, _Args, _Payload, Ctxt) ->
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.lookup">>, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, <<"wamp.registration.lookup">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.match">>, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, <<"wamp.registration.match">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, <<"wamp.registration.get">>, _Opts, _Args, _Payload, Ctxt) ->
+invoke(ReqId, <<"wamp.registration.get">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(
+invoke(
     ReqId, <<"wamp.registration.list_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(
+invoke(
     ReqId, <<"wamp.registration.count_callees">>, _Opts, _Args, _Payload, Ctxt) ->
     %% @TODO
     Res = #{count => 0},
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(M, Ctxt);
 
-call(ReqId, ProcUri, Opts, Args, ArgMap, Ctxt) ->
+invoke(ReqId, ProcUri, Opts, Args, ArgMap, Ctxt) ->
     #{session_id := SessionId} = Ctxt,
     Caller = juno_session:pid(SessionId),
-    Call = #{
-        caller_pid => Caller,
-        session_id => SessionId,
-        call_request_id => ReqId
+    %%  A promise iis used to implement a capability and a feature:
+    %% - the capability to match wamp_yiled() or wamp_error() messages
+    %%   to the originating wamp_call() and the Caller
+    %% - call_timeout feature at the dealer level
+    Promise = #promise{
+        procedure_uri = ProcUri, 
+        call_request_id = ReqId,
+        caller_pid = Caller,
+        caller_session_id = SessionId
     },
     %% TODO
     Details = #{},
 
     Fun = fun(Entry, Ctxt0) ->
         Id = wamp_id:new(global),
-        %% We enqueue the call request i.e. a form of promise.
-        {ok, Ctxt1} = enqueue(
-            {Id, Caller},
-            Call#{invocation_request_id => Id}, 
+        CalleeSessionId = juno_registry:session_id(Entry),
+        Callee = juno_session:pid(CalleeSessionId),
+
+        %% We enqueue the promise with a timeout
+        {ok, Ctxt1} = enqueue_promise(
+            Id,
+            Promise#promise{
+                invocation_request_id = Id,
+                callee_session_id = CalleeSessionId,
+                callee_pid = Callee
+            }, 
             timeout(Opts),
             Ctxt0
         ),
-        Callee = juno_session:pid(juno_registry:session_id(Entry)),
-        Callee ! wamp_message:invocation(
+
+        M = wamp_message:invocation(
             Id, juno_registry:entry_id(Entry), Details, Args, ArgMap),
+        ok = juno:send(Callee, M, Ctxt1),
         {ok, Ctxt1}
     end,
 
@@ -261,7 +287,88 @@ call(ReqId, ProcUri, Opts, Args, ArgMap, Ctxt) ->
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
     Regs = match_registrations(ProcUri, Ctxt, #{exclude => [SessionId]}),
-    do_call(Regs, Fun, Ctxt).
+    do_invoke(Regs, Fun, Ctxt).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec interrupt(id(), map(), juno_context:context()) -> ok.
+interrupt(CallId, Options, Ctxt) ->
+    % #{session_id := SessionId} = Ctxt,
+    % Caller = juno_session:pid(SessionId),
+
+    case dequeue_promise(call_request_id, CallId, Ctxt) of
+        ok ->
+            %% Promises for this call were either interrupted by us, 
+            %% fulfilled or timed out and garbage collected, we do nothing 
+            ok;
+        {ok, timeout} ->
+            %% Promises for this call were either interrupted by us or 
+            %% timed out or caller died, we do nothing
+            ok;
+        {ok, #promise{call_request_id = CallId} = P} ->
+            #promise{
+                invocation_request_id = ReqId,
+                callee_pid = Callee
+            } = P,
+            M = wamp_message:interrupt(ReqId, Options),
+            ok = juno:send(M, Callee, Ctxt),
+            %% We iterate until there are no more pending invocation for the
+            %% call_request_id == CallId
+            interrupt(CallId, Options, Ctxt)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec result(id(), map(), list(), map(), juno_context:context()) -> ok.
+result(ReqId, Details, Args, Payload, Ctxt) ->
+    case dequeue_promise(invocation_request_id, ReqId, Ctxt) of
+        ok ->
+            %% Promise was fulfilled or timed out and garbage collected,
+            %% we do nothing 
+            ok;
+        {ok, timeout} ->
+            %% Promise timed out, we do nothing
+            ok;
+        {ok, #promise{invocation_request_id = ReqId} = P} ->
+            #promise{
+                call_request_id = CallId,
+                caller_pid = Caller
+            } = P,
+            M = wamp_message:result(CallId, Details, Args, Payload),
+            juno:send(Caller, M, Ctxt)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec error(id(), map(), uri(), list(), map(), juno_context:context()) -> ok.
+error(ReqId, Details, ErrUri, Args, Payload, Ctxt) ->
+    case dequeue_promise(invocation_request_id, ReqId, Ctxt) of
+        ok ->
+            %% Promise timed out or never existed
+            ok;
+        {ok, timeout} ->
+            ok;
+        {ok, #promise{invocation_request_id = ReqId} = P} ->
+            #promise{
+                call_request_id = CallId,
+                caller_pid = Caller
+            } = P,
+            M = wamp_message:error(
+                ?INVOCATION, CallId, Details, ErrUri, Args, Payload),
+            juno:send(Caller, M, Ctxt)
+    end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -354,57 +461,58 @@ match_registrations(Cont) ->
 
 
 %% @private
-do_call('$end_of_table', _, _) ->
+do_invoke('$end_of_table', _, _) ->
     ok;
 
-do_call({L, '$end_of_table'}, Fun, Ctxt) ->
-    do_call(L, Fun, Ctxt);
+do_invoke({L, '$end_of_table'}, Fun, Ctxt) ->
+    do_invoke(L, Fun, Ctxt);
 
-do_call({L, Cont}, Fun, Ctxt) ->
-    ok = do_call(Fun, L, Ctxt),
-    do_call(match_registrations(Cont), Fun, Ctxt);
+do_invoke({L, Cont}, Fun, Ctxt) ->
+    ok = do_invoke(Fun, L, Ctxt),
+    do_invoke(match_registrations(Cont), Fun, Ctxt);
 
-do_call(L, Fun, Ctxt) ->
+do_invoke(L, Fun, Ctxt) ->
     Triples = [{
         juno_registry:uri(E),
         maps:get(invoke, juno_registry:options(E), <<"single">>),
         E
     } || E <- L],
-    do_call(Triples, undefined, Fun, Ctxt).
+    do_invoke(Triples, undefined, Fun, Ctxt).
 
 
 %% @private
-do_call([], undefined, _, _) ->
+do_invoke([], undefined, _, _) ->
     ok;
 
-do_call([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt0) ->
+do_invoke([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt0) ->
     {ok, Ctxt1} = send(E, Fun, Ctxt0),
-    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt1);
+    do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt1);
 
-do_call([{Uri, <<"single">>, _}|T], {Uri, <<"single">>, _} = Last, Fun, Ctxt) ->
+do_invoke(
+    [{Uri, <<"single">>, _}|T], {Uri, <<"single">>, _} = Last, Fun, Ctxt) ->
     %% We drop subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    do_call(T, Last, Fun, Ctxt);
+    do_invoke(T, Last, Fun, Ctxt);
 
-do_call([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
-    do_call(T, {Uri, Invoke, [E]}, Fun, Ctxt);
+do_invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
+    do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
 
-do_call([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
+do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    do_call(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
+    do_invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
 
-do_call([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+do_invoke([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
     {ok, Ctxt1} = send({Invoke, L}, Fun, Ctxt0),
     {ok, Ctxt2} = send(E, Fun, Ctxt1),
-    do_call(T, {Uri, <<"single">>, []}, Fun, Ctxt2);
+    do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt2);
 
-do_call([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
     {ok, Ctxt1} = send({Invoke, L}, Fun, Ctxt0),
     %% We build a list for subsequent entries for same Uri.
-    do_call(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
+    do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
@@ -454,7 +562,7 @@ send_round_robin([], _, Ctxt) ->
 send_round_robin([H|_] = L, Fun, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     Uri = juno_registry:uri(H),
-    send_round_robin(get_last_call(RealmUri, Uri), L, Fun, Ctxt).
+    send_round_robin(get_last_invocation(RealmUri, Uri), L, Fun, Ctxt).
 
 
 %% @private
@@ -467,7 +575,7 @@ send_round_robin(undefined, [H|T], Fun, Ctxt) ->
         undefined ->
             send_round_robin(undefined, T, Fun, Ctxt);
         _ ->
-            ok = update_last_call(
+            ok = update_last_invocation(
                 juno_context:realm_uri(Ctxt),
                 juno_registry:uri(H),
                 juno_registry:id(H)
@@ -496,14 +604,14 @@ send_round_robin(RegId, L0, Fun, Ctxt) ->
 
 
 %% @private
-get_last_call(RealmUri, Uri) ->
+get_last_invocation(RealmUri, Uri) ->
     case ets:lookup(rpc_state_table(RealmUri, Uri), {RealmUri, Uri}) of
         [] -> undefined;
         [Entry] -> Entry
     end.
 
-update_last_call(RealmUri, Uri, Val) ->
-    Entry = #last_call{key = {RealmUri, Uri}, value = Val},
+update_last_invocation(RealmUri, Uri, Val) ->
+    Entry = #last_invocation{key = {RealmUri, Uri}, value = Val},
     true = ets:insert(rpc_state_table(RealmUri, Uri), Entry),
     ok.
 
@@ -527,35 +635,55 @@ rpc_state_table(RealmUri, Uri) ->
 
 
 %% @private
-enqueue(Key, Call, Timeout, Ctxt0) ->
+-spec enqueue_promise(
+    id(), promise(), pos_integer(), juno_context:context()) -> 
+    ok.
+enqueue_promise(Id, Promise, Timeout, #{realm_uri := Uri}) ->
+    #promise{call_request_id = CallId} = Promise,
+    Key = {Uri, Id, CallId},
     Opts = #{key => Key, timeout => Timeout},
-    ok = tuplespace_queue:enqueue(?INVOCATION_QUEUE, Call, Opts),
-    Ctxt1 = juno_context:add_awaiting_call_id(Ctxt0, Key),
-    {ok, Ctxt1}.
+    tuplespace_queue:enqueue(?INVOCATION_QUEUE, Promise, Opts).
 
 
-% @private
-% dequeue(Id, Ctxt) ->
-%     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Id}) of
-%         empty ->
-%             {ok, Ctxt};
-%         Val ->
-%             {ok, Val, Ctxt}
-%     end.
+%% @private
+dequeue_promise(invocation_request_id, Id, #{realm_uri := Uri} = Ctxt) ->
+    dequeue_promise({Uri, Id, '_'}, Ctxt);
+
+dequeue_promise(call_request_id, Id, #{realm_uri := Uri} = Ctxt) ->
+    dequeue_promise({Uri, '_', Id}, Ctxt).
+
+
+%% @private
+-spec dequeue_promise(tuple(), juno_context:context()) -> 
+    ok | {ok, timeout} | {ok, promise()}.
+dequeue_promise(Key, #{realm_uri := Uri}) ->
+    case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Key}) of
+        empty ->
+            %% The promise might have expired so we GC it.
+            case tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}) of
+                0 -> ok;
+                _ -> {ok, timeout}
+            end;
+        Promise ->
+            {ok, Promise}
+    end.
+
 
 %% @private
 cleanup_queue(Ctxt) ->
+    #{
+        realm_uri := Uri,
+        awaiting_call_ids := L
+    } = Ctxt,
     lists:foldl(
         fun(Id, Acc) ->
-            ok = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Id}),
+            Key = {Uri, Id},
+            ok = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
             juno_context:remove_awaiting_call_id(Acc, Id)
         end,
         Ctxt,
-        juno_context:awaiting_call_ids(Ctxt)
+        L
     ).
-
-
-    
 
 
 %% @private

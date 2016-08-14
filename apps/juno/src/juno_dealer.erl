@@ -172,20 +172,22 @@ is_feature_enabled(F) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: message(), Ctxt :: map()) -> ok | no_return().
-handle_message(
-    #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
-    %% Check if it has callee role?
-    Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
-        {ok, RegId} ->
-            wamp_message:registered(ReqId, RegId);
-        {error, not_authorized} ->
-            wamp_message:error(
-                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
-        {error, procedure_already_exists} ->
-            wamp_message:error(
-                ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
-    end,
-    juno:send(Reply, Ctxt);
+
+% this case is implemented synchronously by router 
+% handle_message(
+%     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
+%     %% Check if it has callee role?
+%     Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
+%         {ok, RegId} ->
+%             wamp_message:registered(ReqId, RegId);
+%         {error, not_authorized} ->
+%             wamp_message:error(
+%                 ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
+%         {error, procedure_already_exists} ->
+%             wamp_message:error(
+%                 ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
+%     end,
+%     juno:send(Reply, Ctxt);
 
 handle_message(#unregister{} = M, Ctxt) ->
     Reply  = case juno_rpc:unregister(M#unregister.registration_id, Ctxt) of
@@ -210,12 +212,21 @@ handle_message(#call{} = M, Ctxt) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
 
     %% A response will be send asynchronously by another router process instance
-    juno_rpc:call(
+    juno_rpc:invoke(
         M#call.request_id,
         M#call.procedure_uri,
         M#call.options,
         M#call.arguments,
         M#call.payload,
+        Ctxt);
+
+handle_message(#cancel{} = M, Ctxt) ->
+    %% TODO check if authorized and if not throw wamp.error.not_authorized
+
+    %% A response will be send asynchronously by another router process instance
+    juno_rpc:interrupt(
+        M#cancel.request_id,
+        M#cancel.options,
         Ctxt);
 
 handle_message(#yield{} = M, Ctxt) ->
@@ -226,7 +237,23 @@ handle_message(#yield{} = M, Ctxt) ->
     %% wamp_call() request_id and find the caller pid.
 
     %% @TODO
-    ok.
+    juno_rpc:result(
+        M#yield.request_id,
+        M#yield.options,
+        M#yield.arguments,
+        M#yield.payload,
+        Ctxt
+    );
+
+handle_message(#error{request_type = ?INVOCATION} = M, Ctxt) ->
+    juno_rpc:error(
+        M#error.request_id,
+        M#error.details,
+        M#error.error_uri,
+        M#error.arguments,
+        M#error.payload,
+        Ctxt
+    ).
 
 
 %% =============================================================================

@@ -420,12 +420,44 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
         [SessionId, M#goodbye.reason_uri]
     ),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
-    ok = update_stats(Reply, Ctxt),
     {stop, Reply, Ctxt};
+
+handle_session_message(#register{} = M, Ctxt) ->
+    %% This is an easy way to preserve RPC ordering as defined
+    %% RFC 11.2: 
+    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
+    %% message will be sent by _Dealer_ to _Callee A_ before any 
+    %% "INVOCATION" message for *Procedure 1*.
+
+    %% @TODO if the async pool is overloaded, we should affect our call
+    %% here too
+    #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
+    Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
+        {ok, RegId} ->
+            wamp_message:registered(ReqId, RegId);
+        {error, not_authorized} ->
+            wamp_message:error(
+                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
+        {error, procedure_already_exists} ->
+            wamp_message:error(
+                ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
+    end,
+    {reply, Reply, Ctxt};
+
+handle_session_message(#call{request_id = CallId} = M, Ctxt) ->
+    %% This is an easy way to preserve RPC ordering as defined
+    %% by RFC 11.2 as Erlang guarantees causal delivery of messages
+    %% between two processes even when in different nodes.
+
+    %% @TODO if the async pool is overloaded, we should affect our call
+    %% here too
+    ok = route_event({M, Ctxt}),
+    Ctxt1 = juno_context:add_awaiting_call_id(Ctxt0, CallId),
+    {ok, Ctxt1};
 
 handle_session_message(M, Ctxt0) ->
     %% Client already has a session.
-    %% By default, publications are unacknowledged, and the _Broker_ will
+    %% RFC: By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
@@ -548,7 +580,7 @@ route_event({#unregister{} = M, Ctxt}) ->
 
 route_event({#call{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
-
+  
 route_event({#cancel{} = M, Ctxt}) ->
     juno_dealer:handle_message(M, Ctxt);
 

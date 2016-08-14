@@ -24,7 +24,7 @@
 -module(juno_session).
 -include_lib("wamp/include/wamp.hrl").
 
--define(SESSION_TABLE_NAME, session).
+-define(SESSION_TABLE_NAME, juno_session).
 -define(SESSION_SEQ_POS, 5).
 
 -record(session, {

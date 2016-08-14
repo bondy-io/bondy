@@ -150,17 +150,19 @@ websocket_info({stop, Reason}, Req, St) ->
     ]),
     {stop, Req, St};
 
-websocket_info(M, Req, St) ->
-    %% Here we receive the messages another peer sent using juno:send/2
+websocket_info(M, Req, St0) ->
+    %% Here we receive the messages either the router of another peer
+    %% sent to us using juno:send/2
     case wamp_message:is_message(M) of
         true ->
+            St1 = maybe_update_state(M, Req, St0),
             %% We encode and send the message to the client
-            #{subprotocol := #{encoding := E, frame_type := T}} = St,
+            #{subprotocol := #{encoding := E, frame_type := T}} = St1,
             Reply = frame(T, wamp_encoding:encode(M, E)),
-            {reply, Reply, Req, St};
+            {reply, Reply, Req, St1};
         false ->
             %% Any other unwanted erlang messages
-            {ok, Req, St}
+            {ok, Req, St0}
     end.
 
 
@@ -396,3 +398,15 @@ set_ctxt(St, Ctxt) ->
     St#{context => juno_context:reset(Ctxt)}.
 
 
+maybe_update_state(#result{request_id = CallId}, _Req, St) ->
+    #{context := Ctxt0} = St,
+    Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
+    set_ctxt(St, Ctxt1);
+
+maybe_update_state(#error{request_type = ?CALL, request_id = CallId}, _Req, St) ->
+    #{context := Ctxt0} = St,
+    Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
+    set_ctxt(St, Ctxt1);
+
+maybe_update_state(_, _, St) ->
+    St.

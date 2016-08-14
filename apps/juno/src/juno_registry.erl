@@ -8,10 +8,10 @@
 -define(ANY, <<"*">>).
 
 %% -define(DEFAULT_LIMIT, 1000).
--define(SUBSCRIPTION_TABLE_NAME, subscription).
--define(SUBSCRIPTION_INDEX_TABLE_NAME, subscription_index).
--define(REGISTRATION_TABLE_NAME, registration).
--define(REGISTRATION_INDEX_TABLE_NAME, registration_index).
+-define(SUBSCRIPTION_TABLE_NAME, juno_subscription).
+-define(SUBSCRIPTION_INDEX_TABLE_NAME, juno_subscription_index).
+-define(REGISTRATION_TABLE_NAME, juno_registration).
+-define(REGISTRATION_INDEX_TABLE_NAME, juno_registration_index).
 -define(MAX_LIMIT, 100000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 

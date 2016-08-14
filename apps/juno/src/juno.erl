@@ -17,6 +17,7 @@
 -export([make/0]).
 -export([send/2]).
 -export([send/3]).
+-export([safe_end/3]).
 -export([start/0]).
 
 
@@ -48,9 +49,21 @@ send(Message, Ctxt) ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(pid(), Message :: message(), Ctxt :: juno_context:context()) ->
-    ok | no_return().
+-spec send(pid(), Message :: message(), Ctxt :: juno_context:context()) -> ok
 send(Pid, Message, _Ctxt) when is_pid(Pid) ->
+    Pid ! Message,
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sends a message to a peer.
+%% If the transport is not open it fails with an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec safe_send(pid(), Message :: message(), Ctxt :: juno_context:context()) ->
+    ok | no_return().
+safe_send(Pid, Message, _Ctxt) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
             Pid ! Message,
@@ -58,7 +71,6 @@ send(Pid, Message, _Ctxt) when is_pid(Pid) ->
         false ->
             error({unknown_peer, Pid})
     end.
-
 
 %% =============================================================================
 %% API - SESSION
