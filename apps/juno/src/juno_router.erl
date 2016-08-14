@@ -444,14 +444,14 @@ handle_session_message(#register{} = M, Ctxt) ->
     end,
     {reply, Reply, Ctxt};
 
-handle_session_message(#call{request_id = CallId} = M, Ctxt) ->
+handle_session_message(#call{request_id = CallId} = M, Ctxt0) ->
     %% This is an easy way to preserve RPC ordering as defined
     %% by RFC 11.2 as Erlang guarantees causal delivery of messages
     %% between two processes even when in different nodes.
 
     %% @TODO if the async pool is overloaded, we should affect our call
     %% here too
-    ok = route_event({M, Ctxt}),
+    ok = route_event({M, Ctxt0}),
     Ctxt1 = juno_context:add_awaiting_call_id(Ctxt0, CallId),
     {ok, Ctxt1};
 

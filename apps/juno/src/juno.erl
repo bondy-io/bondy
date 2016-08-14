@@ -17,7 +17,7 @@
 -export([make/0]).
 -export([send/2]).
 -export([send/3]).
--export([safe_end/3]).
+-export([safe_send/3]).
 -export([start/0]).
 
 
@@ -49,7 +49,7 @@ send(Message, Ctxt) ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(pid(), Message :: message(), Ctxt :: juno_context:context()) -> ok
+-spec send(pid(), Message :: message(), Ctxt :: juno_context:context()) -> ok.
 send(Pid, Message, _Ctxt) when is_pid(Pid) ->
     Pid ! Message,
     ok.
