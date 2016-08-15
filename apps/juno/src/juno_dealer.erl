@@ -175,7 +175,7 @@ is_feature_enabled(F) ->
 
 % this case is implemented synchronously by router 
 % handle_message(
-%     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
+%     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M, Ctxt) ->
 %     %% Check if it has callee role?
 %     Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
 %         {ok, RegId} ->
@@ -208,28 +208,22 @@ handle_message(#unregister{} = M, Ctxt) ->
     end,
     juno:send(Reply, Ctxt);
 
-handle_message(#call{} = M, Ctxt) ->
+handle_message(#cancel{} = M, Ctxt0) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
-
+    CallId = M#cancel.request_id,
+    Opts = M#cancel.options,
+    
     %% A response will be send asynchronously by another router process instance
-    juno_rpc:invoke(
-        M#call.request_id,
-        M#call.procedure_uri,
-        M#call.options,
-        M#call.arguments,
-        M#call.payload,
-        Ctxt);
+    Fun = fun(InvocationId, Callee, Ctxt1) ->
+        M = wamp_message:interrupt(InvocationId, Opts),
+        ok = juno:send(M, Callee, Ctxt1),
+        {ok, Ctxt1}
+    end,
+    {ok, _Ctxt2} = juno_rpc:dequeue_invocations(CallId, Fun, Ctxt0),
+    ok;
+   
 
-handle_message(#cancel{} = M, Ctxt) ->
-    %% TODO check if authorized and if not throw wamp.error.not_authorized
-
-    %% A response will be send asynchronously by another router process instance
-    juno_rpc:interrupt(
-        M#cancel.request_id,
-        M#cancel.options,
-        Ctxt);
-
-handle_message(#yield{} = M, Ctxt) ->
+handle_message(#yield{} = M, Ctxt0) ->
     %% A Callee is replying to a previous wamp_invocation() message 
     %% which we generated based on a Caller wamp_call() message
     %% We need to match the the wamp_yield() with the originating
@@ -237,23 +231,204 @@ handle_message(#yield{} = M, Ctxt) ->
     %% wamp_call() request_id and find the caller pid.
 
     %% @TODO
-    juno_rpc:result(
-        M#yield.request_id,
-        M#yield.options,
-        M#yield.arguments,
-        M#yield.payload,
-        Ctxt
-    );
+    Fun = fun(CallId, Caller, Ctxt1) ->
+        M = wamp_message:result(
+            CallId, 
+            M#yield.options,  %% TODO check if yield.options should be assigned to result.details
+            M#yield.arguments, 
+            M#yield.payload),
+        ok = juno:send(M, Caller, Ctxt1),
+        {ok, Ctxt1}
+    end,
+    {ok, _Ctxt2} = juno_rpc:dequeue_call(M#yield.request_id, Fun, Ctxt0),
+    ok;
 
-handle_message(#error{request_type = ?INVOCATION} = M, Ctxt) ->
-    juno_rpc:error(
-        M#error.request_id,
-        M#error.details,
-        M#error.error_uri,
-        M#error.arguments,
-        M#error.payload,
-        Ctxt
-    ).
+handle_message(#error{request_type = Type} = M, Ctxt0)
+when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
+    Fun = fun(CallId, Caller, Ctxt1) ->
+        M = wamp_message:error(
+                Type, 
+                CallId, 
+                M#error.details, 
+                M#error.error_uri, 
+                M#error.arguments, 
+                M#error.payload),
+        ok = juno:send(M, Caller, Ctxt1),
+        {ok, Ctxt1}
+    end,
+    {ok, _Ctxt2} = juno_rpc:dequeue_call(M#error.request_id, Fun, Ctxt0),
+    ok;
+
+handle_message(#call{procedure_uri = ?JUNO_USER_ADD} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_USER_DELETE} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_USER_LIST} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_USER_LOOKUP} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_USER_UPDATE} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_GROUP_ADD} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_GROUP_DELETE} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_GROUP_LIST} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_GROUP_LOOKUP} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_GROUP_UPDATE} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_SOURCE_ADD} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_SOURCE_DELETE} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_SOURCE_LIST} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = ?JUNO_SOURCE_LOOKUP} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    Res = #{
+        <<"exact">> => [], % @TODO
+        <<"prefix">> => [], % @TODO
+        <<"wildcard">> => [] % @TODO
+    },
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = <<"wamp.registration.lookup">>} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = <<"wamp.registration.match">>} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(
+    #call{procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(
+    #call{procedure_uri = <<"wamp.registration.count_callees">>} = M, Ctxt) ->
+    %% @TODO
+    ReqId = M#call.request_id,
+    Res = #{count => 0},
+    M = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(M, Ctxt);
+
+handle_message(#call{} = M, Ctxt0) ->
+    %% TODO check if authorized and if not throw wamp.error.not_authorized
+    Details = #{}, % @TODO
+
+    %% juno_rpc:invoke/5 takes a fun which takes the registration_id of the 
+    %% procedure and the callee
+    %% Based on procedure registration and passed options, juno_rpc will
+    %% determine how many invocations and to whom we should do.
+    Fun = fun(RegId, Callee, Ctxt1) ->
+        ReqId = wamp_id:new(global),
+        Args = M#call.arguments,
+        Payload = M#call.payload,
+        M = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
+        ok = juno:send(Callee, M, Ctxt1),
+        {ok, ReqId, Ctxt1}
+    end,
+
+    %% A response will be send asynchronously by another router process instance
+    {ok, _Ctxt2} = juno_rpc:invoke(
+        M#call.request_id,
+        M#call.procedure_uri,
+        Fun,
+        M#call.options,
+        Ctxt0),
+    ok.
 
 
 %% =============================================================================
