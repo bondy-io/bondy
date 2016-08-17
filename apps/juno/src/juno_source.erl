@@ -4,16 +4,17 @@
 
 
 -module(juno_source).
+-include_lib("wamp/include/wamp.hrl").
 
 -type source() :: map().
 
 -define(INFO_KEYS, [<<"description">>]).
 
--export([lookup/1]).
+-export([lookup/2]).
 % -export([add/1]).
 % -export([remove/1]).
--export([fetch/1]).
--export([list/0]).
+-export([fetch/2]).
+-export([list/1]).
 
 
 % %% -----------------------------------------------------------------------------
@@ -59,12 +60,12 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(list() | binary()) -> source() | not_found.
-lookup(Username) when is_binary(Username) ->
-    lookup(unicode:characters_to_list(Username, utf8));
+-spec lookup(uri(), list() | binary()) -> source() | not_found.
+lookup(RealmUri, Username) when is_binary(Username) ->
+    lookup(RealmUri, unicode:characters_to_list(Username, utf8));
 
-lookup(Username) ->
-    case juno_security:lookup_user_source(Username) of
+lookup(RealmUri, Username) ->
+    case juno_security:lookup_user_source(RealmUri, Username) of
         not_found -> not_found;
         Obj -> to_map(Obj)
     end.
@@ -74,12 +75,12 @@ lookup(Username) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(list() | binary()) -> source() | no_return().
-fetch(Id) when is_binary(Id) ->
-    fetch(unicode:characters_to_list(Id, utf8));
+-spec fetch(uri(), list() | binary()) -> source() | no_return().
+fetch(RealmUri, Id) when is_binary(Id) ->
+    fetch(RealmUri, unicode:characters_to_list(Id, utf8));
     
-fetch(Id) ->
-    case lookup(Id) of
+fetch(RealmUri, Id) ->
+    case lookup(RealmUri, Id) of
         not_found -> error(not_found);
         User -> User
     end.
@@ -89,9 +90,9 @@ fetch(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list() -> list(source()).
-list() ->
-    [to_map(Obj) || Obj <- juno_security:list(source)].
+-spec list(uri()) -> list(source()).
+list(RealmUri) ->
+    [to_map(Obj) || Obj <- juno_security:list(RealmUri, source)].
 
 
 

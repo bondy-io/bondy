@@ -33,17 +33,20 @@
 
 -export_type([realm/0]).
 
--export([delete/1]).
 -export([auth_methods/1]).
--export([is_security_enabled/1]).
+-export([delete/1]).
+-export([disable_security/1]).
+-export([enable_security/1]).
 -export([fetch/1]).
 -export([get/1]).
+-export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
 -export([put/1]).
 -export([put/2]).
--export([uri/1]).
+-export([security_status/1]).
 -export([select_auth_method/2]).
+-export([uri/1]).
 
 
 
@@ -66,6 +69,35 @@ is_security_enabled(#realm{authmethods = []}) ->
     false;
 is_security_enabled(#realm{}) ->
     true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec security_status(realm()) -> enabled | disabled.
+security_status(#realm{uri = Uri}) ->
+    juno_security:status(Uri).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec enable_security(realm()) -> ok.
+enable_security(#realm{uri = Uri} = Realm) ->
+    ok = juno_security:enable(Uri),
+    Realm.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec disable_security(realm()) -> ok.
+disable_security(#realm{uri = Uri} = Realm) ->
+    ok = juno_security:disable(Uri),
+    Realm.
 
 
 %% -----------------------------------------------------------------------------
@@ -150,7 +182,7 @@ put(Uri, Opts) ->
         authmethods = Method
     },
     ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
-    Realm.
+    enable_security(Realm).
 
 
 %% -----------------------------------------------------------------------------

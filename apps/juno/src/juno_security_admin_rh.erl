@@ -81,7 +81,7 @@ is_authorized(Req, State) ->
     {true, Req, State}.
 
 resource_exists(Req, #state{is_collection = true} = State0) ->
-    try lookup(State0#state.entity, id(State0)) of
+    try lookup(State0#state.entity, realm_uri(State0), id(State0)) of
         not_found ->
             {false, Req, State0};
         R ->
@@ -94,7 +94,7 @@ resource_exists(Req, #state{is_collection = true} = State0) ->
     end;
 
 resource_exists(Req, State0) ->
-    case lookup(State0#state.entity, id(State0)) of
+    case lookup(State0#state.entity, realm_uri(State0), id(State0)) of
         not_found ->
             {false, Req, State0};
         R ->
@@ -136,34 +136,37 @@ from_json(Req, St) ->
 id(State) ->
     maps:get(id, State#state.bindings).
 
+realm_uri(#state{realm_uri = Uri}) ->
+    Uri.
 
 %% @private
-lookup(user, Id) ->
-    juno_user:lookup(Id);
+lookup(user, RealmUri, Id) ->
+    juno_user:lookup(RealmUri, Id);
 
-lookup(group, Id) ->
-    juno_group:lookup(Id).
+lookup(group, RealmUri, Id) ->
+    juno_group:lookup(RealmUri, Id).
 
 
 %% @private
 delete(user, State) ->
-    juno_security:del_user(id(State));
+    
+    juno_security:del_user(realm_uri(State), id(State));
 
 delete(group, State) ->
-    juno_security:del_group(id(State));
+    juno_security:del_group(realm_uri(State), id(State));
 
 delete(source, #state{master = user} = State) ->
-    juno_security:del_user_source(id(State)).
+    juno_security:del_user_source(realm_uri(State), id(State)).
 
 
-list(user, _State) ->
-    juno_user:list();
+list(user, State) ->
+    juno_user:list(realm_uri(State));
 
-list(group, _State) ->
-    juno_group:list();
+list(group, State) ->
+    juno_group:list(realm_uri(State));
 
-list(source, _State) ->
-    juno_source:list().
+list(source, State) ->
+    juno_source:list(realm_uri(State)).
 
 %% @private
 % add_user(Username, Password, Info) ->

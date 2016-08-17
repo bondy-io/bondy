@@ -20,30 +20,59 @@
 % -module(riak_core_security).
 -module(juno_security).
 
+
+
 %% printing functions
--export([print_users/0, print_sources/0, print_user/1,
-         print_groups/0, print_group/1, print_grants/1]).
+-export([print_users/1, print_sources/1, print_user/2,
+         print_groups/1, print_group/2, print_grants/2]).
 
 %% type exports
 -export_type([context/0]).
 
 %% API
--export([authenticate/3, add_user/2, alter_user/2, del_user/1,
-         add_group/2, alter_group/2, del_group/1,
-         add_source/4, del_source/2,
-         add_grant/3, add_revoke/3, check_permission/2, check_permissions/2,
-         get_username/1, is_enabled/0, enable/0, disable/0, status/0,
-         get_ciphers/0, set_ciphers/1, print_ciphers/0]).
+-export([authenticate/4, add_user/3, alter_user/3, del_user/2,
+         add_group/3, alter_group/3, del_group/2,
+         add_source/5, del_source/3,
+         add_grant/4, add_revoke/4, check_permission/3, check_permissions/3,
+         get_username/1, is_enabled/1, enable/1, disable/1, status/1,
+         get_ciphers/1, set_ciphers/2, print_ciphers/1]).
 
 %% =============================================================================
 %% ADDED BY US
 %% =============================================================================
--export([lookup_user/1]).
--export([lookup_group/1]).
--export([lookup_user_source/1]).
--export([del_user_source/1]).
--export([user_groups/1]).
--export([list/1]).
+-define(FULL_PREFIX(RealmUri, A, B), 
+    {<<RealmUri/binary, $., A/binary>>, B}
+).
+-define(USERS_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"users">>)
+).
+-define(GROUPS_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"groups">>)
+).
+-define(SOURCES_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"sources">>)
+).
+-define(USER_GRANTS_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"usergrants">>)
+).
+-define(GROUP_GRANTS_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"groupgrants">>)
+).
+-define(STATUS_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"status">>)
+).
+-define(CONFIG_PREFIX(RealmUri), 
+    ?FULL_PREFIX(RealmUri, <<"security">>, <<"config">>)
+).
+
+-type uri() :: binary() | string().
+
+-export([lookup_user/2]).
+-export([lookup_group/2]).
+-export([lookup_user_source/2]).
+-export([del_user_source/2]).
+-export([user_groups/2]).
+-export([list/2]).
 %% =============================================================================
 
 
@@ -99,6 +128,14 @@
 -type permission() :: {string()} | {string(), bucket()}.
 -type userlist() :: all | [string()].
 
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 prettyprint_users([all], _) ->
     "all";
 prettyprint_users(Users0, Width) ->
@@ -106,27 +143,38 @@ prettyprint_users(Users0, Width) ->
     Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
     prettyprint_permissions(Users, Width).
 
-print_sources() ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+print_sources(RealmUri) ->
+    Uri = name2bin(RealmUri),
     Sources = plumtree_metadata:fold(fun({{Username, CIDR}, [{Source, Options}]}, Acc) ->
                                               [{Username, CIDR, Source, Options}|Acc];
                                          ({{_, _}, [?TOMBSTONE]}, Acc) ->
                                               Acc
-                                      end, [], {<<"security">>, <<"sources">>}),
+                                      end, [], ?SOURCES_PREFIX(Uri)),
 
-    print_sources(Sources).
+    do_print_sources(Sources).
 
-print_sources(Sources) ->
+%% @private
+do_print_sources(Sources) ->
     GS = group_sources(Sources),
     juno_console_table:print([{users, 20}, {cidr, 10}, {source, 10}, {options, 10}],
                 [[prettyprint_users(Users, 20), prettyprint_cidr(CIDR),
                   atom_to_list(Source), io_lib:format("~p", [Options])] ||
             {Users, CIDR, Source, Options} <- GS]).
 
--spec print_user(Username :: string()) ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_user(RealmUri :: uri(), Username :: string()) ->
     ok | {error, term()}.
-print_user(User) ->
+print_user(RealmUri, User) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(User),
-    Details = user_details(Name),
+    Details = user_details(Uri, Name),
     case Details of
         undefined ->
             {error, {unknown_user, Name}};
@@ -134,16 +182,21 @@ print_user(User) ->
             print_users([{Name, [Details]}])
     end.
 
-print_users() ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+print_users(RealmUri) ->
+    Uri = name2bin(RealmUri),
     Users = plumtree_metadata:fold(fun({_Username, [?TOMBSTONE]}, Acc) ->
                                             Acc;
                                         ({Username, Options}, Acc) ->
                                     [{Username, Options}|Acc]
-                            end, [], {<<"security">>, <<"users">>}),
-    print_users(Users).
+                            end, [], ?USERS_PREFIX(Uri)),
+    do_print_users(Uri, Users).
 
-
-print_users(Users) ->
+%% @private
+do_print_users(RealmUri, Users) ->
     juno_console_table:print([{username, 10}, {'member of', 15}, {password, 40}, {options, 30}],
                 [begin
                      Groups = case proplists:get_value("groups", Options) of
@@ -152,7 +205,7 @@ print_users(Users) ->
                                  List ->
                                      prettyprint_permissions([unicode:characters_to_list(R, utf8)
                                                               || R <- List,
-                                                                 group_exists(R)], 20)
+                                                                 group_exists(RealmUri, R)], 20)
                              end,
                      Password = case proplists:get_value("password", Options) of
                                     undefined ->
@@ -168,28 +221,38 @@ print_users(Users) ->
                  end ||
             {Username, [Options]} <- Users]).
 
--spec print_group(Group :: string()) ->
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_group(RealmUri :: uri(), Group :: string()) ->
     ok | {error, term()}.
-print_group(Group) ->
+print_group(RealmUri, Group) ->
     Name = name2bin(Group),
-    Details = group_details(Name),
+    Details = group_details(RealmUri, Name),
     case Details of
         undefined ->
             {error, {unknown_group, Name}};
         _ ->
-            print_groups([{Name, [Details]}])
+            do_print_groups(RealmUri, [{Name, [Details]}])
     end.
 
-print_groups() ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+print_groups(RealmUri) ->
+    Uri = name2bin(RealmUri),
     Groups = plumtree_metadata:fold(fun({_Groupname, [?TOMBSTONE]}, Acc) ->
                                              Acc;
                                         ({Groupname, Options}, Acc) ->
                                     [{Groupname, Options}|Acc]
-                            end, [], {<<"security">>, <<"groups">>}),
-    print_groups(Groups).
+                            end, [], ?GROUPS_PREFIX(Uri)),
+    do_print_groups(RealmUri, Groups).
 
-
-print_groups(Groups) ->
+%% @private
+do_print_groups(RealmUri, Groups) ->
     juno_console_table:print([{group, 10}, {'member of', 15}, {options, 30}],
                 [begin
                      GroupOptions = case proplists:get_value("groups", Options) of
@@ -198,7 +261,7 @@ print_groups(Groups) ->
                                  List ->
                                      prettyprint_permissions([unicode:characters_to_list(R, utf8)
                                                               || R <- List,
-                                                                 group_exists(R)], 20)
+                                                                 group_exists(RealmUri, R)], 20)
                              end,
                      OtherOptions = lists:keydelete("groups", 1, Options),
                      [Groupname, GroupOptions,
@@ -206,15 +269,20 @@ print_groups(Groups) ->
                  end ||
             {Groupname, [Options]} <- Groups]).
 
--spec print_grants(Rolename :: string()) ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_grants(RealmUri :: uri(), Rolename :: string()) ->
     ok | {error, term()}.
-print_grants(RoleName) ->
+print_grants(RealmUri, RoleName) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(RoleName),
     case is_prefixed(Name) of
         true ->
-            print_grants(chop_name(Name), role_type(Name));
+            print_grants(chop_name(Name), role_type(Uri, Name));
         false ->
-            case { print_grants(Name, user), print_grants(Name, group) } of
+            case { print_grants(Uri, Name, user), print_grants(Name, group) } of
                 {{error, _}, {error, _}} ->
                     {error, {unknown_role, Name}};
                 _ ->
@@ -222,14 +290,14 @@ print_grants(RoleName) ->
             end
     end.
 
-print_grants(User, unknown) ->
+print_grants(_, User, unknown) ->
     {error, {unknown_role, User}};
-print_grants(User, user) ->
-    case user_details(User) of
+print_grants(RealmUri, User, user) ->
+    case user_details(RealmUri, User) of
         undefined ->
             {error, {unknown_user, User}};
         _U ->
-            Grants = accumulate_grants(User, user),
+            Grants = accumulate_grants(RealmUri, User, user),
 
             juno_console_table:print(
               io_lib:format("Inherited permissions (user/~ts)", [User]),
@@ -287,12 +355,12 @@ print_grants(User, user) ->
                          {Bucket, Permissions} <- GroupedGrants]),
             ok
     end;
-print_grants(Group, group) ->
-    case group_details(Group) of
+print_grants(RealmUri, Group, group) ->
+    case group_details(RealmUri, Group) of
         undefined ->
             {error, {unknown_group, Group}};
         _U ->
-            Grants = accumulate_grants(Group, group),
+            Grants = accumulate_grants(RealmUri, Group, group),
 
             juno_console_table:print(
               io_lib:format("Inherited permissions (group/~ts)", [Group]),
@@ -366,10 +434,11 @@ prettyprint_permissions([Permission|Rest], Width, [H|T] =Acc) ->
 prettyprint_permissions([Permission|Rest], Width, Acc) ->
     prettyprint_permissions(Rest, Width, [[Permission] | Acc]).
 
--spec check_permission(Permission :: permission(), Context :: context()) ->
+-spec check_permission(
+    Permission :: permission(), uri(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
-check_permission({Permission}, Context0) ->
-    Context = maybe_refresh_context(Context0),
+check_permission({Permission}, RealmUri,  Context0) ->
+    Context = maybe_refresh_context(RealmUri, Context0),
     %% The user needs to have this permission applied *globally*
     %% This is for things like mapreduce with undetermined inputs or
     %% permissions that don't tie to a particular bucket, like 'ping' and
@@ -385,8 +454,8 @@ check_permission({Permission}, Context0) ->
                        Context#context.username, "' does not have '",
                        Permission, "' on any"], utf8, utf8), Context}
     end;
-check_permission({Permission, Bucket}, Context0) ->
-    Context = maybe_refresh_context(Context0),
+check_permission(RealmUri, {Permission, Bucket}, Context0) ->
+    Context = maybe_refresh_context(RealmUri, Context0),
     MatchG = match_grant(Bucket, Context#context.grants),
     case lists:member(Permission, MatchG) of
         true ->
@@ -400,15 +469,15 @@ check_permission({Permission, Bucket}, Context0) ->
                        bucket2iolist(Bucket)], utf8, utf8), Context}
     end.
 
-check_permissions(Permission, Ctx) when is_tuple(Permission) ->
+check_permissions(Permission, RealmUri, Ctx) when is_tuple(Permission) ->
     %% single permission
-    check_permission(Permission, Ctx);
-check_permissions([], Ctx) ->
+    check_permission(Permission, RealmUri, Ctx);
+check_permissions([], _, Ctx) ->
     {true, Ctx};
-check_permissions([Permission|Rest], Ctx) ->
-    case check_permission(Permission, Ctx) of
+check_permissions([Permission|Rest], RealmUri, Ctx) ->
+    case check_permission(Permission, RealmUri, Ctx) of
         {true, NewCtx} ->
-            check_permissions(Rest, NewCtx);
+            check_permissions(Rest, RealmUri, NewCtx);
         Other ->
             %% return non-standard result
             Other
@@ -417,10 +486,14 @@ check_permissions([Permission|Rest], Ctx) ->
 get_username(#context{username=Username}) ->
     Username.
 
--spec authenticate(Username::binary(), Password::binary(), ConnInfo ::
-                   [{atom(), any()}]) -> {ok, context()} | {error, term()}.
-authenticate(Username, Password, ConnInfo) ->
-    case user_details(Username) of
+-spec authenticate(
+    RealmUri :: uri(), 
+    Username::binary(), 
+    Password::binary(), 
+    ConnInfo :: [{atom(), any()}]) -> {ok, context()} | {error, term()}.
+authenticate(RealmUri, Username, Password, ConnInfo) ->
+    Uri = name2bin(RealmUri),
+    case user_details(RealmUri, Username) of
         undefined ->
             {error, unknown_user};
         UserData ->
@@ -428,7 +501,7 @@ authenticate(Username, Password, ConnInfo) ->
                                                       [{Un, CIDR, Source, Options}|Acc];
                                                   ({{_, _}, [?TOMBSTONE]}, Acc) ->
                                                        Acc
-                                              end, [], {<<"security">>, <<"sources">>}),
+                                              end, [], ?SOURCES_PREFIX(Uri)),
             Sources = sort_sources(Sources0),
             case match_source(Sources, Username,
                               proplists:get_value(ip, ConnInfo)) of
@@ -436,7 +509,7 @@ authenticate(Username, Password, ConnInfo) ->
                     case Source of
                         trust ->
                             %% trust always authenticates
-                            {ok, get_context(Username)};
+                            {ok, get_context(Uri, Username)};
                         password ->
                             %% pull the password out of the userdata
                             case lookup("password", UserData) of
@@ -456,7 +529,7 @@ authenticate(Username, Password, ConnInfo) ->
                                                                           Salt,
                                                                           Iterations) of
                                         true ->
-                                            {ok, get_context(Username)};
+                                            {ok, get_context(Uri, Username)};
                                         false ->
                                             {error, bad_password}
                                     end
@@ -470,7 +543,7 @@ authenticate(Username, Password, ConnInfo) ->
                                     %% common-name to username, should we?
                                     case name2bin(CN) == Username of
                                         true ->
-                                            {ok, get_context(Username)};
+                                            {ok, get_context(Uri, Username)};
                                         false ->
                                             {error, common_name_mismatch}
                                     end
@@ -489,7 +562,7 @@ authenticate(Username, Password, ConnInfo) ->
                                     case AuthMod:auth(Username, Password,
                                                       UserData, SourceOptions) of
                                         ok ->
-                                            {ok, get_context(Username)};
+                                            {ok, get_context(Uri, Username)};
                                         error ->
                                             {error, bad_password}
                                     end
@@ -500,35 +573,50 @@ authenticate(Username, Password, ConnInfo) ->
             end
     end.
 
--spec add_user(Username :: string(), Options :: [{string(), term()}]) ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_user(
+    RealmUri :: binary(), 
+    Username :: string(), 
+    Options :: [{string(), term()}]) ->
     ok | {error, term()}.
-add_user(Username, Options) ->
-    add_role(name2bin(Username), Options,
-             fun user_exists/1,
-             {<<"security">>, <<"users">>}).
+add_user(RealmUri, Username, Options) ->
+    Uri = name2bin(RealmUri),
+    FP = ?USERS_PREFIX(Uri),
+    add_role(
+        Uri, name2bin(Username), Options, fun user_exists/2, FP).
 
--spec add_group(Groupname :: string(), Options :: [{string(), term()}]) ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_group(
+    binary(), Groupname :: string(), Options :: [{string(), term()}]) ->
     ok | {error, term()}.
-add_group(Groupname, Options) ->
-    add_role(name2bin(Groupname), Options, fun group_exists/1,
-             {<<"security">>, <<"groups">>}).
+add_group(RealmUri, Groupname, Options) ->
+    Uri = name2bin(RealmUri),
+    add_role(Uri, name2bin(Groupname), Options, fun group_exists/2,
+             ?GROUPS_PREFIX(Uri)).
 
-add_role(<<"all">>, _Options, _Fun, _Prefix) ->
+%% @private
+add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
-add_role(<<"on">>, _Options, _Fun, _Prefix) ->
+add_role(_, <<"on">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
-add_role(<<"to">>, _Options, _Fun, _Prefix) ->
+add_role(_, <<"to">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
-add_role(<<"from">>, _Options, _Fun, _Prefix) ->
+add_role(_, <<"from">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
-add_role(<<"any">>, _Options, _Fun, _Prefix) ->
+add_role(_, <<"any">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
-add_role(Name, Options, ExistenceFun, Prefix) ->
+add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     case illegal_name_chars(unicode:characters_to_list(Name, utf8)) of
         false ->
             case ExistenceFun(unicode:characters_to_list(Name, utf8)) of
                 false ->
-                    case validate_options(Options) of
+                    case validate_options(RealmUri, Options) of
                         {ok, NewOptions} ->
                             plumtree_metadata:put(Prefix, Name, NewOptions),
                             ok;
@@ -543,67 +631,75 @@ add_role(Name, Options, ExistenceFun, Prefix) ->
     end.
 
 
--spec alter_user(Username :: string(), Options :: [{string(), term()}]) ->
+-spec alter_user(
+    RealmUri :: binary(), 
+    Username :: string(), 
+    Options :: [{string(), term()}]) ->
     ok | {error, term()}.
-alter_user("all", _Options) ->
+alter_user(_, "all", _Options) ->
     {error, reserved_name};
-alter_user(Username, Options) ->
+alter_user(RealmUri, Username, Options) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(Username),
-    case user_details(Name) of
+    case user_details(Uri, Name) of
         undefined ->
             {error, {unknown_user, Name}};
         UserData ->
-            case validate_options(Options) of
+            case validate_options(RealmUri, Options) of
                 {ok, NewOptions} ->
                     MergedOptions = lists:ukeymerge(1, lists:sort(NewOptions),
                                                     lists:sort(UserData)),
 
-                    plumtree_metadata:put({<<"security">>, <<"users">>},
-                                           Name, MergedOptions),
+                    plumtree_metadata:put(
+                        ?USERS_PREFIX(Uri),Name, MergedOptions),
                     ok;
                 Error ->
                     Error
             end
     end.
 
--spec alter_group(Groupname :: string(), Options :: [{string(), term()}]) ->
+-spec alter_group(
+    RealmUri :: binary(), 
+    Groupname :: string(), 
+    Options :: [{string(), term()}]) ->
     ok | {error, term()}.
-alter_group("all", _Options) ->
+alter_group(_, "all", _Options) ->
     {error, reserved_name};
-alter_group(Groupname, Options) ->
+alter_group(RealmUri, Groupname, Options) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(Groupname),
-    case group_details(Groupname) of
+    case group_details(Uri, Groupname) of
         undefined ->
             {error, {unknown_group, Name}};
         GroupData ->
-            case validate_groups_option(Options) of
+            case validate_groups_option(Uri, Options) of
                 {ok, NewOptions} ->
                     MergedOptions = lists:ukeymerge(1, lists:sort(NewOptions),
                                                     lists:sort(GroupData)),
 
-                    plumtree_metadata:put({<<"security">>, <<"groups">>},
-                                           Name, MergedOptions),
+                    plumtree_metadata:put(
+                        ?GROUPS_PREFIX(Uri), Name, MergedOptions),
                     ok;
                 Error ->
                     Error
             end
     end.
 
--spec del_user(Username :: string()) ->
+-spec del_user(RealmUri :: binary(), Username :: string()) ->
     ok | {error, term()}.
-del_user("all") ->
+del_user(_, "all") ->
     {error, reserved_name};
-del_user(Username) ->
+del_user(RealmUri, Username) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(Username),
-    case user_exists(Name) of
+    case user_exists(Uri, Name) of
         false ->
             {error, {unknown_user, Name}};
         true ->
-            plumtree_metadata:delete({<<"security">>, <<"users">>},
-                                      Name),
+            plumtree_metadata:delete(?USERS_PREFIX(RealmUri), Name),
             %% delete any associated grants, so if a user with the same name
             %% is added again, they don't pick up these grants
-            Prefix = {<<"security">>, <<"usergrants">>},
+            Prefix = ?USER_GRANTS_PREFIX(Uri),
             plumtree_metadata:fold(fun({Key, _Value}, Acc) ->
                                             %% apparently destructive
                                             %% iteration is allowed
@@ -612,25 +708,26 @@ del_user(Username) ->
                                     end, undefined,
                                     Prefix,
                                     [{match, {Name, '_'}}]),
-            delete_user_from_sources(Name),
+            delete_user_from_sources(Uri, Name),
             ok
     end.
 
--spec del_group(Groupname :: string()) ->
+-spec del_group(RealmUri :: binary(), Groupname :: string()) ->
     ok | {error, term()}.
-del_group("all") ->
+del_group(_, "all") ->
     {error, reserved_name};
-del_group(Groupname) ->
+del_group(RealmUri, Groupname) ->
+    Uri = name2bin(RealmUri),
     Name = name2bin(Groupname),
-    case group_exists(Name) of
+    case group_exists(RealmUri, Name) of
         false ->
             {error, {unknown_group, Name}};
         true ->
-            plumtree_metadata:delete({<<"security">>, <<"groups">>},
+            plumtree_metadata:delete(?GROUPS_PREFIX(Uri),
                                       Name),
             %% delete any associated grants, so if a user with the same name
             %% is added again, they don't pick up these grants
-            Prefix = {<<"security">>, <<"groupgrants">>},
+            Prefix = ?GROUP_GRANTS_PREFIX(Uri),
             plumtree_metadata:fold(fun({Key, _Value}, Acc) ->
                                             %% apparently destructive
                                             %% iteration is allowed
@@ -639,23 +736,24 @@ del_group(Groupname) ->
                                     end, undefined,
                                     Prefix,
                                     [{match, {Name, '_'}}]),
-            delete_group_from_roles(Name),
+            delete_group_from_roles(Uri, Name),
             ok
     end.
 
--spec add_grant(userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
-add_grant(all, Bucket, Grants) ->
+-spec add_grant(
+    binary(), userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
+add_grant(RealmUri, all, Bucket, Grants) ->
     %% all is always valid
     case validate_permissions(Grants) of
         ok ->
-            add_grant_int([{all, group}], bucket2bin(Bucket), Grants);
+            add_grant_int([{all, group}], RealmUri, bucket2bin(Bucket), Grants);
         Error ->
             Error
     end;
-add_grant(RoleList, Bucket, Grants) ->
+add_grant(RealmUri, RoleList, Bucket, Grants) ->
     RoleTypes = lists:map(
                   fun(Name) -> {chop_name(name2bin(Name)),
-                                role_type(name2bin(Name))} end,
+                                role_type(RealmUri, name2bin(Name))} end,
                   RoleList
                  ),
 
@@ -678,25 +776,26 @@ add_grant(RoleList, Bucket, Grants) ->
     case check_grant_blockers(UnknownRoles, NameOverlaps,
                               validate_permissions(Grants)) of
         none ->
-            add_grant_int(RoleTypes, bucket2bin(Bucket), Grants);
+            add_grant_int(RoleTypes, RealmUri, bucket2bin(Bucket), Grants);
         Error ->
             Error
     end.
 
 
--spec add_revoke(userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
-add_revoke(all, Bucket, Revokes) ->
+-spec add_revoke(
+    binary(), userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
+add_revoke(RealmUri, all, Bucket, Revokes) ->
     %% all is always valid
     case validate_permissions(Revokes) of
         ok ->
-            add_revoke_int([{all, group}], bucket2bin(Bucket), Revokes);
+            add_revoke_int([{all, group}], RealmUri, bucket2bin(Bucket), Revokes);
         Error ->
             Error
     end;
-add_revoke(RoleList, Bucket, Revokes) ->
+add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
     RoleTypes = lists:map(
                    fun(Name) -> {chop_name(name2bin(Name)),
-                                 role_type(name2bin(Name))} end,
+                                 role_type(RealmUri, name2bin(Name))} end,
                    RoleList
                  ),
 
@@ -719,29 +818,34 @@ add_revoke(RoleList, Bucket, Revokes) ->
     case check_grant_blockers(UnknownRoles, NameOverlaps,
                               validate_permissions(Revokes)) of
         none ->
-            add_revoke_int(RoleTypes, bucket2bin(Bucket), Revokes);
+            add_revoke_int(RoleTypes, RealmUri, bucket2bin(Bucket), Revokes);
         Error ->
             Error
     end.
 
--spec add_source(userlist(), CIDR :: {inet:ip_address(), non_neg_integer()},
-                 Source :: atom(),
-                 Options :: [{string(), term()}]) -> ok | {error, term()}.
-add_source(all, CIDR, Source, Options) ->
+-spec add_source(
+    RealmUri :: binary(), 
+    userlist(), 
+    CIDR :: {inet:ip_address(), non_neg_integer()},
+    Source :: atom(),
+    Options :: [{string(), term()}]) -> ok | {error, term()}.
+add_source(RealmUri, all, CIDR, Source, Options) ->
+    Uri = name2bin(RealmUri),
     %% all is always valid
 
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
-    plumtree_metadata:put({<<"security">>, <<"sources">>},
-                           {all, anchor_mask(CIDR)},
-                           {Source, Options}),
+    plumtree_metadata:put(
+        ?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}, {Source, Options}),
     ok;
-add_source(Users, CIDR, Source, Options) ->
+
+add_source(RealmUri, Users, CIDR, Source, Options) ->
+    Uri = name2bin(RealmUri),
     UserList = lists:map(fun name2bin/1, Users),
 
     %% We only allow sources to be assigned to users, so don't check
     %% for valid group names
-    UnknownUsers = unknown_roles(UserList, user),
+    UnknownUsers = unknown_roles(Uri, UserList, user),
 
     Valid = case UnknownUsers of
                 [] ->
@@ -755,49 +859,56 @@ add_source(Users, CIDR, Source, Options) ->
     case Valid of
         ok ->
             %% add a source for each user
-            add_source_int(UserList, anchor_mask(CIDR), Source,
-                                    Options),
+            add_source_int(
+                RealmUri, UserList, anchor_mask(CIDR), Source, Options),
             ok;
         Error ->
             Error
     end.
 
-del_source(all, CIDR) ->
+del_source(RealmUri, all, CIDR) ->
+    Uri = name2bin(RealmUri),
     %% all is always valid
-    plumtree_metadata:delete({<<"security">>, <<"sources">>},
-                              {all, anchor_mask(CIDR)}),
+    plumtree_metadata:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
     ok;
-del_source(Users, CIDR) ->
+
+del_source(RealmUri, Users, CIDR) ->
+    Uri = name2bin(RealmUri),
     UserList = lists:map(fun name2bin/1, Users),
-    _ = [plumtree_metadata:delete({<<"security">>, <<"sources">>},
-                                   {User, anchor_mask(CIDR)}) || User <- UserList],
+    _ = [plumtree_metadata:delete(
+            ?SOURCES_PREFIX(Uri), {User, anchor_mask(CIDR)}) 
+            || User <- UserList],
     ok.
 
-is_enabled() ->
-    case plumtree_metadata:get({<<"security">>, <<"status">>}, enabled) of
+
+is_enabled(RealmUri) ->
+    Uri = name2bin(RealmUri),
+    case plumtree_metadata:get(?STATUS_PREFIX(Uri), enabled) of
     true -> true;
     _ -> false
     end.
 
 
-enable() ->
-    plumtree_metadata:put({<<"security">>, <<"status">>}, enabled, true).
+enable(RealmUri) ->
+    Uri = name2bin(RealmUri),
+    plumtree_metadata:put(?STATUS_PREFIX(Uri), enabled, true).
 
 
-get_ciphers() ->
-    case plumtree_metadata:get({<<"security">>, <<"config">>}, ciphers) of
+get_ciphers(RealmUri) ->
+    Uri = name2bin(RealmUri),
+    case plumtree_metadata:get(?CONFIG_PREFIX(Uri), ciphers) of
         undefined ->
             ?DEFAULT_CIPHER_LIST;
         Result ->
             Result
     end.
 
-print_ciphers() ->
-    Ciphers = get_ciphers(),
+print_ciphers(RealmUri) ->
+    Ciphers = get_ciphers(RealmUri),
     {Good, Bad} = parse_ciphers(Ciphers),
     io:format("Configured ciphers~n~n~s~n~n", [Ciphers]),
     io:format("Valid ciphers(~b)~n~n~s~n~n",
-              [length(Good), print_ciphers(Good)]),
+              [length(Good), do_print_ciphers(Good)]),
     case Bad of
         [] ->
             ok;
@@ -806,25 +917,27 @@ print_ciphers() ->
                       [length(Bad), string:join(Bad, ":")])
     end.
 
-set_ciphers(CipherList) ->
+set_ciphers(RealmUri, CipherList) ->
+    Uri = name2bin(RealmUri),
     case parse_ciphers(CipherList) of
         {[], _} ->
             %% no valid ciphers
             io:format("No known or supported ciphers in list.~n"),
             error;
         _ ->
-            plumtree_metadata:put({<<"security">>, <<"config">>}, ciphers,
+            plumtree_metadata:put(?CONFIG_PREFIX(Uri), ciphers,
                                    CipherList),
             ok
     end.
 
-disable() ->
-    plumtree_metadata:put({<<"security">>, <<"status">>},
-                           enabled, false).
+disable(RealmUri) ->
+    Uri = name2bin(RealmUri),
+    plumtree_metadata:put(?STATUS_PREFIX(Uri), enabled, false).
 
-status() ->
-    Enabled = plumtree_metadata:get({<<"security">>, <<"status">>}, enabled,
-                                    [{default, false}]),
+status(RealmUri) ->
+    Uri = name2bin(RealmUri),
+    Enabled = plumtree_metadata:get(
+        ?STATUS_PREFIX(Uri), enabled, [{default, false}]),
     case Enabled of
         true ->
             enabled;
@@ -836,23 +949,26 @@ status() ->
 %% INTERNAL
 %% ============
 
-metadata_grant_prefix(user) ->
-    {<<"security">>, <<"usergrants">>};
-metadata_grant_prefix(group) ->
-    {<<"security">>, <<"groupgrants">>}.
+metadata_grant_prefix(RealmUri, user) ->
+    Uri = name2bin(RealmUri),
+    ?USER_GRANTS_PREFIX(Uri);
+
+metadata_grant_prefix(RealmUri, group) ->
+    Uri = name2bin(RealmUri),
+    ?GROUP_GRANTS_PREFIX(Uri).
 
 
-add_revoke_int([], _, _) ->
+add_revoke_int([], _, _, _) ->
     ok;
-add_revoke_int([{Name, RoleType}|Roles], Bucket, Permissions) ->
-    Prefix = metadata_grant_prefix(RoleType),
+add_revoke_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
+    Prefix = metadata_grant_prefix(RealmUri, RoleType),
     RoleGrants = plumtree_metadata:get(Prefix, {Name, Bucket}),
 
     %% check if there is currently a GRANT we can revoke
     case RoleGrants of
         undefined ->
             %% can't REVOKE what wasn't GRANTED
-            add_revoke_int(Roles, Bucket, Permissions);
+            add_revoke_int(Roles, RealmUri, Bucket, Permissions);
         GrantedPermissions ->
             NewPerms = [X || X <- GrantedPermissions, not lists:member(X,
                                                                        Permissions)],
@@ -866,20 +982,23 @@ add_revoke_int([{Name, RoleType}|Roles], Bucket, Permissions) ->
                 _ ->
                     plumtree_metadata:put(Prefix, {Name, Bucket}, NewPerms)
             end,
-            add_revoke_int(Roles, Bucket, Permissions)
+            add_revoke_int(Roles, RealmUri, Bucket, Permissions)
     end.
 
-add_source_int([], _, _, _) ->
+add_source_int([], _, _, _, _) ->
     ok;
-add_source_int([User|Users], CIDR, Source, Options) ->
-    plumtree_metadata:put({<<"security">>, <<"sources">>}, {User, CIDR},
-                           {Source, Options}),
-    add_source_int(Users, CIDR, Source, Options).
+add_source_int(Users, RealmUri, CIDR, Source, Options) when is_list(RealmUri) ->
+    add_source_int(Users, name2bin(RealmUri), CIDR, Source, Options);
 
-add_grant_int([], _, _) ->
+add_source_int([User|Users], Uri, CIDR, Source, Options) ->
+    plumtree_metadata:put(
+        ?SOURCES_PREFIX(Uri), {User, CIDR}, {Source, Options}),
+    add_source_int(Users, Uri, CIDR, Source, Options).
+
+add_grant_int([], _, _, _) ->
     ok;
-add_grant_int([{Name, RoleType}|Roles], Bucket, Permissions) ->
-    Prefix = metadata_grant_prefix(RoleType),
+add_grant_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
+    Prefix = metadata_grant_prefix(RealmUri, RoleType),
     BucketPermissions = case plumtree_metadata:get(Prefix, {Name, Bucket}) of
                             undefined ->
                                 [];
@@ -889,7 +1008,7 @@ add_grant_int([{Name, RoleType}|Roles], Bucket, Permissions) ->
     NewPerms = lists:umerge(lists:sort(BucketPermissions),
                             lists:sort(Permissions)),
     plumtree_metadata:put(Prefix, {Name, Bucket}, NewPerms),
-    add_grant_int(Roles, Bucket, Permissions).
+    add_grant_int(Roles, RealmUri, Bucket, Permissions).
 
 match_grant(Bucket, Grants) ->
     AnyGrants = proplists:get_value(any, Grants, []),
@@ -904,13 +1023,13 @@ match_grant(Bucket, Grants) ->
                         Acc
                 end, [], Grants)), lists:sort(AnyGrants)).
 
-maybe_refresh_context(Context) ->
+maybe_refresh_context(RealmUri, Context) ->
     %% TODO replace this with a cluster metadata hash check, or something
     Epoch = os:timestamp(),
     case timer:now_diff(Epoch, Context#context.epoch) < ?REFRESH_TIME of
         false ->
             %% context has expired
-            get_context(Context#context.username);
+            get_context(RealmUri, Context#context.username);
         _ ->
             Context
     end.
@@ -924,32 +1043,33 @@ concat_role(group, Name) ->
 %% Contexts are only valid until the GRANT epoch changes, and it will change
 %% whenever a GRANT or a REVOKE is performed. This is a little coarse grained
 %% right now, but it'll do for the moment.
-get_context(Username) when is_binary(Username) ->
-    Grants = group_grants(accumulate_grants(Username, user)),
+get_context(RealmUri, Username) when is_binary(Username) ->
+    Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
     #context{username=Username, grants=Grants, epoch=os:timestamp()}.
 
-accumulate_grants(Role, Type) ->
+accumulate_grants(RealmUri, Role, Type) ->
     %% The 'all' grants always apply
     All = plumtree_metadata:fold(fun({{_R, _Bucket}, [?TOMBSTONE]}, A) ->
                                           A;
                                      ({{_R, Bucket}, [Permissions]}, A) ->
                                           [{{<<"group/all">>, Bucket},
                                             Permissions}|A]
-                                  end, [], metadata_grant_prefix(group),
+                                  end, [], metadata_grant_prefix(RealmUri, group),
                                   [{match, {all, '_'}}]),
-    {Grants, _Seen} = accumulate_grants([Role], [], All, Type),
+    {Grants, _Seen} = accumulate_grants([Role], [], All, Type, RealmUri),
     lists:flatten(Grants).
 
-accumulate_grants([], Seen, Acc, _Type) ->
+accumulate_grants([], Seen, Acc, _Type, _) ->
     {Acc, Seen};
-accumulate_grants([Role|Roles], Seen, Acc, Type) ->
-    Options = role_details(Role, Type),
+accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
+    Options = role_details(RealmUri, Role, Type),
     Groups = [G || G <- lookup("groups", Options, []),
                         not lists:member(G,Seen),
-                        group_exists(G)],
-    {NewAcc, NewSeen} = accumulate_grants(Groups, [Role|Seen], Acc, group),
+                        group_exists(RealmUri, G)],
+    {NewAcc, NewSeen} = accumulate_grants(
+        Groups, [Role|Seen], Acc, group, RealmUri),
 
-    Prefix = metadata_grant_prefix(Type),
+    Prefix = metadata_grant_prefix(RealmUri, Type),
 
     Grants = plumtree_metadata:fold(fun({{_R, _Bucket}, [?TOMBSTONE]}, A) ->
                                              A;
@@ -958,7 +1078,7 @@ accumulate_grants([Role|Roles], Seen, Acc, Type) ->
                                                Permissions}|A]
                                      end, [], Prefix,
                                      [{match, {Role, '_'}}]),
-    accumulate_grants(Roles, NewSeen, [Grants|NewAcc], Type).
+    accumulate_grants(Roles, NewSeen, [Grants|NewAcc], Type, RealmUri).
 
 %% lookup a key in a list of key/value tuples. Like proplists:get_value but
 %% faster.
@@ -1008,17 +1128,17 @@ prettyprint_cidr({Addr, Mask}) ->
 
 
 
-validate_options(Options) ->
+validate_options(RealmUri, Options) ->
     %% Check if password is an option
     case lookup("password", Options) of
         undefined ->
-            validate_groups_option(Options);
+            validate_groups_option(RealmUri, Options);
         Pass ->
             {ok, NewOptions} = validate_password_option(Pass, Options),
-            validate_groups_option(NewOptions)
+            validate_groups_option(RealmUri, NewOptions)
     end.
 
-validate_groups_option(Options) ->
+validate_groups_option(RealmUri, Options) ->
     case lookup("groups", Options) of
         undefined ->
             {ok, Options};
@@ -1027,7 +1147,7 @@ validate_groups_option(Options) ->
             Groups= [name2bin(G) ||
                         G <- string:tokens(GroupStr, ","), G /= "all"],
 
-            case unknown_roles(Groups, group) of
+            case unknown_roles(RealmUri, Groups, group) of
                 [] ->
                     {ok, stash("groups", {"groups", Groups},
                                Options)};
@@ -1180,13 +1300,15 @@ check_grant_blockers(UnknownRoles, NameOverlaps, {error, Error}) ->
 
 
 
-delete_group_from_roles(Groupname) ->
+delete_group_from_roles(RealmUri, Groupname) ->
     %% delete the group out of any user or group's 'roles' option
     %% this is kind of a pain, as we have to iterate ALL roles
-    delete_group_from_roles(Groupname, <<"users">>),
-    delete_group_from_roles(Groupname, <<"groups">>).
+    delete_group_from_roles(RealmUri, Groupname, <<"users">>),
+    delete_group_from_roles(RealmUri, Groupname, <<"groups">>).
 
-delete_group_from_roles(Groupname, RoleType) ->
+delete_group_from_roles(RealmUri, Groupname, RoleType) ->
+    Uri = name2bin(RealmUri),
+    FP  = ?FULL_PREFIX(Uri, <<"security">>, RoleType),
     plumtree_metadata:fold(fun({_, [?TOMBSTONE]}, Acc) ->
                                     Acc;
                                ({Rolename, [Options]}, Acc) ->
@@ -1198,49 +1320,50 @@ delete_group_from_roles(Groupname, RoleType) ->
                                                               Groups) of
                                                 true ->
                                                     NewGroups = lists:keystore("groups", 1, Options, {"groups", Groups -- [Groupname]}),
-                                                    plumtree_metadata:put({<<"security">>,
-                                                                            RoleType},
-                                                                           Rolename,
-                                                                           NewGroups),
+                                                    plumtree_metadata:put(
+                                                        FP, Rolename, NewGroups),
                                                     Acc;
                                                 false ->
                                                     Acc
                                             end
                                     end
                             end, undefined,
-                            {<<"security">>,RoleType}).
+                            FP).
 
 
-delete_user_from_sources(Username) ->
+delete_user_from_sources(RealmUri, Username) ->
+    Uri = name2bin(RealmUri),
+    FP  = ?SOURCES_PREFIX(Uri),
     plumtree_metadata:fold(fun({{User, _CIDR}=Key, _}, Acc)
                                   when User == Username ->
-                                    plumtree_metadata:delete({<<"security">>,
-                                                               <<"sources">>},
-                                                              Key),
+                                    plumtree_metadata:delete(FP, Key),
                                     Acc;
                                ({{_, _}, _}, Acc) ->
                                     Acc
-                            end, [], {<<"security">>, <<"sources">>}).
+                            end, [], FP).
 
 %%%% Role identification functions
 
 %% Take a list of roles (users or groups) and return any that can't
 %% be found.
-unknown_roles(RoleList, user) ->
-    unknown_roles(RoleList, <<"users">>);
-unknown_roles(RoleList, group) ->
-    unknown_roles(RoleList, <<"groups">>);
-unknown_roles(RoleList, RoleType) ->
+unknown_roles(RealmUri, RoleList, user) ->
+    unknown_roles(RealmUri, RoleList, <<"users">>);
+
+unknown_roles(RealmUri, RoleList, group) ->
+    unknown_roles(RealmUri, RoleList, <<"groups">>);
+
+unknown_roles(RealmUri, RoleList, RoleType) ->
+    Uri = name2bin(RealmUri),
+    FP = ?FULL_PREFIX(Uri, <<"security">>, RoleType),
     plumtree_metadata:fold(fun({Rolename, _}, Acc) ->
                                     Acc -- [Rolename]
-                            end, RoleList, {<<"security">>,
-                                            RoleType}).
+                            end, RoleList, FP).
 
-user_details(U) ->
-    role_details(U, user).
+user_details(RealmUri, U) ->
+    role_details(RealmUri, U, user).
 
-group_details(G) ->
-    role_details(G, group).
+group_details(RealmUri, G) ->
+    role_details(RealmUri, G, group).
 
 is_prefixed(<<"user/", _Name/binary>>) ->
     true;
@@ -1258,47 +1381,48 @@ chop_name(Name) ->
 
 %% When we need to know whether a role name is a group or user (or
 %% both), use this
-role_type(<<"user/", Name/binary>>) ->
-    role_type(role_details(Name, user),
+role_type(RealmUri, <<"user/", Name/binary>>) ->
+    do_role_type(role_details(RealmUri, Name, user),
               undefined);
-role_type(<<"group/", Name/binary>>) ->
-    role_type(undefined,
-              role_details(Name, group));
-role_type(Name) ->
-    role_type(role_details(Name, user),
-              role_details(Name, group)).
+role_type(RealmUri, <<"group/", Name/binary>>) ->
+    do_role_type(undefined,
+              role_details(RealmUri, Name, group));
+role_type(RealmUri, Name) ->
+    do_role_type(role_details(RealmUri, Name, user),
+              role_details(RealmUri, Name, group)).
 
-role_type(undefined, undefined) ->
+%% @private
+do_role_type(undefined, undefined) ->
     unknown;
-role_type(_UserDetails, undefined) ->
+do_role_type(_UserDetails, undefined) ->
     user;
-role_type(undefined, _GroupDetails) ->
+do_role_type(undefined, _GroupDetails) ->
     group;
-role_type(_UserDetails, _GroupDetails) ->
+do_role_type(_UserDetails, _GroupDetails) ->
     both.
 
 
-role_details(Rolename, user) ->
-    role_details(Rolename, <<"users">>);
-role_details(Rolename, group) ->
-    role_details(Rolename, <<"groups">>);
-role_details(Rolename, RoleType) when is_list(Rolename) ->
-    plumtree_metadata:get({<<"security">>, RoleType}, name2bin(Rolename));
-role_details(Rolename, RoleType) ->
-    plumtree_metadata:get({<<"security">>, RoleType}, Rolename).
+role_details(RealmUri, Rolename, user) ->
+    role_details(RealmUri, Rolename, <<"users">>);
+role_details(RealmUri, Rolename, group) ->
+    role_details(RealmUri, Rolename, <<"groups">>);
+role_details(RealmUri, Rolename, RoleType) ->
+    Uri = name2bin(RealmUri),
+    FullPrefix = ?FULL_PREFIX(Uri, <<"security">>, RoleType),
+    plumtree_metadata:get(FullPrefix, name2bin(Rolename)).
 
-user_exists(Username) ->
-    role_exists(Username, user).
+user_exists(RealmUri, Username) ->
+    role_exists(RealmUri, Username, user).
 
-group_exists(Groupname) ->
-    role_exists(Groupname, group).
+group_exists(RealmUri, Groupname) ->
+    role_exists(RealmUri, Groupname, group).
 
-role_exists(Rolename, user) ->
-    role_exists(Rolename, <<"users">>);
-role_exists(Rolename, group) ->
-    role_exists(Rolename, <<"groups">>);
-role_exists(Rolename, RoleType) ->
-    case role_details(Rolename, RoleType) of
+role_exists(RealmUri, Rolename, user) ->
+    role_exists(RealmUri, Rolename, <<"users">>);
+role_exists(RealmUri, Rolename, group) ->
+    role_exists(RealmUri, Rolename, <<"groups">>);
+role_exists(RealmUri, Rolename, RoleType) ->
+    case role_details(RealmUri, Rolename, RoleType) of
         undefined ->
             false;
         _ -> true
@@ -1361,7 +1485,7 @@ parse_ciphers(CipherList) ->
     {lists:reverse(Good), lists:reverse(Bad)}.
 
 %% print the OpenSSL name for ciphers
-print_ciphers(CipherList) ->
+do_print_ciphers(CipherList) ->
     string:join([ssl_cipher:openssl_suite_name(Cipher) || Cipher <-
                                                           CipherList], ":").
 
@@ -1372,23 +1496,23 @@ print_ciphers(CipherList) ->
 %% ADDED BY US
 %% =============================================================================
 
--spec lookup_user(binary()) -> tuple() | not_found.
-lookup_user(Username) when is_binary(Username) ->
-    case plumtree_metadata:get({<<"security">>, <<"users">>}, Username) of
+-spec lookup_user(binary(), binary()) -> tuple() | not_found.
+lookup_user(RealmUri, Username) when is_binary(RealmUri), is_binary(Username) ->
+    case plumtree_metadata:get(?USERS_PREFIX(RealmUri), Username) of
         undefined -> not_found;
         Val -> {Username, Val}
     end.
 
--spec lookup_group(binary()) -> tuple() | not_found.
-lookup_group(Name) when is_binary(Name) ->
-    case plumtree_metadata:get({<<"security">>, <<"groups">>}, Name) of
+-spec lookup_group(binary(), binary()) -> tuple() | not_found.
+lookup_group(RealmUri, Name) when is_binary(Name) ->
+    case plumtree_metadata:get(?GROUPS_PREFIX(RealmUri), Name) of
         undefined -> not_found;
         Val -> {Name, Val}
     end.
 
 
--spec list(user | group) -> list().
-list(user) ->
+-spec list(binary(), user | group) -> list().
+list(RealmUri, user) when is_binary(RealmUri) ->
     plumtree_metadata:fold(
         fun
             ({_Username, [?TOMBSTONE]}, Acc) ->
@@ -1397,10 +1521,10 @@ list(user) ->
                 [{Username, Options}|Acc]
         end, 
         [], 
-        {<<"security">>, <<"users">>}
+        ?USERS_PREFIX(RealmUri)
     );
 
-list(group) ->
+list(RealmUri, group) when is_binary(RealmUri) ->
     plumtree_metadata:fold(
         fun
             ({_Groupname, [?TOMBSTONE]}, Acc) ->
@@ -1409,10 +1533,10 @@ list(group) ->
             [{Groupname, Options}|Acc]
         end, 
         [], 
-        {<<"security">>, <<"groups">>}
+        ?GROUPS_PREFIX(RealmUri)
     );
 
-list(source) ->
+list(RealmUri, source) when is_binary(RealmUri) ->
     plumtree_metadata:fold(
         fun
             ({{Username, CIDR}, [{Source, Options}]}, Acc) ->
@@ -1421,13 +1545,13 @@ list(source) ->
                 Acc
         end, 
         [], 
-        {<<"security">>, <<"sources">>}
+        ?SOURCES_PREFIX(RealmUri)
     ).
 
 
-lookup_user_source(Username) ->
+lookup_user_source(RealmUri, Username) when is_binary(RealmUri) ->
     L = plumtree_metadata:to_list(
-        {<<"security">>, <<"sources">>}, [{match, {name2bin(Username), '_'}}]),
+        ?SOURCES_PREFIX(RealmUri), [{match, {name2bin(Username), '_'}}]),
     Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
     case lists:filter(Pred, L) of
         [{{BinName, CIDR}, [{Source, Options}]}] -> 
@@ -1439,13 +1563,15 @@ lookup_user_source(Username) ->
 
 
 %% @private
-del_user_source(Username) ->
-    {{_, CIDR}, _} = lookup_user_source(Username),
-    del_source([Username], CIDR).
+del_user_source(RealmUri, Username) ->
+    {{_, CIDR}, _} = lookup_user_source(RealmUri, Username),
+    del_source(RealmUri, [Username], CIDR).
 
 
 %% @private
-user_groups({_, Opts}) ->
-    [R || R <- proplists:get_value("groups", Opts, []), group_exists(R)].
+user_groups(RealmUri, {_, Opts}) ->
+    [R || 
+        R <- proplists:get_value("groups", Opts, []), 
+        group_exists(RealmUri, R)].
 
 

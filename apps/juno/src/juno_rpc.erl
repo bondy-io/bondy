@@ -100,6 +100,7 @@ unregister(<<"wamp.", _/binary>>, _) ->
     {error, not_authorized};
 
 unregister(RegId, Ctxt) ->
+    %% TODO Shouldn't we restrict this operation to the peer who registered it?
     juno_registry:remove(registration, RegId, Ctxt).
 
 

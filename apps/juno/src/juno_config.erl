@@ -11,7 +11,7 @@
 
 -define(APP, juno).
 -define(DEFAULT_RESOURCE_SIZE, erlang:system_info(schedulers)).
--define(DEFAULT_RESOURCE_CAPACITY, erlang:system_info(schedulers) * 10000). % max messages in process queue
+-define(DEFAULT_RESOURCE_CAPACITY, 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
 -export([admin_http_port/0]).
@@ -193,9 +193,19 @@ pool_type(juno_router_pool) ->
 
 pool_type(juno_stats_pool) ->
     application:get_env(
-        ?APP, juno_stats_pool_type, permanent).
+        ?APP, juno_stats_pool_type, permanent);
+
+pool_type(juno_router_broadcast_handler_pool) ->
+    %% Should always be permanent
+    permanent.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% The number of workers used by the load regulation system 
+%% for the provided pool
+%% @end
+%% -----------------------------------------------------------------------------
 -spec pool_size(Resource :: atom()) -> pos_integer().
 pool_size(juno_router_pool) ->
     application:get_env(
@@ -203,9 +213,18 @@ pool_size(juno_router_pool) ->
 
 pool_size(juno_stats_pool) ->
     application:get_env(
-        ?APP, juno_stats_pool_size, ?DEFAULT_RESOURCE_SIZE).
+        ?APP, juno_stats_pool_size, ?DEFAULT_RESOURCE_SIZE);
+
+pool_size(juno_router_broadcast_handler_pool) ->
+    application:get_env(
+        ?APP, juno_router_broadcast_handler_pool_size, ?DEFAULT_RESOURCE_SIZE).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% The usage limit enforced by the load regulation system for the provided pool
+%% @end
+%% -----------------------------------------------------------------------------
 -spec pool_capacity(Resource :: atom()) -> pos_integer().
 pool_capacity(juno_router_pool) ->
     application:get_env(
@@ -213,7 +232,11 @@ pool_capacity(juno_router_pool) ->
 
 pool_capacity(juno_stats_pool) ->
     application:get_env(
-        ?APP, juno_stats_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
+        ?APP, juno_stats_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
+
+pool_capacity(juno_router_broadcast_handler_pool) ->
+    application:get_env(
+        ?APP, juno_router_broadcast_handler_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
 
 
 %% CALL

@@ -48,9 +48,10 @@ authenticate(Req, Ctxt) ->
 
 
 %% @private
-authenticate_scheme({basic, Username, Pass}, Ctxt) ->
+authenticate_scheme({basic, Username, Pass}, #{realm_uri := Uri} = Ctxt) ->
     SecCtxt = maybe_throw(
-        juno_security:authenticate(bin2str(Username), Pass, conn_info(Ctxt))),
+        juno_security:authenticate(
+            Uri, bin2str(Username), Pass, conn_info(Ctxt))),
     maps:merge(Ctxt, SecCtxt);
     
 authenticate_scheme({digest, _List}, _Ctxt0) ->

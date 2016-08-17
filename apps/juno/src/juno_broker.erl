@@ -100,23 +100,20 @@ handle_message(#subscribe{} = M, Ctxt) ->
     %% TODO check authorization and reply with wamp.error.not_authorized if not
     {ok, SubsId} = juno_pubsub:subscribe(Topic, Opts, Ctxt),
     Reply = wamp_message:subscribed(ReqId, SubsId),
-    juno:send(Reply, Ctxt),
-    ok;
+    juno:send(Reply, Ctxt);
 
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
     SubsId = M#unsubscribe.subscription_id,
-    Reply = try
-        juno_pubsub:unsubscribe(SubsId, Ctxt),
-        wamp_message:unsubscribed(ReqId)
-    catch
-        error:not_found ->
+    Reply = case juno_pubsub:unsubscribe(SubsId, Ctxt) of
+        ok -> 
+            wamp_message:unsubscribed(ReqId);
+        {error, not_found} ->
             wamp_message:error(
                 ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
             )
     end,
-    juno:send(Reply, Ctxt),
-    ok;
+    juno:send(Reply, Ctxt);
 
 handle_message(#publish{} = M, Ctxt) ->
     %% (RFC) Asynchronously notifies all subscribers of the published event.
@@ -133,28 +130,26 @@ handle_message(#publish{} = M, Ctxt) ->
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
-    try juno_pubsub:publish(TopicUri, Opts, Args, Payload, Ctxt) of
+    case juno_pubsub:publish(TopicUri, Opts, Args, Payload, Ctxt) of
         {ok, PubId} when Acknowledge == true ->
             Reply = wamp_message:published(ReqId, PubId),
-            juno:send(Reply, Ctxt),
+            ok = juno:send(Reply, Ctxt),
             %% TODO publish metaevent
             ok;
         {ok, _} ->
             %% TODO publish metaevent
-            ok
-    catch
-        error:not_authorized when Acknowledge == true ->
+            ok;
+        {error, not_authorized} when Acknowledge == true ->
             Reply = wamp_message:error(
                 ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
-            juno:send(Reply, Ctxt),
-            %% TODO publish metaevent
-            ok;
-        _:Reason when Acknowledge == true ->
+            juno:send(Reply, Ctxt);
+        {error, Reason} when Acknowledge == true ->
             Reply = wamp_message:error(
-                ?PUBLISH, ReqId, juno:error_dict(Reason), ?WAMP_ERROR_CANCELLED),
-            juno:send(Reply, Ctxt),
-            %% TODO publish metaevent
-            ok;
-        _:_ ->
+                ?PUBLISH, 
+                ReqId, 
+                juno:error_dict(Reason), 
+                ?WAMP_ERROR_CANCELLED),
+            juno:send(Reply, Ctxt);
+        {error, _} ->
             ok
     end.

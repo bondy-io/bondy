@@ -44,7 +44,7 @@
 -export_type([entry/0]).
 -export_type([entry_type/0]).
 
--export([uri/1]).
+
 -export([add/4]).
 -export([created/1]).
 -export([criteria/1]).
@@ -52,18 +52,19 @@
 -export([entries/2]).
 -export([entries/3]).
 -export([entries/4]).
+-export([entry_id/1]).
 -export([id/1]).
--export([match_policy/1]).
+-export([lookup/3]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
+-export([match_policy/1]).
 -export([options/1]).
 -export([realm_uri/1]).
--export([remove_all/2]).
 -export([remove/3]).
+-export([remove_all/2]).
 -export([session_id/1]).
--export([entry_id/1]).
-
+-export([uri/1]).
 
 
 %% =============================================================================
@@ -231,6 +232,28 @@ remove_all(Type, Ctxt) ->
         {[First], _} ->
             do_remove_all(First, Type, Tab, Ctxt)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(entry_type(), id(), juno_context:context()) -> 
+    entry() | not_found.
+lookup(Type, EntryId, Ctxt) ->
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
+    % TODO Use UserId when there is no SessionId
+    Tab = entry_table(Type, RealmUri),
+    Key = {RealmUri, SessionId, EntryId},
+    case ets:take(Tab, Key) of
+        [] ->
+            %% The session had no entries with EntryId.
+            {error, not_found};
+        [Entry] ->
+            Entry
+    end.
+
 
 
 %% -----------------------------------------------------------------------------

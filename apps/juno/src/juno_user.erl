@@ -16,20 +16,20 @@
     <<"external_id">>
 ]).
 
--export([lookup/1]).
--export([add/1]).
--export([remove/1]).
--export([fetch/1]).
--export([list/0]).
--export([password/1]).
+-export([lookup/2]).
+-export([add/2]).
+-export([remove/2]).
+-export([fetch/2]).
+-export([list/1]).
+-export([password/2]).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(user()) -> ok.
-add(User) ->
+-spec add(uri(), user()) -> ok.
+add(RealmUri, User) ->
     Info = maps:with(?INFO_KEYS, User),
     #{
         <<"username">> := BinName,
@@ -40,19 +40,19 @@ add(User) ->
         {<<"info">>, Info},
         {"password", binary_to_list(Pass)}
     ],
-    juno_security:add_user(Username, Opts).
+    juno_security:add_user(RealmUri, Username, Opts).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(list() | binary()) -> ok.
-remove(Id) when is_binary(Id) ->
-    remove(unicode:characters_to_binary(Id, utf8, utf8));
+-spec remove(uri(), list() | binary()) -> ok.
+remove(RealmUri, Id) when is_binary(Id) ->
+    remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
-remove(Id) ->
-    case juno_security:del_user(Id) of
+remove(RealmUri, Id) ->
+    case juno_security:del_user(RealmUri, Id) of
         ok -> 
             ok;
         {error, {unknown_user, Id}} ->
@@ -64,12 +64,12 @@ remove(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(list() | binary()) -> user() | not_found.
-lookup(Id) when is_list(Id) ->
-    lookup(unicode:characters_to_binary(Id, utf8, utf8));
+-spec lookup(uri(), list() | binary()) -> user() | not_found.
+lookup(RealmUri, Id) when is_list(Id) ->
+    lookup(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
-lookup(Id) ->
-    case juno_security:lookup_user(Id) of
+lookup(RealmUri, Id) ->
+    case juno_security:lookup_user(RealmUri, Id) of
         not_found -> not_found;
         User -> to_map(User)
     end.
@@ -79,12 +79,12 @@ lookup(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(list() | binary()) -> user() | no_return().
-fetch(Id) when is_list(Id) ->
-    fetch(unicode:characters_to_binary(Id, utf8, utf8));
+-spec fetch(uri(), list() | binary()) -> user() | no_return().
+fetch(RealmUri, Id) when is_list(Id) ->
+    fetch(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
     
-fetch(Id) ->
-    case lookup(Id) of
+fetch(RealmUri, Id) ->
+    case lookup(RealmUri, Id) of
         not_found -> error(not_found);
         User -> User
     end.
@@ -94,21 +94,21 @@ fetch(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list() -> list(user()).
-list() ->
-    [to_map(User) || User <- juno_security:list(user)].
+-spec list(uri()) -> list(user()).
+list(RealmUri) ->
+    [to_map(User) || User <- juno_security:list(RealmUri, user)].
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec password(user() | id()) -> map() | no_return().
-password(#{<<"username">> := Username}) ->
-    password(Username);
+-spec password(uri(), user() | id()) -> map() | no_return().
+password(RealmUri, #{<<"username">> := Username}) ->
+    password(RealmUri, Username);
 
-password(Username) ->
-    case juno_security:lookup_user(Username) of
+password(RealmUri, Username) ->
+    case juno_security:lookup_user(RealmUri, Username) of
         not_found -> 
             error(not_found);
         {Username, Opts} ->

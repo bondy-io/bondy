@@ -58,19 +58,20 @@ send(Pid, Message, _Ctxt) when is_pid(Pid) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sends a message to a peer.
-%% If the transport is not open it fails with an exception.
+%% Returns and error tuple if the process does not exist or if 
+%% the remote node is no reachable.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec safe_send(pid(), Message :: message(), Ctxt :: juno_context:context()) ->
-    ok | no_return().
-safe_send(Pid, Message, _Ctxt) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
+    ok | {error, noproc | noconnection}.
+safe_send(Pid, Message, Ctxt) when is_pid(Pid) ->
+    case node(Pid) =:= node() of
         true ->
-            Pid ! Message,
-            ok;
+            local_safe_send(Pid, Message, Ctxt);
         false ->
-            error({unknown_peer, Pid})
+            remote_safe_send(Pid, Message, Ctxt)
     end.
+
 
 %% =============================================================================
 %% API - SESSION
@@ -138,3 +139,28 @@ error_dict(Code, Description, UserInfo) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+local_safe_send(Pid, Message, _Ctxt) ->
+    case is_process_alive(Pid) of
+        true ->
+            Pid ! Message,
+            ok;
+        false ->
+            error({unknown_peer, Pid})
+    end.
+
+
+%% @private
+remote_safe_send(Pid, Message, _Ctxt) ->
+    Ref = erlang:monitor(process, Pid),
+    Pid ! Message,
+    erlang:demonitor(Ref),
+    receive 
+        {'DOWN', Ref, process, Pid, Reason} ->
+            {error, Reason}
+    after 
+        0 -> ok
+    end.

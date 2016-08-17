@@ -4,24 +4,25 @@
 
 
 -module(juno_group).
+-include_lib("wamp/include/wamp.hrl").
 
 -type group() :: map().
 
 -define(INFO_KEYS, [<<"description">>]).
 
--export([lookup/1]).
--export([add/1]).
--export([remove/1]).
--export([fetch/1]).
--export([list/0]).
+-export([add/2]).
+-export([fetch/2]).
+-export([list/1]).
+-export([lookup/2]).
+-export([remove/2]).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(group()) -> ok.
-add(Group) ->
+-spec add(uri(), group()) -> ok.
+add(RealmUri, Group) ->
     Info = maps:with(?INFO_KEYS, Group),
     #{
         <<"name">> := BinName
@@ -30,19 +31,19 @@ add(Group) ->
     Opts = [
         {<<"info">>, Info}
     ],
-    juno_security:add_group(Name, Opts).
+    juno_security:add_group(RealmUri, Name, Opts).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(list() | binary()) -> ok.
-remove(Id) when is_binary(Id) ->
-    remove(unicode:characters_to_list(Id, utf8));
+-spec remove(uri(), list() | binary()) -> ok.
+remove(RealmUri, Id) when is_binary(Id) ->
+    remove(RealmUri, unicode:characters_to_list(Id, utf8));
 
-remove(Id) ->
-    case juno_security:del_group(Id) of
+remove(RealmUri, Id) ->
+    case juno_security:del_group(RealmUri, Id) of
         ok -> 
             ok;
         {error, {unknown_group, Id}} ->
@@ -54,12 +55,12 @@ remove(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(list() | binary()) -> group() | not_found.
-lookup(Id) when is_binary(Id) ->
-    lookup(unicode:characters_to_list(Id, utf8));
+-spec lookup(uri(), list() | binary()) -> group() | not_found.
+lookup(RealmUri, Id) when is_binary(Id) ->
+    lookup(RealmUri, unicode:characters_to_list(RealmUri, Id, utf8));
 
-lookup(Id) ->
-    case juno_security:lookup_group(Id) of
+lookup(RealmUri, Id) ->
+    case juno_security:lookup_group(RealmUri, Id) of
         not_found -> not_found;
         Obj -> to_map(Obj)
     end.
@@ -69,12 +70,12 @@ lookup(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(list() | binary()) -> group() | no_return().
-fetch(Id) when is_binary(Id) ->
-    fetch(unicode:characters_to_list(Id, utf8));
+-spec fetch(uri(), list() | binary()) -> group() | no_return().
+fetch(RealmUri, Id) when is_binary(Id) ->
+    fetch(RealmUri, unicode:characters_to_list(Id, utf8));
     
-fetch(Id) ->
-    case lookup(Id) of
+fetch(RealmUri, Id) ->
+    case lookup(RealmUri, Id) of
         not_found -> error(not_found);
         Obj -> Obj
     end.
@@ -84,9 +85,9 @@ fetch(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list() -> list(group()).
-list() ->
-    [to_map(Obj) || Obj <- juno_security:list(group)].
+-spec list(uri()) -> list(group()).
+list(RealmUri) ->
+    [to_map(Obj) || Obj <- juno_security:list(RealmUri, group)].
 
 
 
