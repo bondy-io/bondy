@@ -11,33 +11,24 @@
 -define(INFO_KEYS, [<<"description">>]).
 
 -export([lookup/2]).
-% -export([add/1]).
+-export([add/5]).
 % -export([remove/1]).
 -export([fetch/2]).
 -export([list/1]).
 
 
-% %% -----------------------------------------------------------------------------
-% %% @doc
-% %% @end
-% %% -----------------------------------------------------------------------------
-% -spec add(source()) -> ok.
-% add(Users, ) ->
-%     Info = maps:with(?INFO_KEYS, User),
-%     #{
-%         <<"username">> := BinName
-%     } = User,
-%     Username = unicode:characters_to_list(BinName, utf8),
-%     Opts = [
-%         {<<"info">>, Info}
-%     ],
-%     case juno_security:add_user(Username, Opts) of
-%         ok ->
-%             ok;
-%         {error, role_exists} ->
-%             {error, user_exists}
-%     end.
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add(
+    RealmUri :: uri(), 
+    Usernames :: [binary()] | all, 
+    CIDR :: juno_security:cidr(), 
+    Source :: atom(),
+    Options :: list()) -> ok.
+add(RealmUri, Usernames, CIDR, Source, Opts ) ->
+    juno_security:add_source(RealmUri, Usernames, CIDR, Source, Opts).
 
 % %% -----------------------------------------------------------------------------
 % %% @doc

@@ -66,6 +66,9 @@
 ).
 
 -type uri() :: binary() | string().
+-type cidr() :: {inet:ip_address(), non_neg_integer()}.
+
+-export_type([cidr/0]).
 
 -export([lookup_user/2]).
 -export([lookup_group/2]).
@@ -861,7 +864,7 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
         ok ->
             %% add a source for each user
             add_source_int(
-                RealmUri, UserList, anchor_mask(CIDR), Source, Options),
+                UserList, RealmUri, anchor_mask(CIDR), Source, Options),
             ok;
         Error ->
             Error

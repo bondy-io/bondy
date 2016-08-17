@@ -10,14 +10,15 @@
 -type user() :: map().
 
 -define(INFO_KEYS, [
-    <<"first_name">>, 
-    <<"last_name">>,
-    <<"email">>, 
-    <<"external_id">>
+    first_name, 
+    last_name,
+    email, 
+    enternal_id
 ]).
 
 -export([lookup/2]).
 -export([add/2]).
+-export([set_source/5]).
 -export([remove/2]).
 -export([fetch/2]).
 -export([list/1]).
@@ -31,16 +32,27 @@
 -spec add(uri(), user()) -> ok.
 add(RealmUri, User) ->
     Info = maps:with(?INFO_KEYS, User),
-    #{
-        <<"username">> := BinName,
-        <<"password">> := Pass
-    } = User,
+    #{username := BinName, password := Pass} = User,
     Username = unicode:characters_to_list(BinName, utf8),
     Opts = [
-        {<<"info">>, Info},
+        {info, Info},
         {"password", binary_to_list(Pass)}
     ],
     juno_security:add_user(RealmUri, Username, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_source(
+    RealmUri :: uri(), 
+    Username :: binary(), 
+    CIDR :: juno_security:cidr(), 
+    Source :: atom(),
+    Options :: list()) -> ok.
+set_source(RealmUri, Username, CIDR, Source, Opts) ->
+    juno_source:add(RealmUri, [Username], CIDR, Source, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -104,7 +116,7 @@ list(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(uri(), user() | id()) -> map() | no_return().
-password(RealmUri, #{<<"username">> := Username}) ->
+password(RealmUri, #{username := Username}) ->
     password(RealmUri, Username);
 
 password(RealmUri, Username) ->
@@ -130,9 +142,9 @@ password(RealmUri, Username) ->
 
 %% @private
 to_map(RealmUri, {Username, Opts} = User) ->
-    Map0 = proplists:get_value(<<"info">>, Opts, #{}),
+    Map0 = proplists:get_value(info, Opts, #{}),
     Map1 = Map0#{
-        <<"username">> => Username,
+        username => Username,
         <<"has_password">> => has_password(Opts),
         <<"groups">> => juno_security:user_groups(RealmUri, User)
     },
@@ -140,7 +152,7 @@ to_map(RealmUri, {Username, Opts} = User) ->
         not_found ->
             #{};
         Obj ->
-            maps:without([<<"username">>], Obj)
+            maps:without([username], Obj)
     end,
     Map1#{<<"source">> => Source}.
 
