@@ -10,11 +10,11 @@
 
 -define(INFO_KEYS, [<<"description">>]).
 
--export([lookup/2]).
 -export([add/5]).
-% -export([remove/1]).
 -export([fetch/2]).
 -export([list/1]).
+-export([lookup/2]).
+-export([remove/3]).
 
 
 %% -----------------------------------------------------------------------------
@@ -30,21 +30,17 @@
 add(RealmUri, Usernames, CIDR, Source, Opts ) ->
     juno_security:add_source(RealmUri, Usernames, CIDR, Source, Opts).
 
-% %% -----------------------------------------------------------------------------
-% %% @doc
-% %% @end
-% %% -----------------------------------------------------------------------------
-% -spec remove(list() | binary()) -> ok.
-% remove(Id) when is_binary(Id) ->
-%     remove(unicode:characters_to_list(Id, utf8));
 
-% remove(Id) ->
-%     case juno_security:del_user(Id) of
-%         ok -> 
-%             ok;
-%         {error, {unknown_user, Id}} ->
-%             {error, unknown_user}
-%     end.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(
+    RealmUri :: uri(),
+    Usernames :: [binary()] | all,
+    CIDR :: juno_security:cidr()) -> ok.
+remove(RealmUri, Usernames, CIDR) ->
+    juno_security:del_source(RealmUri, Usernames, CIDR).
 
 
 %% -----------------------------------------------------------------------------

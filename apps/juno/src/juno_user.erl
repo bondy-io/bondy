@@ -16,13 +16,14 @@
     enternal_id
 ]).
 
--export([lookup/2]).
 -export([add/2]).
--export([set_source/5]).
--export([remove/2]).
 -export([fetch/2]).
 -export([list/1]).
+-export([lookup/2]).
 -export([password/2]).
+-export([remove/2]).
+-export([remove_source/3]).
+-export([set_source/5]).
 
 
 %% -----------------------------------------------------------------------------
@@ -53,6 +54,18 @@ add(RealmUri, User) ->
     Options :: list()) -> ok.
 set_source(RealmUri, Username, CIDR, Source, Opts) ->
     juno_source:add(RealmUri, [Username], CIDR, Source, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_source(
+    RealmUri :: uri(),
+    Usernames :: [binary()] | all,
+    CIDR :: juno_security:cidr()) -> ok.
+remove_source(RealmUri, Username, CIDR) ->
+    juno_security:del_source(RealmUri, [Username], CIDR).
 
 
 %% -----------------------------------------------------------------------------
