@@ -612,9 +612,10 @@ add_role(_, <<"from">>, _Options, _Fun, _Prefix) ->
 add_role(_, <<"any">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
 add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
+    Uri = name2bin(RealmUri),
     case illegal_name_chars(unicode:characters_to_list(Name, utf8)) of
         false ->
-            case ExistenceFun(unicode:characters_to_list(Name, utf8)) of
+            case ExistenceFun(Uri, unicode:characters_to_list(Name, utf8)) of
                 false ->
                     case validate_options(RealmUri, Options) of
                         {ok, NewOptions} ->

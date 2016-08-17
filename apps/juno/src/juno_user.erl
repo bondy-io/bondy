@@ -71,7 +71,7 @@ lookup(RealmUri, Id) when is_list(Id) ->
 lookup(RealmUri, Id) ->
     case juno_security:lookup_user(RealmUri, Id) of
         not_found -> not_found;
-        User -> to_map(User)
+        User -> to_map(RealmUri, User)
     end.
 
 
@@ -96,7 +96,7 @@ fetch(RealmUri, Id) ->
 %% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(user()).
 list(RealmUri) ->
-    [to_map(User) || User <- juno_security:list(RealmUri, user)].
+    [to_map(RealmUri, User) || User <- juno_security:list(RealmUri, user)].
 
 
 %% -----------------------------------------------------------------------------
@@ -129,14 +129,14 @@ password(RealmUri, Username) ->
 
 
 %% @private
-to_map({Username, Opts} = User) ->
+to_map(RealmUri, {Username, Opts} = User) ->
     Map0 = proplists:get_value(<<"info">>, Opts, #{}),
     Map1 = Map0#{
         <<"username">> => Username,
         <<"has_password">> => has_password(Opts),
-        <<"groups">> => juno_security:user_groups(User)
+        <<"groups">> => juno_security:user_groups(RealmUri, User)
     },
-    Source = case juno_source:lookup(Username) of
+    Source = case juno_source:lookup(RealmUri, Username) of
         not_found ->
             #{};
         Obj ->
