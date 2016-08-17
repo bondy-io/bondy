@@ -10,17 +10,16 @@
 %% @end
 %% =============================================================================
 -module(juno_realm).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(PREFIX, {global, realms}).
-
 -define(DEFAULT_AUTH_METHOD, ?WAMPCRA_AUTH).
--define(JUNO_REALM_URI, <<"juno">>).
--define(JUNO_REALM, #realm{
-    uri = ?JUNO_REALM_URI,
-    description = <<"The Juno administrative realm.">>,
-    authmethods = [?DEFAULT_AUTH_METHOD]
-}).
+-define(PREFIX, {global, realms}).
+-define(LOCAL_CIDRS, [
+    {{10,0,0,0}, 8},
+    {{172,16,0,0}, 12},
+    {{192,168,0,0}, 16}
+]).
 
 
 -record(realm, {
@@ -39,6 +38,7 @@
 -export([enable_security/1]).
 -export([fetch/1]).
 -export([get/1]).
+-export([get/2]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
@@ -48,6 +48,8 @@
 -export([select_auth_method/2]).
 -export([uri/1]).
 
+
+-compile({no_auto_import,[put/2]}).
 
 
 
@@ -148,11 +150,22 @@ fetch(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec get(uri()) -> realm().
 get(Uri) ->
+    get(Uri, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc 
+%% Retrieves the realm identified by Uri from the tuplespace. If the realm
+%% does not exist it will put a new one for Uri.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get(uri(), map()) -> realm().
+get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Realm;
         not_found ->
-            put(Uri)
+            put(Uri, Opts)
     end.
 
 
@@ -181,8 +194,16 @@ put(Uri, Opts) ->
         description = Desc,
         authmethods = Method
     },
-    ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
-    enable_security(Realm).
+
+    case lookup(Uri) of
+        not_found ->
+            ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
+            init(Realm);
+        _ ->
+            ok = plumtree_metadata:put(?PREFIX, Uri, Realm)
+    end.
+    
+    
 
 
 %% -----------------------------------------------------------------------------
@@ -190,6 +211,8 @@ put(Uri, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(uri()) -> ok.
+delete(?JUNO_REALM_URI) ->
+    {error, not_permitted};
 delete(Uri) ->
     plumtree_metadata:delete(?PREFIX, Uri),
     % TODO we need to close all sessions for this realm
@@ -201,7 +224,6 @@ delete(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list() -> [realm()].
-
 list() ->
     [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
 
@@ -233,9 +255,25 @@ select_auth_method(#realm{authmethods = Allowed}, Requested) ->
     end.
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+init(#realm{uri = Uri} = Realm) ->
+    User = #{
+        username => <<"admin">>,
+        password => <<"juno">>
+    },
+    ok = juno_user:add(Uri, User),
+    Opts = [],
+    _ = [juno_user:set_source(Uri, <<"admin">>, CIDR, password, Opts) || 
+            CIDR <- ?LOCAL_CIDRS],
+    enable_security(Realm).
+
 
 %% @private
 select_first_available([H|T], I) ->
@@ -247,8 +285,6 @@ select_first_available([H|T], I) ->
 
 %% @private
 -spec do_lookup(uri()) -> realm() | not_found.
-do_lookup(?JUNO_REALM_URI) ->
-    ?JUNO_REALM;
 do_lookup(Uri) ->
     case plumtree_metadata:get(?PREFIX, Uri)  of
         #realm{} = Realm ->
@@ -268,7 +304,7 @@ opts_spec() ->
     #{
         description => #{
             required => true,
-            datatype => boolean, 
+            datatype => binary, 
             default => <<>>
         },
         authmethods => #{

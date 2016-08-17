@@ -1,4 +1,15 @@
 
+
+-define(JUNO_REALM_URI, <<"juno">>).
+
+
+%% =============================================================================
+%% FEATURES
+%% =============================================================================
+
+
+
+
 -define(DEALER_FEATURES, #{
     progressive_call_results => false,
     progressive_calls => false,

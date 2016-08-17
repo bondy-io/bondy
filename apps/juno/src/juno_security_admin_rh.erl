@@ -155,8 +155,10 @@ delete(user, State) ->
 delete(group, State) ->
     juno_security:del_group(realm_uri(State), id(State));
 
-delete(source, #state{master = user} = State) ->
-    juno_security:del_user_source(realm_uri(State), id(State)).
+delete(source, #state{master = user} = _State) ->
+    %% TODO Implement, we need to receive the CIDR
+    % juno_user:remove_source(realm_uri(State), id(State), CIDR).
+    error(not_implemented).
 
 
 list(user, State) ->

@@ -11,9 +11,8 @@
 -define(INFO_KEYS, [<<"description">>]).
 
 -export([add/5]).
--export([fetch/2]).
 -export([list/1]).
--export([lookup/2]).
+-export([list/2]).
 -export([remove/3]).
 
 
@@ -47,30 +46,16 @@ remove(RealmUri, Usernames, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri(), list() | binary()) -> source() | not_found.
-lookup(RealmUri, Username) when is_binary(Username) ->
-    lookup(RealmUri, unicode:characters_to_list(Username, utf8));
+-spec list(uri(), list() | binary()) -> source() | not_found.
+list(RealmUri, Username) when is_binary(Username) ->
+    list(RealmUri, unicode:characters_to_list(Username, utf8));
 
-lookup(RealmUri, Username) ->
-    case juno_security:lookup_user_source(RealmUri, Username) of
+list(RealmUri, Username) ->
+    case juno_security:lookup_user_sources(RealmUri, Username) of
         not_found -> not_found;
-        Obj -> to_map(Obj)
+        Sources -> [to_map(S) || S <- Sources]
     end.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec fetch(uri(), list() | binary()) -> source() | no_return().
-fetch(RealmUri, Id) when is_binary(Id) ->
-    fetch(RealmUri, unicode:characters_to_list(Id, utf8));
-    
-fetch(RealmUri, Id) ->
-    case lookup(RealmUri, Id) of
-        not_found -> error(not_found);
-        User -> User
-    end.
 
 
 %% -----------------------------------------------------------------------------

@@ -9,6 +9,14 @@
 %% =============================================================================
 -module(juno_app).
 -behaviour(application).
+-include("juno.hrl").
+-include_lib("wamp/include/wamp.hrl").
+
+-define(JUNO_REALM, #{
+    description => <<"The Juno administrative realm.">>,
+    authmethods => [?WAMPCRA_AUTH]
+}).
+
 
 -export([start/2]).
 -export([stop/1]).
@@ -21,6 +29,7 @@ start(_Type, _Args) ->
             ok = juno_stats:create_metrics(),
             ok = maybe_start_router_services(),
             qdate:register_parser(iso8601, date_parser()),
+            ok = maybe_init_juno_realm(),
             {ok, Pid};
         Other  ->
             Other
@@ -36,6 +45,16 @@ stop(_State) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+maybe_init_juno_realm() ->
+    %% TODO Check what happens when we join the cluster and juno realm was
+    %% already defined in my peers...we should not use LWW here.
+    _ = juno_realm:get(?JUNO_REALM_URI, ?JUNO_REALM),
+    ok.
+
+
+%% @private
 maybe_start_router_services() ->
     case juno_config:is_router() of
         true ->

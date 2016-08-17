@@ -23,7 +23,7 @@
 -export([password/2]).
 -export([remove/2]).
 -export([remove_source/3]).
--export([set_source/5]).
+-export([add_source/5]).
 
 
 %% -----------------------------------------------------------------------------
@@ -46,13 +46,13 @@ add(RealmUri, User) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_source(
+-spec add_source(
     RealmUri :: uri(), 
     Username :: binary(), 
     CIDR :: juno_security:cidr(), 
     Source :: atom(),
     Options :: list()) -> ok.
-set_source(RealmUri, Username, CIDR, Source, Opts) ->
+add_source(RealmUri, Username, CIDR, Source, Opts) ->
     juno_source:add(RealmUri, [Username], CIDR, Source, Opts).
 
 
@@ -161,13 +161,13 @@ to_map(RealmUri, {Username, Opts} = User) ->
         <<"has_password">> => has_password(Opts),
         <<"groups">> => juno_security:user_groups(RealmUri, User)
     },
-    Source = case juno_source:lookup(RealmUri, Username) of
+    L = case juno_source:list(RealmUri, Username) of
         not_found ->
             #{};
-        Obj ->
-            maps:without([username], Obj)
+        Sources ->
+            [maps:without([username], S) || S <- Sources]
     end,
-    Map1#{<<"source">> => Source}.
+    Map1#{<<"sources">> => L}.
 
 
 %% @private

@@ -72,8 +72,7 @@
 
 -export([lookup_user/2]).
 -export([lookup_group/2]).
--export([lookup_user_source/2]).
--export([del_user_source/2]).
+-export([lookup_user_sources/2]).
 -export([user_groups/2]).
 -export([list/2]).
 %% =============================================================================
@@ -1553,24 +1552,17 @@ list(RealmUri, source) when is_binary(RealmUri) ->
     ).
 
 
-lookup_user_source(RealmUri, Username) when is_binary(RealmUri) ->
+lookup_user_sources(RealmUri, Username) when is_binary(RealmUri) ->
     L = plumtree_metadata:to_list(
         ?SOURCES_PREFIX(RealmUri), [{match, {name2bin(Username), '_'}}]),
     Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
     case lists:filter(Pred, L) of
-        [{{BinName, CIDR}, [{Source, Options}]}] -> 
-            {BinName, CIDR, Source, Options};
+        L -> 
+            [{BinName, CIDR, Source, Options} || 
+                {{BinName, CIDR}, [{Source, Options}]} <- L];
         [] -> 
             not_found
     end.
-
-
-
-%% @private
-del_user_source(RealmUri, Username) ->
-    {{_, CIDR}, _} = lookup_user_source(RealmUri, Username),
-    del_source(RealmUri, [Username], CIDR).
-
 
 %% @private
 user_groups(RealmUri, {_, Opts}) ->
