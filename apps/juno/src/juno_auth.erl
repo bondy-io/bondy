@@ -71,7 +71,7 @@ maybe_challenge(#{authid := UserId} = Details, Realm, Ctxt0) ->
             AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
-            case juno_user:lookup(UserId) of
+            case juno_user:lookup(juno_realm:uri(Realm), UserId) of
                 not_found ->
                     {error, {user_not_found, UserId}, Ctxt1};
                 User ->
@@ -88,7 +88,7 @@ maybe_challenge(_, _, Ctxt) ->
 
 
 %% @private
-challenge(?WAMPCRA_AUTH, User, Details, #{id := Id}) ->
+challenge(?WAMPCRA_AUTH, User, Details, #{session_id := Id} = Ctxt) ->
     #{<<"username">> := UserId} = User,
     Ch0 = #{
         challenge => #{
@@ -101,8 +101,8 @@ challenge(?WAMPCRA_AUTH, User, Details, #{id := Id}) ->
             timestamp => calendar:universal_time()
         }
     },
-    
-    case juno_user:password(User) of
+    RealmUri = juno_context:uri(Ctxt),
+    case juno_user:password(RealmUri, User) of
         undefined ->
             Ch0;
         Pass ->

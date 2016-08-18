@@ -524,6 +524,7 @@ cleanup_queue(#{realm_uri := Uri, awaiting_call_ids := Set} = Ctxt) ->
         Ctxt,
         Set
     );
+    
 cleanup_queue(Ctxt) ->
     Ctxt.
 
