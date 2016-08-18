@@ -270,7 +270,7 @@ init(#realm{uri = Uri} = Realm) ->
     },
     ok = juno_user:add(Uri, User),
     Opts = [],
-    _ = [juno_user:set_source(Uri, <<"admin">>, CIDR, password, Opts) || 
+    _ = [juno_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) || 
             CIDR <- ?LOCAL_CIDRS],
     enable_security(Realm).
 
