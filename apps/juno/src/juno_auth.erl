@@ -88,8 +88,9 @@ maybe_challenge(_, _, Ctxt) ->
 
 
 %% @private
-challenge(?WAMPCRA_AUTH, User, Details, #{session_id := Id} = Ctxt) ->
-    #{<<"username">> := UserId} = User,
+challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
+    %% id is the future session_id 
+    #{username := UserId} = User,
     Ch0 = #{
         challenge => #{
             authmethod => ?WAMPCRA_AUTH,
@@ -101,7 +102,7 @@ challenge(?WAMPCRA_AUTH, User, Details, #{session_id := Id} = Ctxt) ->
             timestamp => calendar:universal_time()
         }
     },
-    RealmUri = juno_context:uri(Ctxt),
+    RealmUri = juno_context:realm_uri(Ctxt),
     case juno_user:password(RealmUri, User) of
         undefined ->
             Ch0;
