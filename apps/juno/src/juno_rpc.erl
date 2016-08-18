@@ -514,15 +514,15 @@ dequeue_promise(Key) ->
 
 
 %% @private
-cleanup_queue(#{realm_uri := Uri, awaiting_call_ids := L} = Ctxt) ->
-    lists:foldl(
+cleanup_queue(#{realm_uri := Uri, awaiting_call_ids := Set} = Ctxt) ->
+    sets:fold(
         fun(Id, Acc) ->
             Key = {Uri, Id},
             ok = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
             juno_context:remove_awaiting_call_id(Acc, Id)
         end,
         Ctxt,
-        L
+        Set
     );
 cleanup_queue(Ctxt) ->
     Ctxt.
