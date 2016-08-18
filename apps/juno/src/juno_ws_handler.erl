@@ -144,10 +144,7 @@ websocket_info({timeout, _Ref, _Msg}, Req, St) ->
 
 websocket_info({stop, Reason}, Req, St) ->
     %% TODO use lager
-    error_logger:error_report([
-        {description, <<"WAMP session shutdown">>},
-        {reason, Reason}
-    ]),
+    lager:debug("description: 'WAMP session shutdown', reason: ~p", [Reason]),
     {stop, Req, St};
 
 websocket_info(M, Req, St0) ->

@@ -4,15 +4,15 @@
 
 %% =============================================================================
 %% @doc
-%% The Juno Router provides the routing logic for all interactions.
+%% juno_router provides the routing logic for all interactions.
 %% In general juno_router handles all messages asynchronously. It does this by
 %% using either a static or a dynamic pool of workers based on configuration.
 %% A dynamic pool actually spawns a new erlang process for each message.
-%% By default a Juno Router uses a dynamic pool.
+%% By default juno_router uses a dynamic pool.
 %%
 %% This module implements both type of workers as a gen_server.
 %%
-%% A router provides load regulation, in case a maximum capacity has been
+%% A router provides load regulation, in case a maximum pool capacity has been
 %% reached, the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
 %% e.g. {@link juno_ws_handler}).
@@ -62,6 +62,8 @@
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
+%%
+%% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
 %% =============================================================================
@@ -642,16 +644,21 @@ parse_roles([_|T], Roles) ->
 update_stats(M, Ctxt) ->
     Type = element(1, M),
     Size = erts_debug:flat_size(M) * 8,
-    Realm = juno_context:realm_uri(Ctxt),
     {IP, _} = juno_context:peer(Ctxt),
-    case juno_context:session_id(Ctxt) of
-        undefined ->
-            juno_stats:update(
-                {message, Realm, IP, Type, Size});
-        SessionId ->
-            juno_stats:update(
-                {message, Realm, SessionId, IP, Type, Size})
-    end.
+    update_stats(Type, IP, Size, Ctxt).
+
+
+%% @private
+update_stats(Type, IP, Size, #{realm_uri := Uri, session_id := Id}) ->
+    juno_stats:update({message, Uri, Id, IP, Type, Size});
+
+update_stats(Type, IP, Size, #{realm_uri := Uri}) ->
+    juno_stats:update({message, Uri, IP, Type, Size});
+
+update_stats(Type, IP, Size, _Ctxt) ->
+    juno_stats:update({message, IP, Type, Size}).
+
+
 
 
 %% @private

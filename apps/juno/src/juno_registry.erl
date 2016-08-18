@@ -212,10 +212,7 @@ add(Type, Uri, Options, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), juno_context:context()) -> ok.
-remove_all(Type, Ctxt) ->
-    RealmUri = juno_context:realm_uri(Ctxt),
-    SessionId = juno_context:session_id(Ctxt),
-    % TODO Use UserId when there is no SessionId
+remove_all(Type, #{realm_uri := RealmUri, session_id := SessionId} = Ctxt) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
         uri = '_',
@@ -231,7 +228,10 @@ remove_all(Type, Ctxt) ->
             ok;
         {[First], _} ->
             do_remove_all(First, Type, Tab, Ctxt)
-    end.
+    end;
+    
+remove_all(_, _) ->
+    ok.
 
 
 %% -----------------------------------------------------------------------------

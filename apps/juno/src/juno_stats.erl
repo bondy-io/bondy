@@ -252,6 +252,20 @@ do_update({session_closed, Realm, SessionId, IP, Secs}) ->
     ), 
     ok;
 
+do_update({message, IP, Type, Sz}) ->
+    BIP = list_to_binary(inet_parse:ntoa(IP)),
+    exometer:update([juno, messages], 1),
+    exometer:update([juno, messages, size], Sz),
+    exometer:update_or_create([juno, messages, Type], 1, spiral, []),
+
+    exometer:update_or_create(
+        [juno, ip, messages, BIP], 1, counter, []),
+    exometer:update_or_create(
+        [juno, ip, messages, size, BIP], Sz, histogram, []),
+    exometer:update_or_create(
+        [juno, ip, messages, Type, BIP], 1, spiral, []);
+
+
 do_update({message, Realm, IP, Type, Sz}) ->
     BIP = list_to_binary(inet_parse:ntoa(IP)),
     exometer:update([juno, messages], 1),

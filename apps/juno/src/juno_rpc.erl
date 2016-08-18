@@ -514,8 +514,7 @@ dequeue_promise(Key) ->
 
 
 %% @private
-cleanup_queue(Ctxt) ->
-    #{realm_uri := Uri, awaiting_call_ids := L} = Ctxt,
+cleanup_queue(#{realm_uri := Uri, awaiting_call_ids := L} = Ctxt) ->
     lists:foldl(
         fun(Id, Acc) ->
             Key = {Uri, Id},
@@ -524,7 +523,9 @@ cleanup_queue(Ctxt) ->
         end,
         Ctxt,
         L
-    ).
+    );
+cleanup_queue(Ctxt) ->
+    Ctxt.
 
 
 
