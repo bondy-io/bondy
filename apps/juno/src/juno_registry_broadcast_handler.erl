@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_router_broadcast_handler).
+-module(juno_registry_broadcast_handler).
 -behaviour(plumtree_broadcast_handler).
 -behaviour(gen_server).
 -include("juno.hrl").
@@ -26,7 +26,7 @@
 
 
 -define(TIMEOUT, 60000).
--define(POOL_NAME, juno_router_broadcast_handler_pool).
+-define(POOL_NAME, juno_registry_broadcast_handler_pool).
 -define(JUNO_EVENT(RealmUri, SessionId, Id, M), #juno_event{
     key = {RealmUri, SessionId, Id},
     message = M
@@ -101,7 +101,14 @@ broadcast_data(#juno_event{} = E) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec merge(any(), any()) -> boolean().
-merge(A, B) -> 
+merge({RealmUri, SessionId, EntryId}, #register{} = M) -> 
+    case juno_registry:lookup(registration, EntryId, SessionId, RealmUri) of
+        not_found ->
+            juno_
+            true;
+        _ ->
+            false
+    end.
     % @TODO
     io:format("I've got ~p and ~p~n", [A, B]),
     true.
@@ -239,11 +246,11 @@ call(M) ->
 %% -----------------------------------------------------------------------------
 call(M, Timeout) ->
     %% We send a request to an existing permanent worker
-    %% using juno_router_broadcast_handler acting as a sidejob_worker
+    %% using juno_registry_broadcast_handler acting as a sidejob_worker
     sidejob:call(?POOL_NAME, M, Timeout).
 
 % cast(M) ->
 %     %% We send a request to an existing permanent worker
-%     %% using juno_router_broadcast_handler acting as a sidejob_worker
+%     %% using juno_registry_broadcast_handler acting as a sidejob_worker
 %     sidejob:cast(?POOL_NAME, M).
 

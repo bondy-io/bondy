@@ -97,6 +97,13 @@
 %% -export([start_realm/2]). uri, ctxt
 %% -export([stop_realm/2]). uri, ctxt
 
+%% -export([callees/2]).
+%% -export([count_callees/2]).
+%% -export([count_registrations/2]).
+%% -export([lookup_registration/2]).
+%% -export([fetch_registration/2]). % wamp.registration.get
+
+
 %% GEN_SERVER CALLBACKS 
 -export([init/1]).
 -export([handle_info/2]).
@@ -434,7 +441,7 @@ handle_session_message(#register{} = M, Ctxt) ->
     %% @TODO if the async pool is overloaded, we should affect our call
     %% here too
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
-    Reply = case juno_rpc:register(Uri, Opts, Ctxt) of
+    Reply = case juno_dealer:register(Uri, Opts, Ctxt) of
         {ok, RegId} ->
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->

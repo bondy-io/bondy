@@ -195,7 +195,7 @@ pool_type(juno_stats_pool) ->
     application:get_env(
         ?APP, juno_stats_pool_type, permanent);
 
-pool_type(juno_router_broadcast_handler_pool) ->
+pool_type(juno_registry_broadcast_handler_pool) ->
     %% Should always be permanent
     permanent.
 
@@ -215,9 +215,9 @@ pool_size(juno_stats_pool) ->
     application:get_env(
         ?APP, juno_stats_pool_size, ?DEFAULT_RESOURCE_SIZE);
 
-pool_size(juno_router_broadcast_handler_pool) ->
+pool_size(juno_registry_broadcast_handler_pool) ->
     application:get_env(
-        ?APP, juno_router_broadcast_handler_pool_size, ?DEFAULT_RESOURCE_SIZE).
+        ?APP, juno_registry_broadcast_handler_pool_size, ?DEFAULT_RESOURCE_SIZE).
 
 
 %% -----------------------------------------------------------------------------
@@ -234,9 +234,9 @@ pool_capacity(juno_stats_pool) ->
     application:get_env(
         ?APP, juno_stats_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
 
-pool_capacity(juno_router_broadcast_handler_pool) ->
+pool_capacity(juno_registry_broadcast_handler_pool) ->
     application:get_env(
-        ?APP, juno_router_broadcast_handler_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
+        ?APP, juno_registry_broadcast_handler_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
 
 
 %% CALL

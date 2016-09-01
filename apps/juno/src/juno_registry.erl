@@ -2,6 +2,11 @@
 %% Copyright (C) Ngineo Limited 2015 - 2016. All rights reserved.
 %% -----------------------------------------------------------------------------
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% 
+%% @end
+%% -----------------------------------------------------------------------------
 -module(juno_registry).
 -include_lib("wamp/include/wamp.hrl").
 
@@ -55,6 +60,7 @@
 -export([entry_id/1]).
 -export([id/1]).
 -export([lookup/3]).
+-export([lookup/4]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
@@ -135,7 +141,7 @@ options(#entry{options = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> 
-    {ok, id()} |  {error, procedure_already_exists}.
+    {ok, id()} |  {error, {already_exists, id()}}.
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -165,8 +171,8 @@ add(Type, Uri, Options, Ctxt) ->
                 options = parse_options(Type, Options)
             },
             do_add(Type, Entry, Ctxt);
-        (false) ->
-            {error, procedure_already_exists}
+        (Id) ->
+            {error, {already_exists, Id}}
     end,
 
     case ets:match_object(Tab, Pattern) of
@@ -179,9 +185,10 @@ add(Type, Uri, Options, Ctxt) ->
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
-            {ok, EntryId};
+            {error, {already_exists, EntryId}};
 
-        [#entry{options = EOpts} | _] when Type == registration ->
+        [#entry{key = {_, _, EntryId}, options = EOpts} | _] 
+        when Type == registration ->
             SharedEnabled = juno_context:is_feature_enabled(
                 Ctxt, callee, shared_registration),
             NewPolicy = maps:get(invoke, Options, <<"single">>),
@@ -202,7 +209,7 @@ add(Type, Uri, Options, Ctxt) ->
                 NewPolicy =/= <<"single">> andalso
                 NewPolicy == PrevPolicy,
 
-            MaybeAdd(Flag)
+            MaybeAdd(Flag orelse EntryId)
     end.
 
 
@@ -238,11 +245,19 @@ remove_all(_, _) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(entry_type(), id(), juno_context:context()) -> 
-    entry() | not_found.
+-spec lookup(entry_type(), id(), juno_context:context()) -> entry() | not_found.
 lookup(Type, EntryId, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
+    lookup(Type, EntryId, SessionId, RealmUri).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(entry_type(), id(), id(), uri()) -> entry() | not_found.
+lookup(Type, EntryId, SessionId, RealmUri) ->
     % TODO Use UserId when there is no SessionId
     Tab = entry_table(Type, RealmUri),
     Key = {RealmUri, SessionId, EntryId},
@@ -253,7 +268,6 @@ lookup(Type, EntryId, Ctxt) ->
         [Entry] ->
             Entry
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -485,7 +499,6 @@ do_add(Type, Entry, Ctxt) ->
     } = Entry,
 
     SSTab = entry_table(Type, RealmUri),
-
     true = ets:insert(SSTab, Entry),
 
     IdxTab = index_table(Type, RealmUri),
