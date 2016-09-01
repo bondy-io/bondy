@@ -70,8 +70,9 @@
 
 -spec close_context(juno_context:context()) -> juno_context:context().
 close_context(Ctxt) -> 
-    juno_pubsub:close_context(Ctxt).
-    
+    ok = unsubscribe_all(Ctxt),
+    Ctxt.
+
 
 -spec features() -> map().
 features() ->
@@ -98,14 +99,14 @@ handle_message(#subscribe{} = M, Ctxt) ->
     Opts = M#subscribe.options,
     Topic = M#subscribe.topic_uri,
     %% TODO check authorization and reply with wamp.error.not_authorized if not
-    {ok, SubsId} = juno_pubsub:subscribe(Topic, Opts, Ctxt),
+    {ok, SubsId} = subscribe(Topic, Opts, Ctxt),
     Reply = wamp_message:subscribed(ReqId, SubsId),
     juno:send(Reply, Ctxt);
 
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
     SubsId = M#unsubscribe.subscription_id,
-    Reply = case juno_pubsub:unsubscribe(SubsId, Ctxt) of
+    Reply = case unsubscribe(SubsId, Ctxt) of
         ok -> 
             wamp_message:unsubscribed(ReqId);
         {error, not_found} ->
@@ -130,7 +131,7 @@ handle_message(#publish{} = M, Ctxt) ->
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
-    case juno_pubsub:publish(TopicUri, Opts, Args, Payload, Ctxt) of
+    case publish(TopicUri, Opts, Args, Payload, Ctxt) of
         {ok, PubId} when Acknowledge == true ->
             Reply = wamp_message:published(ReqId, PubId),
             ok = juno:send(Reply, Ctxt),
@@ -153,3 +154,190 @@ handle_message(#publish{} = M, Ctxt) ->
         {error, _} ->
             ok
     end.
+
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscribe(uri(), map(), juno_context:context()) -> {ok, id()}.
+subscribe(TopicUri, Options, Ctxt) ->
+    case juno_registry:add(subscription, TopicUri, Options, Ctxt) of
+        {ok, _} = OK -> OK;
+        {error, {already_exists, Id}} -> {ok, Id}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unsubscribe_all(juno_context:context()) -> ok.
+unsubscribe_all(Ctxt) ->
+    juno_registry:remove_all(subscription, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unsubscribe(id(), juno_context:context()) -> ok | {error, not_found}.
+unsubscribe(SubsId, Ctxt) ->
+    juno_registry:remove(subscription, SubsId, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Throws not_authorized
+%% @end
+%% -----------------------------------------------------------------------------
+-spec publish(uri(), map(), list(), map(), juno_context:context()) ->
+    {ok, id()}.
+publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
+    SessionId = juno_context:session_id(Ctxt),
+    %% TODO check if authorized and if not throw wamp.error.not_authorized
+    PubId = wamp_id:new(global),
+    Details = #{},
+    %% REVIEW We need to parallelise this based on batches
+    %% (RFC) When a single event matches more than one of a _Subscriber's_
+    %% subscriptions, the event will be delivered for each subscription.
+
+    %% We should not send the publication to the published
+    %% (RFC) Note that the _Publisher_ of an event will never
+    %% receive the published event even if the _Publisher_ is
+    %% also a _Subscriber_ of the topic published to.
+    Subs = match_subscriptions(TopicUri, Ctxt, #{exclude => [SessionId]}),
+    Fun = fun
+        (Entry) ->
+            SubsId = juno_registry:entry_id(Entry),
+            Session = juno_session:fetch(juno_registry:session_id(Entry)),
+            Pid = juno_session:pid(Session),
+            Pid ! wamp_message:event(SubsId, PubId, Details, Args, Payload)
+    end,
+    ok = publish(Subs, Fun),
+    {ok, PubId}.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns the list of subscriptions for the active session.
+%%
+%% When called with a juno:context() it is equivalent to calling
+%% subscriptions/2 with the RealmUri and SessionId extracted from the Context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscriptions(
+    ContextOrCont :: juno_context:context() | juno_registry:continuation()) ->
+    [juno_registry:entry()].
+subscriptions(Ctxt) when is_map(Ctxt) ->
+    RealmUri = juno_context:realm_uri(Ctxt),
+    SessionId = juno_context:session_id(Ctxt),
+    juno_registry:entries(
+        subscription, RealmUri, SessionId);
+
+subscriptions(Cont) ->
+    juno_registry:entries(Cont).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns the complete list of subscriptions matching the RealmUri
+%% and SessionId.
+%%
+%% Use {@link subscriptions/3} and {@link subscriptions/1} to limit the number
+%% of subscriptions returned.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->       
+    [juno_registry:entry()].
+subscriptions(RealmUri, SessionId) ->
+    juno_registry:entries(
+        subscription, RealmUri, SessionId, infinity).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Returns the complete list of subscriptions matching the RealmUri
+%% and SessionId.
+%%
+%% Use {@link subscriptions/3} to limit the number of subscriptions returned.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+    {[juno_registry:entry()], juno_registry:continuation()}
+    | '$end_of_table'.
+subscriptions(RealmUri, SessionId, Limit) ->
+    juno_registry:entries(
+        subscription, RealmUri, SessionId, Limit).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_subscriptions(uri(), juno_context:context()) ->
+    [{SessionId :: id(), pid(), SubsId :: id(), Opts :: map()}].
+match_subscriptions(TopicUri, Ctxt) ->
+    case juno_registry:match(subscription, TopicUri, Ctxt) of
+        {L, '$end_of_table'} -> L;
+        '$end_of_table' -> []
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_subscriptions(
+    uri(), juno_context:context(), non_neg_integer()) ->
+    {[juno_registry:entry()], juno_registry:continuation()}
+    | '$end_of_table'.
+match_subscriptions(TopicUri, Ctxt, Opts) ->
+    juno_registry:match(subscription, TopicUri, Ctxt, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match_subscriptions(juno_registry:continuation()) ->
+    {[juno_registry:entry()], juno_registry:continuation()} | '$end_of_table'.
+match_subscriptions(Cont) ->
+    ets:select(Cont).
+
+
+
+%% @private
+publish('$end_of_table', _Fun) ->
+    ok;
+
+publish({L, '$end_of_table'}, Fun) ->
+    lists:foreach(Fun, L);
+
+publish({L, Cont}, Fun ) ->
+    ok = lists:foreach(Fun, L),
+    publish(match_subscriptions(Cont), Fun);
+
+publish(L, Fun) when is_list(L) ->
+    lists:foreach(Fun, L).
