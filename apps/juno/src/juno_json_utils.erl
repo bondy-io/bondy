@@ -8,7 +8,7 @@ error({Name, Desc, L}) when is_list(L) ->
     jsx:encode(#{
         <<"code">> => Name,
         <<"message">> => Desc,
-        <<"errors">> => [pbs_json_utils:error(E) || E <- L]
+        <<"errors">> => [juno_json_utils:error(E) || E <- L]
     });
 error(Reason) ->
     jsx:encode(#{<<"code">> => Reason}).

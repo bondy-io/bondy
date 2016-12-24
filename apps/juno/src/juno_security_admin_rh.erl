@@ -111,7 +111,7 @@ delete_resource(Req0, State) ->
         ok ->
             {true, Req0, State};
         {error, Reason} ->
-            Req1 = pbs_rest_utils:set_resp_error_body(Reason, Req0),
+            Req1 = juno_rest_utils:set_resp_error_body(Reason, Req0),
             {false, Req1, State}
     end.
 
