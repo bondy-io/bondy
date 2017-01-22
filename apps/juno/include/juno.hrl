@@ -1,6 +1,9 @@
 
-
+-define(JUNO_VERSION_STRING, <<"JUNO-0.0.2">>).
 -define(JUNO_REALM_URI, <<"juno">>).
+
+-define(JUNO_PEER_CALL, <<"$juno_call">>).
+-define(JUNO_PEER_ACK, <<"$juno_ack">>).
 
 
 %% =============================================================================
@@ -117,3 +120,9 @@
 -define(JUNO_SOURCE_ON_DELETE, <<"juno.security.source.on_delete">>).
 
 
+-define(JUNO_ERROR_NOT_IN_SESSION, <<"juno.error.not_in_session">>).
+-define(JUNO_SESSION_ALREADY_EXISTS, <<"juno.error.session_already_exists">>).
+
+
+
+-type peer_id() :: {integer(), pid()}.

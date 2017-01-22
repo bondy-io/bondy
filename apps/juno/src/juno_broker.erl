@@ -57,10 +57,14 @@
 
 
 %% API
+-export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
 -export([is_feature_enabled/1]).
--export([close_context/1]).
+-export([match_subscriptions/2]).
+-export([subscriptions/1]).
+-export([subscriptions/2]).
+-export([subscriptions/3]).
 
 
 %% =============================================================================
@@ -79,7 +83,7 @@ features() ->
     ?BROKER_FEATURES.
 
 
--spec is_feature_enabled(broker_features()) -> boolean().
+-spec is_feature_enabled(broker_feature()) -> boolean().
 is_feature_enabled(F) ->
     maps:get(F, ?BROKER_FEATURES).
 
@@ -101,7 +105,7 @@ handle_message(#subscribe{} = M, Ctxt) ->
     %% TODO check authorization and reply with wamp.error.not_authorized if not
     {ok, SubsId} = subscribe(Topic, Opts, Ctxt),
     Reply = wamp_message:subscribed(ReqId, SubsId),
-    juno:send(Reply, Ctxt);
+    juno:send(juno_context:peer_id(Ctxt), Reply);
 
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
@@ -114,7 +118,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
                 ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
             )
     end,
-    juno:send(Reply, Ctxt);
+    juno:send(juno_context:peer_id(Ctxt), Reply);
 
 handle_message(#publish{} = M, Ctxt) ->
     %% (RFC) Asynchronously notifies all subscribers of the published event.
@@ -134,7 +138,7 @@ handle_message(#publish{} = M, Ctxt) ->
     case publish(TopicUri, Opts, Args, Payload, Ctxt) of
         {ok, PubId} when Acknowledge == true ->
             Reply = wamp_message:published(ReqId, PubId),
-            ok = juno:send(Reply, Ctxt),
+            ok = juno:send(juno_context:peer_id(Ctxt), Reply),
             %% TODO publish metaevent
             ok;
         {ok, _} ->
@@ -143,14 +147,14 @@ handle_message(#publish{} = M, Ctxt) ->
         {error, not_authorized} when Acknowledge == true ->
             Reply = wamp_message:error(
                 ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
-            juno:send(Reply, Ctxt);
+            juno:send(juno_context:peer_id(Ctxt), Reply);
         {error, Reason} when Acknowledge == true ->
             Reply = wamp_message:error(
                 ?PUBLISH, 
                 ReqId, 
                 juno:error_dict(Reason), 
                 ?WAMP_ERROR_CANCELLED),
-            juno:send(Reply, Ctxt);
+            juno:send(juno_context:peer_id(Ctxt), Reply);
         {error, _} ->
             ok
     end.
@@ -211,7 +215,7 @@ unsubscribe(SubsId, Ctxt) ->
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     SessionId = juno_context:session_id(Ctxt),
     %% TODO check if authorized and if not throw wamp.error.not_authorized
-    PubId = wamp_id:new(global),
+    PubId = juno_utils:get_id(global),
     Details = #{},
     %% REVIEW We need to parallelise this based on batches
     %% (RFC) When a single event matches more than one of a _Subscriber's_

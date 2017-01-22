@@ -4,9 +4,13 @@
 
 %% =============================================================================
 %% @doc
+%% An implementation of a WAMP realm. 
 %% A Realm is a routing and administrative domain, optionally
 %% protected by authentication and authorization. Juno messages are
-%% only routed within a Realm. This is equivalent to the WAMP Realm.
+%% only routed within a Realm. 
+%%
+%% Realms are persisted to disk and replicated across the cluster using the 
+%% plumtree_metadata subsystem.
 %% @end
 %% =============================================================================
 -module(juno_realm).
@@ -183,7 +187,7 @@ put(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec put(uri(), map()) -> realm().
 put(Uri, Opts) ->
-    wamp_uri:is_valid(Uri) orelse error({invalid_uri, Uri}),
+    wamp_uri:is_valid(Uri) orelse error({?WAMP_ERROR_INVALID_URI, Uri}),
     #{
         description := Desc, 
         authmethods := Method

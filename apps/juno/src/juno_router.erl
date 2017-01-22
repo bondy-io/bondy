@@ -5,6 +5,7 @@
 %% =============================================================================
 %% @doc
 %% juno_router provides the routing logic for all interactions.
+%%
 %% In general juno_router handles all messages asynchronously. It does this by
 %% using either a static or a dynamic pool of workers based on configuration.
 %% A dynamic pool actually spawns a new erlang process for each message.
@@ -134,6 +135,8 @@ roles() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Starts a sidejob pool of workers according to the configured pool_type 
+%% {@link juno_config:pool_type/1} for the pool named 'juno_router_pool'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_pool() -> ok.
@@ -150,9 +153,11 @@ start_pool() ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles a wamp message.
-%% The message might be handled synchronously (it is performed by the calling
+%% The message might be handled synchronously (performed by the calling
 %% process i.e. the transport handler) or asynchronously (by sending the
 %% message to the router worker pool).
+%%
+%% Most 
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: message(), Ctxt :: juno_context:context()) ->
@@ -208,11 +213,11 @@ handle_message(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
     end;
             
 handle_message(#authenticate{} = M, Ctxt) ->
-    %% Client does not have a session and has not been sent a challenge?
+    %% Client does not have a session and has not been sent a challenge
     ok = update_stats(M, Ctxt),
     abort(
         ?WAMP_ERROR_CANCELLED, 
-        <<"You've sent an AUTHENTICATE message.">>, 
+        <<"You need to request a session first by sending a HELLO message.">>, 
         Ctxt);
 
 handle_message(M, #{session_id := _} = Ctxt) ->
@@ -282,7 +287,8 @@ handle_cast(Event, State) ->
 
 handle_info(timeout, #state{pool_type = transient, event = Event} = State)
 when Event /= undefined ->
-    %% We've been spawned to handle this single event, so we should stop after
+    %% We've been spawned to handle this single event, 
+    %% so we should stop right after we do it
     ok = route_event(Event),
     {stop, normal, State};
 
@@ -329,7 +335,6 @@ do_start_pool() ->
 
 
 
-
 %% @private
 maybe_open_session({ok, Ctxt}) ->
     open_session(Ctxt);
@@ -358,7 +363,7 @@ maybe_open_session({error, {user_not_found, AuthId}, Ctxt}) ->
 maybe_open_session({challenge, AuthMethod, Challenge, Ctxt0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     Ctxt1 = Ctxt0#{
-        challenge_sent => true % to avoid multiple hellos
+        challenge_sent => true % to avoid multiple HELLO messages
     },
     ok = update_stats(M, Ctxt1),
     {reply, M, Ctxt1}.
@@ -409,7 +414,8 @@ open_session(Ctxt0) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%%
+%% Handles those WAMP messages that are allowed by the protocol once a session 
+%% has been established.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_session_message(M :: message(), Ctxt :: map()) ->
@@ -418,11 +424,11 @@ open_session(Ctxt0) ->
     | {reply, Reply :: message(), juno_context:context()}.
 
 handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
-    %% The client is replying to our goodbye() message.
+    %% The client is replying to our goodbye() message, we stop.
     {stop, Ctxt};
 
 handle_session_message(#goodbye{} = M, Ctxt) ->
-    %% Goodbye initiated by client, we reply with goodbye().
+    %% Goodbye initiated by client, we reply with goodbye() and stop.
     #{session_id := SessionId} = Ctxt,
     error_logger:info_report(
         "Session ~p closed as per client request. Reason: ~p~n",
@@ -432,15 +438,22 @@ handle_session_message(#goodbye{} = M, Ctxt) ->
     {stop, Reply, Ctxt};
 
 handle_session_message(#register{} = M, Ctxt) ->
-    %% This is an easy way to preserve RPC ordering as defined
-    %% RFC 11.2: 
+    %% This is a sync call as it is an easy way to preserve RPC ordering as 
+    %% defined by RFC 11.2: 
     %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
     %% message will be sent by _Dealer_ to _Callee A_ before any 
     %% "INVOCATION" message for *Procedure 1*.
 
-    %% @TODO if the async pool is overloaded, we should affect our call
-    %% here too
+    %% Because we block the callee until we get the result, the calle cannot
+    %% perform a call. 
+    %% At the moment this relies on Erlang's guaranteed causal delivery of 
+    %% messages between two processes even when in different nodes.
+
+    %% We are bound to the capacity of the transport-specific pool here 
+    %% e.g. cowboy or ranch
+
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
+
     Reply = case juno_dealer:register(Uri, Opts, Ctxt) of
         {ok, RegId} ->
             wamp_message:registered(ReqId, RegId);
@@ -453,16 +466,16 @@ handle_session_message(#register{} = M, Ctxt) ->
     end,
     {reply, Reply, Ctxt};
 
-handle_session_message(#call{request_id = CallId} = M, Ctxt0) ->
-    %% This is an easy way to preserve RPC ordering as defined
-    %% by RFC 11.2 as Erlang guarantees causal delivery of messages
+handle_session_message(#call{request_id = ReqId} = M, Ctxt0) ->
+    %% This is a sync call as it is an easy way to preserve RPC ordering as 
+    %% defined by RFC 11.2 as Erlang guarantees causal delivery of messages
     %% between two processes even when in different nodes.
 
-    %% @TODO if the async pool is overloaded, we should affect our call
-    %% here too
+    %% We are bound to the capacity of the transport-specific pool here 
+    %% e.g. cowboy or ranch
     ok = route_event({M, Ctxt0}),
-    Ctxt1 = juno_context:add_awaiting_call_id(Ctxt0, CallId),
-    {ok, Ctxt1};
+    %% The Call response will be delivered asynchronously by the dealer
+    {ok, juno_context:add_awaiting_call_id(Ctxt0, ReqId)};
 
 handle_session_message(M, Ctxt0) ->
     %% Client already has a session.
@@ -475,7 +488,7 @@ handle_session_message(M, Ctxt0) ->
     try async_route_event(M, Ctxt0) of
         ok ->
             {ok, Ctxt0};
-        overload ->
+        {error, overload} ->
             error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
             %% TODO publish metaevent and stats
             %% TODO use throttling and send error to caller conditionally
@@ -510,7 +523,7 @@ acknowledge_message(#publish{options = Opts}) ->
     maps:get(acknowledge, Opts, false);
 
 acknowledge_message(_) ->
-    true.
+    false.
 
 
 
@@ -526,11 +539,10 @@ acknowledge_message(_) ->
 %% Asynchronously handles a message by either sending it to an 
 %% existing worker or spawning a new one depending on the juno_broker_pool_type 
 %% type.
-%% This message will be handled by the worker's (gen_server)
-%% handle_info callback function.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec async_route_event(message(), juno_context:context()) -> ok | overload.
+-spec async_route_event(message(), juno_context:context()) -> 
+    ok | {error, overload}.
 async_route_event(M, Ctxt) ->
     PoolName = ?POOL_NAME,
     PoolType = juno_config:pool_type(PoolName),
@@ -540,7 +552,7 @@ async_route_event(M, Ctxt) ->
         {ok, _} ->
             ok;
         overload ->
-            overload
+            {error, overload}
     end.
 
 
@@ -569,6 +581,7 @@ async_route_event(transient, PoolName, M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
+%% Synchronously handles a message in the calling process.
 %% @end.
 %% -----------------------------------------------------------------------------
 -spec route_event(event()) -> ok.

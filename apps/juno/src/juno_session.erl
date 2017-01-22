@@ -25,7 +25,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SESSION_TABLE_NAME, juno_session).
--define(SESSION_SEQ_POS, 5).
+-define(SESSION_SEQ_POS, 7).
 
 -record(session, {
     id              ::  id(),
@@ -88,10 +88,10 @@
     session() | no_return().
 
 open(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
-    open(wamp_id:new(global), Peer, juno_realm:fetch(RealmUri), Opts);
+    open(juno_utils:get_id(global), Peer, juno_realm:fetch(RealmUri), Opts);
 
 open(Peer, Realm, Opts) when is_map(Opts) ->
-    open(wamp_id:new(global), Peer, Realm, Opts).
+    open(juno_utils:get_id(global), Peer, Realm, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -197,10 +197,11 @@ peer(#session{peer = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec incr_seq(id() | session()) -> dict().
+-spec incr_seq(id() | session()) -> map().
 
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
+    
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
     Tab = tuplespace:locate_table(?SESSION_TABLE_NAME, SessionId),
     ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).

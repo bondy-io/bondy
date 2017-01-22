@@ -8,8 +8,13 @@
 %% @end
 %% =============================================================================
 -module(juno).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+
+
+
+-export([ack/2]).
 -export([error_dict/1]).
 -export([error_dict/2]).
 -export([error_dict/3]).
@@ -17,8 +22,8 @@
 -export([make/0]).
 -export([send/2]).
 -export([send/3]).
--export([safe_send/3]).
 -export([start/0]).
+
 
 
 %% =============================================================================
@@ -36,11 +41,10 @@ start() ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(Message :: message(), Ctxt :: juno_context:context()) ->
+-spec send(peer_id(), wamp_message:message()) ->
     ok | no_return().
-send(Message, Ctxt) ->
-    Pid = juno_session:pid(juno_context:session(Ctxt)),
-    send(Pid, Message, Ctxt).
+send(Term, M) ->
+    send(Term, M, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -49,28 +53,41 @@ send(Message, Ctxt) ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(pid(), Message :: message(), Ctxt :: juno_context:context()) -> ok.
-send(Pid, Message, _Ctxt) when is_pid(Pid) ->
-    Pid ! Message,
-    ok.
+-spec send(peer_id(), wamp_message:message(), infinity | integer()) ->
+    ok | no_return().
+send({Pid, SessionId}, M, Timeout) 
+when is_pid(Pid), Timeout =:= infinity; 
+is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
+    MonitorRef = monitor(process, Pid),
+    %% If the monitor/2 call failed to set up a connection to a
+    %% remote node, we don't want the '!' operator to attempt
+    %% to set up the connection again. (If the monitor/2 call
+    %% failed due to an expired timeout, '!' too would probably
+    %% have to wait for the timeout to expire.) Therefore,
+    %% use erlang:send/3 with the 'noconnect' option so that it
+    %% will fail immediately if there is no connection to the
+    %% remote node.
+    erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
+    receive
+        {'DOWN', MonitorRef, process, Pid, Reason} ->
+            demonitor(MonitorRef, [flush]),
+            maybe_queue(SessionId, M) orelse exit(Reason);
+        {?JUNO_PEER_ACK, MonitorRef} ->
+            ok
+    after Timeout ->
+        demonitor(MonitorRef, [flush]),
+        exit(timeout)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Sends a message to a peer.
-%% Returns and error tuple if the process does not exist or if 
-%% the remote node is no reachable.
 %% @end
 %% -----------------------------------------------------------------------------
--spec safe_send(pid(), Message :: message(), Ctxt :: juno_context:context()) ->
-    ok | {error, noproc | noconnection}.
-safe_send(Pid, Message, Ctxt) when is_pid(Pid) ->
-    case node(Pid) =:= node() of
-        true ->
-            local_safe_send(Pid, Message, Ctxt);
-        false ->
-            remote_safe_send(Pid, Message, Ctxt)
-    end.
+-spec ack(pid(), reference()) -> ok.
+ack(Pid, Ref) ->
+    Pid ! {?JUNO_PEER_ACK, Ref},
+    ok.
 
 
 %% =============================================================================
@@ -136,31 +153,16 @@ error_dict(Code, Description, UserInfo) ->
         <<"userInfo">> => UserInfo
     }.
 
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 
 
-%% @private
-local_safe_send(Pid, Message, _Ctxt) ->
-    case is_process_alive(Pid) of
-        true ->
-            Pid ! Message,
-            ok;
-        false ->
-            error({unknown_peer, Pid})
-    end.
-
 
 %% @private
-remote_safe_send(Pid, Message, _Ctxt) ->
-    Ref = erlang:monitor(process, Pid),
-    Pid ! Message,
-    erlang:demonitor(Ref),
-    receive 
-        {'DOWN', Ref, process, Pid, Reason} ->
-            {error, Reason}
-    after 
-        0 -> ok
-    end.
+maybe_queue(_, _) ->
+    false.

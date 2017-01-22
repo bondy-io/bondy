@@ -1,7 +1,8 @@
 -module(juno_utils).
-
+-include_lib("wamp/include/wamp.hrl").
 
 -export([merge_map_flags/2]).
+-export([get_id/1]).
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 
@@ -11,6 +12,30 @@
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
+%% distribution_ over the complete range [0, 2^53]
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_id(Scope :: global | {router, uri()} | {session, id()}) -> id().
+get_id(global) ->
+    %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
+    %% distribution_ over the complete range [0, 2^53]
+    wamp_utils:rand_uniform();
+
+get_id({router, _}) ->
+    get_id(global);
+
+get_id({session, SessionId}) ->
+    %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
+    %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
+    %% Client_)
+    juno_session:incr_seq(SessionId).
+
+
 
 
 
@@ -56,7 +81,7 @@ get_nonce() ->
 get_random_string(Length, AllowedChars) ->
     lists:foldl(
         fun(_, Acc) ->
-            [lists:nth(random:uniform(length(AllowedChars)),
+            [lists:nth(rand:uniform(length(AllowedChars)),
             AllowedChars)]
             ++ Acc
         end, 

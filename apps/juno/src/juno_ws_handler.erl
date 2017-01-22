@@ -4,6 +4,8 @@
 
 %% =============================================================================
 %% @doc
+%% A Cowboy WS handler.
+%% 
 %% Each WAMP message is transmitted as a separate WebSocket message
 %% (not WebSocket frame)
 %%
@@ -30,11 +32,19 @@
 %% @end
 %% =============================================================================
 -module(juno_ws_handler).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?TIMEOUT
 -define(TIMEOUT, 60000*10).
+
+
+-type subprotocol() ::  #{
+    id => binary(),
+    frame_type => text | binary,
+    encoding => json | msgpack | json_batched | msgpack_batched
+}.
 
 -type state()       ::  #{
     context => juno_context:context(),
@@ -44,6 +54,7 @@
 }.
 
 -export([init/2]).
+-export([websocket_init/1]).
 -export([websocket_handle/3]).
 -export([websocket_info/3]).
 -export([terminate/3]).
@@ -92,6 +103,18 @@ init(Req, Opts) ->
 %% COWBOY_WEBSOCKET CALLBACKS
 %% =============================================================================
 
+websocket_init(#{subprotocol := undefined} = St) ->
+    %% This will close the WS connection
+    Frame = {
+        close, 
+        1002, 
+        <<"Missing value for header 'sec-websocket-protocol'.">>
+    },
+    {reply, Frame, St};
+
+websocket_init(St) ->
+    {ok, St}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -101,6 +124,7 @@ init(Req, Opts) ->
 websocket_handle(Msg, Req, #{subprotocol := undefined} = St) ->
     %% At the moment we only support WAMP, so we stop.
     %% TODO use lager
+    %% TODO This should be handled by the websocket_init callback above, review and eliminate.
     error_logger:error_report([
         {error, {unsupported_message, Msg}},
         {state, St},
@@ -147,20 +171,19 @@ websocket_info({stop, Reason}, Req, St) ->
     lager:debug("description: 'WAMP session shutdown', reason: ~p", [Reason]),
     {stop, Req, St};
 
-websocket_info(M, Req, St0) ->
-    %% Here we receive the messages either the router of another peer
-    %% sent to us using juno:send/2
-    case wamp_message:is_message(M) of
-        true ->
-            St1 = maybe_update_state(M, Req, St0),
-            %% We encode and send the message to the client
-            #{subprotocol := #{encoding := E, frame_type := T}} = St1,
-            Reply = frame(T, wamp_encoding:encode(M, E)),
-            {reply, Reply, Req, St1};
-        false ->
-            %% Any other unwanted erlang messages
-            {ok, Req, St0}
-    end.
+websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, Req, St0) ->
+    %% Here we receive the messages that either the router of another peer
+    %% sent to us using juno:send/2,3
+    ok = juno:ack(Pid, Ref),
+    St1 = maybe_update_state(M, Req, St0),
+    %% We encode and send the message to the client
+    #{subprotocol := #{encoding := E, frame_type := T}} = St1,
+    Reply = frame(T, wamp_encoding:encode(M, E)),
+    {reply, Reply, Req, St1};
+
+websocket_info(_, Req, St0) ->
+    %% Any other unwanted erlang messages
+    {ok, Req, St0}.
 
 
 
@@ -313,6 +336,7 @@ frame(Type, E) when Type == text orelse Type == binary ->
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state()}
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state(), hibernate}
     | {shutdown, cowboy_req:req(), state()}.
+    
 handle_wamp_data(Data1, Req, St0) ->
     #{
         subprotocol := #{frame_type := T, encoding := E},

@@ -4,7 +4,9 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% 
+%% An in-memory registry for PubSub subscriptions and RPC registrations,
+%% providing pattern matching capbilities including support for WAMP's
+%% version 2.0 match policies (exact, prefix and wilcard).
 %% @end
 %% -----------------------------------------------------------------------------
 -module(juno_registry).
@@ -23,7 +25,7 @@
 -record(entry, {
     key                     ::  entry_key(),
     uri                     ::  uri() | atom(),
-    match_policy            ::  match_policy() | atom(),
+    match_policy            ::  binary(),
     criteria                ::  [{'=:=', Field :: binary(), Value :: any()}] 
                                 | atom(),
     created                 ::  calendar:date_time() | atom(),
@@ -47,6 +49,7 @@
 
 
 -export_type([entry/0]).
+-export_type([entry_key/0]).
 -export_type([entry_type/0]).
 
 
@@ -163,7 +166,7 @@ add(Type, Uri, Options, Ctxt) ->
     MaybeAdd = fun
         (true) ->
             Entry = #entry{
-                key = {RealmUri, SessionId, wamp_id:new(global)},
+                key = {RealmUri, SessionId, juno_utils:get_id(global)},
                 uri = Uri,
                 match_policy = MatchPolicy,
                 criteria = [], % TODO Criteria

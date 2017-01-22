@@ -4,7 +4,7 @@
 
 %% =============================================================================
 %% @doc
-%% A Juno Context lets you access information that define the context of an
+%% A Juno Context lets you access information that defines the state of an
 %% interaction. In a typical interacion, several actors or objects have a hand
 %% in what is going on e.g. juno_session, wamp_realm, etc.
 %%
@@ -13,6 +13,7 @@
 %% @end
 %% =============================================================================
 -module(juno_context).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 
@@ -52,6 +53,7 @@
 -export([roles/1]).
 -export([session/1]).
 -export([session_id/1]).
+-export([peer_id/1]).
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
@@ -61,13 +63,13 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Initialises a new context object.
+%% Initialises a new context.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec new() -> context().
 new() ->
     Ctxt = #{
-        id => wamp_id:new(global),
+        id => juno_utils:get_id(global),
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => juno_config:request_timeout(),
@@ -89,8 +91,11 @@ reset(Ctxt) ->
         request_timeout => 0
     }.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Closes the context. This function calls {@link juno_session:close/1} 
+%% and {@link juno_router:close_context/1}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(context()) -> ok.
@@ -161,7 +166,8 @@ realm_uri(#{realm_uri := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the sessionId of the provided context.
+%% Returns the sessionId of the provided context or 'undefined' 
+%% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session_id(context()) -> id() | undefined.
@@ -179,6 +185,19 @@ set_session_id(Ctxt, SessionId) ->
     Ctxt#{session_id => SessionId}.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(context()) -> peer_id().
+
+peer_id(#{session_id := SessionId}) ->
+    %% TODO evaluate caching this as it should be immutable
+    Session = juno_session:fetch(SessionId),
+    {SessionId, juno_session:pid(Session)}.
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Fetches and returns the juno_session for the associated sessionId.
@@ -191,7 +210,7 @@ session(#{session_id := SessionId}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the current request id
+%% Returns the current request id.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec request_id(context()) -> id().
@@ -241,12 +260,14 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Returns a list containing the identifiers for the calls the peer performed 
+%% and it is still awaiting a response for.  This is used by the internal rpc
+%% mechanism which is based on promises.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec awaiting_call_ids(context()) -> [id()].
 awaiting_call_ids(#{awaiting_call_ids := S}) ->
     sets:to_list(S).
-
 
 
 
