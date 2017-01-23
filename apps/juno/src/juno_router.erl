@@ -502,7 +502,7 @@ handle_session_message(M, Ctxt0) ->
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
-                juno:error_dict(Reason),
+                juno:error_map(Reason),
                 ?WAMP_ERROR_CANCELLED
             ),
             ok = update_stats(Reply, Ctxt0),

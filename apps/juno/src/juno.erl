@@ -15,9 +15,9 @@
 
 
 -export([ack/2]).
--export([error_dict/1]).
--export([error_dict/2]).
--export([error_dict/3]).
+-export([error_map/1]).
+-export([error_map/2]).
+-export([error_map/3]).
 -export([error_uri/1]).
 -export([make/0]).
 -export([send/2]).
@@ -41,8 +41,7 @@ start() ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message:message()) ->
-    ok | no_return().
+-spec send(peer_id(), wamp_message:message()) -> ok | no_return().
 send(Term, M) ->
     send(Term, M, 5000).
 
@@ -70,7 +69,7 @@ is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
     erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            maybe_queue(SessionId, M) orelse exit(Reason);
+            exit(Reason);
         {?JUNO_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
@@ -135,18 +134,18 @@ error_uri(Reason) when is_atom(Reason) ->
     <<"com.leapsight.error.", R/binary>>.
 
 
-error_dict(Code) ->
+error_map(Code) ->
     #{
         <<"code">> => Code
     }.
 
-error_dict(Code, Description) ->
+error_map(Code, Description) ->
     #{
         <<"code">> => Code,
         <<"description">> => Description
     }.
 
-error_dict(Code, Description, UserInfo) ->
+error_map(Code, Description, UserInfo) ->
     #{
         <<"code">> => Code,
         <<"description">> => Description,
@@ -161,8 +160,3 @@ error_dict(Code, Description, UserInfo) ->
 %% =============================================================================
 
 
-
-
-%% @private
-maybe_queue(_, _) ->
-    false.
