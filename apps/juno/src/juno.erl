@@ -70,9 +70,9 @@ is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
     erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            demonitor(MonitorRef, [flush]),
             maybe_queue(SessionId, M) orelse exit(Reason);
         {?JUNO_PEER_ACK, MonitorRef} ->
+            demonitor(MonitorRef, [flush]),
             ok
     after Timeout ->
         demonitor(MonitorRef, [flush]),
