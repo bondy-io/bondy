@@ -1,0 +1,8 @@
+// Place your settings in this file to overwrite default and user settings.
+{
+    "erlang.linter-erlc.include": [
+        "${workspaceRoot}/apps/juno/include",
+        "${workspaceRoot}/_build/default/lib/../include"
+    ], 
+    "erlang.linter-erlc.deps": ["${workspaceRoot}/_build/default/lib"],
+}
