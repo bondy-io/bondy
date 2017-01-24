@@ -5,4 +5,7 @@
         "${workspaceRoot}/_build/default/lib/../include"
     ], 
     "erlang.linter-erlc.deps": ["${workspaceRoot}/_build/default/lib"],
+    "editor.wrappingColumn": 80,
+	"editor.wordWrap": true,
+	"erlang.enableExperimentalAutoComplete": true
 }
