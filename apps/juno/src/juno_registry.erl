@@ -22,8 +22,15 @@
 -define(MAX_LIMIT, 100000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
+
+-define(ENTRY_KEY(RealmUri, SessionId, EntryId), 
+    {RealmUri, SessionId, EntryId}
+).
+
+%% An entry denotes a registration or a subscription
 -record(entry, {
     key                     ::  entry_key(),
+    type                    ::  entry_type(),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     criteria                ::  [{'=:=', Field :: binary(), Value :: any()}] 
@@ -31,6 +38,7 @@
     created                 ::  calendar:date_time() | atom(),
     options                 ::  map() | atom()
 }).
+
 
 -record(index, {
     key                     ::  tuple() | atom(),  % dynamically generated
@@ -73,6 +81,8 @@
 -export([remove/3]).
 -export([remove_all/2]).
 -export([session_id/1]).
+-export([to_details_map/1]).
+-export([type/1]).
 -export([uri/1]).
 
 
@@ -81,20 +91,45 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec id(entry()) -> id().
 id(#entry{key = {_, _, Val}}) -> Val.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec realm_uri(entry()) -> uri().
 realm_uri(#entry{key = {Val, _, _}}) -> Val.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec session_id(entry()) -> id().
 session_id(#entry{key = {_, Val, _}}) -> Val.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec entry_id(entry()) -> id().
 entry_id(#entry{key = {_, _, Val}}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec type(entry()) -> entry_type().
+type(#entry{type = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -143,18 +178,34 @@ options(#entry{options = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec to_details_map(entry()) -> any().
+
+to_details_map(#entry{key = {_, _, Id}} = E) ->
+    #{
+        <<"id">> => Id,
+        <<"created">> => E#entry.created,
+        <<"uri">> => E#entry.uri,
+        <<"match">> => E#entry.match_policy
+    }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Add a registry entry
+%% @end
+%% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> 
-    {ok, id()} |  {error, {already_exists, id()}}.
+    {ok, map(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, id()}}.
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
     MatchPolicy = validate_match_policy(Options),
-    MatchSessionId = case Type of
-        registration -> '_';
-        subscription -> SessionId
-    end,
+    
     Pattern = #entry{
-        key = {RealmUri, MatchSessionId, '$1'},
+        key = key_pattern(Type, RealmUri, SessionId),
+        type = Type,
         uri = Uri,
         match_policy = MatchPolicy,
         criteria = [], % TODO Criteria
@@ -166,7 +217,9 @@ add(Type, Uri, Options, Ctxt) ->
     MaybeAdd = fun
         (true) ->
             Entry = #entry{
-                key = {RealmUri, SessionId, juno_utils:get_id(global)},
+                key = ?ENTRY_KEY(
+                    RealmUri, SessionId, juno_utils:get_id(global)),
+                type = Type,
                 uri = Uri,
                 match_policy = MatchPolicy,
                 criteria = [], % TODO Criteria
@@ -174,28 +227,28 @@ add(Type, Uri, Options, Ctxt) ->
                 options = parse_options(Type, Options)
             },
             do_add(Type, Entry, Ctxt);
-        (Id) ->
-            {error, {already_exists, Id}}
+        (Entry) ->
+            {error, {already_exists, to_details_map(Entry)}}
     end,
 
     case ets:match_object(Tab, Pattern) of
         [] ->
-            %% No matching entry exists.
+            %% No matching registrations at all exists or
+            %% No matching subscriptions for this SessionId exists
             MaybeAdd(true);
 
-        [#entry{key = {_, _, EntryId}}] when Type == subscription ->
+        [#entry{} = Entry] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
-            {error, {already_exists, EntryId}};
+            {error, {already_exists, Entry}};
 
-        [#entry{key = {_, _, EntryId}, options = EOpts} | _] 
-        when Type == registration ->
+        [#entry{options = EOpts} = Entry| _] when Type == registration ->
             SharedEnabled = juno_context:is_feature_enabled(
-                Ctxt, callee, shared_registration),
-            NewPolicy = maps:get(invoke, Options, <<"single">>),
-            PrevPolicy = maps:get(invoke, EOpts, <<"single">>),
+                Ctxt, <<"callee">>, <<"shared_registration">>),
+            NewPolicy = maps:get(<<"invoke">>, Options, <<"single">>),
+            PrevPolicy = maps:get(<<"invoke">>, EOpts, <<"single">>),
             %% As a default, only a single Callee may register a procedure
             %% for an URI.
             %% Shared Registration (RFC 13.3.9)
@@ -212,7 +265,7 @@ add(Type, Uri, Options, Ctxt) ->
                 NewPolicy =/= <<"single">> andalso
                 NewPolicy == PrevPolicy,
 
-            MaybeAdd(Flag orelse EntryId)
+            MaybeAdd(Flag orelse Entry)
     end.
 
 
@@ -225,6 +278,7 @@ add(Type, Uri, Options, Ctxt) ->
 remove_all(Type, #{realm_uri := RealmUri, session_id := SessionId} = Ctxt) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
+        type = Type,
         uri = '_',
         match_policy = '_',
         criteria = '_',
@@ -237,7 +291,8 @@ remove_all(Type, #{realm_uri := RealmUri, session_id := SessionId} = Ctxt) ->
             %% There are no entries for this session
             ok;
         {[First], _} ->
-            do_remove_all(First, Type, Tab, Ctxt)
+            %% Use iterator to remove each one
+            do_remove_all(First, Tab, Ctxt)
     end;
     
 remove_all(_, _) ->
@@ -246,6 +301,7 @@ remove_all(_, _) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Lookup an entry by Type, Id and Ctxt
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(entry_type(), id(), juno_context:context()) -> entry() | not_found.
@@ -263,8 +319,7 @@ lookup(Type, EntryId, Ctxt) ->
 lookup(Type, EntryId, SessionId, RealmUri) ->
     % TODO Use UserId when there is no SessionId
     Tab = entry_table(Type, RealmUri),
-    Key = {RealmUri, SessionId, EntryId},
-    case ets:take(Tab, Key) of
+    case ets:take(Tab, ?ENTRY_KEY(RealmUri, SessionId, EntryId)) of
         [] ->
             %% The session had no entries with EntryId.
             {error, not_found};
@@ -284,15 +339,17 @@ remove(Type, EntryId, Ctxt) ->
     SessionId = juno_context:session_id(Ctxt),
     % TODO Use UserId when there is no SessionId
     Tab = entry_table(Type, RealmUri),
-    Key = {RealmUri, SessionId, EntryId},
+    Key = ?ENTRY_KEY(RealmUri, SessionId, EntryId),
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no entries with EntryId.
             {error, not_found};
         [#entry{uri = Uri, match_policy = MP}] ->
+            decr_counter(Tab, {RealmUri, Uri}, 1),
+            %% Delete indices for entry
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(EntryId, Uri, MP, Ctxt),
-            true = ets:delete_object(IdxTab, IdxEntry),
+            ets:delete_object(IdxTab, IdxEntry),
             ok
     end.
 
@@ -420,22 +477,27 @@ match({Type, Cont}) when Type == registration orelse Type == subscription ->
 
 
 %% @private
-do_remove_all('$end_of_table', _, _, _) ->
+do_remove_all('$end_of_table', _, _) ->
     ok;
-do_remove_all([], _, _, _) ->
+
+do_remove_all([], _, _) ->
     ok;
-do_remove_all(#entry{} = S, Type, Tab, Ctxt) ->
-    {RealmUri, _, EntryId} = Key = S#entry.key,
+
+do_remove_all(#entry{key = Key, type = Type} = S, Tab, Ctxt) ->
+    {RealmUri, _, EntryId} = Key,
     Uri = S#entry.uri,
     MatchPolicy = S#entry.match_policy,
     IdxTab = index_table(Type, RealmUri),
     IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
-    true = ets:delete_object(Tab, S),
+    N = ets:select_delete(Tab, [{S, [], [true]}]),
+    decr_counter(Tab, {RealmUri, Uri}, N),
     true = ets:delete_object(IdxTab, IdxEntry),
-    do_remove_all(ets:next(Tab, Key), Type, Tab, Ctxt);
-do_remove_all({_, Sid, _} = Key, Type, Tab, #{session_id := Sid} = Ctxt) ->
-    do_remove_all(ets:lookup(Tab, Key), Type, Tab, Ctxt);
-do_remove_all(_, _, _, _) ->
+    do_remove_all(ets:next(Tab, Key), Tab, Ctxt);
+
+do_remove_all({_, Sid, _} = Key, Tab, #{session_id := Sid} = Ctxt) ->
+    do_remove_all(ets:lookup(Tab, Key), Tab, Ctxt);
+
+do_remove_all(_, _, _) ->
     %% No longer our session
     ok.
 
@@ -451,7 +513,7 @@ do_remove_all(_, _, _, _) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(match, Options, <<"exact">>),
+    P = maps:get(<<"match">>, Options, <<"exact">>),
     P == <<"exact">> orelse P == <<"prefix">> orelse P == <<"wildcard">>
     orelse error({invalid_pattern_match_policy, P}),
     P.
@@ -466,12 +528,12 @@ parse_options(registration, Opts) ->
 
 %% @private
 parse_subscription_options(Opts) ->
-    maps:without([match], Opts).
+    maps:without([<<"match">>], Opts).
 
 
 %% @private
 parse_registration_options(Opts) ->
-    maps:without([match], Opts).
+    maps:without([<<"match">>], Opts).
 
 
 %% @private
@@ -494,6 +556,8 @@ index_table(registration, RealmUri) ->
 
 
 %% @private
+-spec do_add(atom(), entry(), juno_context:context()) -> 
+    {ok, entry(), IsFirstEntry :: boolean()}.
 do_add(Type, Entry, Ctxt) ->
     #entry{
         key = {RealmUri, _, EntryId},
@@ -507,7 +571,7 @@ do_add(Type, Entry, Ctxt) ->
     IdxTab = index_table(Type, RealmUri),
     IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
     true = ets:insert(IdxTab, IdxEntry),
-    {ok, EntryId}.
+    {ok, to_details_map(Entry), incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1}.
 
 
 %% @private
@@ -612,6 +676,7 @@ lookup_entries(Type, {Keys, Cont}) ->
 do_lookup_entries(Type, Keys) ->
     do_lookup_entries(Keys, Type, []).
 
+
 %% @private
 do_lookup_entries([], _, Acc) ->
     lists:reverse(Acc);
@@ -648,3 +713,32 @@ uri_components(Uri) ->
             %% Invalid Uri
             error({badarg, Uri})
     end.
+
+
+%% @private
+key_pattern(subscription, RealmUri, SessionId) -> 
+    {RealmUri, SessionId, '$1'};
+
+key_pattern(registration, RealmUri, _) -> 
+    {RealmUri, '_', '$1'}.
+
+
+%% @private
+incr_counter(Tab, Key, N) ->
+    ets:update_counter(Tab, Key, {2, N}, {Key, 1}).
+
+
+%% @private
+decr_counter(Tab, Key, N) ->
+    Default = {Key, 0},
+    case ets:update_counter(Tab, Key, {2, -N, 0, 0}, Default) of
+        0 ->
+            %% Other process might have incremented the count, 
+            %% so we do a match delete
+            true = ets:match_delete(Tab, Default),
+            0;
+        N -> 
+            N
+    end.
+
+

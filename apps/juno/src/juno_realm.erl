@@ -53,7 +53,7 @@
 -export([uri/1]).
 
 
--compile({no_auto_import,[put/2]}).
+-compile({no_auto_import, [put/2]}).
 
 
 

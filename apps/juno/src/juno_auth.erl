@@ -63,11 +63,11 @@ when is_binary(Signature), is_map(Extra) ->
 maybe_challenge(_, not_found, #{realm_uri := Uri} = Ctxt) ->
     {error, {realm_not_found, Uri}, Ctxt};
 
-maybe_challenge(#{authid := UserId} = Details, Realm, Ctxt0) ->
+maybe_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
     Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
     case juno_realm:is_security_enabled(Realm) of
         true ->
-            AuthMethods = maps:get(authmethods, Details, []),
+            AuthMethods = maps:get(<<"authmethods">>, Details, []),
             AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
@@ -90,16 +90,16 @@ maybe_challenge(_, _, Ctxt) ->
 %% @private
 challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
     %% id is the future session_id 
-    #{username := UserId} = User,
+    #{<<"username">> := UserId} = User,
     Ch0 = #{
         challenge => #{
-            authmethod => ?WAMPCRA_AUTH,
-            authid => UserId,
-            authprovider => <<"juno">>, 
-            authrole => maps:get(authrole, Details, <<"user">>), % @TODO
-            nonce => juno_utils:get_nonce(),
-            session => Id,
-            timestamp => calendar:universal_time()
+            <<"authmethod">> => ?WAMPCRA_AUTH,
+            <<"authid">> => UserId,
+            <<"authprovider">> => <<"juno">>, 
+            <<"authrole">> => maps:get(authrole, Details, <<"user">>), % @TODO
+            <<"nonce">> => juno_utils:get_nonce(),
+            <<"session">> => Id,
+            <<"timestamp">> => calendar:universal_time()
         }
     },
     RealmUri = juno_context:realm_uri(Ctxt),
@@ -108,15 +108,15 @@ challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
             Ch0;
         Pass ->
             #{
-                auth_name := pbkdf2,
-                hash_func := sha,
-                iterations := Iter,
-                salt := Salt
+                <<"auth_name">> := pbkdf2,
+                <<"hash_func">> := sha,
+                <<"iterations">> := Iter,
+                <<"salt">> := Salt
             } = Pass,
             Ch0#{
-                salt => Salt,
-                keylen => 16, % see juno_pw_auth.erl
-                iterations => Iter
+                <<"salt">> => Salt,
+                <<"keylen">> => 16, % see juno_pw_auth.erl
+                <<"iterations">> => Iter
             }
     end;
 

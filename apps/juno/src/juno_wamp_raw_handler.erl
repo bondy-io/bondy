@@ -83,7 +83,7 @@ handle_command(ping) ->
 handle_command({F, Args} = Cmd)
 when is_atom(F), is_list(Args) ->
     try
-        apply(lsd_client, F, Args)
+        apply(juno, F, Args)
     catch
         _:Reason ->
             lager:debug("Reason ~p", [Reason]),

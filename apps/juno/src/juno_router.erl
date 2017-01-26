@@ -75,11 +75,11 @@
 
 -define(POOL_NAME, juno_router_pool).
 -define(ROUTER_ROLES, #{
-    broker => ?BROKER_FEATURES,
-    dealer => ?DEALER_FEATURES
+    <<"broker">> => ?BROKER_FEATURES,
+    <<"dealer">> => ?DEALER_FEATURES
 }).
 
--type event()                   ::  {message(), juno_context:context()}.
+-type event()                   ::  {wamp_message(), juno_context:context()}.
 
 -record(state, {
     pool_type = permanent       ::  permanent | transient,
@@ -128,7 +128,7 @@ close_context(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec roles() -> #{broker => map(), dealer => map()}.
+-spec roles() -> #{binary() => #{binary() => boolean()}}.
 roles() ->
     ?ROUTER_ROLES.
 
@@ -160,10 +160,10 @@ start_pool() ->
 %% Most 
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: juno_context:context()) ->
+-spec handle_message(M :: wamp_message(), Ctxt :: juno_context:context()) ->
     {ok, juno_context:context()}
-    | {reply, Reply :: message(), juno_context:context()}
-    | {stop, Reply :: message(), juno_context:context()}.
+    | {reply, Reply :: wamp_message(), juno_context:context()}
+    | {stop, Reply :: wamp_message(), juno_context:context()}.
 
 handle_message(#hello{} = M, #{session_id := _} = Ctxt) ->
     %% Client already has a session!
@@ -376,8 +376,8 @@ maybe_open_session({challenge, AuthMethod, Challenge, Ctxt0}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open_session(juno_context:context()) ->
-    {reply, message(), juno_context:context()}
-    | {stop, message(), juno_context:context()}.
+    {reply, wamp_message(), juno_context:context()}
+    | {stop, wamp_message(), juno_context:context()}.
 
 open_session(Ctxt0) ->
     try 
@@ -390,14 +390,14 @@ open_session(Ctxt0) ->
     
         Ctxt1 = Ctxt0#{
             session_id => Id,
-            roles => parse_roles(maps:get(roles, Details))
+            roles => parse_roles(maps:get(<<"roles">>, Details))
         },
 
         Welcome = wamp_message:welcome(
             Id,
             #{
-                agent => ?JUNO_VERSION_STRING,
-                roles => ?ROUTER_ROLES
+                <<"agent">> => ?JUNO_VERSION_STRING,
+                <<"roles">> => ?ROUTER_ROLES
             }
         ),
         ok = update_stats(Welcome, Ctxt1),
@@ -418,10 +418,10 @@ open_session(Ctxt0) ->
 %% has been established.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_session_message(M :: message(), Ctxt :: map()) ->
+-spec handle_session_message(M :: wamp_message(), Ctxt :: map()) ->
     {ok, juno_context:context()}
-    | {stop, Reply :: message(), juno_context:context()}
-    | {reply, Reply :: message(), juno_context:context()}.
+    | {stop, Reply :: wamp_message(), juno_context:context()}
+    | {reply, Reply :: wamp_message(), juno_context:context()}.
 
 handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message, we stop.
@@ -520,7 +520,7 @@ handle_session_message(M, Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
 acknowledge_message(#publish{options = Opts}) ->
-    maps:get(acknowledge, Opts, false);
+    maps:get(<<"acknowledge">>, Opts, false);
 
 acknowledge_message(_) ->
     false.
@@ -541,10 +541,12 @@ acknowledge_message(_) ->
 %% type.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec async_route_event(message(), juno_context:context()) -> 
+-spec async_route_event(wamp_message(), juno_context:context()) -> 
     ok | {error, overload}.
 async_route_event(M, Ctxt) ->
     PoolName = ?POOL_NAME,
+    %% Todo either fix pool_type based on stats or use mochiweb to compile 
+    %% juno_config to avoid bottlenecks.
     PoolType = juno_config:pool_type(PoolName),
     case async_route_event(PoolType, PoolName, M, Ctxt) of
         ok ->
@@ -632,25 +634,25 @@ parse_roles(Roles) ->
 parse_roles([], Roles) ->
     Roles;
 
-parse_roles([caller|T], Roles) ->
+parse_roles([<<"caller">>|T], Roles) ->
     F = juno_utils:merge_map_flags(
-        maps:get(caller, Roles), ?CALLER_FEATURES),
-    parse_roles(T, Roles#{caller => F});
+        maps:get(<<"caller">>, Roles), ?CALLER_FEATURES),
+    parse_roles(T, Roles#{<<"caller">> => F});
 
-parse_roles([callee|T], Roles) ->
+parse_roles([<<"callee">>|T], Roles) ->
     F = juno_utils:merge_map_flags(
-        maps:get(callee, Roles), ?CALLEE_FEATURES),
-    parse_roles(T, Roles#{callee => F});
+        maps:get(<<"callee">>, Roles), ?CALLEE_FEATURES),
+    parse_roles(T, Roles#{<<"callee">> => F});
 
-parse_roles([subscriber|T], Roles) ->
+parse_roles([<<"subscriber">>|T], Roles) ->
     F = juno_utils:merge_map_flags(
-        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
-    parse_roles(T, Roles#{subscriber => F});
+        maps:get(<<"subscriber">>, Roles), ?SUBSCRIBER_FEATURES),
+    parse_roles(T, Roles#{<<"subscriber">> => F});
 
-parse_roles([publisher|T], Roles) ->
+parse_roles([<<"publisher">>|T], Roles) ->
     F = juno_utils:merge_map_flags(
-        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
-    parse_roles(T, Roles#{publisher => F});
+        maps:get(<<"publisher">>, Roles), ?PUBLISHER_FEATURES),
+    parse_roles(T, Roles#{<<"publisher">> => F});
 
 parse_roles([_|T], Roles) ->
     parse_roles(T, Roles).
@@ -660,7 +662,7 @@ parse_roles([_|T], Roles) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update_stats(wamp_message:message(), juno_context:context()) -> ok.
+-spec update_stats(wamp_message(), juno_context:context()) -> ok.
 update_stats(M, Ctxt) ->
     Type = element(1, M),
     Size = erts_debug:flat_size(M) * 8,

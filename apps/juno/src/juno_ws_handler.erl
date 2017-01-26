@@ -76,13 +76,10 @@ init(Req, Opts) ->
     %% correct subprotocol was found.
     case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
         undefined ->
-            %% Plain websockets
-            %% {ok, Req1, St, ?TIMEOUT};
-            %% At the moment we only support wamp, not plain ws, so we stop.
-            error_logger:error_report([
-                {error,
-                    {missing_value_for_header, <<"sec-websocket-protocol">>}}
-            ]),
+            %% At the moment we only support wamp, not plain ws
+            lager:error(
+                <<"Missing value for header 'sec-websocket-protocol'.">>, []),
+            %% Returning ok will cause the handler to stop in websocket_handle
             {ok, Req, Opts};
         Subprotocols ->
             Ctxt = juno_context:set_peer(
@@ -121,15 +118,13 @@ websocket_init(St) ->
 %% Handles frames sent by client
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_handle(Msg, Req, #{subprotocol := undefined} = St) ->
-    %% At the moment we only support WAMP, so we stop.
-    %% TODO use lager
+websocket_handle(Data, Req, #{subprotocol := undefined} = St) ->
+    %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above, review and eliminate.
-    error_logger:error_report([
-        {error, {unsupported_message, Msg}},
-        {state, St},
-        {stacktrace, erlang:get_stacktrace()}
-    ]),
+    lager:error(
+        <<"Unsupported message ~p. Stacktrace: ~p">>, 
+        [Data, erlang:get_stacktrace()]
+    ),
     {stop, Req, St};
 
 websocket_handle({T, Data}, Req, #{subprotocol := #{frame_type := T}} = St) ->
@@ -146,11 +141,10 @@ websocket_handle({pong, _Msg}, Req, St) ->
 
 websocket_handle(Data, Req, St) ->
     %% TODO use lager
-    error_logger:error_report([
-        {error, {unsupported_message, Data}},
-        {state, St},
-        {stacktrace, erlang:get_stacktrace()}
-    ]),
+    lager:error(
+        <<"Unsupported message ~p. Stacktrace: ~p">>, 
+        [Data, erlang:get_stacktrace()]
+    ),
     %% We ignore this message and carry on listening
     {ok, Req, St}.
 
@@ -168,7 +162,8 @@ websocket_info({timeout, _Ref, _Msg}, Req, St) ->
 
 websocket_info({stop, Reason}, Req, St) ->
     %% TODO use lager
-    lager:debug("description: 'WAMP session shutdown', reason: ~p", [Reason]),
+    lager:debug(
+        <<"description='WAMP session shutdown', reason=~p">>, [Reason]),
     {stop, Req, St};
 
 websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, Req, St0) ->
@@ -370,11 +365,11 @@ handle_wamp_data(Data1, Req, St0) ->
 %% when required.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_wamp_messages([message()], juno_context:context()) ->
+-spec handle_wamp_messages([wamp_message()], juno_context:context()) ->
     {ok, juno_context:context()} 
-    | {reply, [message()], juno_context:context()} 
+    | {reply, [wamp_message()], juno_context:context()} 
     | {stop, juno_context:context()}
-    | {stop, [message()], juno_context:context()}.
+    | {stop, [wamp_message()], juno_context:context()}.
 handle_wamp_messages(Ms, Ctxt) ->
     handle_wamp_messages(Ms, Ctxt, []).
 

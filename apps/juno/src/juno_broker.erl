@@ -60,8 +60,10 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
+-export([handle_call/2]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
+-export([publish/5]).
 -export([subscriptions/1]).
 -export([subscriptions/2]).
 -export([subscriptions/3]).
@@ -83,8 +85,8 @@ features() ->
     ?BROKER_FEATURES.
 
 
--spec is_feature_enabled(broker_feature()) -> boolean().
-is_feature_enabled(F) ->
+-spec is_feature_enabled(binary()) -> boolean().
+is_feature_enabled(F) when is_binary(F) ->
     maps:get(F, ?BROKER_FEATURES).
 
 
@@ -97,15 +99,9 @@ is_feature_enabled(F) ->
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: juno_context:context()) -> ok.
+-spec handle_message(M :: wamp_message(), Ctxt :: juno_context:context()) -> ok.
 handle_message(#subscribe{} = M, Ctxt) ->
-    ReqId = M#subscribe.request_id,
-    Opts = M#subscribe.options,
-    Topic = M#subscribe.topic_uri,
-    %% TODO check authorization and reply with wamp.error.not_authorized if not
-    {ok, SubsId} = subscribe(Topic, Opts, Ctxt),
-    Reply = wamp_message:subscribed(ReqId, SubsId),
-    juno:send(juno_context:peer_id(Ctxt), Reply);
+    subscribe(M, Ctxt);
 
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
@@ -130,7 +126,7 @@ handle_message(#publish{} = M, Ctxt) ->
     TopicUri = M#publish.topic_uri,
     Args = M#publish.arguments,
     Payload = M#publish.payload,
-    Acknowledge = maps:get(acknowledge, Opts, false),
+    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
     %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
@@ -161,7 +157,60 @@ handle_message(#publish{} = M, Ctxt) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Handles the following wamp calls:
+%%
+%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
+%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
+%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
+%% * "wamp.subscription.get": Retrieves information on a particular subscription.
+%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
+%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(wamp_call(), juno_context:context()) -> ok | no_return().
 
+handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
+    %% TODO, BUT This call might be too big, dos not make any sense as it is a dump of the whole database
+    Res = #{
+        <<"exact">> => [],
+        <<"prefix">> => [],
+        <<"wildcard">> => []
+    },
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M);
+
+handle_call(#call{procedure_uri = <<"wamp.subscription.lookup">>} = M, Ctxt) ->
+    % #{<<"topic">> := TopicUri} = Args = M#call.arguments,
+    % Opts = maps:get(<<"options">>, Args, #{}),
+    Res = #{},
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M);
+
+handle_call(#call{procedure_uri = <<"wamp.subscription.match">>} = M, Ctxt) ->
+    Res = #{},
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M);
+
+handle_call(#call{procedure_uri = <<"wamp.subscription.get">>} = M, Ctxt) ->
+    Res = #{},
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M);
+
+handle_call(
+    #call{procedure_uri = <<"wamp.subscription.list_subscribers">>} = M, 
+    Ctxt) ->
+    Res = #{},
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M);
+
+handle_call(
+    #call{procedure_uri = <<"wamp.subscription.count_subscribers">>} = M, 
+    Ctxt) ->
+    Res = #{},
+    M = wamp_message:result(M#call.request_id, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), M).
 
 
 %% =============================================================================
@@ -176,11 +225,23 @@ handle_message(#publish{} = M, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(uri(), map(), juno_context:context()) -> {ok, id()}.
-subscribe(TopicUri, Options, Ctxt) ->
-    case juno_registry:add(subscription, TopicUri, Options, Ctxt) of
-        {ok, _} = OK -> OK;
-        {error, {already_exists, Id}} -> {ok, Id}
+-spec subscribe(wamp_subscribe(), juno_context:context()) -> ok.
+subscribe(M, Ctxt) ->
+    ReqId = M#subscribe.request_id,
+    Opts = M#subscribe.options,
+    Topic = M#subscribe.topic_uri,
+    PeerId = juno_context:peer_id(Ctxt),
+    %% TODO check authorization and reply with wamp.error.not_authorized if not
+
+    case juno_registry:add(subscription, Topic, Opts, Ctxt) of
+        {ok, #{<<"id">> := Id} = Details, true} ->
+            juno:send(PeerId, wamp_message:subscribed(ReqId, Id)),
+            on_create(Details, Ctxt);
+        {ok, #{<<"id">> := Id}, false} ->
+            juno:send(PeerId, wamp_message:subscribed(ReqId, Id)),
+            on_subscribe(Id, Ctxt);
+        {error, {already_exists, #{id := Id}}} -> 
+            juno:send(PeerId, wamp_message:subscribed(ReqId, Id))
     end.
 
 
@@ -189,6 +250,7 @@ subscribe(TopicUri, Options, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+%% TODO Rename to flush()
 -spec unsubscribe_all(juno_context:context()) -> ok.
 unsubscribe_all(Ctxt) ->
     juno_registry:remove_all(subscription, Ctxt).
@@ -201,7 +263,16 @@ unsubscribe_all(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec unsubscribe(id(), juno_context:context()) -> ok | {error, not_found}.
 unsubscribe(SubsId, Ctxt) ->
-    juno_registry:remove(subscription, SubsId, Ctxt).
+    case juno_registry:remove(subscription, SubsId, Ctxt) of
+        ok ->
+            on_unsubscribe(SubsId, Ctxt);
+        {ok, false} ->
+            on_unsubscribe(SubsId, Ctxt);
+        {ok, true} ->
+            on_delete(SubsId, Ctxt);
+        Error ->
+            Error
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -216,7 +287,7 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     SessionId = juno_context:session_id(Ctxt),
     %% TODO check if authorized and if not throw wamp.error.not_authorized
     PubId = juno_utils:get_id(global),
-    Details = #{},
+    Details = #{}, % TODO
     %% REVIEW We need to parallelise this based on batches
     %% (RFC) When a single event matches more than one of a _Subscriber's_
     %% subscriptions, the event will be delivered for each subscription.
@@ -307,6 +378,7 @@ match_subscriptions(TopicUri, Ctxt) ->
         '$end_of_table' -> []
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -331,7 +403,6 @@ match_subscriptions(Cont) ->
     ets:select(Cont).
 
 
-
 %% @private
 publish('$end_of_table', _Fun) ->
     ok;
@@ -345,3 +416,52 @@ publish({L, Cont}, Fun ) ->
 
 publish(L, Fun) when is_list(L) ->
     lists:foreach(Fun, L).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE: META EVENTS
+%% =============================================================================
+
+
+
+%% @private
+on_create(Details, #{session_id := SessionId} = Ctxt) ->
+    Map = #{
+        <<"session">> => SessionId, 
+        <<"SubscriptionDetails">> => Details
+    },
+    % TODO Records stats
+    {ok, _} = publish(
+        <<"wamp.subscription.on_create">>, #{}, [], Map, Ctxt),
+    ok.
+
+
+%% @private
+on_subscribe(SubsId, Ctxt) ->
+    % TODO Records stats
+    on_event(<<"wamp.subscription.on_subscribe">>, SubsId, Ctxt).
+
+
+%% @private
+on_unsubscribe(SubsId, Ctxt) ->
+    % TODO Records stats
+    on_event(<<"wamp.subscription.on_unsubscribe">>, SubsId, Ctxt).
+
+
+%% @private
+on_delete(SubsId, Ctxt) ->
+    % TODO Records stats
+    on_event(<<"wamp.subscription.on_delete">>, SubsId, Ctxt).
+
+
+%% @private
+on_event(Uri, SubsId, #{session_id := SessionId} = Ctxt) ->
+    Map = #{
+        <<"session">> => SessionId, 
+        <<"subscription">> => SubsId
+    },
+    {ok, _} = publish(Uri, #{}, [], Map, Ctxt),
+    ok.

@@ -13,8 +13,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(JUNO_REALM, #{
-    description => <<"The Juno administrative realm.">>,
-    authmethods => [?WAMPCRA_AUTH]
+    <<"description">> => <<"The Juno administrative realm.">>,
+    <<"authmethods">> => [?WAMPCRA_AUTH]
 }).
 
 

@@ -41,7 +41,7 @@ start() ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message:message()) -> ok | no_return().
+-spec send(peer_id(), wamp_message()) -> ok | no_return().
 send(Term, M) ->
     send(Term, M, 5000).
 
@@ -52,9 +52,9 @@ send(Term, M) ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message:message(), infinity | integer()) ->
+-spec send(peer_id(), wamp_message(), infinity | integer()) ->
     ok | no_return().
-send({Pid, SessionId}, M, Timeout) 
+send({Pid, _SessionId}, M, Timeout) 
 when is_pid(Pid), Timeout =:= infinity; 
 is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
     MonitorRef = monitor(process, Pid),
@@ -69,12 +69,14 @@ is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
     erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
+            % TODO Conditionally Enqueue call to session or exit
             exit(Reason);
         {?JUNO_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
     after Timeout ->
         demonitor(MonitorRef, [flush]),
+        % TODO Conditionally Enqueue call to session or exit
         exit(timeout)
     end.
 

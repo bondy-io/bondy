@@ -2,7 +2,7 @@
 {
     "erlang.linter-erlc.include": [
         "${workspaceRoot}/apps/juno/include",
-        "${workspaceRoot}/_build/default/lib/../include"
+        "${workspaceRoot}/_build/default/lib/wamp/include"
     ], 
     "erlang.linter-erlc.deps": ["${workspaceRoot}/_build/default/lib"],
     "editor.wrappingColumn": 80,

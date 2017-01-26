@@ -8,6 +8,7 @@
 %% @end
 %% =============================================================================
 -module(juno_api_http).
+-include("juno.hrl").
 
 -define(DEFAULT_POOL_SIZE, 200).
 
@@ -27,7 +28,7 @@ start_admin_http() ->
         [
             {env,[
                 {auth, #{
-                    realm_uri => <<"com.leapsight.juno">>,
+                    realm_uri => ?JUNO_REALM_URI,
                     schemes => [basic, digest]
                 }},
                 {dispatch, admin_dispatch_table()}, 

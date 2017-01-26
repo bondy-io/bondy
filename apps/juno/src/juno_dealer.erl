@@ -193,8 +193,8 @@ features() ->
     ?DEALER_FEATURES.
 
 
--spec is_feature_enabled(dealer_feature()) -> boolean().
-is_feature_enabled(F) ->
+-spec is_feature_enabled(binary()) -> boolean().
+is_feature_enabled(F) when is_binary(F) ->
     maps:get(F, ?DEALER_FEATURES).
 
 
@@ -203,7 +203,7 @@ is_feature_enabled(F) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: message(), Ctxt :: map()) -> ok | no_return().
+-spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
 handle_message(
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
@@ -388,6 +388,9 @@ handle_message(#call{procedure_uri = ?JUNO_SOURCE_LOOKUP} = M, Ctxt) ->
     M = wamp_message:result(ReqId, #{}, [], Res),
     juno:send(juno_context:peer_id(Ctxt), M);
 
+handle_message(#call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
+    juno_broker:handle_call(M, Ctxt);
+
 handle_message(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
     ReqId = M#call.request_id,
     Res = #{
@@ -472,21 +475,25 @@ handle_message(#call{} = M, Ctxt0) ->
 %% @doc
 %% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
-%% 'procedure_already_exists' or 'not_authorized' error.
+%% 'procedure_already_exists', 'not_authorized' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), juno_context:context()) -> 
     {ok, id()} | {error, not_authorized | procedure_already_exists}.
 register(<<"juno.", _/binary>>, _, _) ->
+    %% Reserved namespace
     {error, not_authorized};
 
 register(<<"wamp.", _/binary>>, _, _) ->
+    %% Reserved namespace
     {error, not_authorized};
 
 register(ProcUri, Options, Ctxt) ->
     case juno_registry:add(registration, ProcUri, Options, Ctxt) of
-        {ok, _} = OK -> OK;
-        {error, {already_exists, _}} -> procedure_already_exists
+        {ok, Id, _IsFirst} -> 
+            {ok, Id};
+        {error, {already_exists, _}} -> 
+            {error, procedure_already_exists}
     end.
 
 
@@ -501,11 +508,11 @@ register(ProcUri, Options, Ctxt) ->
 -spec unregister(id(), juno_context:context()) -> 
     ok | {error, not_authorized | not_found}.
 unregister(<<"juno.", _/binary>>, _) ->
-    % TODO throw a different reason
+    %% Reserved namespace
     {error, not_authorized};
 
 unregister(<<"wamp.", _/binary>>, _) ->
-    % TODO throw a different reason
+    %% Reserved namespace
     {error, not_authorized};
 
 unregister(RegId, Ctxt) ->
@@ -741,7 +748,7 @@ do_invoke({L, Cont}, Fun, Ctxt) ->
 do_invoke(L, Fun, Ctxt) ->
     Triples = [{
         juno_registry:uri(E),
-        maps:get(invoke, juno_registry:options(E), <<"single">>),
+        maps:get(<<"invoke">>, juno_registry:options(E), <<"single">>),
         E
     } || E <- L],
     do_invoke(Triples, undefined, Fun, Ctxt).

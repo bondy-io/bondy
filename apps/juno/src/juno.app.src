@@ -1,9 +1,9 @@
 {application, juno,
  [
-     {description, "Juno is an API Gateway and WAMP Router which enables unified real-time communication between applications and services."},
-    {vsn, "0.1.0"},
+     {description, "JUNO is an open source networking platform for distributed and MicroServices and IoT applications written in Erlang, implementing primarily the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
+    {vsn, "0.2.0"},
     {registered, []},
-    {mod, { juno_app, []}},
+    {mod, {juno_app, []}},
     {applications,[
             kernel,
             stdlib,
@@ -25,7 +25,7 @@
         ]},
     {env,[]},
     {modules, []},
-    {maintainers, ["Leapsight"]},
+    {maintainers, ["Ngineo Limited t/a Leapsight"]},
     {licenses, ["Apache"]},
     {links, [{"Github", "https://github.com/leapsight/juno"}]}
  ]}.
