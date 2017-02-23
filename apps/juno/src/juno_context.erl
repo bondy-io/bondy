@@ -18,7 +18,6 @@
 
 
 -type context()       ::  #{
-    auth_method => binary(),
     goodbye_initiated => boolean(),
     peer => juno_session:peer(),
     realm_uri => uri(),

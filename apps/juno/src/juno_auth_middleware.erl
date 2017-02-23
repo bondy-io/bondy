@@ -9,7 +9,7 @@
 -export([execute/2]).
 
 
-
+% TODO Review this function - we are doing some of this in juno_ws_handler
 execute(Req0, Env0) ->
     Ctxt0 = juno_context:set_peer(juno_context:new(), cowboy_req:peer(Req0)),
     try 

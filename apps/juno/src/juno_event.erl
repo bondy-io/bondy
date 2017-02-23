@@ -9,4 +9,8 @@
 %% =============================================================================
 -module(juno_event).
 
+-export([version/0]).
+
+version() -> "0.0.1".
+
 %% The event tuplespace

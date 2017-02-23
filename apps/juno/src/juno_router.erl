@@ -119,6 +119,10 @@
 %% API
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec close_context(juno_context:context()) -> juno_context:context().
 close_context(Ctxt) -> 
     juno_dealer:close_context(juno_broker:close_context(Ctxt)).
@@ -155,7 +159,7 @@ start_pool() ->
 %% Handles a wamp message.
 %% The message might be handled synchronously (performed by the calling
 %% process i.e. the transport handler) or asynchronously (by sending the
-%% message to the router worker pool).
+%% message to the router load regulated worker pool).
 %%
 %% Most 
 %% @end
@@ -178,8 +182,8 @@ handle_message(#hello{} = M, #{session_id := _} = Ctxt) ->
 
 handle_message(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
     %% Client does not have a session but we already sent a challenge message
-    %% Similar case as above
-    ok = update_stats(M, Ctxt),
+    %% in response to a HELLO message
+    ok = update_stats(M, Ctxt), 
     abort(
         ?WAMP_ERROR_CANCELLED, 
         <<"You've sent a HELLO message more than once.">>, Ctxt);
@@ -443,14 +447,13 @@ handle_session_message(#register{} = M, Ctxt) ->
     %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
     %% message will be sent by _Dealer_ to _Callee A_ before any 
     %% "INVOCATION" message for *Procedure 1*.
-
-    %% Because we block the callee until we get the result, the calle cannot
-    %% perform a call. 
+    %% Because we block the callee until we get the response, 
+    %% the calle will not receive any other messages.
+    %% However, notice that if the callee has another connection with the 
+    %% router, then it might receive an invocation through that connection 
+    %% before we reply here. 
     %% At the moment this relies on Erlang's guaranteed causal delivery of 
     %% messages between two processes even when in different nodes.
-
-    %% We are bound to the capacity of the transport-specific pool here 
-    %% e.g. cowboy or ranch
 
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
 
@@ -467,12 +470,11 @@ handle_session_message(#register{} = M, Ctxt) ->
     {reply, Reply, Ctxt};
 
 handle_session_message(#call{request_id = ReqId} = M, Ctxt0) ->
-    %% This is a sync call as it is an easy way to preserve RPC ordering as 
-    %% defined by RFC 11.2 as Erlang guarantees causal delivery of messages
-    %% between two processes even when in different nodes.
-
-    %% We are bound to the capacity of the transport-specific pool here 
-    %% e.g. cowboy or ranch
+    %% This is a sync call as it is an easy way to guarantees ordering of 
+    %% invocations between any given pair of Caller and Callee as 
+    %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
+    %% between two processes even when in different nodes (when using 
+    %% distributed Erlang).
     ok = route_event({M, Ctxt0}),
     %% The Call response will be delivered asynchronously by the dealer
     {ok, juno_context:add_awaiting_call_id(Ctxt0, ReqId)};
@@ -489,7 +491,7 @@ handle_session_message(M, Ctxt0) ->
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            error_logger:info_report([{reason, overload}, {pool, ?POOL_NAME}]),
+            lager:info("Pool ~p is overloaded.", [?POOL_NAME]),
             %% TODO publish metaevent and stats
             %% TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
@@ -497,7 +499,7 @@ handle_session_message(M, Ctxt0) ->
             {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
-            %% TODO Maybe publish metaevent and stats
+            %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
