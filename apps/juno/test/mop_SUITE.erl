@@ -61,4 +61,12 @@ recursive_2_test(_) ->
         <<"name">> => <<"Alejandro">>, 
         <<"surname">> => <<"Ramallo">>
     },
-    mop:eval(<<"{{fullname}}">>, Ctxt).
+    <<"Alejandro Ramallo">> =:= mop:eval(<<"{{fullname}}">>, Ctxt).
+
+recursive_3_test(_) ->
+    Ctxt = #{
+        <<"fullname">> => <<"\"{{name}} {{surname}}\"">>, 
+        <<"name">> => <<"Alejandro">>, 
+        <<"surname">> => <<"Ramallo">>
+    },
+    <<"\"Alejandro Ramallo\"">> =:= mop:eval(<<"\"{{fullname}}\"">>, Ctxt).
