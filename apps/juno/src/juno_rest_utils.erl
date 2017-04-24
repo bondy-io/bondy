@@ -9,6 +9,28 @@
 -export([bindings_to_map/2]).
 -export([set_resp_link_header/4]).
 -export([set_resp_link_header/2]).
+-export([request_headers/1]).
+-export([qs_params/1]).
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_headers(cowboy:req()) -> map().
+request_headers(Req) ->
+    maps:from_list(cowboy_req:headers(Req)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec qs_params(cowboy:req()) -> map().
+qs_params(Req) ->
+    maps:from_list(cowboy_req:parse_qs(Req)).
 
 % %% The StateFun should receive
 % -spec is_authorized(Req :: cowboy_req:req(), juno_context:context()) ->
