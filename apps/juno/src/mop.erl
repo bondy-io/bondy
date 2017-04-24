@@ -5,7 +5,7 @@
 % mop:eval(<<"\"Hello {{foo}}, {{foo}}\"">>, #{<<"foo">> => 3}).
 % mop:eval(<<"\"Hello {{foo | float | integer}}, {{foo | integer}}\"">>, #{<<"foo">> => 3}).
 % [_, Fun, _]=mop:eval(<<"\"{{foo.bar.a}}\"">>, #{<<"foo">> => fun(X) -> X end}).
-% Fun(#{<<"bar">> => #{<<"a">> => 3}}).
+% Fun(#{<<"foo">> => #{<<"bar">> => #{<<"a">> => 3.0}}}).
 -module(mop).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
@@ -192,6 +192,9 @@ apply_op(<<"integer">>, Val) when is_integer(Val) ->
 apply_op(<<"integer">>, Val) when is_float(Val) ->
     trunc(Val);
 
+apply_op(<<"integer">> = Op, Val) when is_function(Val, 1) ->
+    fun(X) -> apply_op(Op, Val(X)) end;
+
 apply_op(<<"float">>, Val) when is_binary(Val) ->
     binary_to_float(Val);
 
@@ -202,7 +205,10 @@ apply_op(<<"float">>, Val) when is_float(Val) ->
     Val;
 
 apply_op(<<"float">>, Val) when is_integer(Val) ->
-    float(Val).
+    float(Val);
+
+apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
+    fun(X) -> apply_op(Op, Val(X)) end.
 
 
 %% @private
