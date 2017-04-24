@@ -3,12 +3,14 @@
 % Len = byte_size(Bin).
 % mop:eval(Bin, #{<<"foo">> => 3}).
 % mop:eval(<<"\"Hello {{foo}}, {{foo}}\"">>, #{<<"foo">> => 3}).
-% mop:eval(<<"\"Hello {{foo | float | integer}}, {{foo | integer}}\"">>, #{<<"foo">> => 3}).
-% [_, Fun, _]=mop:eval(<<"\"{{foo.bar.a}}\"">>, #{<<"foo">> => fun(X) -> X end}).
+% mop:eval(<<"\"Hello {{foo |> float |> integer}}, {{foo |> integer}}\"">>, #{<<"foo">> => 3}).
+% [_, Fun, _]=mop:eval(<<"\"{{foo.bar.a |> integer}}\"">>, #{<<"foo">> => fun(X) -> X end}).
 % Fun(#{<<"foo">> => #{<<"bar">> => #{<<"a">> => 3.0}}}).
 -module(mop).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
+-define(PIPE_OP, <<$|,$>>>).
+-define(DOUBLE_QUOTES, <<$">>).
 
 -record(state, {
     context             :: map(),
@@ -63,7 +65,7 @@ do_eval(Bin0, #state{acc = []} = St0) ->
         {Pos, 2}  ->
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
-            case binary:matches(Bin1, <<$">>) of
+            case binary:matches(Bin1, ?DOUBLE_QUOTES) of
                 [] when Pos =:= 0 ->
                     %% Not a string so we should have a single 
                     %% mustache expression
@@ -134,7 +136,7 @@ acc(#state{acc = Acc} = St, Val) ->
 %% @end
 %% -----------------------------------------------------------------------------
 parse_expr(Bin, Ctxt) ->
-    case binary:split(Bin, <<$|>>, [global]) of
+    case binary:split(Bin, ?PIPE_OP, [global]) of
         [Val | Pipes] ->
             apply_ops([trim(P) || P <- Pipes], get_value(trim(Val), Ctxt));
         _ ->
