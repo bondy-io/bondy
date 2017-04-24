@@ -167,7 +167,7 @@ websocket_info({stop, Reason}, Req, St) ->
     {stop, Req, St};
 
 websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, Req, St0) ->
-    %% Here we receive the messages that either the router of another peer
+    %% Here we receive the messages that either the router or another peer
     %% sent to us using juno:send/2,3
     ok = juno:ack(Pid, Ref),
     St1 = maybe_update_state(M, Req, St0),
