@@ -34,6 +34,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec eval(any(), Ctxt :: map()) -> any() | no_return().
+eval(<<>>, _Ctxt) ->
+    <<>>;
+
 eval(Val, Ctxt) when is_binary(Val) ->
     do_eval(Val, #state{context = Ctxt});
 
@@ -76,7 +79,8 @@ do_eval(Bin0, #state{acc = []} = St0) ->
                 _ ->
                     %% We found quotes that are in the middle of the string
                     %% or we have no closing quote
-                    %% or we have no quotes but chars before opening mustache
+                    %% or this is not a string and we have no quotes but chars 
+                    %% before opening mustache
                     error(badarg)
             end
     end;
@@ -152,7 +156,7 @@ get_value(Key, Ctxt) when is_map(Ctxt) ->
                     Val when is_function(Val, 1) ->
                         fun(X) ->
                             try 
-                                get_value(B, Val(X))
+                                get_value(Key, Val(X))
                             catch
                                 error:{badkey, _} ->
                                     error({badkey, Key})
