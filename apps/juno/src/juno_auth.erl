@@ -90,7 +90,7 @@ maybe_challenge(_, _, Ctxt) ->
 %% @private
 challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
     %% id is the future session_id 
-    #{<<"username">> := UserId} = User,
+    #{username := UserId} = User,
     Ch0 = #{
         challenge => #{
             <<"authmethod">> => ?WAMPCRA_AUTH,
@@ -108,10 +108,10 @@ challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
             Ch0;
         Pass ->
             #{
-                <<"auth_name">> := pbkdf2,
-                <<"hash_func">> := sha,
-                <<"iterations">> := Iter,
-                <<"salt">> := Salt
+                auth_name := pbkdf2,
+                hash_func := sha,
+                iterations := Iter,
+                salt := Salt
             } = Pass,
             Ch0#{
                 <<"salt">> => Salt,
