@@ -52,10 +52,10 @@ eval(Val, _) ->
 %% -----------------------------------------------------------------------------
 -spec do_eval(binary(), state()) -> any() | no_return().
 do_eval(<<>>, #state{is_ground = true} = St) ->
-    iolist_to_binary(lists:reverse([$" | St#state.acc]));
+    iolist_to_binary(lists:reverse([?DOUBLE_QUOTES | St#state.acc]));
 
 do_eval(<<>>, St) ->
-    lists:reverse([$" | St#state.acc]); 
+    lists:reverse([?DOUBLE_QUOTES | St#state.acc]); 
 
 do_eval(Bin0, #state{acc = []} = St0) ->
     Bin1 = trim(Bin0),
@@ -113,7 +113,7 @@ do_eval(Bin, #state{is_open = false} = St) ->
 %% PRIVATE
 %% =============================================================================
 acc(#state{acc = []} = St, Val) ->
-    acc(St#state{acc= [$"]}, Val);
+    acc(St#state{acc= [?DOUBLE_QUOTES]}, Val);
 
 acc(St, <<>>) ->
     St;
