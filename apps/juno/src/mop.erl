@@ -6,6 +6,8 @@
 % mop:eval(<<"\"Hello {{foo |> float |> integer}}, {{foo |> integer}}\"">>, #{<<"foo">> => 3}).
 % [_, Fun, _]=mop:eval(<<"\"{{foo.bar.a |> integer}}\"">>, #{<<"foo">> => fun(X) -> X end}).
 % Fun(#{<<"foo">> => #{<<"bar">> => #{<<"a">> => 3.0}}}).
+% mop:eval(<<"\"{{fullname}}\"">>, #{<<"fullname">> => <<"\"{{name}} {{surname}}\"">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
+% mop:eval(<<"\"{{fullname}}\"">>, #{<<"fullname">> => <<"{{name}}">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
 -module(mop).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
@@ -14,6 +16,7 @@
 
 -record(state, {
     context             :: map(),
+    opts                :: map(),
     acc = []            :: any(),
     is_ground = true    :: boolean(),
     is_open = false     :: boolean()
@@ -21,6 +24,9 @@
 -type state()       :: #state{}.
 
 -export([eval/2]).
+-export([eval/3]).
+
+-export([apply_op/2]).
 
 
 
@@ -33,17 +39,35 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Calls eval/3.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec eval(any(), Ctxt :: map()) -> any() | no_return().
-eval(<<>>, _Ctxt) ->
+eval(Val, Ctxt) ->
+    eval(Val, Ctxt, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec eval(any(), Ctxt :: map(), Opts :: map()) -> any() | no_return().
+eval(<<>>, _, _) ->
     <<>>;
 
-eval(Val, Ctxt) when is_binary(Val) ->
-    do_eval(Val, #state{context = Ctxt});
+eval(Val, Ctxt, Opts) when is_binary(Val), is_map(Opts) ->
+    do_eval(Val, #state{context = Ctxt, opts = Opts});
 
-eval(Val, _) ->
+eval(Val, _, _) ->
     Val.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -70,7 +94,7 @@ do_eval(Bin0, #state{acc = []} = St0) ->
                     %% Not a string so we should have a single 
                     %% mustache expression
                     parse_expr(
-                        binary:part(Bin1, 2, Len - 4), St1#state.context);
+                        binary:part(Bin1, 2, Len - 4), St1);
                 [{0, 1}, {QPos, 1}] when QPos =:= Len - 1 ->
                     %% A string so we might have multiple 
                     %% mustache expressions
@@ -91,7 +115,7 @@ do_eval(Bin, #state{is_open = true} = St0) ->
     case binary:split(Bin, ?END) of
         [Expr, Rest] ->
             St1 = St0#state{is_open = false},
-            do_eval(Rest, acc(St1, parse_expr(Expr, St1#state.context)));
+            do_eval(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
             error(badarg)
     end;
@@ -106,19 +130,14 @@ do_eval(Bin, #state{is_open = false} = St) ->
 
     
 
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
+%% @private
 acc(#state{acc = []} = St, Val) ->
     acc(St#state{acc= [?DOUBLE_QUOTES]}, Val);
 
 acc(St, <<>>) ->
     St;
 
-acc(#state{acc = Acc} = St, Val) when is_function(Val) ->
+acc(#state{acc = Acc} = St, Val) when is_function(Val, 1) ->
     St#state{acc = [Val | Acc], is_ground = false};
 
 acc(#state{acc = Acc} = St, Val) when is_binary(Val) ->
@@ -135,7 +154,7 @@ acc(#state{acc = Acc} = St, Val) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-parse_expr(Bin, Ctxt) ->
+parse_expr(Bin, #state{context = Ctxt}) ->
     case binary:split(Bin, ?PIPE_OP, [global]) of
         [Val | Pipes] ->
             apply_ops([trim(P) || P <- Pipes], get_value(trim(Val), Ctxt));
@@ -144,28 +163,30 @@ parse_expr(Bin, Ctxt) ->
     end.
 
 
-
 %% @private
-get_value(Key, Ctxt) when is_map(Ctxt) ->
+get_value(Key, Ctxt) ->
     try 
-        case binary:split(Key, <<$.>>) of
+        Val = case binary:split(Key, <<$.>>) of
             [Key] ->
                 maps:get(Key, Ctxt);
             [A, B] ->
-                case  maps:get(A, Ctxt) of
-                    Val when is_map(Val) ->
-                        get_value(B, Val);
-                    Val when is_function(Val, 1) ->
+                case maps:get(A, Ctxt) of
+                    V when is_map(V) ->
+                        get_value(B, V);
+                    V when is_function(V, 1) ->
                         fun(X) ->
                             try 
-                                get_value(Key, Val(X))
+                                get_value(Key, V(X))
                             catch
                                 error:{badkey, _} ->
                                     error({badkey, Key})
                             end
-                        end
+                        end;
+                    {{M, F, A}} ->
+                        {{ ?MODULE, get_value, [{{M, F, A}}, Ctxt] }}
                 end
-        end
+        end,
+        eval(Val, Ctxt)
     catch
         error:{badkey, _} ->
             error({badkey, Key})
@@ -210,7 +231,10 @@ apply_op(<<"float">>, Val) when is_integer(Val) ->
     float(Val);
 
 apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end.
+    fun(X) -> apply_op(Op, Val(X)) end;
+
+apply_op(Op, {{M, F, A}}) ->
+    {?MODULE, apply_op, [Op, {{M, F, A}}]}.
 
 
 %% @private
