@@ -10,9 +10,16 @@
 -module(juno_wamp_raw_handler).
 -behaviour(ranch_protocol).
 
+-define(MAGIC, 16#7F).
+-define(RESERVED, 0). %% Todo all ceros
+
+-type encoding()    ::  json | msgpack | bert.
+
 -record(state, {
     socket,
-    transport
+    transport,
+    encoding    :: encoding(),
+    maxlen  :: integer()
 }).
 -type state() :: #state{}.
 
@@ -55,6 +62,7 @@ init(Ref, Socket, Transport, _Opts) ->
 loop(State = #state{socket = Socket, transport = Transport}) ->
     case Transport:recv(Socket, 0, 15000) of
         {ok, Data} ->
+            % TODO handle errors
             ok = handle_data(Data, State),
             loop(State);
         _ ->
@@ -66,11 +74,35 @@ loop(State = #state{socket = Socket, transport = Transport}) ->
     ok |
     {error, atom()}.
 
+handle_data(
+    <<?MAGIC:8/integer, Len:4/integer, Encoding:4/integer, _:8, _:8>>,
+    #state{encoding = undefined} = State) ->
+    handle_handshake(Len, Encoding, State);
+
+handle_data(_Data, #state{encoding = undefined} = State) ->
+    %% After a _Client_ has connected to a _Router_, the _Router_ will 
+    %% first receive the 4 octets handshake request from the _Client_.
+    %% If the _first octet_ differs from "0x7F", it is not a WAMP-over- 
+    %% RawSocket request. Unless the _Router_ also supports other 
+    %% transports on the connecting port (such as WebSocket), the 
+    %% _Router_ MUST *fail the connection*.
+    %% TODO define correct return value
+    {error, foo, State};
+
 handle_data(Data, #state{socket = Socket, transport = Transport}) ->
     Cmd = decode(Data),
-    lager:debug("Bert Command: ~p", [Cmd]),
     Response = encode(handle_command(Cmd)),
     Transport:send(Socket, Response).
+
+
+%% @private
+handle_handshake(Len, Encoding, State) ->
+    validate_length(Len),
+    Key = encoding(Encoding),
+    Response = <<?MAGIC, Len:4/integer, Encoding:4/integer, ?RESERVED:8, ?RESERVED:8>>,
+    (State#state.transport):send(State#state.socket, Response),
+    {ok, State#state{encoding = Key, maxlen = Len}}.
+
 
 
 -spec handle_command(Cmd :: term()) ->
@@ -100,3 +132,29 @@ decode(Data) ->
 %% @private
 encode(Term) ->
     bert:encode(Term).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% The possible values for "LENGTH" are:
+%%
+%% 0: 2**9 octets 
+%% 1: 2**10 octets ...
+%% 15: 2**24 octets
+%%
+%% This means a _Client_ can choose the maximum message length between *512* and *16M* octets.
+%% @end
+%% -----------------------------------------------------------------------------
+validate_length(N) when N >= 0, N =< 15 ->
+    ok;
+validate_length(_) ->
+    %% TODO define correct error return
+    error({invalid_length}).
+
+
+encoding(1) -> json;
+encoding(2) -> msgpack;
+encoding(3) -> bert;
+encoding(_) ->
+    %% TODO define correct error return
+    error({illegal_serializer}).
