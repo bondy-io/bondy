@@ -53,6 +53,7 @@ recursive_1_test(_) ->
         <<"lastname">> => <<"{{surname}}">>,
         <<"surname">> => <<"Ramallo">>
     },
+    true = mop:eval(<<"{{surname}}">>, Ctxt) =:= mop:eval(<<"{{lastname}}">>, Ctxt),
     <<"Ramallo">> =:= mop:eval(<<"{{name}}">>, Ctxt).
 
 recursive_2_test(_) ->
