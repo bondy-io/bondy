@@ -66,10 +66,20 @@ eval(Val, _, _) ->
 %% -----------------------------------------------------------------------------
 -spec do_eval(binary(), state()) -> any() | no_return().
 do_eval(<<>>, #state{is_ground = true} = St) ->
-    iolist_to_binary(lists:reverse([?DOUBLE_QUOTES | St#state.acc]));
+    iolist_to_binary(
+        lists:foldl(fun term_to_iolist/1, [], [?DOUBLE_QUOTES | St#state.acc]));
 
-do_eval(<<>>, St) ->
-    lists:reverse([?DOUBLE_QUOTES | St#state.acc]); 
+do_eval(<<>>, #state{is_ground = false} =St) ->
+    fun(Ctxt) ->
+        Eval = fun
+            (F, Acc) when is_function(F, 1) ->
+                [term_to_iolist(F(Ctxt))|Acc];
+            (Val, Acc) ->
+                [term_to_iolist(Val)|Acc]
+        end,
+        iolist_to_binary(
+            lists:foldl(Eval, [], [?DOUBLE_QUOTES | St#state.acc]))
+    end;
 
 do_eval(Bin0, #state{acc = []} = St0) ->
     Bin1 = trim(Bin0),
@@ -230,3 +240,12 @@ apply_op(Op, {{M, F, A}}) ->
 %% @private
 trim(Bin) ->
     re:replace(Bin, "^\\s+|\\s+$", "", [{return, binary}, global]).
+
+term_to_iolist(Term) when is_binary(Term) ->
+    Term;
+
+term_to_iolist(Term) when is_list(Term) ->
+    Term;
+    
+term_to_iolist(Term) ->
+    io_lib:format("~p", [Term]).

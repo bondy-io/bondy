@@ -375,9 +375,9 @@ get_context(Req) ->
             <<"body_length">> => cowboy_req:body_length(Req) 
         },
         <<"action">> => #{
-            <<"result">> => #{},
-            <<"error">> => #{},
-            <<"timeout">> => #{}
+            <<"result">> => fun(_) -> undefined_map end,
+            <<"error">> => fun(_) -> undefined_map end,
+            <<"timeout">> => fun(_) -> undefined_map end
         }
     }.
 
@@ -431,9 +431,9 @@ get_context() ->
             
         },
         <<"action">> => #{
-            <<"result">> => #{},
-            <<"error">> => #{},
-            <<"timeout">> => #{}
+            <<"result">> => fun(_) -> undefined_map end,
+            <<"error">> => fun(_) -> undefined_map end,
+            <<"timeout">> => fun(_) -> undefined_map end
         }
     }.
 
