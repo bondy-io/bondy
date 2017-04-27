@@ -59,4 +59,34 @@ simple_1_test(_) ->
             }
         }
     },
-    juno_api_gateway_spec:analyse(Spec).
+    Expected = #{
+        <<"host">> => <<"myapi.com">>,
+        <<"versions">> => #{
+            <<"1.0.0">> => #{
+                <<"is_active">> => false,
+                <<"is_deprecated">> => false,
+                <<"paths">> => #{
+                    <<"/things">> => #{
+                        <<"get">> => #{
+                            <<"accepts">> => [
+                                <<"application/json">>,<<"application/msgpack">>],
+                            <<"action">> => #{
+                                <<"arguments">> => [300],
+                                <<"arguments_kw">> => #{},
+                                <<"details">> => #{},
+                                <<"procedure">> => <<"com.myapi.foo">>,
+                                <<"retries">> => 0,
+                                <<"timeout">> => 30000,
+                                <<"type">> => <<"wamp_call">>},
+                            <<"provides">> => [
+                                <<"application/json">>,<<"application/msgpack">>],
+                            <<"response">> => #{
+                                <<"on_error">> => #{
+                                    <<"body">> => <<>>,<<"headers">> => #{}},
+                                <<"on_result">> => #{
+                                    <<"body">> => <<>>,<<"headers">> => #{}},
+                                <<"on_timeout">> => #{
+                                    <<"body">> => <<>>,<<"headers">> => #{}}}},
+                        <<"is_collection">> => false}},
+            <<"version">> => <<"1.0.0">>}}},
+    Expected =:= juno_api_gateway_spec:analyse(Spec).
