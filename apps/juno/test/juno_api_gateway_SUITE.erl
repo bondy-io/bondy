@@ -19,7 +19,7 @@ simple_1_test(_) ->
         },
         <<"versions">> =>  #{
             <<"1.0.0">> => #{
-                <<"version">> => <<"1.0.0">>,
+                <<"base_path">> => <<"/v1.0">>,
                 <<"variables">> => #{
                     <<"foo">> => 200
                 },  
@@ -63,13 +63,15 @@ simple_1_test(_) ->
         <<"host">> => <<"myapi.com">>,
         <<"versions">> => #{
             <<"1.0.0">> => #{
+                <<"base_path">> => <<"/v1.0">>,
                 <<"is_active">> => false,
                 <<"is_deprecated">> => false,
                 <<"paths">> => #{
                     <<"/things">> => #{
                         <<"get">> => #{
                             <<"accepts">> => [
-                                <<"application/json">>,<<"application/msgpack">>],
+                                <<"application/json">>,<<"application/msgpack">>
+                            ],
                             <<"action">> => #{
                                 <<"arguments">> => [300],
                                 <<"arguments_kw">> => #{},
@@ -77,16 +79,30 @@ simple_1_test(_) ->
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"retries">> => 0,
                                 <<"timeout">> => 30000,
-                                <<"type">> => <<"wamp_call">>},
+                                <<"type">> => <<"wamp_call">>
+                            },
                             <<"provides">> => [
-                                <<"application/json">>,<<"application/msgpack">>],
+                                <<"application/json">>,<<"application/msgpack">>
+                            ],
                             <<"response">> => #{
                                 <<"on_error">> => #{
-                                    <<"body">> => <<>>,<<"headers">> => #{}},
+                                    <<"body">> => <<>>,
+                                    <<"headers">> => #{}
+                                },
                                 <<"on_result">> => #{
-                                    <<"body">> => <<>>,<<"headers">> => #{}},
+                                    <<"body">> => <<>>,
+                                    <<"headers">> => #{}
+                                },
                                 <<"on_timeout">> => #{
-                                    <<"body">> => <<>>,<<"headers">> => #{}}}},
-                        <<"is_collection">> => false}},
-            <<"version">> => <<"1.0.0">>}}},
+                                    <<"body">> => <<>>,
+                                    <<"headers">> => #{}
+                                }
+                            }
+                        },
+                        <<"is_collection">> => false
+                    }
+                }
+            }
+        }
+    },
     Expected =:= juno_api_gateway_spec:analyse(Spec).

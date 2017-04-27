@@ -45,7 +45,7 @@
 }).
 
 -define(API_VERSION, #{
-    <<"version">> => #{
+    <<"base_path">> => #{
         required => true,
         allow_null => false,
         datatype => binary
