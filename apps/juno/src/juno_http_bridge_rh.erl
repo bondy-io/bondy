@@ -4,21 +4,14 @@
 
 
 -module(juno_http_bridge_rh).
+-include("http_api.hrl").
 -include_lib("wamp/include/wamp.hrl").
-% -include("juno.hrl").
 
 -record(state, {
     realm_uri :: uri(),
     resource :: atom(),
     context :: juno_context:context()
 }).
-
--define(DELETE, <<"DELETE">>).
--define(GET, <<"GET">>).
--define(HEAD, <<"HEAD">>).
--define(OPTIONS, <<"OPTIONS">>).
--define(POST, <<"POST">>).
--define(PUT, <<"PUT">>).
 
 -export([allowed_methods/2]).
 -export([content_types_accepted/2]).
