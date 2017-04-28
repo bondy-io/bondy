@@ -123,13 +123,13 @@
         required => true,
         allow_null => false,
         default => [<<"application/json">>, <<"application/msgpack">>],
-        datatype => {list, binary}
+        datatype => {in, [<<"application/json">>, <<"application/msgpack">>]}
     },
     <<"provides">> => #{
         required => true,
         allow_null => false,
         default => [<<"application/json">>, <<"application/msgpack">>],
-        datatype => {list, binary}
+        datatype => {in, [<<"application/json">>, <<"application/msgpack">>]}
     },
     <<"headers">> => #{
         required => true,
@@ -157,6 +157,18 @@
         datatype => map,
         validator => ?API_PATH_DEFAULTS
     },
+    <<"accepts">> => #{
+        required => true,
+        allow_null => false,
+        default => <<"{{defaults.accepts}}">>,
+        datatype => {list, binary}
+    },
+    <<"provides">> => #{
+        required => true,
+        allow_null => false,
+        default => <<"{{defaults.provides}}">>,
+        datatype => {list, binary}
+    }, 
     <<"delete">> => #{
         required => false,
         validator => ?REQ
@@ -193,18 +205,6 @@
         required => false,
         validator => ?API_PATH_INFO
     },
-    <<"accepts">> => #{
-        required => true,
-        allow_null => false,
-        default => <<"{{defaults.accepts}}">>,
-        datatype => {list, binary}
-    },
-    <<"provides">> => #{
-        required => true,
-        allow_null => false,
-        default => <<"{{defaults.provides}}">>,
-        datatype => {list, binary}
-    }, 
     <<"action">> => #{
         required => true,
         allow_null => false,
@@ -343,7 +343,8 @@
 -export([from_file/1]).
 -export([get_context/1]).
 -export([analyse/1]).
-
+-export([gen_code/2]).
+-compile({parse_transform, parse_trans_codegen}).
 
 
 
@@ -388,6 +389,57 @@ get_context(Req) ->
 %% -----------------------------------------------------------------------------
 analyse(Spec) ->
     analyse(Spec, get_context()).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+gen_code(Name, PathSpec) ->
+    ModName = list_to_atom(
+        "juno_api_gateway_rh_" ++ integer_to_list(erlang:phash2(Name))),
+    AllowedMethods = maps:get(<<"allowed_methods">>, PathSpec),
+    IsCollection = maps:get(<<"is_collection">>, PathSpec),
+    Accepts = content_types_accepted(maps:get(<<"accepts">>, PathSpec)),
+    Provides = content_types_provided(maps:get(<<"provides">>, PathSpec)),
+
+    Forms = codegen:gen_module(
+        {'$var', ModName},
+        [
+            {init, 2},
+            {allowed_methods, 2},
+            {content_types_accepted, 2},
+            {content_types_provided, 2},
+            {is_authorized, 2},
+            {resource_exists, 2},
+            {resource_existed, 2},
+            {to_json, 2},
+            {from_json, 2},
+            {to_msgpack, 2},
+            {from_msgpack, 2}
+        ],
+        [
+            {init, fun(Req, _Opts) ->
+                Ctxt = juno_context:set_peer(
+                    juno_context:new(), cowboy_req:peer(Req)),
+                St = {{'$var', IsCollection}, Ctxt, get_context(Req)},
+                {cowboy_rest, Req, St}
+            end},
+            {allowed_methods, fun(Req, St) ->
+                {{'$var', AllowedMethods}, Req, St}
+            end},
+            {content_types_accepted, fun(Req, St) ->
+                {{'$var', Accepts}, Req, St}
+            end},
+            {content_types_provided, fun(Req, St) ->
+                {{'$var', Provides}, Req, St}
+            end}
+        ]
+    ),
+    io:format("Generated Module --->\n~p", [io:fwrite("~s", [[erl_pp:form(F) || F <- Forms]])]),
+    Forms.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -510,14 +562,14 @@ analyse_path(Path0, Ctxt0) ->
     end,
     Ctxt3 = maps:fold(DFun, Ctxt2, Defs0),
     %% Now we evaluate each request type spec
-    Methods = sets:to_list(
+    AllowedMethods = sets:to_list(
         sets:intersection(
             sets:from_list(?HTTP_METHODS), 
             sets:from_list(maps:keys(Path2)
             )
         )
     ),
-    case Methods of
+    case AllowedMethods of
         [] -> 
             error({
                 missing_required_key, 
@@ -536,15 +588,21 @@ analyse_path(Path0, Ctxt0) ->
                         error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
                 end
             end,
-            lists:foldl(PFun, Path2, L)
+            Path3 = lists:foldl(PFun, Path2, L),
+            
+            Path4 = maps:put(<<"allowed_methods">>, AllowedMethods, Path3),
+            Path5 = maps:update_with(
+                <<"accepts">>, fun(V) -> eval_term(V, Ctxt3) end, Path4),
+            maps:update_with(
+                <<"provides">>, fun(V) -> eval_term(V, Ctxt3) end, Path5)
     end.
 
 
 %% @private
 analyse_request_method(Spec, Ctxt) ->
     #{
-        <<"accepts">> := Acc,
-        <<"provides">> := Prov,
+        % <<"accepts">> := Acc,
+        % <<"provides">> := Prov,
         <<"action">> := Act,
         <<"response">> := #{
             <<"on_timeout">> := T,
@@ -553,8 +611,8 @@ analyse_request_method(Spec, Ctxt) ->
         }
     } = Spec,
     Spec#{
-        <<"accepts">> := eval_term(Acc, Ctxt),
-        <<"provides">> := eval_term(Prov, Ctxt),
+        % <<"accepts">> := eval_term(Acc, Ctxt),
+        % <<"provides">> := eval_term(Prov, Ctxt),
         <<"action">> => analyse_action(Act, Ctxt),
         <<"response">> => #{
             <<"on_timeout">> => eval_term(T, Ctxt),
@@ -598,3 +656,25 @@ eval_term(L, Ctxt) when is_list(L) ->
 
 eval_term(T, Ctxt) ->
     mop:eval(T, Ctxt).
+
+
+%% @private
+content_types_accepted(L) when is_list(L) ->
+    [content_types_accepted(T) || T <- L];
+
+content_types_accepted(<<"application/json">>) ->
+    {<<"application/json">>, from_json};
+
+content_types_accepted(<<"application/msgpack">>) ->
+    {<<"application/msgpack">>, from_msgpack}.
+
+
+%% @private
+content_types_provided(L) when is_list(L) ->
+    [content_types_provided(T) || T <- L];
+
+content_types_provided(<<"application/json">>) ->
+    {<<"application/json">>, to_json};
+
+content_types_provided(<<"application/msgpack">>) ->
+    {<<"application/msgpack">>, to_msgpack}.

@@ -67,7 +67,10 @@ eval(Val, _, _) ->
 -spec do_eval(binary(), state()) -> any() | no_return().
 do_eval(<<>>, #state{is_ground = true} = St) ->
     iolist_to_binary(
-        lists:foldl(fun term_to_iolist/1, [], [?DOUBLE_QUOTES | St#state.acc]));
+        lists:foldl(
+            fun(X, Acc) -> [term_to_iolist(X)|Acc] end, 
+            [], 
+            [?DOUBLE_QUOTES | St#state.acc]));
 
 do_eval(<<>>, #state{is_ground = false} =St) ->
     fun(Ctxt) ->

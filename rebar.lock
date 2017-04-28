@@ -38,7 +38,7 @@
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},1},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},1},
  {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.6.0">>},0},
- {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"2.9.0">>},1},
+ {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.0.0">>},0},
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
  {<<"plumtree">>,
   {git,"https://github.com/helium/plumtree.git",

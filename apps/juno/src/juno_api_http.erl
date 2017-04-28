@@ -145,7 +145,7 @@ admin_dispatch_table() ->
 
 %% @private
 dispatch_table() ->
-    List = [
+    Hosts = [
         {'_', [
             {"/",
                 juno_http_bridge_rh, #{entity => entry_point}},
@@ -174,4 +174,4 @@ dispatch_table() ->
                 juno_gateway_rh, #{}}
         ]}
     ],
-    cowboy_router:compile(List).
+    cowboy_router:compile(Hosts).

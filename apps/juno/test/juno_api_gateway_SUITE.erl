@@ -10,7 +10,7 @@ groups() ->
     
 simple_1_test(_) ->
     Spec = #{
-        <<"host">> => <<"myapi.com">>,
+        <<"host">> => <<"[www.]myapi.com">>,
         <<"variables">> => #{
             <<"foo">> => 100
         },  
@@ -60,7 +60,7 @@ simple_1_test(_) ->
         }
     },
     Expected = #{
-        <<"host">> => <<"myapi.com">>,
+        <<"host">> => <<"[www.]myapi.com">>,
         <<"versions">> => #{
             <<"1.0.0">> => #{
                 <<"base_path">> => <<"/v1.0">>,
@@ -68,10 +68,13 @@ simple_1_test(_) ->
                 <<"is_deprecated">> => false,
                 <<"paths">> => #{
                     <<"/things">> => #{
+                        <<"accepts">> => [
+                            <<"application/json">>,<<"application/msgpack">>
+                        ],
+                        <<"provides">> => [
+                            <<"application/json">>,<<"application/msgpack">>
+                        ],
                         <<"get">> => #{
-                            <<"accepts">> => [
-                                <<"application/json">>,<<"application/msgpack">>
-                            ],
                             <<"action">> => #{
                                 <<"arguments">> => [300],
                                 <<"arguments_kw">> => #{},
@@ -81,9 +84,6 @@ simple_1_test(_) ->
                                 <<"timeout">> => 30000,
                                 <<"type">> => <<"wamp_call">>
                             },
-                            <<"provides">> => [
-                                <<"application/json">>,<<"application/msgpack">>
-                            ],
                             <<"response">> => #{
                                 <<"on_error">> => #{
                                     <<"body">> => <<>>,
@@ -99,6 +99,7 @@ simple_1_test(_) ->
                                 }
                             }
                         },
+                        <<"allowed_methods">> => [<<"get">>],
                         <<"is_collection">> => false
                     }
                 }
