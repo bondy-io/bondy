@@ -41,18 +41,19 @@
 -define(WS_SUBPROTOCOL_HEADER_NAME, <<"sec-websocket-protocol">>).
 
 
+%% The WS subprotocol config
 -record(subprotocol, {
-    id              ::  binary(),
-    frame_type      ::  text | binary,
-    encoding        ::  json | msgpack | json_batched | msgpack_batched
+    id                      ::  binary(),
+    frame_type              ::  text | binary,
+    encoding                ::  json | msgpack | json_batched | msgpack_batched
 }).
 
 -record(state, {
-    subprotocol     ::  subprotocol(),
-    session         ::  juno_session:session(),
-    context         ::  juno_context:context(),
-    data            ::  binary(),
-    hibernate       ::  boolean() 
+    subprotocol             ::  subprotocol() | undefined,
+    session                 ::  juno_session:session() | undefined,
+    context                 ::  juno_context:context() | undefined,
+    data = <<>>             ::  binary(),
+    hibernate = false       ::  boolean() 
 }).
 
 -type state()       ::  #state{}.
@@ -139,7 +140,7 @@ websocket_handle(Data, Req, #state{subprotocol = undefined} = St) ->
 
 websocket_handle(
     {T, Data}, Req, #state{subprotocol = #subprotocol{frame_type = T}} = St) ->
-    handle_wamp_data(Data, Req, St);
+    wamp_handle(Data, Req, St);
 
 websocket_handle({ping, _Msg}, Req, St) ->
     %% Cowboy already handles pings for us
@@ -339,14 +340,14 @@ frame(Type, E) when Type == text orelse Type == binary ->
 %% the client when required.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_wamp_data(binary(), cowboy_req:req(), state()) ->
+-spec wamp_handle(binary(), cowboy_req:req(), state()) ->
     {ok, cowboy_req:req(), state()}
     | {ok, cowboy_req:req(), state(), hibernate}
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state()}
     | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state(), hibernate}
     | {shutdown, cowboy_req:req(), state()}.
     
-handle_wamp_data(Data1, Req, St0) ->
+wamp_handle(Data1, Req, St0) ->
     #state{
         subprotocol = #subprotocol{frame_type = T, encoding = E},
         data = Data0,
