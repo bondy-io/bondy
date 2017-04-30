@@ -19,6 +19,19 @@
         allow_null => false,
         datatype => binary
     },
+    <<"realm">> => #{
+        required => true,
+        allow_null => false,
+        datatype => binary
+    },
+    <<"auth">> => #{
+        required => false,
+        datatype => map,
+        validator => fun(_) ->
+            %% TODO
+            true
+        end
+    },
     ?VARS_KEY => #{
         required => true,
         allow_null => false,
@@ -344,6 +357,8 @@
 -export([get_context/1]).
 -export([analyse/1]).
 -export([gen_code/2]).
+-export([eval_term/2]).
+-export([pp/1]).
 -compile({parse_transform, parse_trans_codegen}).
 
 
@@ -403,8 +418,9 @@ gen_code(Name, PathSpec) ->
     IsCollection = maps:get(<<"is_collection">>, PathSpec),
     Accepts = content_types_accepted(maps:get(<<"accepts">>, PathSpec)),
     Provides = content_types_provided(maps:get(<<"provides">>, PathSpec)),
+    Get = maps:get(<<"get">>, PathSpec, undefined),
 
-    Forms = codegen:gen_module(
+    codegen:gen_module(
         {'$var', ModName},
         [
             {init, 2},
@@ -423,7 +439,11 @@ gen_code(Name, PathSpec) ->
             {init, fun(Req, _Opts) ->
                 Ctxt = juno_context:set_peer(
                     juno_context:new(), cowboy_req:peer(Req)),
-                St = {{'$var', IsCollection}, Ctxt, get_context(Req)},
+                St = #{
+                    is_collection => {'$var', IsCollection}, 
+                    context => Ctxt, 
+                    gatewaye_context => ?MODULE:get_context(Req)
+                },
                 {cowboy_rest, Req, St}
             end},
             {allowed_methods, fun(Req, St) ->
@@ -434,12 +454,89 @@ gen_code(Name, PathSpec) ->
             end},
             {content_types_provided, fun(Req, St) ->
                 {{'$var', Provides}, Req, St}
-            end}
+            end},
+            {is_authorized, fun(Req, St) ->
+                {true, Req, St}
+            end},
+            {resource_exists, fun(Req, St) ->
+                {true, Req, St}
+            end},
+            {resource_existed, fun(Req, St) ->
+                {false, Req, St}
+            end},
+            {to_json, fun(Req, St) ->
+                {<<>>, Req, St}
+            end},
+            {to_json, fun
+                (<<"GET">>, Req, St) -> 
+                    Spec = {'$var', Get},
+                    Action = maps:get(<<"action">>, Spec),
+                    Resp = maps:get(<<"response">>, Spec),
+                    Result = perform_action(Action, St),
+                    Body = response(json, Result, St),
+                    {Body, Req, St};
+                (<<"HEAD">>, Req, St) -> 
+                    {<<>>, Req, St};
+                (<<"OPTIONS">>, Req, St) -> 
+                    {<<>>, Req, St}
+            end},
+            {from_json, fun(Req, St) ->
+                from_json(cowboy_req:method(Req), Req, St)
+            end},
+            {from_json, fun
+                (<<"PATCH">>, Req, St) -> 
+                    {<<>>, Req, St};
+                (<<"POST">>, Req, St) -> 
+                    {<<>>, Req, St};
+                (<<"PUT">>, Req, St) -> 
+                    {<<>>, Req, St}
+            end},
+            {to_msgpack, fun(Req, St) ->
+                {<<>>, Req, St}
+            end},
+            {from_msgpack, fun(Req, St) ->
+                from_msgpack(cowboy_req:method(Req), Req, St)
+            end},
+            {from_msgpack, fun
+                (<<"PATCH">>, Req, St) -> 
+                    {<<>>, Req, St};
+                (<<"POST">>, Req, St) -> 
+                    {<<>>, Req, St};
+                (<<"PUT">>, Req, St) -> 
+                    {<<>>, Req, St}
+            end},
+            {perform_action, fun
+                (#{<<"type">> := <<"wamp_call">>} = M, St0) -> 
+                    GC0 = maps:get(gateway_context, St0),
+                    Action0 = maps:get(<<"action">>, GC0),
+                    %% Arguments might be funs waiting for the
+                    %% request.* values to be bound
+                    %% so we need to evaluate them passing the
+                    %% context
+                    #{
+                        <<"arguments">> := A,
+                        <<"arguments_kw">> := Akw,
+                        <<"details">> := D,
+                        <<"procedure">> := P,
+                        <<"retries">> := _R,
+                        <<"timeout">> := _T
+                    } = ?MODULE:eval_term(M, GC0),
+                    
+                    Msg = juno:call(D, P, A, Akw),
+                    %% Use Map to make wamp call
+                    %% and set the action.[result, error, timeout]
+                    Result = <<>>,
+                    Action1 = maps:update(<<"result">>, Result, Action0),
+                    GC1 = maps:update(<<"action">>, Action1, GC0),
+                    {<<>>, maps:update(gateway_context, GC1, St)}
+            end}      
         ]
-    ),
-    io:format("Generated Module --->\n~p", [io:fwrite("~s", [[erl_pp:form(F) || F <- Forms]])]),
-    Forms.
+    ).
 
+
+
+pp(Forms) ->
+    io:fwrite("~s", [[erl_pp:form(F) || F <- Forms]]).
 
 
 %% -----------------------------------------------------------------------------
@@ -480,7 +577,6 @@ get_context() ->
                 maps:from_list(cowboy_req:parse_qs(Req)) end,
             <<"body">> => fun cowboy_req:body/1,
             <<"body_length">> => fun cowboy_req:body_length/1
-            
         },
         <<"action">> => #{
             <<"result">> => fun(_) -> undefined_map end,
