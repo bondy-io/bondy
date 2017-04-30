@@ -36,8 +36,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
-%% arrives on the socket after ?TIMEOUT
--define(TIMEOUT, 60000*10).
+%% arrives on the socket after ?CONN_TIMEOUT
+-define(CONN_TIMEOUT, 60000*10).
 
 
 -type subprotocol() ::  #{
@@ -77,8 +77,8 @@ init(Req, Opts) ->
     case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
         undefined ->
             %% At the moment we only support wamp, not plain ws
-            lager:error(
-                <<"Missing value for header 'sec-websocket-protocol'.">>, []),
+            lager:info(
+                <<"Closing WS connection. Initialised without a value for http header 'sec-websocket-protocol'">>, []),
             %% Returning ok will cause the handler to stop in websocket_handle
             {ok, Req, Opts};
         Subprotocols ->
@@ -100,6 +100,11 @@ init(Req, Opts) ->
 %% COWBOY_WEBSOCKET CALLBACKS
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Initialises the WS connection.
+%% @end
+%% -----------------------------------------------------------------------------
 websocket_init(#{subprotocol := undefined} = St) ->
     %% This will close the WS connection
     Frame = {
@@ -128,10 +133,11 @@ websocket_handle(Data, Req, #{subprotocol := undefined} = St) ->
     {stop, Req, St};
 
 websocket_handle({T, Data}, Req, #{subprotocol := #{frame_type := T}} = St) ->
+    %% At the moment we only support WAMP, so we stop immediately.
     handle_wamp_data(Data, Req, St);
 
 websocket_handle({ping, _Msg}, Req, St) ->
-    %% Cowboy already handled ping
+    %% Cowboy already handles pings
     %% We ignore this message and carry on listening
     {ok, Req, St};
 
@@ -140,8 +146,7 @@ websocket_handle({pong, _Msg}, Req, St) ->
     {ok, Req, St};
 
 websocket_handle(Data, Req, St) ->
-    %% TODO use lager
-    lager:error(
+    lager:debug(
         <<"Unsupported message ~p. Stacktrace: ~p">>, 
         [Data, erlang:get_stacktrace()]
     ),
@@ -191,19 +196,25 @@ websocket_info(_, Req, St0) ->
 %% Note that while this function may be called in a Websocket handler, it is generally not useful to do any clean up as the process terminates immediately after calling this callback when using Websocket.
 terminate(normal, _Req, St) ->
     do_terminate(St);
+
 terminate(stop, _Req, St) ->
     do_terminate(St);
+
 terminate(timeout, _Req, St) ->
     do_terminate(St);
+
 terminate(remote, _Req, St) ->
     do_terminate(St);
 
 terminate({error, closed}, _Req, St) ->
     do_terminate(St);
+
 terminate({error, badencoding}, _Req, St) ->
     do_terminate(St);
+
 terminate({error, badframe}, _Req, St) ->
     do_terminate(St);
+
 terminate({error, _Other}, _Req, St) ->
     do_terminate(St);
 
@@ -214,6 +225,7 @@ terminate({crash, error, Reason}, _Req, St) ->
         {stacktrace, erlang:get_stacktrace()}
     ]),
     do_terminate(St);
+
 terminate({crash, exit, Reason}, _Req, St) ->
     %% TODO use lager
     error_logger:error_report([
@@ -221,6 +233,7 @@ terminate({crash, exit, Reason}, _Req, St) ->
         {stacktrace, erlang:get_stacktrace()}
     ]),
     do_terminate(St);
+
 terminate({crash, throw, Reason}, _Req, St) ->
     %% TODO use lager
     error_logger:error_report([
@@ -233,9 +246,11 @@ terminate({remote, _Code, _Binary}, _Req, St) ->
     do_terminate(St).
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
 
 
 %% @private
@@ -259,7 +274,7 @@ subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
         data => <<>>,
         subprotocol => Subprotocol
     },
-    {cowboy_websocket, Req1, St1, ?TIMEOUT}.
+    {cowboy_websocket, Req1, St1, ?CONN_TIMEOUT}.
 
 
 %% -----------------------------------------------------------------------------
@@ -313,6 +328,7 @@ reply(FrameType, Frames, Req, #{hibernate := false} = St) ->
 %% @private
 frame(Type, L) when is_list(L) ->
     [frame(Type, E) || E <- L];
+
 frame(Type, E) when Type == text orelse Type == binary ->
     {Type, E}.
 
