@@ -40,18 +40,22 @@
 -define(CONN_TIMEOUT, 60000*10).
 
 
--type subprotocol() ::  #{
-    id => binary(),
-    frame_type => text | binary,
-    encoding => json | msgpack | json_batched | msgpack_batched
-}.
+-record(subprotocol, {
+    id              ::  binary(),
+    frame_type      ::  text | binary,
+    encoding        ::  json | msgpack | json_batched | msgpack_batched
+}).
 
--type state()       ::  #{
-    context => juno_context:context(),
-    data => binary(),
-    subprotocol => subprotocol(),
-    hibernate => boolean() 
-}.
+-record(state, {
+    subprotocol     ::  subprotocol(),
+    session         ::  juno_session:session(),
+    context         ::  juno_context:context(),
+    data            ::  binary(),
+    hibernate       ::  boolean() 
+}).
+
+-type state()       ::  #state{}.
+-type subprotocol() ::  #subprotocol{}.
 
 -export([init/2]).
 -export([websocket_init/1]).
@@ -84,11 +88,11 @@ init(Req, Opts) ->
         Subprotocols ->
             Ctxt = juno_context:set_peer(
                 juno_context:new(), cowboy_req:peer(Req)),
-            St = #{
-                context => Ctxt,
-                subprotocol => undefined,
-                data => <<>>,
-                hibernate => false %% TODO define business logic
+            St = #state{
+                context = Ctxt,
+                subprotocol = undefined,
+                data = <<>>,
+                hibernate = false %% TODO define business logic
             },
             %% The client provided subprotocol options
             subprotocol_init(select_subprotocol(Subprotocols), Req, St)
@@ -105,7 +109,7 @@ init(Req, Opts) ->
 %% Initialises the WS connection.
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_init(#{subprotocol := undefined} = St) ->
+websocket_init(#state{subprotocol = undefined} = St) ->
     %% This will close the WS connection
     Frame = {
         close, 
@@ -123,7 +127,7 @@ websocket_init(St) ->
 %% Handles frames sent by client
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_handle(Data, Req, #{subprotocol := undefined} = St) ->
+websocket_handle(Data, Req, #state{subprotocol = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above, review and eliminate.
     lager:error(
@@ -132,7 +136,8 @@ websocket_handle(Data, Req, #{subprotocol := undefined} = St) ->
     ),
     {stop, Req, St};
 
-websocket_handle({T, Data}, Req, #{subprotocol := #{frame_type := T}} = St) ->
+websocket_handle(
+    {T, Data}, Req, #state{subprotocol = #subprotocol{frame_type = T}} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     handle_wamp_data(Data, Req, St);
 
@@ -177,7 +182,7 @@ websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, Req, St0) ->
     ok = juno:ack(Pid, Ref),
     St1 = maybe_update_state(M, Req, St0),
     %% We encode and send the message to the client
-    #{subprotocol := #{encoding := E, frame_type := T}} = St1,
+    #state{subprotocol = #subprotocol{encoding = E, frame_type = T}} = St1,
     Reply = frame(T, wamp_encoding:encode(M, E)),
     {reply, Reply, Req, St1};
 
@@ -264,16 +269,9 @@ subprotocol_init(undefined, Req0, St) ->
     %% No valid subprotocol found in sec-websocket-protocol header, so we stop
     {ok, Req0, St};
 
-subprotocol_init(Subprotocol, Req0, St0) when is_map(Subprotocol) ->
-    #{id := SubprotocolId} = Subprotocol,
-
-    Req1 = cowboy_req:set_resp_header(
-        ?WS_SUBPROTOCOL_HEADER_NAME, SubprotocolId, Req0),
-
-    St1 = St0#{
-        data => <<>>,
-        subprotocol => Subprotocol
-    },
+subprotocol_init(#subprotocol{id = SId} = Sub, Req0, St0) ->
+    Req1 = cowboy_req:set_resp_header(?WS_SUBPROTOCOL_HEADER_NAME, SId, Req0),
+    St1 = St0#state{data = <<>>, subprotocol = Sub},
     {cowboy_websocket, Req1, St1, ?CONN_TIMEOUT}.
 
 
@@ -290,39 +288,39 @@ select_subprotocol([]) ->
     undefined;
 
 select_subprotocol([?WAMP2_JSON | _T]) ->
-    #{
-        frame_type => text,
-        encoding => json,
-        id => ?WAMP2_JSON
+    #subprotocol{
+        frame_type = text,
+        encoding = json,
+        id = ?WAMP2_JSON
     };
 
 select_subprotocol([?WAMP2_MSGPACK | _T]) ->
-    #{
-        frame_type => binary,
-        encoding => msgpack,
-        id => ?WAMP2_MSGPACK
+    #subprotocol{
+        frame_type = binary,
+        encoding = msgpack,
+        id = ?WAMP2_MSGPACK
     };
 
 select_subprotocol([?WAMP2_JSON_BATCHED | _T]) ->
-    #{
-        frame_type => text,
-        encoding => json_batched,
-        id => ?WAMP2_JSON_BATCHED
+    #subprotocol{
+        frame_type = text,
+        encoding = json_batched,
+        id = ?WAMP2_JSON_BATCHED
     };
 
 select_subprotocol([?WAMP2_MSGPACK_BATCHED | _T]) ->
-    #{
-        frame_type => binary,
-        encoding => msgpack_batched,
-        id => ?WAMP2_MSGPACK_BATCHED
+    #subprotocol{
+        frame_type = binary,
+        encoding = msgpack_batched,
+        id = ?WAMP2_MSGPACK_BATCHED
     }.
 
 
 %% @private
-reply(FrameType, Frames, Req, #{hibernate := true} = St) ->
+reply(FrameType, Frames, Req, #state{hibernate = true} = St) ->
     {reply, frame(FrameType, Frames), Req, St, hibernate};
 
-reply(FrameType, Frames, Req, #{hibernate := false} = St) ->
+reply(FrameType, Frames, Req, #state{hibernate = false} = St) ->
     {reply, frame(FrameType, Frames), Req, St}.
 
 %% @private
@@ -349,10 +347,10 @@ frame(Type, E) when Type == text orelse Type == binary ->
     | {shutdown, cowboy_req:req(), state()}.
     
 handle_wamp_data(Data1, Req, St0) ->
-    #{
-        subprotocol := #{frame_type := T, encoding := E},
-        data := Data0,
-        context := Ctxt0
+    #state{
+        subprotocol = #subprotocol{frame_type = T, encoding = E},
+        data = Data0,
+        context = Ctxt0
     } = St0,
 
     Data2 = <<Data0/binary, Data1/binary>>,
@@ -427,17 +425,16 @@ do_terminate(#{context := Ctxt}) ->
 
 %% @private
 set_ctxt(St, Ctxt) ->
-    St#{context => juno_context:reset(Ctxt)}.
+    St#state{context = juno_context:reset(Ctxt)}.
 
 
 maybe_update_state(#result{request_id = CallId}, _Req, St) ->
-    #{context := Ctxt0} = St,
-    Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
+    Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
     set_ctxt(St, Ctxt1);
 
-maybe_update_state(#error{request_type = ?CALL, request_id = CallId}, _Req, St) ->
-    #{context := Ctxt0} = St,
-    Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
+maybe_update_state(
+    #error{request_type = ?CALL, request_id = CallId}, _Req, St) ->
+    Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
     set_ctxt(St, Ctxt1);
 
 maybe_update_state(_, _, St) ->
