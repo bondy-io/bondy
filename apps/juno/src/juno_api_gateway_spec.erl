@@ -19,7 +19,7 @@
         allow_null => false,
         datatype => binary
     },
-    <<"realm">> => #{
+    <<"realm_uri">> => #{
         required => true,
         allow_null => false,
         datatype => binary

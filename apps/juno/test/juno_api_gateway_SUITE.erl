@@ -11,7 +11,7 @@ groups() ->
 simple_1_test(_) ->
     Spec = #{
         <<"host">> => <<"[www.]myapi.com">>,
-        <<"realm">> => <<"com.myapi">>,
+        <<"realm_uri">> => <<"com.myapi">>,
         <<"variables">> => #{
             <<"foo">> => 100
         },  
@@ -62,7 +62,7 @@ simple_1_test(_) ->
     },
     Expected = #{
         <<"host">> => <<"[www.]myapi.com">>,
-        <<"realm">> => <<"com.myapi">>,
+        <<"realm_uri">> => <<"com.myapi">>,
         <<"versions">> => #{
             <<"1.0.0">> => #{
                 <<"base_path">> => <<"/v1.0">>,
