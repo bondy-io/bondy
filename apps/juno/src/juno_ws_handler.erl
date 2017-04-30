@@ -38,6 +38,7 @@
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?CONN_TIMEOUT
 -define(CONN_TIMEOUT, 60000*10).
+-define(WS_SUBPROTOCOL_HEADER_NAME, <<"sec-websocket-protocol">>).
 
 
 -record(subprotocol, {
@@ -78,11 +79,11 @@ init(Req, Opts) ->
     %% select one of these subprotocol and send it back to the client,
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
-    case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
+    case cowboy_req:parse_header(?WS_SUBPROTOCOL_HEADER_NAME, Req) of
         undefined ->
             %% At the moment we only support wamp, not plain ws
             lager:info(
-                <<"Closing WS connection. Initialised without a value for http header 'sec-websocket-protocol'">>, []),
+                <<"Closing WS connection. Initialised without a value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER_NAME]),
             %% Returning ok will cause the handler to stop in websocket_handle
             {ok, Req, Opts};
         Subprotocols ->
@@ -138,11 +139,10 @@ websocket_handle(Data, Req, #state{subprotocol = undefined} = St) ->
 
 websocket_handle(
     {T, Data}, Req, #state{subprotocol = #subprotocol{frame_type = T}} = St) ->
-    %% At the moment we only support WAMP, so we stop immediately.
     handle_wamp_data(Data, Req, St);
 
 websocket_handle({ping, _Msg}, Req, St) ->
-    %% Cowboy already handles pings
+    %% Cowboy already handles pings for us
     %% We ignore this message and carry on listening
     {ok, Req, St};
 
