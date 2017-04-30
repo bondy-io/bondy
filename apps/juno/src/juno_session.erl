@@ -26,25 +26,56 @@
 
 -define(SESSION_TABLE_NAME, juno_session).
 -define(SESSION_SEQ_POS, 7).
+-define(DEFAULT_RATE, #rate_window{max = 1000, secs = 1}).
+-define(DEFAULT_QUOTA, #rate_window{max = 1000, secs = 1}).
+
+-record(quota_window, {
+    limit               ::  pos_integer(),
+    %% time when the quota resets in secs
+    renews              ::  pos_integer(),
+    %% number of requests remaining in quota
+    remaining           ::  pos_integer(),
+    %% time in seconds during which quota is valid e.g. 
+    %% the length of the window
+    duration            ::  pos_integer()
+}).
+
+
+-record(rate_window, {
+    %% max number of messages allowed during window 
+    limit               ::  pos_integer(), 
+    %% duration of window in seconds
+    duration            ::  pos_integer()
+}).
 
 -record(session, {
-    id              ::  id(),
-    created         ::  calendar:date_time(),
-    realm_uri       ::  uri(),
-    pid = self()    ::  pid(),
-    peer            ::  peer(),
-    host            ::  binary(),
-    seq = 0         ::  non_neg_integer(),
-    agent           ::  binary(),
-    caller          ::  map(),
-    callee          ::  map(),
-    subscriber      ::  map(),
-    publisher       ::  map(),
-    authid          ::  binary()
+    id                  ::  id(),
+    created             ::  calendar:date_time(),
+    realm_uri           ::  uri(),
+    %% Peer
+    pid = self()        ::  pid(),
+    peer                ::  peer(),
+    host                ::  binary(),
+    seq = 0             ::  non_neg_integer(),
+    agent               ::  binary(),
+    %% Peer WAMP Roles
+    caller              ::  map() | undefined,
+    callee              ::  map() | undefined,
+    subscriber          ::  map() | undefined,
+    publisher           ::  map() | undefined,
+    %% 
+    authid              ::  binary(),
+    ttl                 ::  timeout(),
+    expires             ::  pos_integer() | infinity,
+    rate                ::  rate(),
+    quota               ::  quota(),
+    user_info = #{}     ::  map()
 }).
 
 -type peer()        ::  {inet:ip_address(), inet:port_number()}.
 -type session()     ::  #session{}.
+-type quota()       ::  #quota_window{}.
+-type rate()        ::  #rate_window{}.
 -type session_opts()::  #{
     roles => map()
 }.

@@ -30,11 +30,7 @@
     challenge_sent => boolean(),
     authmethod => binary(),
     authid => binary(),
-    awaiting_call_ids => sets:set(),
-    rate_limit_window => pos_integer(),       % duration of rate limit window in secs
-    rate_limit => pos_integer(),         % max number of messages allowed during window 
-    rate_limit_remaining => pos_integer(), % # of messages remaining in window
-    rate_limit_resets => pos_integer()      % time when the quota resets in secs
+    awaiting_call_ids => sets:set()
 }.
 -export_type([context/0]).
 
