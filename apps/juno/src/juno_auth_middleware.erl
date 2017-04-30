@@ -15,6 +15,7 @@ execute(Req0, Env0) ->
     try 
         case get_value(handler, Env0) of
             juno_ws_handler -> 
+                %% A WS connection
                 Env1 = set_ctxt(Ctxt0, Env0),
                 {ok, Req0, Env1};
             _Other ->
@@ -57,9 +58,11 @@ authenticate_scheme({basic, Username, Pass}, #{realm_uri := Uri} = Ctxt) ->
 authenticate_scheme({digest, _List}, _Ctxt0) ->
     %% TODO support
     throw({unsupported_scheme, <<"Digest">>});
-authenticate_scheme({bearer, _Bin}, _Ctxt0) ->
+
+authenticate_scheme({bearer, _Token}, _Ctxt0) ->
     %% TODO support OAUTH
     throw({unsupported_scheme, <<"Bearer">>});
+
 authenticate_scheme({Scheme, _Payload}, _Ctxt0) ->
     %% TODO support via custom functions
     throw({unsupported_scheme, Scheme}).

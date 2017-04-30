@@ -29,7 +29,7 @@ start_admin_http() ->
             {env,[
                 {auth, #{
                     realm_uri => ?JUNO_REALM_URI,
-                    schemes => [basic, digest]
+                    schemes => [basic, digest, bearer]
                 }},
                 {dispatch, admin_dispatch_table()}, 
                 {max_connections, infinity}
@@ -51,7 +51,7 @@ start_http() ->
         [
             {env,[
                 {auth, #{
-                    schemes => [basic, digest]
+                    schemes => [basic, digest, bearer]
                 }},
                 {dispatch, admin_dispatch_table()}, 
                 {max_connections, infinity}
