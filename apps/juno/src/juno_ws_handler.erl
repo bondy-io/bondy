@@ -50,14 +50,13 @@
 
 -record(state, {
     subprotocol             ::  subprotocol() | undefined,
-    session                 ::  juno_session:session() | undefined,
     context                 ::  juno_context:context() | undefined,
     data = <<>>             ::  binary(),
-    hibernate = false       ::  boolean() 
+    hibernate = false       ::  boolean()
 }).
 
--type state()       ::  #state{}.
--type subprotocol() ::  #subprotocol{}.
+-type state()               ::  #state{}.
+-type subprotocol()         ::  #subprotocol{}.
 
 -export([init/2]).
 -export([websocket_init/1]).
@@ -348,15 +347,12 @@ frame(Type, E) when Type == text orelse Type == binary ->
     | {shutdown, cowboy_req:req(), state()}.
     
 wamp_handle(Data1, Req, St0) ->
-    #state{
-        subprotocol = #subprotocol{frame_type = T, encoding = E},
-        data = Data0,
-        context = Ctxt0
-    } = St0,
-
+    Data0 = St0#state.data,
+    Ctxt0 = St0#state.context,
+    #subprotocol{frame_type = T, encoding = E} = St0#state.subprotocol,
     Data2 = <<Data0/binary, Data1/binary>>,
     {Messages, Data3} = wamp_encoding:decode(Data2, T, E),
-    St1 = St0#{data => Data3},
+    St1 = St0#state{data = Data3},
 
     case handle_wamp_messages(Messages, Ctxt0) of
         {ok, Ctxt1} ->

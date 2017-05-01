@@ -275,9 +275,9 @@ add(Type, Uri, Options, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), juno_context:context()) -> ok.
-remove_all(Type, #{realm_uri := RealmUri, session_id := SessionId} = Ctxt) ->
+remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
     Pattern = #entry{
-        key = {RealmUri, SessionId, '_'},
+        key = {RealmUri, juno_context:session_id(Ctxt), '_'},
         type = Type,
         uri = '_',
         match_policy = '_',
@@ -494,8 +494,13 @@ do_remove_all(#entry{key = Key, type = Type} = S, Tab, Ctxt) ->
     true = ets:delete_object(IdxTab, IdxEntry),
     do_remove_all(ets:next(Tab, Key), Tab, Ctxt);
 
-do_remove_all({_, Sid, _} = Key, Tab, #{session_id := Sid} = Ctxt) ->
-    do_remove_all(ets:lookup(Tab, Key), Tab, Ctxt);
+do_remove_all({_, Sid, _} = Key, Tab, Ctxt) ->
+    case juno_context:session_id(Ctxt) of
+        Sid ->
+            do_remove_all(ets:lookup(Tab, Key), Tab, Ctxt);
+        _ ->
+            ok
+    end;
 
 do_remove_all(_, _, _) ->
     %% No longer our session

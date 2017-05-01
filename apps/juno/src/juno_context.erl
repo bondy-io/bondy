@@ -18,30 +18,33 @@
 
 
 -type context()       ::  #{
-    goodbye_initiated => boolean(),
-    peer => juno_session:peer(),
+    id => id(),
     realm_uri => uri(),
+    session => juno_session:session() | undefined,
+    goodbye_initiated => boolean(),
+    challenge_sent => boolean(),
+    peer => juno_session:peer(),
+    roles => map(),
     request_id => id(),
     request_timeout => non_neg_integer(),
-    roles => map(),
-    session_id => id() | undefined,
-    id => id(),
     request_details => map(),
-    challenge_sent => boolean(),
     authmethod => binary(),
     authid => binary(),
-    awaiting_call_ids => sets:set()
+    awaiting_call_ids => sets:set(),
+    %% Metadata
+    user_info => map()
 }.
 -export_type([context/0]).
 
--export([add_awaiting_call_id/2]).
--export([awaiting_call_ids/1]).
+
 -export([close/1]).
+-export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
 -export([peer/1]).
+-export([add_awaiting_call_id/2]).
+-export([awaiting_call_ids/1]).
 -export([realm_uri/1]).
--export([remove_awaiting_call_id/2]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
@@ -50,10 +53,11 @@
 -export([session_id/1]).
 -export([peer_id/1]).
 -export([set_peer/2]).
+-export([remove_awaiting_call_id/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
--export([set_session_id/2]).
+-export([set_session/2]).
 
 
 %% -----------------------------------------------------------------------------
@@ -95,15 +99,10 @@ reset(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec close(context()) -> ok.
 
-close(#{session_id := SessionId} = Ctxt) ->
+close(#{session := S} = Ctxt) ->
     %% We close the session
-    case juno_session:lookup(SessionId) of
-        not_found ->
-            ok;
-        Session ->
-            juno_session:close(Session)
-    end,
-    close(maps:without([session_id], Ctxt));
+    juno_session:close(S),
+    close(maps:without([session], Ctxt));
 
 close(Ctxt0) ->
     %% We cleanup session and router data for this Ctxt
@@ -166,8 +165,21 @@ realm_uri(#{realm_uri := Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session_id(context()) -> id() | undefined.
-session_id(#{session_id := S}) -> S;
-session_id(#{}) -> undefined.
+session_id(#{session := S}) -> 
+    juno_session:id(S);
+session_id(#{}) -> 
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the context is associated with a session,
+%% false otherwise.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec has_session(context()) -> boolean().
+has_session(#{session := _}) -> true;
+has_session(#{}) -> false.
 
 
 %% -----------------------------------------------------------------------------
@@ -175,9 +187,9 @@ session_id(#{}) -> undefined.
 %% Sets the sessionId to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_session_id(context(), id()) -> context().
-set_session_id(Ctxt, SessionId) ->
-    Ctxt#{session_id => SessionId}.
+-spec set_session(context(), juno_session:session()) -> context().
+set_session(Ctxt, S) ->
+    Ctxt#{session => S}.
 
 
 
@@ -187,10 +199,9 @@ set_session_id(Ctxt, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec peer_id(context()) -> peer_id().
 
-peer_id(#{session_id := SessionId}) ->
+peer_id(#{session := S}) ->
     %% TODO evaluate caching this as it should be immutable
-    Session = juno_session:fetch(SessionId),
-    {SessionId, juno_session:pid(Session)}.
+    {juno_session:id(S), juno_session:pid(S)}.
 
 
 %% -----------------------------------------------------------------------------
@@ -199,8 +210,8 @@ peer_id(#{session_id := SessionId}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session(context()) -> juno_session:session() | no_return().
-session(#{session_id := SessionId}) ->
-    juno_session:fetch(SessionId).
+session(#{session := S}) ->
+    S.
 
 
 %% -----------------------------------------------------------------------------
@@ -263,7 +274,6 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) when is_binary(Feature) ->
 -spec awaiting_call_ids(context()) -> [id()].
 awaiting_call_ids(#{awaiting_call_ids := S}) ->
     sets:to_list(S).
-
 
 
 %% -----------------------------------------------------------------------------

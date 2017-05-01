@@ -80,7 +80,10 @@
 }).
 
 -type event()                   ::  {wamp_message(), juno_context:context()}.
-
+-type auth_error_reason()       ::  realm_not_found 
+                                    | {missing_param, binary()} 
+                                | {user_not_found, binary()}.
+                                
 -record(state, {
     pool_type = permanent       ::  permanent | transient,
     event                       ::  event()
@@ -169,7 +172,7 @@ start_pool() ->
     | {reply, Reply :: wamp_message(), juno_context:context()}
     | {stop, Reply :: wamp_message(), juno_context:context()}.
 
-handle_message(#hello{} = M, #{session_id := _} = Ctxt) ->
+handle_message(#hello{} = M, #{session := _} = Ctxt) ->
     %% Client already has a session!
     %% RFC:
     %% It is a protocol error to receive a second "HELLO" message during the
@@ -195,9 +198,9 @@ handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort 
     maybe_open_session(
-        juno_auth:authenticate(M#hello.details, Ctxt1));
+        authenticate(M#hello.details, Ctxt1));
 
-handle_message(#authenticate{} = M, #{session_id := _} = Ctxt) ->
+handle_message(#authenticate{} = M, #{session := _} = Ctxt) ->
     %% Client already has a session so is already authenticated.
     ok = update_stats(M, Ctxt),
     abort(
@@ -209,7 +212,7 @@ handle_message(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
     %% Client is responding to a challenge
     ok = update_stats(M, Ctxt0),
     #authenticate{signature = Signature, extra = Extra} = M,
-    case juno_auth:authenticate(Signature, Extra, Ctxt0) of
+    case authenticate(Signature, Extra, Ctxt0) of
         {ok, Ctxt1} ->
             open_session(Ctxt1);
         {error, Reason, Ctxt1} ->
@@ -224,7 +227,7 @@ handle_message(#authenticate{} = M, Ctxt) ->
         <<"You need to request a session first by sending a HELLO message.">>, 
         Ctxt);
 
-handle_message(M, #{session_id := _} = Ctxt) ->
+handle_message(M, #{session := _} = Ctxt) ->
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = update_stats(M, Ctxt),
@@ -390,10 +393,9 @@ open_session(Ctxt0) ->
             id := Id, 
             request_details := Details
         } = Ctxt0,
-        _Session = juno_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
-    
+        Session = juno_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
         Ctxt1 = Ctxt0#{
-            session_id => Id,
+            session => Session,
             roles => parse_roles(maps:get(<<"roles">>, Details))
         },
 
@@ -433,10 +435,9 @@ handle_session_message(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
 
 handle_session_message(#goodbye{} = M, Ctxt) ->
     %% Goodbye initiated by client, we reply with goodbye() and stop.
-    #{session_id := SessionId} = Ctxt,
     error_logger:info_report(
         "Session ~p closed as per client request. Reason: ~p~n",
-        [SessionId, M#goodbye.reason_uri]
+        [juno_context:session_id(Ctxt), M#goodbye.reason_uri]
     ),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
@@ -673,7 +674,8 @@ update_stats(M, Ctxt) ->
 
 
 %% @private
-update_stats(Type, IP, Size, #{realm_uri := Uri, session_id := Id}) ->
+update_stats(Type, IP, Size, #{realm_uri := Uri, session := S}) ->
+    Id = juno_session:id(S),
     juno_stats:update({message, Uri, Id, IP, Type, Size});
 
 update_stats(Type, IP, Size, #{realm_uri := Uri}) ->
@@ -690,3 +692,120 @@ abort(Type, Reason, Ctxt) ->
     M = wamp_message:abort(#{message => Reason}, Type),
     ok = update_stats(M, Ctxt),
     {stop, M, Ctxt}.
+
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE: AUTH
+%% =============================================================================
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authenticate(map(), juno_context:context()) -> 
+    {ok, juno_context:context()} 
+    | {challenge, 
+        AuthMethod :: binary(), Challenge :: map(), juno_context:context()}
+    | {error, auth_error_reason(), juno_context:context()}.
+authenticate(Details, #{realm_uri := Uri} = Ctxt) when is_map(Details) ->
+    maybe_challenge(Details, get_realm(Uri), Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authenticate(binary(), map(), juno_context:context()) -> 
+    {ok, juno_context:context()} 
+    | {error, auth_error_reason(), juno_context:context()}.
+authenticate(Signature, Extra, #{authid := _, realm_uri := _Uri} = Ctxt) 
+when is_binary(Signature), is_map(Extra) ->
+    %% TODO    
+    % S = base64:decode(Signature),
+    % io:format("Auth sign ~p extra ~p~n", [S, Extra]),
+    {ok, Ctxt}.
+
+
+
+%% @private
+maybe_challenge(_, not_found, #{realm_uri := Uri} = Ctxt) ->
+    {error, {realm_not_found, Uri}, Ctxt};
+
+maybe_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
+    Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+    case juno_realm:is_security_enabled(Realm) of
+        true ->
+            AuthMethods = maps:get(<<"authmethods">>, Details, []),
+            AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
+            % TODO Get User for Realm (change security module) and if not exist
+            % return error else challenge
+            case juno_user:lookup(juno_realm:uri(Realm), UserId) of
+                not_found ->
+                    {error, {user_not_found, UserId}, Ctxt1};
+                User ->
+                    Ch = challenge(AuthMethod, User, Details, Ctxt1),
+                    {challenge, AuthMethod, Ch, Ctxt1}
+            end;
+        false ->
+            {ok, Ctxt1}
+    end;
+
+%% @private
+maybe_challenge(_, _, Ctxt) ->
+    {error, {missing_param, <<"authid">>}, Ctxt}.
+
+
+%% @private
+challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
+    %% id is the future session_id 
+    #{username := UserId} = User,
+    Ch0 = #{
+        challenge => #{
+            <<"authmethod">> => ?WAMPCRA_AUTH,
+            <<"authid">> => UserId,
+            <<"authprovider">> => <<"juno">>, 
+            <<"authrole">> => maps:get(authrole, Details, <<"user">>), % @TODO
+            <<"nonce">> => juno_utils:get_nonce(),
+            <<"session">> => Id,
+            <<"timestamp">> => calendar:universal_time()
+        }
+    },
+    RealmUri = juno_context:realm_uri(Ctxt),
+    case juno_user:password(RealmUri, User) of
+        undefined ->
+            Ch0;
+        Pass ->
+            #{
+                auth_name := pbkdf2,
+                hash_func := sha,
+                iterations := Iter,
+                salt := Salt
+            } = Pass,
+            Ch0#{
+                <<"salt">> => Salt,
+                <<"keylen">> => 16, % see juno_pw_auth.erl
+                <<"iterations">> => Iter
+            }
+    end;
+
+challenge(?TICKET_AUTH, _UserId, _Details, _Ctxt) ->
+    #{}.
+
+
+%% @private
+get_realm(Uri) ->
+    case juno_config:automatically_create_realms() of
+        true ->
+            %% We force the creation of a new realm if it does not exist
+            juno_realm:get(Uri);
+        false ->
+            %% Will throw an exception if it does not exist
+            juno_realm:lookup(Uri)
+    end.
