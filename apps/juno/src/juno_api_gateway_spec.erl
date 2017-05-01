@@ -437,12 +437,16 @@ gen_code(Name, PathSpec) ->
         ],
         [
             {init, fun(Req, _Opts) ->
-                Ctxt = juno_context:set_peer(
-                    juno_context:new(), cowboy_req:peer(Req)),
+                Session = undefined, %TODO
+                % SessionId = 1,
+                % Ctxt0 = juno_context:set_peer(
+                %     juno_context:new(), cowboy_req:peer(Req)),
+                % Ctxt1 = juno_context:set_session_id(SessionId, Ctxt0),
                 St = #{
                     is_collection => {'$var', IsCollection}, 
-                    context => Ctxt, 
-                    gatewaye_context => ?MODULE:get_context(Req)
+                    session => Session,
+                    % context => Ctxt1, 
+                    gateway_context => ?MODULE:get_context(Req)
                 },
                 {cowboy_rest, Req, St}
             end},
