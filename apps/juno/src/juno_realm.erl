@@ -160,7 +160,7 @@ get(Uri) ->
 %% -----------------------------------------------------------------------------
 %% @doc 
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will put a new one for Uri.
+%% does not exist it will create a new one for Uri.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) -> realm().
