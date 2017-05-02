@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_auth_middleware).
+-module(juno_security_middleware).
 -behaviour(cowboy_middleware).
 
 -export([execute/2]).

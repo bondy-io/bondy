@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_group).
+-module(juno_security_group).
 -include_lib("wamp/include/wamp.hrl").
 
 -type group() :: map().

@@ -4,6 +4,13 @@
 ```bash
 rebar3 shell
 ```
+## Using a WS Client
+
+```
+/connect ws://localhost:18080/ws wamp.2.json
+/send \[1,"realm1",{"authid":"admin", "roles":{"caller":{}, "subscriber":{}, "publisher":{}, "callee":{"shared_registration":true}}}]
+/send \[5,"foo",{}]
+```
 
 
 ## Bulding a cluster of 3 nodes

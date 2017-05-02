@@ -544,8 +544,8 @@ unregister_all(Ctxt) ->
     [juno_registry:entry()] 
     | {[juno_registry:entry()], juno_registry:continuation()}
     | '$end_of_table'. 
-registrations(#{realm_uri := RealmUri, session_id := SessionId}) ->
-    registrations(RealmUri, SessionId);
+registrations(#{realm_uri := RealmUri} = Ctxt) ->
+    registrations(RealmUri, juno_context:session_id(Ctxt));
 
 registrations(Cont) ->
     juno_registry:entries(Cont).
@@ -630,10 +630,11 @@ match_registrations(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec invoke(id(), uri(), function(), map(), juno_context:context()) -> ok.
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-    #{session_id := SessionId} = Ctxt0,
-    Caller = juno_session:pid(SessionId),
+    S = juno_context:session(Ctxt0),
+    SId = juno_session:id(S),
+    Caller = juno_session:pid(S),
     Timeout = timeout(Opts),
-    %%  A promise iis used to implement a capability and a feature:
+    %%  A promise is used to implement a capability and a feature:
     %% - the capability to match wamp_yiled() or wamp_error() messages
     %%   to the originating wamp_call() and the Caller
     %% - call_timeout feature at the dealer level
@@ -641,7 +642,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
         procedure_uri = ProcUri, 
         call_request_id = CallId,
         caller_pid = Caller,
-        caller_session_id = SessionId
+        caller_session_id = SId
     },
 
     Fun = fun(Entry, Ctxt1) ->
@@ -662,7 +663,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% We asume that as with pubsub, the _Caller_ should not receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    Regs = match_registrations(ProcUri, Ctxt0, #{exclude => [SessionId]}),
+    Regs = match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}),
     do_invoke(Regs, Fun, Ctxt0).
 
 
@@ -676,8 +677,8 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 -spec dequeue_invocations(id(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
 dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
-    % #{session_id := SessionId} = Ctxt,
-    % Caller = juno_session:pid(SessionId),
+    % #{session := S} = Ctxt,
+    % Caller = juno_session:pid(S),
 
     case dequeue_promise(call_request_id, CallId, Ctxt) of
         ok ->

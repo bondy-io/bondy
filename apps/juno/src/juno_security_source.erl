@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_source).
+-module(juno_security_source).
 -include_lib("wamp/include/wamp.hrl").
 
 -type source() :: map().

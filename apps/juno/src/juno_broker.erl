@@ -284,7 +284,8 @@ unsubscribe(SubsId, Ctxt) ->
 -spec publish(uri(), map(), list(), map(), juno_context:context()) ->
     {ok, id()}.
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
-    SessionId = juno_context:session_id(Ctxt),
+    Session = juno_context:session(Ctxt),
+    SessionId = juno_session:id(Session),
     %% TODO check if authorized and if not throw wamp.error.not_authorized
     PubId = juno_utils:get_id(global),
     Details = #{}, % TODO
@@ -428,9 +429,9 @@ publish(L, Fun) when is_list(L) ->
 
 
 %% @private
-on_create(Details, #{session_id := SessionId} = Ctxt) ->
+on_create(Details, Ctxt) ->
     Map = #{
-        <<"session">> => SessionId, 
+        <<"session">> => juno_context:session_id(Ctxt), 
         <<"SubscriptionDetails">> => Details
     },
     % TODO Records stats
@@ -458,9 +459,9 @@ on_delete(SubsId, Ctxt) ->
 
 
 %% @private
-on_event(Uri, SubsId, #{session_id := SessionId} = Ctxt) ->
+on_event(Uri, SubsId, Ctxt) ->
     Map = #{
-        <<"session">> => SessionId, 
+        <<"session">> => juno_context:session_id(Ctxt), 
         <<"subscription">> => SubsId
     },
     {ok, _} = publish(Uri, #{}, [], Map, Ctxt),

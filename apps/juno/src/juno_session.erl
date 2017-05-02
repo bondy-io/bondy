@@ -26,8 +26,8 @@
 
 -define(SESSION_TABLE_NAME, juno_session).
 -define(SESSION_SEQ_POS, 7).
--define(DEFAULT_RATE, #rate_window{max = 1000, secs = 1}).
--define(DEFAULT_QUOTA, #rate_window{max = 1000, secs = 1}).
+-define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
+-define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
 
 -record(quota_window, {
     limit               ::  pos_integer(),
@@ -49,38 +49,40 @@
 }).
 
 -record(session, {
-    id                  ::  id(),
-    created             ::  calendar:date_time(),
-    realm_uri           ::  uri(),
-    %% Peer
-    pid = self()        ::  pid(),
-    peer                ::  peer(),
-    host                ::  binary(),
-    seq = 0             ::  non_neg_integer(),
-    agent               ::  binary(),
+    id                              ::  id(),
+    realm_uri                       ::  uri(),
+    pid = self()                    ::  pid(),
+    peer                            ::  peer(),
+    host                            ::  binary(),
+    agent                           ::  binary(),
+    %% ----
+    seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles
-    caller              ::  map() | undefined,
-    callee              ::  map() | undefined,
-    subscriber          ::  map() | undefined,
-    publisher           ::  map() | undefined,
-    %% 
-    authid              ::  binary(),
-    ttl                 ::  timeout(),
-    expires             ::  pos_integer() | infinity,
-    rate                ::  rate(),
-    quota               ::  quota(),
-    user_info = #{}     ::  map()
+    caller                          ::  map() | undefined,
+    callee                          ::  map() | undefined,
+    subscriber                      ::  map() | undefined,
+    publisher                       ::  map() | undefined,
+    %% Auth
+    authid                          ::  binary(),
+    token                           ::  binary(),
+    %% Expiration and Limits
+    created                         ::  calendar:date_time(),
+    ttl                             ::  timeout(),
+    expires                         ::  pos_integer() | infinity,
+    rate = ?DEFAULT_RATE            ::  rate(),
+    quota = ?DEFAULT_QUOTA           ::  quota()
 }).
 
--type peer()        ::  {inet:ip_address(), inet:port_number()}.
--type session()     ::  #session{}.
--type quota()       ::  #quota_window{}.
--type rate()        ::  #rate_window{}.
--type session_opts()::  #{
+-type peer()                    ::  {inet:ip_address(), inet:port_number()}.
+-type session()                 ::  #session{}.
+-type quota()                   ::  #quota_window{}.
+-type rate()                    ::  #rate_window{}.
+-type session_opts()            ::  #{
     roles => map()
 }.
 
 -export_type([peer/0]).
+
 
 
 -export([close/1]).
@@ -95,6 +97,7 @@
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([size/0]).
+-export([update/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -155,6 +158,16 @@ open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
         false ->
             error({integrity_constraint_violation, Id})
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(session()) -> ok.
+update(#session{id = Id} = S) ->
+    true = ets:insert(table(Id), S),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -281,8 +294,6 @@ fetch(Id) ->
         Session ->
             Session
     end.
-
-
 
 
 

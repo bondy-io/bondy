@@ -7,7 +7,7 @@
 %%
 %% @end
 %% =============================================================================
--module(juno_api_http).
+-module(juno_rest_api).
 -include("juno.hrl").
 
 -define(DEFAULT_POOL_SIZE, 200).
@@ -35,7 +35,7 @@ start_admin_http() ->
                 {max_connections, infinity}
             ]},
             {middlewares, [
-                    cowboy_router, juno_auth_middleware, cowboy_handler
+                    cowboy_router, juno_security_middleware, cowboy_handler
             ]}
         ]
     ).
@@ -57,7 +57,7 @@ start_http() ->
                 {max_connections, infinity}
             ]},
             {middlewares, [
-                    cowboy_router, juno_auth_middleware, cowboy_handler
+                    cowboy_router, juno_security_middleware, cowboy_handler
             ]}
         ]
     ).
@@ -84,12 +84,12 @@ admin_dispatch_table() ->
         %% ADMIN API
         {'_', [
             {"/",
-                juno_admin_rh, #{entity => entry_point}},
+                juno_rest_admin_handler, #{entity => entry_point}},
             %% Used to establish a websockets connection
             {"/ws",
                 juno_ws_handler, #{}},
             {"/ping",
-                juno_admin_rh, #{entity => ping}},
+                juno_rest_admin_handler, #{entity => ping}},
             %% MULTI-TENANCY CAPABILITY
             {"/realms",
                 juno_realm_rh, #{entity => realm, is_collection => true}},
@@ -97,47 +97,47 @@ admin_dispatch_table() ->
                 juno_realm_rh, #{entity => realm}},
             %% SECURITY CAPABILITY    
             {"/users",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => user, is_collection => true}},
             {"/users/:id",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => user}},
             {"/users/:id/permissions",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => permission, is_collection => true}},
             {"/users/:id/source",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => source, master => user, is_collection => false}},
             {"/sources/",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => source, is_collection => true}},
             {"/groups",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => group, is_collection => true}},
             {"/groups/:id",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => group}},
             {"/groups/:id/permissions",
-                juno_security_admin_rh, 
+                juno_rest_security_handler, 
                 #{entity => permission, is_collection => true}},
             {"/stats",
-                juno_admin_rh, #{entity => stats, is_collection => true}},
+                juno_rest_admin_handler, #{entity => stats, is_collection => true}},
             %% CLUSTER MANAGEMENT CAPABILITY
             {"/nodes", 
-                juno_admin_rh, #{entity => node, is_collection => true}},
+                juno_rest_admin_handler, #{entity => node, is_collection => true}},
             {"/nodes/:node", 
-                juno_admin_rh, #{entity => node}},
+                juno_rest_admin_handler, #{entity => node}},
             %% GATEWAY CAPABILITY
             {"/apis", 
-                juno_gateway_rh, 
+                juno_rest_api_gateway_handler, 
                 #{entity => api, is_collection => true}},
             {"/apis/:id", 
-                juno_gateway_rh, #{entity => api}},
+                juno_rest_api_gateway_handler, #{entity => api}},
             {"/apis/:id/procedures", 
-                juno_gateway_rh, 
+                juno_rest_api_gateway_handler, 
                 #{entity => api, is_collection => true}},
             {"/apis/:id/procedures/:uri", 
-                juno_gateway_rh, #{entity => api}}
+                juno_rest_api_gateway_handler, #{entity => api}}
         ]}
     ],
     cowboy_router:compile(List).
@@ -148,30 +148,30 @@ dispatch_table() ->
     Hosts = [
         {'_', [
             {"/",
-                juno_http_bridge_rh, #{entity => entry_point}},
+                juno_rest_wamp_bridge_handler, #{entity => entry_point}},
             %% JUNO HTTP/REST - WAMP BRIDGE
             % Used by HTTP publishers to publish an event
             {"/events",
-                juno_http_bridge_rh, #{entity => event}},
+                juno_rest_wamp_bridge_handler, #{entity => event}},
             % Used by HTTP callers to make a call
             {"/calls",
-                juno_http_bridge_rh, #{entity => call}},
+                juno_rest_wamp_bridge_handler, #{entity => call}},
             % Used by HTTP subscribers to list, add and remove HTTP subscriptions
             {"/subscriptions",
-                juno_http_bridge_rh, #{entity => subscription}},
+                juno_rest_wamp_bridge_handler, #{entity => subscription}},
             {"/subscriptions/:id",
-                juno_http_bridge_rh, #{entity => subscription}},
+                juno_rest_wamp_bridge_handler, #{entity => subscription}},
             %% Used by HTTP callees to list, register and unregister HTTP endpoints
             {"/registrations",
-                juno_http_bridge_rh, #{entity => registration}},
+                juno_rest_wamp_bridge_handler, #{entity => registration}},
             {"/registrations/:id",
-                juno_http_bridge_rh, #{entity => registration}},
+                juno_rest_wamp_bridge_handler, #{entity => registration}},
             %% Used to establish a websockets connection
             {"/ws",
                 juno_ws_handler, #{}},
             %% JUNO API GATEWAY
             {"/api/:version/realms/:realm/[...]",
-                juno_gateway_rh, #{}}
+                juno_rest_api_gateway_handler, #{}}
         ]}
     ],
     cowboy_router:compile(Hosts).

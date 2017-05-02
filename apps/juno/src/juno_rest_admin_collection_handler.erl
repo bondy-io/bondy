@@ -3,19 +3,12 @@
 %% =============================================================================
 
 
--module(juno_admin_rh).
--include_lib("wamp/include/wamp.hrl").
-% -include("juno.hrl").
-
--record(state, {
-    realm_uri :: uri(),
-    resource :: atom(),
-    context :: juno_context:context()
-}).
+-module(juno_rest_admin_collection_handler).
 
 -export([allowed_methods/2]).
 -export([content_types_provided/2]).
--export([init/2]).
+-export([init/3]).
+-export([rest_init/2]).
 -export([is_authorized/2]).
 -export([resource_exists/2]).
 -export([resource_existed/2]).
@@ -27,13 +20,12 @@
 %% ============================================================================
 
 
-init(Req, #{resource := R}) ->
-    Ctxt = juno_context:set_peer(juno_context:new(), cowboy_req:peer(Req)),
-    St = #state{
-        context = Ctxt,
-        resource = R
-    },
-    {cowboy_rest, Req, St}.  
+init({tcp, http}, _Req, _Opts) ->
+    {upgrade, protocol, cowboy_rest}.
+
+
+rest_init(Req, _Opts) ->
+    {ok, Req, undefined}.
 
 
 allowed_methods(Req, State) ->

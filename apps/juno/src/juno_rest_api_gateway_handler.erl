@@ -1,14 +1,9 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2016. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%% Copyright (C) NGINEO LIMITED 2016. All rights reserved.
+%% =============================================================================
 
-%% =============================================================================
-%% @doc
-%% A cowboy REST resource handler for the API entrypoint i.e. '/'.
-%% @end
-%% =============================================================================
--module(juno_entry_point_rh).
-%% -behaviour(cowboy_rest).
+
+-module(juno_rest_api_gateway_handler).
 
 -export([allowed_methods/2]).
 -export([content_types_provided/2]).
