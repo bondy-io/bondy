@@ -1,3 +1,7 @@
+%% -----------------------------------------------------------------------------
+%% Copyright (C) Ngineo Limited 2017. All rights reserved.
+%% -----------------------------------------------------------------------------
+
 -module(juno_rest_api_gateway_spec).
 
 -define(VARS_KEY, <<"variables">>).
