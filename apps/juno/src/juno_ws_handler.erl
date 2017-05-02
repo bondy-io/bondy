@@ -416,7 +416,7 @@ handle_wamp_messages([H|T], Ctxt0, Acc) ->
 
 
 %% @private
-do_terminate(#{context := Ctxt}) ->
+do_terminate(#state{context = Ctxt}) ->
     juno_context:close(Ctxt).
 
 
