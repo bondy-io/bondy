@@ -6,6 +6,7 @@
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
+-define(MOD_PREFIX, "juno_rest_api_gateway_handler_").
 
 -define(HTTP_METHODS, [
      <<"delete">>,
@@ -360,7 +361,9 @@
 -export([from_file/1]).
 -export([get_context/1]).
 -export([analyse/1]).
--export([gen_code/2]).
+-export([compile/1]).
+-export([load/1]).
+-export([gen_path_code/2]).
 -export([eval_term/2]).
 -export([pp/1]).
 -compile({parse_transform, parse_trans_codegen}).
@@ -406,8 +409,72 @@ get_context(Req) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec analyse(map()) -> map() | no_return().
 analyse(Spec) ->
     analyse(Spec, get_context()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+load(API) ->
+    {RealmUri, _Host} = compile(API),
+    %% We make sure realm exists
+    _ = juno_realm:get(RealmUri),
+    %% TODO build new cowboy dispatch route and compile
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec compile(map()) -> 
+    {RealmUri :: binary, {HostMatch :: binary(), PathList :: []}} | no_return.
+compile(API) ->
+    #{
+        <<"host">> := Host,
+        <<"realm_uri">> := RealmUri,
+        <<"versions">> := Vers
+    } = API,
+
+    {RealmUri, 
+        {Host, [compile_version(RealmUri, V) || V <- maps:to_list(Vers)]}}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+compile_version(_, #{<<"is_active">> := false}) ->
+    [];
+
+compile_version(Realm, {_Name, Spec}) ->
+    #{
+        <<"base_path">> := BasePath,
+        <<"is_deprecated">> := Deprecated,
+        <<"paths">> := Paths
+    } = Spec,
+    [compile_path(BasePath, Deprecated, Realm, P) || P <- maps:to_list(Paths)].
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec compile_path(binary(), boolean(), binary(), tuple()) -> 
+    {Code :: binary(), CowboyPath :: tuple()} | no_return().
+compile_path(BasePath, Deprecated, Realm, {Path, Spec}) ->
+    FullPath = <<BasePath/binary, Path/binary>>,
+    {Mod, Forms} = gen_path_code(FullPath, Spec),
+    %% TODO compile and load code
+    {ok, Mod, Bin} = compile:forms(Forms, [verbose, report_errors]),
+    code:purge(Mod),
+    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    {Bin, {FullPath, Mod, #{realm_uri => Realm, deprecated => Deprecated}}}.
+    
+
 
 
 
@@ -415,16 +482,18 @@ analyse(Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-gen_code(Name, PathSpec) ->
-    ModName = list_to_atom(
-        "juno_rest_api_gateway_handler_" ++ integer_to_list(erlang:phash2(Name))),
+-spec gen_path_code(binary(), PathSpec :: map()) -> 
+    {Mod :: atom(), Forms :: list()} | no_return().
+
+gen_path_code(Name, PathSpec) ->
+    ModName = list_to_atom(?MOD_PREFIX ++ integer_to_list(erlang:phash2(Name))),
     AllowedMethods = maps:get(<<"allowed_methods">>, PathSpec),
     IsCollection = maps:get(<<"is_collection">>, PathSpec),
     Accepts = content_types_accepted(maps:get(<<"accepts">>, PathSpec)),
     Provides = content_types_provided(maps:get(<<"provides">>, PathSpec)),
     Get = maps:get(<<"get">>, PathSpec, undefined),
 
-    codegen:gen_module(
+    Forms = codegen:gen_module(
         {'$var', ModName},
         [
             {init, 2},
@@ -440,19 +509,19 @@ gen_code(Name, PathSpec) ->
             {from_msgpack, 2}
         ],
         [
-            {init, fun(Req, _Opts) ->
+            {init, fun(Req, St0) ->
                 Session = undefined, %TODO
                 % SessionId = 1,
                 % Ctxt0 = juno_context:set_peer(
                 %     juno_context:new(), cowboy_req:peer(Req)),
                 % Ctxt1 = juno_context:set_session_id(SessionId, Ctxt0),
-                St = #{
+                St1 = St0#{
                     is_collection => {'$var', IsCollection}, 
                     session => Session,
                     % context => Ctxt1, 
                     gateway_context => ?MODULE:get_context(Req)
                 },
-                {cowboy_rest, Req, St}
+                {cowboy_rest, Req, St1}
             end},
             {allowed_methods, fun(Req, St) ->
                 {{'$var', AllowedMethods}, Req, St}
@@ -536,10 +605,20 @@ gen_code(Name, PathSpec) ->
                     Result = <<>>,
                     Action1 = maps:update(<<"result">>, Result, Action0),
                     GC1 = maps:update(<<"action">>, Action1, GC0),
-                    {<<>>, maps:update(gateway_context, GC1, St)}
-            end}      
+                    {<<>>, maps:update(gateway_context, GC1, St0)}
+            end},
+            {response, fun
+                (json, Result, St) ->
+                    case jsx:is_json(Result) of
+                        true ->
+                            Result;
+                        false ->
+                            jsx:encode(Result)
+                    end
+            end}     
         ]
-    ).
+    ),
+    {ModName, Forms}.
 
 
 
