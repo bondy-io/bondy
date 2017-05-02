@@ -108,4 +108,4 @@ simple_1_test(_) ->
             }
         }
     },
-    Expected =:= juno_api_gateway_spec:analyse(Spec).
+    Expected =:= juno_rest_api_gateway_spec:analyse(Spec).

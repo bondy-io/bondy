@@ -1,4 +1,4 @@
--module(juno_api_gateway_spec).
+-module(juno_rest_api_gateway_spec).
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
@@ -413,7 +413,7 @@ analyse(Spec) ->
 %% -----------------------------------------------------------------------------
 gen_code(Name, PathSpec) ->
     ModName = list_to_atom(
-        "juno_api_gateway_rh_" ++ integer_to_list(erlang:phash2(Name))),
+        "juno_rest_api_gateway_handler_" ++ integer_to_list(erlang:phash2(Name))),
     AllowedMethods = maps:get(<<"allowed_methods">>, PathSpec),
     IsCollection = maps:get(<<"is_collection">>, PathSpec),
     Accepts = content_types_accepted(maps:get(<<"accepts">>, PathSpec)),

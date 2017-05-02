@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_http_bridge_rh).
+-module(juno_rest_wamp_bridge_handler).
 -include("http_api.hrl").
 -include_lib("wamp/include/wamp.hrl").
 

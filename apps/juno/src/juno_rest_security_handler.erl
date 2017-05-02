@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_security_admin_rh).
+-module(juno_rest_security_handler).
 -include_lib("wamp/include/wamp.hrl").
 % -include("juno.hrl").
 
@@ -141,10 +141,10 @@ realm_uri(#state{realm_uri = Uri}) ->
 
 %% @private
 lookup(user, RealmUri, Id) ->
-    juno_user:lookup(RealmUri, Id);
+    juno_security_user:lookup(RealmUri, Id);
 
 lookup(group, RealmUri, Id) ->
-    juno_group:lookup(RealmUri, Id).
+    juno_security_group:lookup(RealmUri, Id).
 
 
 %% @private
@@ -157,18 +157,18 @@ delete(group, State) ->
 
 delete(source, #state{master = user} = _State) ->
     %% TODO Implement, we need to receive the CIDR
-    % juno_user:remove_source(realm_uri(State), id(State), CIDR).
+    % juno_security_user:remove_source(realm_uri(State), id(State), CIDR).
     error(not_implemented).
 
 
 list(user, State) ->
-    juno_user:list(realm_uri(State));
+    juno_security_user:list(realm_uri(State));
 
 list(group, State) ->
-    juno_group:list(realm_uri(State));
+    juno_security_group:list(realm_uri(State));
 
 list(source, State) ->
-    juno_source:list(realm_uri(State)).
+    juno_security_source:list(realm_uri(State)).
 
 %% @private
 % add_user(Username, Password, Info) ->

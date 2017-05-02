@@ -198,7 +198,7 @@ handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort 
     maybe_open_session(
-        authenticate(M#hello.details, Ctxt1));
+        maybe_auth_challenge(M#hello.details, get_realm(Uri), Ctxt1));
 
 handle_message(#authenticate{} = M, #{session := _} = Ctxt) ->
     %% Client already has a session so is already authenticated.
@@ -709,25 +709,12 @@ abort(Type, Reason, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authenticate(map(), juno_context:context()) -> 
-    {ok, juno_context:context()} 
-    | {challenge, 
-        AuthMethod :: binary(), Challenge :: map(), juno_context:context()}
-    | {error, auth_error_reason(), juno_context:context()}.
-authenticate(Details, #{realm_uri := Uri} = Ctxt) when is_map(Details) ->
-    maybe_challenge(Details, get_realm(Uri), Ctxt).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec authenticate(binary(), map(), juno_context:context()) -> 
     {ok, juno_context:context()} 
     | {error, auth_error_reason(), juno_context:context()}.
 authenticate(Signature, Extra, #{authid := _, realm_uri := _Uri} = Ctxt) 
 when is_binary(Signature), is_map(Extra) ->
-    %% TODO    
+    %% TODO Implement password checking.   
     % S = base64:decode(Signature),
     % io:format("Auth sign ~p extra ~p~n", [S, Extra]),
     {ok, Ctxt}.
@@ -735,10 +722,10 @@ when is_binary(Signature), is_map(Extra) ->
 
 
 %% @private
-maybe_challenge(_, not_found, #{realm_uri := Uri} = Ctxt) ->
+maybe_auth_challenge(_, not_found, #{realm_uri := Uri} = Ctxt) ->
     {error, {realm_not_found, Uri}, Ctxt};
 
-maybe_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
+maybe_auth_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
     Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
     case juno_realm:is_security_enabled(Realm) of
         true ->
@@ -746,7 +733,7 @@ maybe_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
             AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
-            case juno_user:lookup(juno_realm:uri(Realm), UserId) of
+            case juno_security_user:lookup(juno_realm:uri(Realm), UserId) of
                 not_found ->
                     {error, {user_not_found, UserId}, Ctxt1};
                 User ->
@@ -758,7 +745,7 @@ maybe_challenge(#{<<"authid">> := UserId} = Details, Realm, Ctxt0) ->
     end;
 
 %% @private
-maybe_challenge(_, _, Ctxt) ->
+maybe_auth_challenge(_, _, Ctxt) ->
     {error, {missing_param, <<"authid">>}, Ctxt}.
 
 
@@ -778,7 +765,7 @@ challenge(?WAMPCRA_AUTH, User, Details, #{id := Id} = Ctxt) ->
         }
     },
     RealmUri = juno_context:realm_uri(Ctxt),
-    case juno_user:password(RealmUri, User) of
+    case juno_security_user:password(RealmUri, User) of
         undefined ->
             Ch0;
         Pass ->

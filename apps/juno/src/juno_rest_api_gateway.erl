@@ -7,7 +7,7 @@
 %%
 %% @end
 %% =============================================================================
--module(juno_gateway).
+-module(juno_rest_api_gateway).
 
 -export([version/0]).
 

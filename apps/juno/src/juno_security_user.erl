@@ -3,7 +3,7 @@
 %% =============================================================================
 
 
--module(juno_user).
+-module(juno_security_user).
 -include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -53,7 +53,7 @@ add(RealmUri, User) ->
     Source :: atom(),
     Options :: list()) -> ok.
 add_source(RealmUri, Username, CIDR, Source, Opts) ->
-    juno_source:add(RealmUri, [Username], CIDR, Source, Opts).
+    juno_security_source:add(RealmUri, [Username], CIDR, Source, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -161,7 +161,7 @@ to_map(RealmUri, {Username, Opts} = User) ->
         <<"has_password">> => has_password(Opts),
         <<"groups">> => juno_security:user_groups(RealmUri, User)
     },
-    L = case juno_source:list(RealmUri, Username) of
+    L = case juno_security_source:list(RealmUri, Username) of
         not_found ->
             #{};
         Sources ->
