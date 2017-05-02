@@ -6,21 +6,27 @@
 %% @doc
 %% juno_router provides the routing logic for all interactions.
 %%
-%% In general juno_router handles all messages asynchronously. It does this by
+%% In general juno_router tries to handle all messages asynchronously. 
+%% It does it by
 %% using either a static or a dynamic pool of workers based on configuration.
-%% A dynamic pool actually spawns a new erlang process for each message.
+%% This module implements both type of workers as a gen_server (this module).
+%% A static pool uses a set of supervised processes whereas a 
+%% dynamic pool spawns a new erlang process for each message. In both cases,
+%% sidejob supervises the processes.
 %% By default juno_router uses a dynamic pool.
 %%
-%% This module implements both type of workers as a gen_server.
-%%
-%% A router provides load regulation, in case a maximum pool capacity has been
-%% reached, the router will handle the message synchronously i.e. blocking the
+%% The pools are implemented using the sidejob library in order to provide 
+%% load regulation. Inn case a maximum pool capacity has been reached, 
+%% the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
 %% e.g. {@link juno_ws_handler}).
 %%
-%% This module handles only the concurrency and basic routing logic, 
-%% delegating the rest to either {@link juno_broker} or {@link juno_dealer}.
+%% The router also handles messages synchronously in those 
+%% cases where it needs to preserve message ordering guarantees.
 %%
+%% This module handles only the concurrency and basic routing logic, 
+%% delegating the rest to either {@link juno_broker} or {@link juno_dealer},
+%% which implement the actual PubSub and RPC logic respectively.
 %%
 %%
 %% ,------.                                    ,------.
@@ -420,7 +426,7 @@ open_session(Ctxt0) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Handles those WAMP messages that are allowed by the protocol once a session 
+%% Handles the WAMP messages that are allowed by the protocol once a session 
 %% has been established.
 %% @end
 %% -----------------------------------------------------------------------------
