@@ -97,6 +97,7 @@
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([size/0]).
+-export([update/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -157,6 +158,16 @@ open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
         false ->
             error({integrity_constraint_violation, Id})
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(session()) -> ok.
+update(#session{id = Id} = S) ->
+    true = ets:insert(table(Id), S),
+    ok.
 
 
 %% -----------------------------------------------------------------------------
