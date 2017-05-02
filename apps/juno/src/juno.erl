@@ -42,8 +42,8 @@ start() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message()) -> ok | no_return().
-send(Term, M) ->
-    send(Term, M, 5000).
+send(PeerId, M) ->
+    send(PeerId, M, #{timeout => 5000}).
 
 
 %% -----------------------------------------------------------------------------
@@ -52,11 +52,22 @@ send(Term, M) ->
 %% If the transport is not open it fails with an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), infinity | integer()) ->
-    ok | no_return().
-send({Pid, _SessionId}, M, Timeout) 
-when is_pid(Pid), Timeout =:= infinity; 
-is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
+-spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+send({Pid, SessionId}, M, Opts0) when is_pid(Pid) ->
+    Opts1 = maps_utils:validate(Opts0, #{
+        timeout => #{
+            required => true,
+            default => 5000,
+            datatype => timeout
+        },
+        enqueue => #{
+            required => true,
+            datatype => boolean,
+            default => false
+        }
+    }),
+    Timeout = maps:get(timeout, Opts1),
+    Enqueue = maps:get(enqueue, Opts1),
     MonitorRef = monitor(process, Pid),
     %% If the monitor/2 call failed to set up a connection to a
     %% remote node, we don't want the '!' operator to attempt
@@ -69,16 +80,16 @@ is_pid(Pid), is_integer(Timeout), Timeout >= 0 ->
     erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            % TODO Conditionally Enqueue call to session or exit
-            exit(Reason);
+            maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?JUNO_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
-    after Timeout ->
-        demonitor(MonitorRef, [flush]),
-        % TODO Conditionally Enqueue call to session or exit
-        exit(timeout)
+    after 
+        Timeout ->
+            demonitor(MonitorRef, [flush]),
+            maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -162,3 +173,11 @@ error_map(Code, Description, UserInfo) ->
 %% =============================================================================
 
 
+
+%% @private
+maybe_enqueue(true, _SessionId, _M, _) ->
+    %% TODO Enqueue for session resumption
+    ok;
+
+maybe_enqueue(false, _, _, Reason) ->
+    exit(Reason).
