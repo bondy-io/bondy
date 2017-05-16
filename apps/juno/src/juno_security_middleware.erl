@@ -19,6 +19,7 @@ execute(Req0, Env0) ->
                 Env1 = set_ctxt(Ctxt0, Env0),
                 {ok, Req0, Env1};
             _Other ->
+                %% A REST API handler
                 %% TODO
                 Ctxt1 = case get_realm_uri(Env0) of
                     undefined -> Ctxt0;
@@ -113,7 +114,14 @@ parse_authorization_header(Req0, Ctxt) ->
 
 %% private
 get_realm_uri(Env) ->
-    get_value(realm_uri, get_value(auth, Env)).
+    %% We first try in the opts of the handler and revert to the 
+    %% environment default
+    case get_value(realm_uri, get_value(handler_opts, Env)) of
+        undefined ->
+            get_value(realm_uri, get_value(auth, get_value(juno, Env)));
+        Val ->
+            Val
+    end.
 
 
 
