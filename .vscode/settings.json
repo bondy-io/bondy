@@ -1,11 +1,11 @@
 // Place your settings in this file to overwrite default and user settings.
 {
+    "editor.wordWrapColumn": 80,
+	"editor.wordWrap": "wordWrapColumn",
     "erlang.linter-erlc.include": [
         "${workspaceRoot}/apps/juno/include",
         "${workspaceRoot}/_build/default/lib/wamp/include"
     ], 
     "erlang.linter-erlc.deps": ["${workspaceRoot}/_build/default/lib"],
-    "editor.wordWrapColumn": 80,
-	  "editor.wordWrap": "wordWrapColumn",
 	"erlang.enableExperimentalAutoComplete": true
 }
