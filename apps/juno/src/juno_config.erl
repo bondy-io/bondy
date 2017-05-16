@@ -24,6 +24,7 @@
 -export([https_acceptors_pool_size/0]).
 -export([https_max_connections/0]).
 -export([https_port/0]).
+-export([hosts/0]).
 -export([is_router/0]).
 -export([load_regulation_enabled/0]).
 -export([pool_capacity/1]).
@@ -58,6 +59,8 @@ is_router() ->
 %% HTTP
 %% =============================================================================
 
+hosts() ->
+    application:get_env(?APP, hosts, []).
 
 http_acceptors_pool_size() ->
     application:get_env(?APP, http_acceptors_pool_size, 200).
