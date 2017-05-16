@@ -191,7 +191,7 @@ put(Uri, Opts) ->
     #{
         description := Desc, 
         authmethods := Method
-    } = ls_maps_utils:validate(Opts, opts_spec()),
+    } = maps_utils:validate(Opts, opts_spec()),
 
     Realm = #realm{
         uri = Uri,
@@ -301,7 +301,7 @@ do_lookup(Uri) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns the ls_maps_utils:spec() for validation the options
+%% Returns the maps_utils:spec() for validation the options
 %% @end
 %% -----------------------------------------------------------------------------
 opts_spec() ->
