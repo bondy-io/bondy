@@ -14,6 +14,7 @@
 -define(DEFAULT_RESOURCE_CAPACITY, 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
+-export([priv_dir/0]).
 -export([admin_http_port/0]).
 -export([automatically_create_realms/0]).
 -export([connection_lifetime/0]).
@@ -24,7 +25,7 @@
 -export([https_acceptors_pool_size/0]).
 -export([https_max_connections/0]).
 -export([https_port/0]).
--export([hosts/0]).
+-export([api_gateway/0]).
 -export([is_router/0]).
 -export([load_regulation_enabled/0]).
 -export([pool_capacity/1]).
@@ -59,8 +60,23 @@ is_router() ->
 %% HTTP
 %% =============================================================================
 
-hosts() ->
-    application:get_env(?APP, hosts, []).
+api_gateway() ->
+    application:get_env(?APP, api_gateway, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the app's priv dir
+%% @end
+%% -----------------------------------------------------------------------------
+priv_dir() ->
+    case code:priv_dir(juno) of
+        {error, bad_name} ->
+            filename:join(
+                [filename:dirname(code:which(?MODULE)), "..", "priv"]);
+        Val ->
+            Val
+    end.
 
 http_acceptors_pool_size() ->
     application:get_env(?APP, http_acceptors_pool_size, 200).

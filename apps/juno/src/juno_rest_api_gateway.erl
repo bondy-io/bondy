@@ -36,8 +36,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    Specs = juno_config:hosts(),
-    Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- Specs],
+    Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- specs()],
     Compiled = juno_rest_api_gateway_spec:compile(Parsed),
     SchemeRules = case juno_rest_api_gateway_spec:load(Compiled) of
         [] ->
@@ -49,6 +48,12 @@ start_listeners() ->
         || {Scheme, Rules} <- SchemeRules],
     ok.
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_listener({<<"http">>, Rules}) ->
@@ -156,6 +161,34 @@ execute(Req0, Env0) ->
 
 
 
+%% @private
+specs() ->
+    case juno_config:api_gateway() of
+        undefined ->
+            [];
+        L ->
+            case lists:keyfind(specs_path, 1, L) of
+                false ->
+                    [];
+                {_, Path} ->
+                    Expr = filename:join([Path, "*.jags"]),
+                    case filelib:wildcard(Expr) of
+                        [] ->
+                            [];
+                        FNames ->
+                            [read_spec(FName) || FName <- FNames]
+                    end
+            end
+    end.
+
+%% @private
+read_spec(FName) ->
+    case file:consult(FName) of
+        {ok, L} ->
+            L;
+        {error, _} ->
+            {error, {invalid_specification_format, FName}}
+    end.
 
 
 
