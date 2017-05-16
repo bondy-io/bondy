@@ -51,7 +51,7 @@ simple_1_test(_) ->
                                 
                                 },
                                 <<"on_result">> => #{
-                                
+                                  
                                 }
                             }
                         }
@@ -68,14 +68,11 @@ simple_1_test(_) ->
                 <<"base_path">> => <<"/v1.0">>,
                 <<"is_active">> => false,
                 <<"is_deprecated">> => false,
+                <<"pool_size">> => 200,
                 <<"paths">> => #{
                     <<"/things">> => #{
-                        <<"accepts">> => [
-                            <<"application/json">>,<<"application/msgpack">>
-                        ],
-                        <<"provides">> => [
-                            <<"application/json">>,<<"application/msgpack">>
-                        ],
+                        <<"accepts">> => [<<"application/json">>,<<"application/msgpack">>],
+                        <<"allowed_methods">> => [<<"get">>],
                         <<"get">> => #{
                             <<"action">> => #{
                                 <<"arguments">> => [300],
@@ -101,11 +98,20 @@ simple_1_test(_) ->
                                 }
                             }
                         },
-                        <<"allowed_methods">> => [<<"get">>],
-                        <<"is_collection">> => false
+                        <<"is_collection">> => false,
+                        <<"provides">> => [<<"application/json">>,<<"application/msgpack">>],
+                        <<"schemes">> => [<<"http">>,<<"https">>],
+                        <<"security">> => #{
+                            <<"authorization_path">> => <<"/auth">>,
+                            <<"flow">> => <<"resource_owner_password_credentials">>,
+                            <<"token_path">> => <<"/token">>
+                        }
                     }
                 }
             }
         }
     },
-    Expected =:= juno_rest_api_gateway_spec:analyse(Spec).
+    Expected = juno_rest_api_gateway_spec:parse(Spec),
+    Result = juno_rest_api_gateway_spec:compile([Expected]),
+    Final = juno_rest_api_gateway_spec:load(Result),
+    io:format("Result ~p~n", [Final]).

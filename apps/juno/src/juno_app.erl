@@ -59,10 +59,8 @@ maybe_start_router_services() ->
     case juno_config:is_router() of
         true ->
             ok = start_tcp_handlers(),
-            %% {ok, _} = juno_rest_api:start_https(),
-            {ok, _} = juno_rest_api:start_admin_http(),
-            {ok, _} = juno_rest_api:start_http(),
-            ok;
+            % {ok, _} = juno_rest_admin_api:start_admin_http(),
+            juno_rest_api_gateway:start_listeners();
         false ->
             ok
     end.
