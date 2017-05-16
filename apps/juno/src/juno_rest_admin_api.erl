@@ -7,16 +7,28 @@
 %%
 %% @end
 %% =============================================================================
--module(juno_rest_api).
+-module(juno_rest_admin_api).
 -include("juno.hrl").
 
--define(DEFAULT_POOL_SIZE, 200).
+-define(DEFAULT_POOL_SIZE, 100).
 
 -export([start_admin_http/0]).
--export([start_http/0]).
--export([start_https/0]).
 
 
+
+
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec start_admin_http() -> {ok, Pid :: pid()} | {error, any()}.
 start_admin_http() ->
     Port = juno_config:admin_http_port(),
@@ -35,43 +47,14 @@ start_admin_http() ->
                 {max_connections, infinity}
             ]},
             {middlewares, [
-                    cowboy_router, juno_security_middleware, cowboy_handler
+                cowboy_router, 
+                juno_security_middleware, 
+                cowboy_handler
             ]}
         ]
     ).
 
--spec start_http() -> {ok, Pid :: pid()} | {error, any()}.
-start_http() ->
-    Port = juno_config:http_port(),
-    PoolSize = juno_config:http_acceptors_pool_size(),
-    cowboy:start_http(
-        juno_http_listener,
-        PoolSize,
-        [{port, Port}],
-        [
-            {env,[
-                {auth, #{
-                    schemes => [basic, digest, bearer]
-                }},
-                {dispatch, admin_dispatch_table()}, 
-                {max_connections, infinity}
-            ]},
-            {middlewares, [
-                    cowboy_router, juno_security_middleware, cowboy_handler
-            ]}
-        ]
-    ).
 
--spec start_https() -> {ok, Pid :: pid()} | {error, any()}.
-start_https() ->
-    Port = juno_config:https_port(),
-    PoolSize = juno_config:https_acceptors_pool_size(),
-    cowboy:start_https(
-        juno_https_listener,
-        PoolSize,
-        [{port, Port}],
-        [{env, [{dispatch, dispatch_table()}, {max_connections, infinity}]}]
-    ).
 
 
 
@@ -80,7 +63,7 @@ start_https() ->
 %% ============================================================================
 
 admin_dispatch_table() ->
-    List = [
+    Hosts = [
         %% ADMIN API
         {'_', [
             {"/",
@@ -140,38 +123,6 @@ admin_dispatch_table() ->
                 juno_rest_api_gateway_handler, #{entity => api}}
         ]}
     ],
-    cowboy_router:compile(List).
-
-
-%% @private
-dispatch_table() ->
-    Hosts = [
-        {'_', [
-            {"/",
-                juno_rest_wamp_bridge_handler, #{entity => entry_point}},
-            %% JUNO HTTP/REST - WAMP BRIDGE
-            % Used by HTTP publishers to publish an event
-            {"/events",
-                juno_rest_wamp_bridge_handler, #{entity => event}},
-            % Used by HTTP callers to make a call
-            {"/calls",
-                juno_rest_wamp_bridge_handler, #{entity => call}},
-            % Used by HTTP subscribers to list, add and remove HTTP subscriptions
-            {"/subscriptions",
-                juno_rest_wamp_bridge_handler, #{entity => subscription}},
-            {"/subscriptions/:id",
-                juno_rest_wamp_bridge_handler, #{entity => subscription}},
-            %% Used by HTTP callees to list, register and unregister HTTP endpoints
-            {"/registrations",
-                juno_rest_wamp_bridge_handler, #{entity => registration}},
-            {"/registrations/:id",
-                juno_rest_wamp_bridge_handler, #{entity => registration}},
-            %% Used to establish a websockets connection
-            {"/ws",
-                juno_ws_handler, #{}},
-            %% JUNO API GATEWAY
-            {"/api/:version/realms/:realm/[...]",
-                juno_rest_api_gateway_handler, #{}}
-        ]}
-    ],
     cowboy_router:compile(Hosts).
+
+
