@@ -1,4 +1,4 @@
--name ${NODE_NAME}
+-sname juno
 -setcookie juno_cookie
 +P 5000000
 +K true
