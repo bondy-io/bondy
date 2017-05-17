@@ -36,15 +36,16 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- specs()],
+    Specs = specs(),
+    Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- Specs],
     Compiled = juno_rest_api_gateway_spec:compile(Parsed),
     SchemeRules = case juno_rest_api_gateway_spec:load(Compiled) of
         [] ->
             [{<<"http">>, []}];
-        {_, _} = Val ->
+        Val ->
             Val
     end,
-    _ = [start_listener({Scheme, add_base_rules(Rules)}) 
+    _ = [start_listener({Scheme, Rules}) 
         || {Scheme, Rules} <- SchemeRules],
     ok.
 
@@ -73,6 +74,8 @@ start_listener({<<"https">>, Rules}) ->
 -spec start_http(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_http(Rules) ->
     Table = cowboy_router:compile(Rules),
+    % io:format("Rules ~p~n", [Rules]),
+    % io:format("Table ~p~n", [Table]),
     Port = juno_config:http_port(),
     PoolSize = juno_config:http_acceptors_pool_size(),
     JunoEnv = #{
@@ -93,7 +96,7 @@ start_http(Rules) ->
             {middlewares, [
                 cowboy_router, 
                 % juno_rest_api_gateway,
-                juno_security_middleware, 
+                % juno_security_middleware, 
                 cowboy_handler
             ]}
         ]
@@ -176,7 +179,7 @@ specs() ->
                         [] ->
                             [];
                         FNames ->
-                            [read_spec(FName) || FName <- FNames]
+                            lists:append([read_spec(FName) || FName <- FNames])
                     end
             end
     end.
@@ -186,7 +189,7 @@ read_spec(FName) ->
     case file:consult(FName) of
         {ok, L} ->
             L;
-        {error, _} ->
+        {error, _} = E ->
             {error, {invalid_specification_format, FName}}
     end.
 
