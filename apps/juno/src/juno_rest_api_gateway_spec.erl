@@ -275,10 +275,6 @@
             <<"client_credentials">>
         ]}
     },
-    <<"authorization_path">> => #{
-        required => false,
-        datatype => binary
-    },
     <<"token_path">> => #{
         required => false,
         datatype => binary
@@ -1026,7 +1022,6 @@ security_scheme_rules(
     } = Sec) ->
 
     #{
-        <<"authorization_path">> := Auth,
         <<"token_path">> := Token,
         <<"revoke_token_path">> := Revoke
     } = Sec,
@@ -1036,7 +1031,6 @@ security_scheme_rules(
 
     Mod = juno_rest_oauth2_handler,
     [
-        {S, Host, Realm, <<BasePath/binary, Auth/binary>>, Mod, A},
         {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, A},
         %% Revoke is secured
         {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, B}

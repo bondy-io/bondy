@@ -18,7 +18,6 @@ simple_1_test(_) ->
             <<"oauth2">> => #{
                 <<"type">> => <<"oauth2">>,
                 <<"flow">> => <<"resource_owner_password_credentials">>,
-                <<"authorization_path">> => <<"/auth/login">>,
                 <<"token_path">> => <<"/auth/token">>,
                 <<"revoke_token_path">> => <<"/auth/revoke_token">>,
                 <<"schemes">> => <<"{{variables.schemes}}">>
@@ -115,7 +114,6 @@ simple_1_test(_) ->
                         <<"security">> => #{
                             <<"type">> => <<"oauth2">>,
                             <<"flow">> => <<"resource_owner_password_credentials">>,
-                            <<"authorization_path">> => <<"/auth/login">>,
                             <<"token_path">> => <<"/auth/token">>,
                             <<"revoke_token_path">> => <<"/auth/revoke_token">>,
                             <<"schemes">> => [<<"http">>]
