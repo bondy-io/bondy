@@ -7,6 +7,14 @@
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(MOD_PREFIX, "juno_rest_api_gateway_handler_").
 
+-define(DEFAULT_TIMEOUT, 60000).
+-define(DEFAULT_RETRIES, 0).
+-define(DEFAULT_ACCEPTS, [<<"application/json">>, <<"application/msgpack">>]).
+-define(DEFAULT_PROVIDES, [<<"application/json">>, <<"application/msgpack">>]).
+-define(DEFAULT_HEADERS, #{}).
+-define(DEFAULT_SECURITY, #{}).
+-define(DEFAULT_SCHEMES, [<<"http">>]).
+
 %% MAP VALIDATION SPECS to use with maps_utils.erl
 -define(HTTP_METHODS, [
     <<"delete">>,
@@ -22,7 +30,11 @@
     <<"host">> => #{
         required => true,
         allow_null => false,
-        datatype => binary
+        datatype => binary,
+        validator => fun
+            (<<"_">>) -> {ok, '_'}; % Cowboy requirement
+            (Val) -> {ok, Val}
+        end
     },
     <<"realm_uri">> => #{
         required => true,
@@ -40,17 +52,17 @@
         allow_null => false,
         default => #{},
         datatype => map,
-        validator => ?API_PATH_DEFAULTS
+        validator => ?DEFAULTS_SPEC
     },
     <<"versions">> => #{
         required => true,
         allow_null => false,
-        datatype => map,
-        validator => fun(M) -> 
-            R = maps:map(
-                fun(_, Ver) -> maps_utils:validate(Ver, ?API_VERSION) end, M),
-            {ok, R}
-        end
+        datatype => map
+        % , validator => fun(M) -> 
+        %     R = maps:map(
+        %         fun(_, Ver) -> maps_utils:validate(Ver, ?API_VERSION) end, M),
+        %     {ok, R}
+        % end
     }
 }).
 
@@ -93,8 +105,7 @@
         required => true,
         allow_null => false,
         default => #{},
-        datatype => map,
-        validator => ?API_PATH_DEFAULTS
+        datatype => map
     },
     <<"paths">> => #{
         required => true,
@@ -106,8 +117,9 @@
                     error({invalid_path, P});
                 (<<"/ws">> = P, _) ->
                     error({reserved_path, P});
-                (_, V1) -> 
-                    maps_utils:validate(V1, ?API_PATH) 
+                (_, Val) -> 
+                    % maps_utils:validate(Val, ?API_PATH) 
+                    Val
             end,
             {ok, maps:map(Inner, M1)}
         end
@@ -125,56 +137,134 @@
         datatype => binary}
 }).
 
+-define(DEFAULTS_SPEC, #{
+    <<"schemes">> => #{
+        required => true,
+        default => ?DEFAULT_SCHEMES
+    },
+    <<"security">> => #{
+        required => true,
+        allow_null => false,
+        % datatype => map,
+        default => #{}
+    },
+    <<"timeout">> => #{
+        required => true,
+        % datatype => timeout,
+        default => ?DEFAULT_TIMEOUT
+    },
+    <<"retries">> => #{
+        required => true,
+        % datatype => integer,
+        default => ?DEFAULT_RETRIES
+    },
+    <<"accepts">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_ACCEPTS
+    },
+    <<"provides">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_PROVIDES
+    },
+    <<"headers">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_HEADERS
+    }
+}).
+
+
 -define(API_PATH_DEFAULTS, #{
     <<"schemes">> => #{
         required => true,
-        default => [<<"http">>, <<"https">>],
-        datatype => {list, {in, [<<"http">>, <<"https">>]}}
+        default => <<"{{defaults.schemes}}">>
     },
     <<"security">> => #{
         required => true,
         allow_null => false,
         datatype => map,
-        default => #{ 
-            <<"flow">> => <<"resource_owner_password_credentials">>,
-            <<"authorization_path">> => <<"/auth">>,
-            <<"token_path">> => <<"/token">>
-        },
-        validator => fun(_, V) ->
-            %% More in the future
-            {ok, maps_utils:validate(V, ?OAUTH2_SPEC)}
-        end
+        default => #{}
     },
     <<"timeout">> => #{
         required => true,
-        default => 60000,
-        datatype => timeout
+        datatype => timeout,
+        default => <<"{{defaults.timeout}}">>
     },
     <<"retries">> => #{
         required => true,
-        default => 0,
-        validator => integer
+        datatype => integer,
+        default => <<"{{defaults.retries}}">>
     },
     <<"accepts">> => #{
         required => true,
         allow_null => false,
-        default => [<<"application/json">>, <<"application/msgpack">>],
-        datatype => {in, [<<"application/json">>, <<"application/msgpack">>]}
+        datatype => {list, 
+            {in, [<<"application/json">>, <<"application/msgpack">>]}},
+        default => <<"{{defaults.accepts}}">>
     },
     <<"provides">> => #{
         required => true,
         allow_null => false,
-        default => [<<"application/json">>, <<"application/msgpack">>],
-        datatype => {in, [<<"application/json">>, <<"application/msgpack">>]}
+        datatype => {list, 
+            {in, [<<"application/json">>, <<"application/msgpack">>]}},
+        default => <<"{{defaults.provides}}">>
     },
     <<"headers">> => #{
         required => true,
         allow_null => false,
-        default => #{}
+        default => <<"{{defaults.headers}}">>
+    }
+}).
+
+-define(BASIC, #{
+    <<"type">> => #{
+        required => true,
+        allow_null => false,
+        default => <<"basic">>,
+        datatype => {in, [<<"basic">>]}
+    },
+    <<"schemes">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_SCHEMES,
+        datatype => {list, binary}
+    }
+}).
+
+-define(APIKEY, #{
+    <<"type">> => #{
+        required => true,
+        allow_null => false,
+        default => <<"api_key">>,
+        datatype => {in, [<<"api_key">>]}
+    },
+    <<"schemes">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_SCHEMES,
+        datatype => {list, binary}
+    }, 
+    <<"header_name">> => #{
+        required => true,
+        allow_null => false,
+        datatype => binary
     }
 }).
 
 -define(OAUTH2_SPEC, #{
+    <<"type">> => #{
+        required => true,
+        allow_null => false,
+        datatype => {in, [<<"oauth2">>]}
+    },
+    <<"schemes">> => #{
+        required => true,
+        allow_null => false,
+        default => ?DEFAULT_SCHEMES,
+        datatype => {list, binary}
+    }, 
     <<"flow">> => #{
         required => true,
         default => null,
@@ -190,6 +280,10 @@
         datatype => binary
     },
     <<"token_path">> => #{
+        required => false,
+        datatype => binary
+    },
+    <<"revoke_token_path">> => #{
         required => false,
         datatype => binary
     },
@@ -213,22 +307,30 @@
     },
     ?DEFAULTS_KEY => #{
         required => true,
+        allow_null => false,
         default => #{},
-        datatype => map,
-        validator => ?API_PATH_DEFAULTS
+        datatype => map
     },
     <<"accepts">> => #{
         required => true,
         allow_null => false,
         default => <<"{{defaults.accepts}}">>,
-        datatype => {list, binary}
+        datatype => {list,
+            {in, [
+                <<"application/json">>, <<"application/msgpack">>
+            ]}
+        }
     },
     <<"provides">> => #{
         required => true,
         allow_null => false,
         default => <<"{{defaults.provides}}">>,
-        datatype => {list, binary}
-    }, 
+        datatype => {list, 
+            {in, [
+                <<"application/json">>, <<"application/msgpack">>
+            ]}
+        }
+    },
     <<"schemes">> => #{
         required => true,
         allow_null => false,
@@ -238,39 +340,46 @@
     <<"security">> => #{
         required => true,
         allow_null => false,
+        datatype => map,
         default => <<"{{defaults.security}}">>,
-        validator => fun(_, V) ->
-            %% More in the future
-            {ok, maps_utils:validate(V, ?OAUTH2_SPEC)}
+        validator => fun
+            (#{<<"type">> := <<"oauth2">>} = V) ->
+                {ok, maps_utils:validate(V, ?OAUTH2_SPEC)};
+            (#{<<"type">> := <<"basic">>} = V) ->
+                {ok, maps_utils:validate(V, ?BASIC)};
+            (#{<<"type">> := <<"api_key">>} = V) ->
+                {ok, maps_utils:validate(V, ?APIKEY)};
+            (V) ->
+                #{} =:= V
         end
-    }, 
+    },
     <<"delete">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"get">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"head">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"options">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"patch">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"post">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     },
     <<"put">> => #{
         required => false,
-        validator => ?REQ
+        datatype => map
     }
 }).
 
@@ -282,7 +391,16 @@
     <<"action">> => #{
         required => true,
         allow_null => false,
-        validator => ?ACTION
+        validator => fun
+            (#{<<"type">> := <<"static">>} = V) ->
+                {ok, maps_utils:validate(V, ?STATIC_ACTION)};
+            (#{<<"type">> := <<"wamp_", _/binary>>} = V) ->
+                {ok, maps_utils:validate(V, ?WAMP_ACTION)};
+            (#{<<"type">> := <<"forward">>} = V) ->
+                {ok, maps_utils:validate(V, ?APIKEY)};
+            (V) ->
+                #{} =:= V
+        end
     },
     <<"response">> => #{
         required => true,
@@ -308,7 +426,54 @@
 
 }).
 
--define(ACTION, #{
+-define(STATIC_ACTION, #{
+    <<"type">> => #{
+        required => true,
+        allow_null => false,
+        datatype => {in, [<<"static">>]}
+    },
+    <<"resource">> => #{
+        required => true,
+        default => <<"Undefined resource">>,
+        allow_null => false,
+        datatype => binary
+    },
+    <<"timeout">> => #{
+        required => true,
+        default => <<"{{defaults.timeout}}">>,
+        datatype => timeout
+    },
+    <<"retries">> => #{
+        required => true,
+        default => <<"{{defaults.retries}}">>,
+        datatype => integer
+    }
+}).
+
+-define(FORWARD_ACTION, #{
+    <<"type">> => #{
+        required => true,
+        allow_null => false,
+        datatype => {in, [<<"forward">>]}
+    },
+    <<"upstream_url">> => #{
+        required => true,
+        allow_null => false,
+        datatype => binary %% TODO URI
+    },
+    <<"timeout">> => #{
+        required => true,
+        default => <<"{{defaults.timeout}}">>,
+        datatype => timeout
+    },
+    <<"retries">> => #{
+        required => true,
+        default => <<"{{defaults.retries}}">>,
+        datatype => integer
+    }
+}).
+
+-define(WAMP_ACTION, #{
     <<"type">> => #{
         required => true,
         allow_null => false,
@@ -318,8 +483,7 @@
             <<"wamp_register">>,
             <<"wamp_unregister">>,
             <<"wamp_subscribe">>,
-            <<"wamp_unsubscribe">>,
-            <<"http_request">>
+            <<"wamp_unsubscribe">>
         ]}
     },
     <<"timeout">> => #{
@@ -480,7 +644,6 @@ get_context(Req) ->
      #{
         <<"request">> => #{
             <<"peer">> => cowboy_req:peer(Req),
-            <<"scheme">> => cowboy_req:scheme(Req),
             <<"path">> => cowboy_req:path(Req),
             <<"host">> => cowboy_req:host(Req),
             <<"host_url">> => cowboy_req:host_url(Req),
@@ -593,7 +756,6 @@ load({MFBs, SchemeRules}) ->
     leap_relation:tuples(SHP).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -626,101 +788,116 @@ parse_host(Host0, Ctxt0) ->
         ?VARS_KEY => Vars,
         ?DEFAULTS_KEY => Defs
     },
+    
     %% parse all versions
     Vs0 = maps:get(<<"versions">>, Host2),
     Fun = fun(_, V) -> parse_version(V, Ctxt1) end,
     Vs1 = maps:map(Fun, Vs0),
-    maps:update(<<"versions">>, Vs1, Host2).
+    Host3 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host2),
+    maps:update(<<"versions">>, Vs1, Host3).
 
 
 %% @private
 -spec parse_version(map(), map()) -> map().
-parse_version(Vers0, Ctxt0) ->
-    {VVars, Vers1} = maps:take(?VARS_KEY, Vers0),
-    {VDefs, Vers2} = maps:take(?DEFAULTS_KEY, Vers1),
-    #{?VARS_KEY := CVars, ?DEFAULTS_KEY := CDefs} = Ctxt0,
+parse_version(V0, Ctxt0) ->
     %% We merge variables and defaults
-    Ctxt1 = maps:update(?VARS_KEY, maps:merge(CVars, VVars), Ctxt0),
-    Ctxt2 = maps:update(?DEFAULTS_KEY, maps:merge(CDefs, VDefs), Ctxt1),
+    {V1, Ctxt1} = merge(V0, Ctxt0),
+    %% We then validate the resulting version
+    V2 = maps_utils:validate(V1, ?API_VERSION),
+    %% We merge again in case the validation added defaults
+    {V3, Ctxt2} = merge(V2, Ctxt1),
+    %% Finally we parse the contained paths
     Fun = fun(Uri, P) -> 
-        try parse_path(P, Ctxt2) 
+        try 
+            parse_path(P, Ctxt2) 
         catch 
             error:{badkey, Key} ->
-                io:format("Path ~p\nCtxt: ~p\nST:~p", [P, Ctxt2,erlang:get_stacktrace()]),
-                error({badarg, <<"The key '", Key/binary, "' does not exist in path section '", Uri/binary, "'.">>})
+                io:format(
+                    "Path ~p~nST:~p~n", 
+                    [P, erlang:get_stacktrace()]),
+                error({
+                    badarg, 
+                    <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
+                })
         end
     end,
+    V4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V3),
     maps:update(
-        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, Vers2)), Vers2).
+        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V4)), V4).
 
 
 %% @private
-parse_path(Path0, Ctxt0) ->
-    {PVars, Path1} = maps:take(?VARS_KEY, Path0),
-    {PDefs, Path2} = maps:take(?DEFAULTS_KEY, Path1),
-    
+parse_path(P0, Ctxt0) ->
+    %% The path should have at least one HTTP method
+    %% otherwise this will fail with an error
+    L = allowed_methods(P0),
     %% We merge variables and defaults
-    Vars0 = maps:merge(maps:get(?VARS_KEY, Ctxt0), PVars),
-    Defs0 = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), PDefs),
-    Ctxt1 = maps:update(
-        ?DEFAULTS_KEY, Defs0, maps:update(?VARS_KEY, Vars0, Ctxt0)),
-    
-    %% We evaluate variables by iterating over each variables and 
-    %% updating the context in each turn as we might have interdependencies
-    %% amongst them
-    VFun = fun(Var, Val, ICtxt) ->
-        IVars1 = maps:update(
-            Var, eval_term(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
-        maps:update(?VARS_KEY, IVars1, ICtxt)
-    end,
-    Ctxt2 = maps:fold(VFun, Ctxt1, Vars0),
-    
-    %% We evaluate defaults
-    DFun = fun(Var, Val, ICtxt) ->
-        IDefs1 = maps:update(
-            Var, eval_term(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
-        maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
-    end,
-    Ctxt3 = maps:fold(DFun, Ctxt2, Defs0),
+    {P1, Ctxt1} = merge(P0, eval(Ctxt0)),
+    %% We evaluate before validating
+    Ctxt2 = eval(P1, Ctxt1),
+    P2 = validate(?DEFAULTS_KEY, P1, ?API_PATH_DEFAULTS),
+    %% We merge again in case the validation added defaults
+    {P3, Ctxt3} = merge(P2, eval(P2, Ctxt2)),    
+    P4 = parse_path_elements(P3, Ctxt3),
+
+    %% We then validate the resulting path
+    P5 = maps_utils:validate(P4, ?API_PATH),
+    %% HTTP (and COWBOY) requires uppercase method names
+    P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
+    P7 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P6),    
+
     %% Now we evaluate each request type spec
-    AllowedMethods = sets:to_list(
-        sets:intersection(
-            sets:from_list(?HTTP_METHODS), 
-            sets:from_list(maps:keys(Path2)
-            )
-        )
-    ),
-    case AllowedMethods of
-        [] -> 
-            error({
-                missing_required_key, 
-                <<"At least one request method should be specified">>});
-        L ->
-            PFun = fun(Method, IPath) ->
-                Section = maps:get(Method, IPath),
-                try  maps:update(
-                        Method, 
-                        parse_request_method(Section, Ctxt3), 
-                        IPath
-                    )
-                catch
-                    error:{badkey, Key} ->
-                        io:format("Method ~p\nCtxt: ~p\nST:~p", [Section, Ctxt3, erlang:get_stacktrace()]),
-                        error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
-                end
-            end,
-            Path3 = lists:foldl(PFun, Path2, L),
-            
-            Path4 = maps:put(<<"allowed_methods">>, AllowedMethods, Path3),
-            Path5 = maps:update_with(
-                <<"accepts">>, fun(V) -> eval_term(V, Ctxt3) end, Path4),
-            Path6 = maps:update_with(
-                <<"provides">>, fun(V) -> eval_term(V, Ctxt3) end, Path5),
-            Path7 = maps:update_with(
-                <<"schemes">>, fun(V) -> eval_term(V, Ctxt3) end, Path6),
-            maps:update_with(
-                <<"security">>, fun(V) -> eval_term(V, Ctxt3) end, Path7)
-    end.
+    PFun = fun(Method, IPath) ->
+        Sec0 = maps:get(Method, IPath),
+        try  
+            Sec1 = parse_request_method(
+                maps_utils:validate(Sec0, ?REQ), Ctxt3), 
+            maps:update(Method, Sec1, IPath)
+        catch
+            error:{badkey, Key} ->
+                io:format("Method ~p\nCtxt: ~p\nST:~p", [Sec0, Ctxt3, erlang:get_stacktrace()]),
+                error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
+        end
+    end,
+    lists:foldl(PFun, P7, L).
+    
+
+%% @private 
+parse_path_elements(Path, Ctxt) ->
+    L = [
+        <<"accepts">>,
+        <<"provides">>,
+        <<"schemes">>,
+        <<"security">>
+    ],
+    parse_path_elements(L, Path, Ctxt).
+
+
+%% @private
+parse_path_elements([H|T], P0, Ctxt) ->
+    P1 = case maps:is_key(H, P0) of
+        true ->
+            P0;
+        false ->
+            %% We assign a default and fail if none exists
+            case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
+                {ok, Val} ->
+                    maps:put(H, Val, P0);
+                false ->
+                    error({
+                        badarg, 
+                        <<"The key ", H/binary, " does not exist in path.">>
+                    })
+            end
+    end,    
+    Eval = fun(V) -> eval_term(V, Ctxt) end,    
+    P2 = maps:update_with(H, Eval, P1),
+    parse_path_elements(T, P2, Ctxt);
+
+parse_path_elements([], Path, _) ->
+    Path.
+
+    
 
 
 %% @private
@@ -827,12 +1004,47 @@ compile_path(Host, BasePath, Deprecated, Realm, {Path, Spec}) ->
         authmethod => oauth2 %% TODO Get this from API Version Spec
     },
     Schemes = maps:get(<<"schemes">>, Spec),
-    {{Mod, FName, Bin}, [{S, Host, Realm, AbsPath, Mod, State} 
-        || S <- Schemes]}.
+    Sec = maps:get(<<"security">>, Spec),
+    Rules = lists:flatten([
+        [
+            {S, Host, Realm, AbsPath, Mod, State},
+            security_scheme_rules(S, Host, BasePath, Realm, Sec)
+        ] || S <- Schemes
+    ]),
+    {{Mod, FName, Bin}, Rules}.
     
 
+%% @private
+%% The OAUTH2 spec requires the scheme to be HTTPS but we 
+%% will enable it anyway as we assume JUNO would be behind
+%% an HTTPS load balancer
+security_scheme_rules(
+    S, Host, BasePath, Realm, 
+    #{
+        <<"type">> := <<"oauth2">>, 
+        <<"flow">> := <<"resource_owner_password_credentials">>
+    } = Sec) ->
 
+    #{
+        <<"authorization_path">> := Auth,
+        <<"token_path">> := Token,
+        <<"revoke_token_path">> := Revoke
+    } = Sec,
 
+    A = #{realm_uri => Realm},
+    B = #{authmethod => oauth2, realm_uri => Realm},
+
+    Mod = juno_rest_oauth2_handler,
+    [
+        {S, Host, Realm, <<BasePath/binary, Auth/binary>>, Mod, A},
+        {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, A},
+        %% Revoke is secured
+        {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, B}
+    ];
+
+security_scheme_rules(_, _, _, _, _) ->
+    %% TODO for other types
+    [].
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -866,6 +1078,7 @@ gen_path_code(Name, PathSpec) ->
         ],
         [
             {init, fun(Req, St0) ->
+                io:format("Entering init with state: ~p~n", [St0]),
                 Session = undefined, %TODO
                 % SessionId = 1,
                 % Ctxt0 = juno_context:set_peer(
@@ -898,7 +1111,7 @@ gen_path_code(Name, PathSpec) ->
                 {false, Req, St}
             end},
             {to_json, fun(Req, St) ->
-                {<<>>, Req, St}
+                to_json(cowboy_req:method(Req), Req, St)
             end},
             {to_json, fun
                 (<<"GET">>, Req, St) -> 
@@ -988,7 +1201,6 @@ get_ctxt_proxy() ->
     #{
         <<"request">> => #{
             <<"peer">> => fun(X) -> maps:get(<<"peer">>, X) end,
-            <<"scheme">> => fun(X) -> maps:get(<<"scheme">>, X) end,
             <<"path">> => fun(X) -> maps:get(<<"path">>, X) end,
             <<"host">> => fun(X) -> maps:get(<<"host">>, X) end,
             <<"host_url">> => fun(X) -> maps:get(<<"host_url">>, X) end,
@@ -1021,6 +1233,48 @@ eval_term(T, Ctxt) ->
     mop:eval(T, Ctxt).
 
 
+
+
+merge(S0, Ctxt0) ->
+    %% We merge variables and defaults
+    VVars = maps:get(?VARS_KEY, S0, #{}),
+    VDefs = maps:get(?DEFAULTS_KEY, S0, #{}),
+    MVars = maps:merge(maps:get(?VARS_KEY, Ctxt0), VVars),
+    MDefs = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), VDefs),
+    %% We update section and ctxt
+    S1 = S0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
+    Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
+    Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
+    {S1, Ctxt2}.
+
+
+eval(Ctxt) ->
+    eval(Ctxt, Ctxt).
+
+
+%% @private
+eval(S0, Ctxt0) ->
+    Vars = maps:get(?VARS_KEY, S0),
+    Defs = maps:get(?DEFAULTS_KEY, S0),
+    %% We evaluate variables by iterating over each 
+    %% updating the context in each turn as we might have interdependencies
+    %% amongst them
+    VFun = fun(Var, Val, ICtxt) ->
+        IVars1 = maps:update(
+            Var, eval_term(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
+        maps:update(?VARS_KEY, IVars1, ICtxt)
+    end,
+    Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
+    
+    %% We evaluate defaults
+    DFun = fun(Var, Val, ICtxt) ->
+        IDefs1 = maps:update(
+            Var, eval_term(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
+        maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
+    end,
+maps:fold(DFun, Ctxt1, Defs).
+
+
 %% @private
 content_types_accepted(L) when is_list(L) ->
     [content_types_accepted(T) || T <- L];
@@ -1041,3 +1295,56 @@ content_types_provided(<<"application/json">>) ->
 
 content_types_provided(<<"application/msgpack">>) ->
     {<<"application/msgpack">>, to_msgpack}.
+
+
+
+%% @private
+to_uppercase(L) when is_list(L) ->
+    [to_uppercase(M) || M <- L];
+
+to_uppercase(<<"delete">>) ->
+    <<"DELETE">>;
+
+to_uppercase(<<"get">>) ->
+    <<"GET">>;
+
+to_uppercase(<<"head">>) ->
+    <<"HEAD">>;
+
+to_uppercase(<<"options">>) ->
+    <<"OPTIONS">>;
+
+to_uppercase(<<"patch">>) ->
+    <<"PATCH">>;
+
+to_uppercase(<<"post">>) ->
+    <<"POST">>;
+
+to_uppercase(<<"put">>) ->
+    <<"PUT">>.
+
+
+
+%% @private
+allowed_methods(Path) ->
+    L = sets:to_list(
+        sets:intersection(
+            sets:from_list(?HTTP_METHODS), 
+            sets:from_list(maps:keys(Path)
+            )
+        )
+    ),
+    case L of
+        [] ->  
+            error(
+                {missing_required_key, 
+            <<"At least one request method should be specified">>});
+        _ ->
+            L
+    end.
+
+
+%% @private
+validate(Key, Map, Spec) ->
+    maps:update(
+        Key, maps_utils:validate(maps:get(Key, Map), Spec), Map).

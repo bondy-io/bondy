@@ -13,10 +13,21 @@ simple_1_test(_) ->
         <<"host">> => <<"[www.]myapi.com">>,
         <<"realm_uri">> => <<"com.myapi">>,
         <<"variables">> => #{
-            <<"foo">> => 100
+            <<"foo">> => 100,
+            <<"schemes">> => [<<"http">>],
+            <<"oauth2">> => #{
+                <<"type">> => <<"oauth2">>,
+                <<"flow">> => <<"resource_owner_password_credentials">>,
+                <<"authorization_path">> => <<"/auth/login">>,
+                <<"token_path">> => <<"/auth/token">>,
+                <<"revoke_token_path">> => <<"/auth/revoke_token">>,
+                <<"schemes">> => <<"{{variables.schemes}}">>
+            }
         },  
         <<"defaults">> => #{
-            <<"timeout">> => 15000
+            <<"timeout">> => 15000,
+            <<"security">> => <<"{{variables.oauth2}}">>,
+            <<"schemes">> => <<"{{variables.schemes}}">>
         },
         <<"versions">> =>  #{
             <<"1.0.0">> => #{
@@ -72,7 +83,7 @@ simple_1_test(_) ->
                 <<"paths">> => #{
                     <<"/things">> => #{
                         <<"accepts">> => [<<"application/json">>,<<"application/msgpack">>],
-                        <<"allowed_methods">> => [<<"get">>],
+                        <<"allowed_methods">> => [<<"GET">>],
                         <<"get">> => #{
                             <<"action">> => #{
                                 <<"arguments">> => [300],
@@ -100,11 +111,14 @@ simple_1_test(_) ->
                         },
                         <<"is_collection">> => false,
                         <<"provides">> => [<<"application/json">>,<<"application/msgpack">>],
-                        <<"schemes">> => [<<"http">>,<<"https">>],
+                        <<"schemes">> => [<<"http">>],
                         <<"security">> => #{
-                            <<"authorization_path">> => <<"/auth">>,
+                            <<"type">> => <<"oauth2">>,
                             <<"flow">> => <<"resource_owner_password_credentials">>,
-                            <<"token_path">> => <<"/token">>
+                            <<"authorization_path">> => <<"/auth/login">>,
+                            <<"token_path">> => <<"/auth/token">>,
+                            <<"revoke_token_path">> => <<"/auth/revoke_token">>,
+                            <<"schemes">> => [<<"http">>]
                         }
                     }
                 }
