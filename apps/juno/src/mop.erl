@@ -8,6 +8,27 @@
 -define(PIPE_OP, <<$|,$>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
+-define(OPTS_SPEC, #{
+    labels => #{
+        required => true,
+        default => binary,
+        allow_null => false,
+        datatype => {in, [binary, atom]}
+    },
+    operators => #{
+        required => false,
+        allow_null => false,
+        validator => fun
+            ({Name, Fun} = Op) 
+            when (is_atom(Name) orelse is_binary(Name)) 
+            andalso is_function(Fun, 1) ->
+                {ok, Op};
+            (_) ->
+                false
+        end
+    }
+}).
+
 -record(state, {
     context             :: map(),
     opts                :: map(),
@@ -17,10 +38,11 @@
 }).
 -type state()       :: #state{}.
 
+
+
+
 -export([eval/2]).
 -export([eval/3]).
-
--export([apply_op/2]).
 
 
 
@@ -50,7 +72,11 @@ eval(<<>>, _, _) ->
     <<>>;
 
 eval(Val, Ctxt, Opts) when is_binary(Val), is_map(Opts) ->
-    do_eval(Val, #state{context = Ctxt, opts = Opts});
+    do_eval(Val, #state{
+        context = Ctxt, 
+        %% TODO Opts not being used 
+        opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
+    });
 
 eval(Val, _, _) ->
     Val.
@@ -64,17 +90,15 @@ eval(Val, _, _) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+%% @private
 -spec do_eval(binary(), state()) -> any() | no_return().
 do_eval(<<>>, #state{is_ground = true} = St) ->
+    Fun = fun
+        (X, Acc) -> 
+            [term_to_iolist(X)|Acc] 
+    end,
     iolist_to_binary(
-        lists:foldl(
-            fun(X, Acc) -> [term_to_iolist(X)|Acc] end, 
-            [], 
-            [?DOUBLE_QUOTES | St#state.acc]));
+        lists:foldl(Fun, [], [?DOUBLE_QUOTES | St#state.acc]));
 
 do_eval(<<>>, #state{is_ground = false} =St) ->
     fun(Ctxt) ->
@@ -134,7 +158,6 @@ do_eval(Bin, #state{is_open = false} = St) ->
         [Bin] ->
             do_eval(<<>>, acc(St, Bin))
     end.
-
     
 
 %% @private
@@ -175,6 +198,7 @@ get_value(Key, Ctxt) ->
     try  eval(get(binary:split(Key, <<$.>>, [global]), Ctxt), Ctxt)
     catch
         error:{badkey, _} ->
+            %% We blame the full key
             error({badkey, Key})
     end.
 
@@ -186,6 +210,7 @@ get(Key, F) when is_function(F) ->
             get_value(Key, F(X))
         catch
             error:{badkey, _} ->
+                %% We blame the full key
                 error({badkey, Key})
         end
     end;
@@ -234,13 +259,19 @@ apply_op(<<"float">>, Val) when is_integer(Val) ->
     float(Val);
 
 apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end.
+    fun(X) -> apply_op(Op, Val(X)) end;
+
+apply_op(Op, _) ->
+    error({unknown_pipe_operator, Op}).
+
 
 
 %% @private
 trim(Bin) ->
     re:replace(Bin, "^\\s+|\\s+$", "", [{return, binary}, global]).
 
+
+%% @private
 term_to_iolist(Term) when is_binary(Term) ->
     Term;
 
