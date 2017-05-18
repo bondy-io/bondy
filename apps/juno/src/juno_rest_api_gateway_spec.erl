@@ -9,6 +9,7 @@
 
 -define(DEFAULT_TIMEOUT, 60000).
 -define(DEFAULT_RETRIES, 0).
+-define(DEFAULT_RETRY_TIMEOUT, 5000).
 -define(DEFAULT_ACCEPTS, [<<"application/json">>, <<"application/msgpack">>]).
 -define(DEFAULT_PROVIDES, [<<"application/json">>, <<"application/msgpack">>]).
 -define(DEFAULT_HEADERS, #{}).
@@ -158,6 +159,10 @@
         % datatype => integer,
         default => ?DEFAULT_RETRIES
     },
+    <<"retry_timeout">> => #{
+        required => true,
+        default => ?DEFAULT_RETRY_TIMEOUT
+    },
     <<"accepts">> => #{
         required => true,
         allow_null => false,
@@ -196,6 +201,11 @@
         required => true,
         datatype => integer,
         default => <<"{{defaults.retries}}">>
+    },
+    <<"retry_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.retry_timeout}}">>,
+        datatype => integer
     },
     <<"accepts">> => #{
         required => true,
@@ -443,6 +453,11 @@
         required => true,
         default => <<"{{defaults.retries}}">>,
         datatype => integer
+    },
+    <<"retry_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.retry_timeout}}">>,
+        datatype => integer
     }
 }).
 
@@ -465,6 +480,11 @@
     <<"retries">> => #{
         required => true,
         default => <<"{{defaults.retries}}">>,
+        datatype => integer
+    },
+    <<"retry_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.retry_timeout}}">>,
         datatype => integer
     }
 }).
