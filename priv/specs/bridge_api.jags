@@ -7,12 +7,13 @@
         <<"oauth2">> => #{
             <<"type">> => <<"oauth2">>,
             <<"flow">> => <<"resource_owner_password_credentials">>,
-            <<"authorization_path">> => <<"/auth">>,
             <<"token_path">> => <<"/auth/access_token">>,
+            <<"revoke_token_path">> => <<"/auth/revoke_token">>,
             <<"schemes">> => <<"{{variables.schemes}}">>
         }
     },  
     <<"defaults">> => #{
+        <<"retries">> => 0,
         <<"timeout">> => 15000,
         <<"security">> => <<"{{variables.oauth2}}">>,
         <<"schemes">> => <<"{{variables.schemes}}">>
