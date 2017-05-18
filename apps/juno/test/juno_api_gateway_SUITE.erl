@@ -65,6 +65,29 @@ simple_1_test(_) ->
                                 }
                             }
                         }
+                    },
+                    <<"/agents">> => #{
+                        <<"security">> => #{},
+                        <<"get">> => #{
+                            <<"action">> => #{
+                                <<"type">> => <<"wamp_call">>,
+                                <<"procedure">> => <<"com.myapi.foo">>,
+                                <<"details">> => #{},
+                                <<"arguments">> => [<<"{{variables.foo}}">>],
+                                <<"arguments_kw">> => #{}
+                            },
+                            <<"response">> => #{
+                                <<"on_timeout">> => #{
+                                
+                                },
+                                <<"on_error">> => #{
+                                
+                                },
+                                <<"on_result">> => #{
+                                  
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -80,6 +103,26 @@ simple_1_test(_) ->
                 <<"is_deprecated">> => false,
                 <<"pool_size">> => 200,
                 <<"paths">> => #{
+                    <<"/agents">> => #{
+                        <<"accepts">> => [<<"application/json">>,<<"application/msgpack">>],
+                        <<"allowed_methods">> => [<<"GET">>],
+                        <<"get">> => #{
+                            <<"action">> => #{
+                                <<"arguments">> => [200],
+                                <<"arguments_kw">> => #{},
+                                <<"details">> => #{},
+                                <<"procedure">> => <<"com.myapi.foo">>,
+                                <<"retries">> => 0,
+                                <<"timeout">> => 20000,
+                                <<"type">> => <<"wamp_call">>},
+                            <<"response">> => #{<<"on_error">> => #{<<"body">> => <<>>,<<"headers">> => #{}},
+                            <<"on_result">> => #{<<"body">> => <<>>,<<"headers">> => #{}},
+                            <<"on_timeout">> => #{<<"body">> => <<>>,<<"headers">> => #{}}}},
+                        <<"is_collection">> => false,
+                        <<"provides">> => [<<"application/json">>,<<"application/msgpack">>],
+                        <<"schemes">> => [<<"http">>],
+                        <<"security">> => #{}
+                    },
                     <<"/things">> => #{
                         <<"accepts">> => [<<"application/json">>,<<"application/msgpack">>],
                         <<"allowed_methods">> => [<<"GET">>],
