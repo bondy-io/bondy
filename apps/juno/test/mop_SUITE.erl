@@ -71,3 +71,29 @@ recursive_3_test(_) ->
         <<"surname">> => <<"Ramallo">>
     },
     <<"\"Alejandro Ramallo\"">> =:= mop:eval(<<"\"{{fullname}}\"">>, Ctxt).
+
+funny_1_test(_) ->
+    Ctxt = #{
+        <<"variables">> => #{
+            <<"foo">> => <<"{{variables.bar}}">>,
+            <<"bar">> => 200
+        },
+        <<"defaults">> => #{
+            <<"foobar">> => <<"{{variables.foo}}">>
+        }
+    },
+    200 =:= mop:eval(<<"{{defaults.foobar}}">>, Ctxt).
+
+funny_2_test(_) ->
+    Ctxt = #{
+        <<"variables">> => #{
+            <<"foo">> => <<"{{variables.bar}}">>,
+            <<"bar">> => 200
+        },
+        <<"defaults">> => #{
+            <<"foobar">> => #{
+                <<"value">> => <<"{{variables.foo}}">>
+            }
+        }
+    },
+    200 =:= mop:eval(<<"{{defaults.foobar.value}}">>, Ctxt).

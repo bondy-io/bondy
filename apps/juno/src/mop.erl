@@ -172,33 +172,29 @@ parse_expr(Bin, #state{context = Ctxt}) ->
 
 %% @private
 get_value(Key, Ctxt) ->
-    try 
-        Val = case binary:split(Key, <<$.>>) of
-            [Key] ->
-                maps:get(Key, Ctxt);
-            [A, B] ->
-                case maps:get(A, Ctxt) of
-                    V when is_map(V) ->
-                        get_value(B, V);
-                    V when is_function(V, 1) ->
-                        fun(X) ->
-                            try 
-                                get_value(Key, V(X))
-                            catch
-                                error:{badkey, _} ->
-                                    error({badkey, Key})
-                            end
-                        end;
-                    {{M, F, A}} ->
-                        {{ ?MODULE, get_value, [{{M, F, A}}, Ctxt] }}
-                end
-        end,
-        eval(Val, Ctxt)
+    try  eval(get(binary:split(Key, <<$.>>, [global]), Ctxt), Ctxt)
     catch
         error:{badkey, _} ->
             error({badkey, Key})
     end.
 
+
+%% @private
+get(Key, F) when is_function(F) ->
+    fun(X) ->
+        try 
+            get_value(Key, F(X))
+        catch
+            error:{badkey, _} ->
+                error({badkey, Key})
+        end
+    end;
+
+get([H|T], Ctxt) when is_map(Ctxt) ->
+    get(T, maps:get(H, Ctxt));
+
+get([], Ctxt) ->
+    Ctxt.
 
 
 %% @private
@@ -238,10 +234,7 @@ apply_op(<<"float">>, Val) when is_integer(Val) ->
     float(Val);
 
 apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end;
-
-apply_op(Op, {{M, F, A}}) ->
-    {?MODULE, apply_op, [Op, {{M, F, A}}]}.
+    fun(X) -> apply_op(Op, Val(X)) end.
 
 
 %% @private
