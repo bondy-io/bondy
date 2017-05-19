@@ -45,7 +45,7 @@ start_listeners() ->
         Val ->
             Val
     end,
-    _ = [start_listener({Scheme, Rules}) 
+    _ = [start_listener({Scheme, add_base_rules(Rules)}) 
         || {Scheme, Rules} <- SchemeRules],
     ok.
 
@@ -76,61 +76,54 @@ start_http(Rules) ->
     Table = cowboy_router:compile(Rules),
     % io:format("Rules ~p~n", [Rules]),
     % io:format("Table ~p~n", [Table]),
-    Port = juno_config:http_port(),
-    PoolSize = juno_config:http_acceptors_pool_size(),
-    JunoEnv = #{
-        auth => #{
-            schemes => [basic, digest, bearer]
-        }
-    },
-    cowboy:start_http(
-        ?HTTP,
-        PoolSize,
-        [{port, Port}],
-        [
-            {env,[
-                {juno, JunoEnv},
-                {dispatch, Table}, 
-                {max_connections, infinity}
-            ]},
-            {middlewares, [
+    cowboy:start_clear(
+        ?HTTPS,
+        juno_config:http_acceptors_pool_size(),
+        [{port, juno_config:http_port()}],
+        #{
+            env => #{
+                juno => #{
+                    auth => #{
+                        schemes => [basic, digest, bearer]
+                    }
+                },
+                dispatch => cowboy_router:compile(Rules), 
+                max_connections => infinity
+            },
+            middlewares => [
                 cowboy_router, 
                 % juno_rest_api_gateway,
                 % juno_security_middleware, 
                 cowboy_handler
-            ]}
-        ]
+            ]
+        }
     ).
 
 
 
 -spec start_https(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_https(Rules) ->
-    Table = cowboy_router:compile(Rules),
-    Port = juno_config:https_port(),
-    PoolSize = juno_config:https_acceptors_pool_size(),
-    JunoEnv = #{
-        auth => #{
-            schemes => [basic, digest, bearer]
-        }
-    },
-    cowboy:start_https(
+    cowboy:start_tls(
         ?HTTPS,
-        PoolSize,
-        [{port, Port}],
-        [
-            {env,[
-                {juno, JunoEnv},
-                {dispatch, Table}, 
-                {max_connections, infinity}
-            ]},
-            {middlewares, [
+        juno_config:https_acceptors_pool_size(),
+        [{port, juno_config:https_port()}],
+        #{
+            env => #{
+                juno => #{
+                    auth => #{
+                        schemes => [basic, digest, bearer]
+                    }
+                },
+                dispatch => cowboy_router:compile(Rules), 
+                max_connections => infinity
+            },
+            middlewares => [
                 cowboy_router, 
                 % juno_rest_api_gateway,
                 juno_security_middleware, 
                 cowboy_handler
-            ]}
-        ]
+            ]
+        }
     ).
 
 % update_hosts(Hosts) ->
@@ -189,7 +182,7 @@ read_spec(FName) ->
     case file:consult(FName) of
         {ok, L} ->
             L;
-        {error, _} = E ->
+        {error, _} ->
             {error, {invalid_specification_format, FName}}
     end.
 
@@ -198,6 +191,7 @@ read_spec(FName) ->
 add_base_rules(T) ->
     %% The WS entrypoint
     [{'_', [{"/ws", juno_ws_handler, #{}}]} | T].
+
 
 % %% @private
 % bridge_dispatch_table() ->
