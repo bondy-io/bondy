@@ -4,7 +4,8 @@
 
 -module(juno_rest_reverse_proxy_handler).
 
-
+-define(CONN_TIMEOUT, 8000).
+-define(RECV_TIMEOUT, 5000).
 
 
 -export([init/2]).
@@ -16,33 +17,58 @@
 %% ============================================================================
 
 
-init(Req, Opts) ->
-	% Req = forward(Method, Echo, Req0),
-	{ok, Req, Opts}.
+init(Req, St) ->
+	forward(cowboy_req:method(Req), Req, St).
 
 
-% forward(Req, State) ->
-%     Method = Req#http_req.method,
-%     Path = Req#http_req.raw_path,
-%     Host = to_string(Req#http_req.host, "."),
-%     Qs  = Req#http_req.raw_qs,
-%     Binds = Req#http_req.bindings,
-%     Cookies = Req#http_req.cookies,
-%     Headers = Req#http_req.headers,
-
-%     Opts = [
-%         {connect_timeout, maps:get(connect_timeout, State)},
-%         {recv_timeout, maps:get(connect_timeout, State)}
-%     ],
-%     URI = [
-%         UpstreamURL,
-%         cowboy_req:path(Req),
-%         cowboy_req:qs(Req),
-%         cowboy_req:fragment(Req)
-%     ]
-%     hackney:request(method(Method), URI, Headers, Body, Opts)
 
 
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+forward(Method, Req0, St) ->
+    Opts = [
+        {connect_timeout, maps:get(connect_timeout, St, ?CONN_TIMEOUT)},
+        {recv_timeout, maps:get(connect_timeout, St, ?RECV_TIMEOUT)}
+    ],
+    URL = maps:get(<<"upstream_url">>, St),
+    URI = cowboy_req:uri(Req0, #{host => URL, port => 80}),
+    Headers = cowboy_req:headers(Req0),
+    {ok, Body, Req1} = cowboy_req:read_body(Req0),
+    io:format(
+        "Gateway is forwarding request to ~p~n", 
+        [[method(Method), URI, Headers, Body, Opts]]
+    ),
+    try 
+        Response = hackney:request(method(Method), URI, Headers, Body, Opts),
+        reply(Method, Response, Req1, St)
+    catch
+         _:Reason ->
+             reply(Method, Reason, Req1, St)
+            
+    end.
+    
+
+
+%% @private
+reply(<<"HEAD">>, {ok, StatusCode, RespHeaders}, Req0, St) ->
+    Req1 = cowboy_req:reply(StatusCode, RespHeaders, <<>>, Req0),
+    {ok, Req1, St};
+
+reply(_, {ok, StatusCode, RespHeaders, ClientRef}, Req0, St) ->
+    {ok, Body} = hackney:body(ClientRef),
+    Req1 = cowboy_req:reply(StatusCode, RespHeaders, Body, Req0),
+    {ok, Req1, St};
+
+reply(_, {error, _Reason}, Req0, St) ->
+    %% TODO Reply error
+    Req1 = cowboy_req:reply(500, [], <<>>, Req0),
+    {ok, Req1, St}.
 
 
 %% @private
