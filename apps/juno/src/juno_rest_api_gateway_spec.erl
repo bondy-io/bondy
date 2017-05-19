@@ -7,6 +7,7 @@
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(MOD_PREFIX, "juno_rest_api_gateway_handler_").
 
+-define(DEFAULT_CONN_TIMEOUT, 8000).
 -define(DEFAULT_TIMEOUT, 60000).
 -define(DEFAULT_RETRIES, 0).
 -define(DEFAULT_RETRY_TIMEOUT, 5000).
@@ -154,6 +155,10 @@
         % datatype => timeout,
         default => ?DEFAULT_TIMEOUT
     },
+    <<"connect_timeout">> => #{
+        required => true,
+        default => ?DEFAULT_CONN_TIMEOUT
+    },
     <<"retries">> => #{
         required => true,
         % datatype => integer,
@@ -196,6 +201,11 @@
         required => true,
         datatype => timeout,
         default => <<"{{defaults.timeout}}">>
+    },
+    <<"connect_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.connect_timeout}}">>,
+        datatype => timeout
     },
     <<"retries">> => #{
         required => true,
@@ -449,6 +459,11 @@
         default => <<"{{defaults.timeout}}">>,
         datatype => timeout
     },
+    <<"connect_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.connect_timeout}}">>,
+        datatype => timeout
+    },
     <<"retries">> => #{
         required => true,
         default => <<"{{defaults.retries}}">>,
@@ -470,11 +485,26 @@
     <<"upstream_url">> => #{
         required => true,
         allow_null => false,
-        datatype => binary %% TODO URI
+        datatype => binary %% TODO URI 
+    },
+    <<"body">> => #{
+        required => true,
+        default => <<"{{request.body}}">>,
+        datatype => binary
+    },
+    <<"query_string">> => #{
+        required => true,
+        default => <<"{{request.qs}}">>,
+        datatype => binary
     },
     <<"timeout">> => #{
         required => true,
         default => <<"{{defaults.timeout}}">>,
+        datatype => timeout
+    },
+    <<"connect_timeout">> => #{
+        required => true,
+        default => <<"{{defaults.connect_timeout}}">>,
         datatype => timeout
     },
     <<"retries">> => #{
@@ -629,7 +659,7 @@
 
 
 -export([from_file/1]).
--export([get_context/1]).
+-export([update_context/2]).
 -export([parse/1]).
 -export([compile/1]).
 -export([load/1]).
@@ -652,31 +682,46 @@
 %% (`cowboy_request:request()`).
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_context(cowboy_req:req()) -> map().
+-spec update_context(cowboy_req:req() | map(), map()) -> map().
 
-get_context(Req) ->
+update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
+    M = #{
+        <<"result">> => <<>>,
+        <<"error">> => Map
+    },
+    maps:update(M, <<"action">>, Ctxt);
+
+update_context(Result, #{<<"request">> := _} = Ctxt) ->
+    M = #{
+        <<"result">> => Result,
+        <<"error">> => <<>>
+    },
+    maps:update(M, <<"action">>, Ctxt);
+
+update_context(Req, Ctxt) ->
     %% TODO Consider using req directly when upgrading Cowboy as the latest 
     %% version moved to a maps representation.
-     #{
-        <<"request">> => #{
-            <<"peer">> => cowboy_req:peer(Req),
-            <<"path">> => cowboy_req:path(Req),
-            <<"host">> => cowboy_req:host(Req),
-            <<"host_url">> => cowboy_req:host_url(Req),
-            <<"host_info">> => cowboy_req:host_info(Req),
-            <<"port">> => cowboy_req:port(Req),
-            <<"headers">> => maps:from_list(cowboy_req:headers(Req)),
-            <<"qs">> => cowboy_req:qs(Req),
-            <<"params">> => maps:from_list(cowboy_req:parse_qs(Req)),
-            <<"body">> => cowboy_req:body(Req),
-            <<"body_length">> => cowboy_req:body_length(Req) 
-        },
-        <<"action">> => #{
-            <<"result">> => fun(_) -> undefined_map end,
-            <<"error">> => fun(_) -> undefined_map end,
-            <<"timeout">> => fun(_) -> undefined_map end
-        }
-    }.
+    M = #{
+        <<"method">> => cowboy_req:method(Req),
+        <<"scheme">> => cowboy_req:scheme(Req),
+        <<"peer">> => cowboy_req:peer(Req),
+        <<"path">> => cowboy_req:path(Req),
+        <<"host">> => cowboy_req:host(Req),
+        <<"port">> => cowboy_req:port(Req),
+        <<"headers">> => maps:from_list(cowboy_req:headers(Req)),
+        <<"query_string">> => cowboy_req:qs(Req),
+        <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req)),
+        <<"bindings">> => to_binary_keys(cowboy_req:bindings(Req)),
+        <<"body">> => fun(IReq) ->
+            %% At the moment we do not support partially reading the body
+            %% nor streams so we drop the NewReq
+            {ok, Body, _NewIReq} = cowboy_req:read_body(IReq),
+            Body
+        end,
+        <<"body_length">> => cowboy_req:body_length(Req) 
+    },
+    maps:update(<<"request">>, M, Ctxt).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -960,8 +1005,28 @@ parse_action(#{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
         <<"arguments_kw">> => eval_term(Akw, Ctxt)
     };
 
-parse_action(#{<<"type">> := Action}, _) ->
-    error({unsupported_action, Action}).
+parse_action(#{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
+    #{
+        <<"upstream_url">> := Url,
+        <<"timeout">> := TO,
+        <<"connect_timeout">> := CTO,
+        <<"retries">> := R,
+        <<"retry_timeout">> := RTO,
+        <<"body">> := Body,
+        <<"query_string">> := QS
+    } = Spec,
+    Spec#{
+        <<"upstream_url">> := eval_term(Url, Ctxt),
+        <<"timeout">> := eval_term(TO, Ctxt),
+        <<"connect_timeout">> := eval_term(CTO, Ctxt),
+        <<"retries">> := eval_term(R, Ctxt),
+        <<"retry_timeout">> := eval_term(RTO, Ctxt),
+        <<"body">> := eval_term(Body, Ctxt),
+        <<"query_string">> := eval_term(QS, Ctxt)
+    };
+
+parse_action(#{<<"type">> := Type}, _) ->
+    error({unsupported_action, Type}).
 
 
 %% -----------------------------------------------------------------------------
@@ -1102,7 +1167,7 @@ gen_path_code(Name, PathSpec) ->
                     is_collection => {'$var', IsCollection}, 
                     session => Session,
                     % context => Ctxt1, 
-                    gateway_context => ?MODULE:get_context(Req)
+                    gateway_context => ?MODULE:update_context(Req)
                 },
                 {cowboy_rest, Req, St1}
             end},
@@ -1213,27 +1278,12 @@ gen_path_code(Name, PathSpec) ->
 %% -----------------------------------------------------------------------------
 get_ctxt_proxy() ->
     #{
-        <<"request">> => #{
-            <<"peer">> => fun(X) -> maps:get(<<"peer">>, X) end,
-            <<"path">> => fun(X) -> maps:get(<<"path">>, X) end,
-            <<"host">> => fun(X) -> maps:get(<<"host">>, X) end,
-            <<"host_url">> => fun(X) -> maps:get(<<"host_url">>, X) end,
-            <<"host_info">> => fun(X) -> maps:get(<<"host_info">>, X) end,
-            <<"port">> => fun(X) -> maps:get(<<"port">>, X) end,
-            <<"headers">> => fun(Req) -> maps:from_list(cowboy_req:headers(Req)) end,
-            <<"qs">> => fun cowboy_req:qs/1,
-            <<"params">> => fun(Req) -> 
-                maps:from_list(cowboy_req:parse_qs(Req)) end,
-            <<"body">> => fun cowboy_req:body/1,
-            <<"body_length">> => fun cowboy_req:body_length/1
-        },
-        <<"action">> => #{
-            <<"result">> => fun(_) -> undefined_map end,
-            <<"error">> => fun(_) -> undefined_map end,
-            <<"timeout">> => fun(_) -> undefined_map end
-        }
+        <<"request">> => proxy_fun(<<"request">>),
+        <<"action">> => proxy_fun(<<"action">>)
     }.
 
+proxy_fun(Key) ->
+    fun(Ctxt) -> maps:get(Key, Ctxt) end.
 
 %% @private
 -spec eval_term(any(), map()) -> any().
@@ -1362,3 +1412,9 @@ allowed_methods(Path) ->
 validate(Key, Map, Spec) ->
     maps:update(
         Key, maps_utils:validate(maps:get(Key, Map), Spec), Map).
+    
+to_binary_keys(Map) ->
+    F = fun(K, V, Acc) ->
+        maps:put(list_to_binary(atom_to_list(K)), V, Acc)
+    end,
+    maps:fold(F, #{}, Map).
