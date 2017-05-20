@@ -272,7 +272,7 @@ subprotocol_init(undefined, Req0, St) ->
 subprotocol_init(#subprotocol{id = SId} = Sub, Req0, St0) ->
     Req1 = cowboy_req:set_resp_header(?WS_SUBPROTOCOL_HEADER_NAME, SId, Req0),
     St1 = St0#state{data = <<>>, subprotocol = Sub},
-    {cowboy_websocket, Req1, St1, ?CONN_TIMEOUT}.
+    {cowboy_websocket, Req1, St1, #{idle_timeout => ?CONN_TIMEOUT}}.
 
 
 %% -----------------------------------------------------------------------------
