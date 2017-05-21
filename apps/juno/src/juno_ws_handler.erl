@@ -398,7 +398,7 @@ handle_wamp_messages(
     [#goodbye{} = M|_], Ctxt, Acc) ->
     %% The client initiated a goodbye, so we will not process
     %% any subsequent messages
-   case juno_router:handle_message(M, Ctxt) of
+   case juno_router:forward(M, Ctxt) of
         {stop, Ctxt1} ->
             {stop, lists:reverse(Acc), Ctxt1};
         {stop, Reply, Ctxt1} ->
@@ -406,7 +406,7 @@ handle_wamp_messages(
     end;
 
 handle_wamp_messages([H|T], Ctxt0, Acc) ->
-    case juno_router:handle_message(H, Ctxt0) of
+    case juno_router:forward(H, Ctxt0) of
         {ok, Ctxt1} ->
             handle_wamp_messages(T, Ctxt1, Acc);
         {stop, Reply, Ctxt1} ->
