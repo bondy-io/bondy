@@ -59,32 +59,37 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec eval(any(), Ctxt :: map()) -> any() | no_return().
-eval(Val, Ctxt) ->
-    eval(Val, Ctxt, #{}).
+eval(<<>>, _) ->
+    <<>>;
 
+eval(Val, Ctxt) when is_binary(Val) ->
+    eval(Val, Ctxt, #{});
+
+eval(Val, _) ->
+    Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Evaluates **Term** ( `any()`) using the context **Ctxt** (`map()`).
+%% Evaluates **Term** ( `any()') using the context **Ctxt** (`map()').
 %% Returns **Term** in case the term is not a binary and does not contain a 
 %% mop expression. Otherwise, it tries to resolve the expression using the
 %% **Ctxt**.
 %%
 %% The following are valid mop expressions and their meanings:
-%% - `<<"{{foo}}">>` - resolve the value for key `<<"foo">>` in the context. 
-%% It fails if the context does not have a key named `<<"foo">>`.
-%% - `<<"\"{{foo}}\">>` - return a string by resolving the value for key 
-%% `<<"foo">>` in the context. It fails if the context does not have a key 
-%% named `<<"foo">>`.
-%% - `<<"{{foo.bar}}">>` - resolve the value for key path in the context.
-%% It fails if the context does not have a key named `<<"foo">>` which has a value that is either a `function()` or a `map()` with a key named `<<"bar">>`.
-%% - `<<"{{foo |> integer}}">>` - resolves the value for key <<"foo">> in the 
+%% - `<<"{{foo}}">>' - resolve the value for key `<<"foo">>` in the context. 
+%% It fails if the context does not have a key named `<<"foo">>'.
+%% - `<<"\"{{foo}}\">>' - return a string by resolving the value for key 
+%% `<<"foo">>' in the context. It fails if the context does not have a key 
+%% named `<<"foo">>'.
+%% - `<<"{{foo.bar}}">>' - resolve the value for key path in the context.
+%% It fails if the context does not have a key named `<<"foo">>' which has a value that is either a `function()` or a `map()` with a key named `<<"bar">>'.
+%% - `<<"{{foo |> integer}}">>' - resolves the value for key `<<"foo">>' in the 
 %% context and converts the result to an integer. If the result was a 
-%% `function()`, it returns a function composition. 
-%% It fails if the context does not have a key named `<<"foo">>`
+%% `function()', it returns a function composition. 
+%% It fails if the context does not have a key named `<<"foo">>'
 %%
 %% Examples:
-%% ```
+%% <pre language="erlang">
 %% > mop:eval(foo, #{<<"foo">> => bar}).
 %% > foo
 %% > mop:eval(<<"foo">>, #{<<"foo">> => bar}).
@@ -93,7 +98,7 @@ eval(Val, Ctxt) ->
 %% > bar
 %% > mop:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => foobar}}).
 %% > foobar
-%% ```
+%% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec eval(Term :: any(), Ctxt :: map(), Opts :: map()) -> any() | no_return().
@@ -244,29 +249,40 @@ parse_expr(Bin, #state{context = Ctxt}) ->
 
 %% @private
 get_value(Key, Ctxt) ->
-    try  eval(get(binary:split(Key, <<$.>>, [global]), Ctxt), Ctxt)
+    try  
+        PathElems = binary:split(Key, <<$.>>, [global]),
+        case get(PathElems, Ctxt) of
+            {ok, '$mop_proxy', _Rem} ->
+                fun(X) -> get_value(Key, X) end;
+            {ok, Val} ->
+                eval(Val, Ctxt)
+        end
     catch
         error:{badkey, _} ->
             %% We blame the full key
-            error({badkey, Key})
+            error({badkeypath, Key})
     end.
 
 
 %% @private
 
-get([], Ctxt) ->
-    Ctxt;
 
-get(Key, F) when is_function(F) ->
-    fun(X) ->
+get(Rem, '$mop_proxy') ->
+    {ok, '$mop_proxy', Rem};
+
+get([], Term) ->
+    {ok, Term};
+
+get(Key, F) when is_function(F, 1) ->
+    Fun = fun(X) ->
         try 
             get_value(Key, F(X))
         catch
             error:{badkey, _} ->
-                %% We blame the full key
-                error({badkey, Key})
+                error({badkeypath, Key})
         end
-    end;
+    end,
+    {ok, Fun};
 
 get([H|T], Ctxt) when is_map(Ctxt) ->
     get(T, maps:get(H, Ctxt)).
