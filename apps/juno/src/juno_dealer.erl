@@ -41,6 +41,7 @@
 %%    4.  "UNREGISTERED"
 %%    5.  "ERROR"
 %%
+%%<pre>
 %%        ,------.          ,------.               ,------.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `--+---'          `--+---'               `--+---'
@@ -64,6 +65,7 @@
 %%        ,--+---.          ,--+---.               ,--+---.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `------'          `------'               `------'
+%%</pre>
 %%
 %% # Calling and Invocations
 %%
@@ -81,6 +83,7 @@
 %%
 %%    5. "ERROR"
 %%
+%% <pre>
 %%        ,------.          ,------.          ,------.
 %%        |Caller|          |Dealer|          |Callee|
 %%        `--+---'          `--+---'          `--+---'
@@ -98,6 +101,7 @@
 %%        ,--+---.          ,--+---.          ,--+---.
 %%        |Caller|          |Dealer|          |Callee|
 %%        `------'          `------'          `------'
+%%</pre>
 %%
 %%    The execution of remote procedure calls is asynchronous, and there
 %%    may be more than one call outstanding.  A call is called outstanding
@@ -633,7 +637,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     S = juno_context:session(Ctxt0),
     SId = juno_session:id(S),
     Caller = juno_session:pid(S),
-    Timeout = timeout(Opts),
+    Timeout = juno_utils:timeout(Opts),
     %%  A promise is used to implement a capability and a feature:
     %% - the capability to match wamp_yiled() or wamp_error() messages
     %%   to the originating wamp_call() and the Caller
@@ -966,14 +970,6 @@ cleanup_queue(Ctxt) ->
 
 
 
-
-%% @private
-timeout(#{timeout := T}) when is_integer(T), T > 0 ->
-    T;
-timeout(#{timeout := 0}) ->
-    infinity;
-timeout(_) ->
-    juno_config:request_timeout().
 
 
 %% From https://erlangcentral.org/wiki/index.php/RandomShuffle
