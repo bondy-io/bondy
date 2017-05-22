@@ -698,8 +698,10 @@ do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
 %% @private
 %% @doc
 %% Example:
-%% uri_components(<<"com.mycompany.foo.bar">>) ->
-%% [<<"com.mycompany">>, <<"foo">>, <<"bar">>].
+%%<pre lang="erlang">
+%% > uri_components(<<"com.mycompany.foo.bar">>).
+%% > [<<"com.mycompany">>, <<"foo">>, <<"bar">>].
+%%</pre>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri_components(uri()) -> [binary()].

@@ -170,6 +170,6 @@ list(group, State) ->
 list(source, State) ->
     juno_security_source:list(realm_uri(State)).
 
-%% @private
+
 % add_user(Username, Password, Info) ->
 %     case juno_security:add_user(Username, )

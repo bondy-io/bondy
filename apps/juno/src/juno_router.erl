@@ -28,7 +28,7 @@
 %% delegating the rest to either {@link juno_broker} or {@link juno_dealer},
 %% which implement the actual PubSub and RPC logic respectively.
 %%
-%%
+%%<pre>
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
 %% `--+---'                                    `--+---'
@@ -69,7 +69,7 @@
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
-%%
+%%</pre>
 %% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
