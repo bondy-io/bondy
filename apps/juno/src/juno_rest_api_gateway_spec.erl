@@ -3,6 +3,7 @@
 %% -----------------------------------------------------------------------------
 
 -module(juno_rest_api_gateway_spec).
+
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(MOD_PREFIX, "juno_rest_api_gateway_handler_").
@@ -27,6 +28,8 @@
     <<"post">>,
     <<"put">>
 ]).
+
+-define(MOP_PROXY_FUN_TYPE, {function, 1}).
 
 -define(API_HOST, #{
     <<"host">> => #{
@@ -95,7 +98,16 @@
     <<"info">> => #{
         required => false,
         datatype => map,
-        validator => ?API_INFO
+        validator => #{
+            <<"title">> => #{
+                required => true,
+                allow_null => true,
+                datatype => binary},
+            <<"description">> => #{
+                required => true,
+                allow_null => true,
+                datatype => binary}
+        }
     },
     ?VARS_KEY => #{
         required => true,
@@ -128,16 +140,6 @@
     }
 }).
 
--define(API_INFO, #{
-    <<"title">> => #{
-        required => true,
-        allow_null => true,
-        datatype => binary},
-    <<"description">> => #{
-        required => true,
-        allow_null => true,
-        datatype => binary}
-}).
 
 -define(DEFAULTS_SPEC, #{
     <<"schemes">> => #{
@@ -185,58 +187,6 @@
     }
 }).
 
-
--define(API_PATH_DEFAULTS, #{
-    <<"schemes">> => #{
-        required => true,
-        default => <<"{{defaults.schemes}}">>
-    },
-    <<"security">> => #{
-        required => true,
-        allow_null => false,
-        datatype => map,
-        default => #{}
-    },
-    <<"timeout">> => #{
-        required => true,
-        datatype => timeout,
-        default => <<"{{defaults.timeout}}">>
-    },
-    <<"connect_timeout">> => #{
-        required => true,
-        default => <<"{{defaults.connect_timeout}}">>,
-        datatype => timeout
-    },
-    <<"retries">> => #{
-        required => true,
-        datatype => integer,
-        default => <<"{{defaults.retries}}">>
-    },
-    <<"retry_timeout">> => #{
-        required => true,
-        default => <<"{{defaults.retry_timeout}}">>,
-        datatype => integer
-    },
-    <<"accepts">> => #{
-        required => true,
-        allow_null => false,
-        datatype => {list, 
-            {in, [<<"application/json">>, <<"application/msgpack">>]}},
-        default => <<"{{defaults.accepts}}">>
-    },
-    <<"provides">> => #{
-        required => true,
-        allow_null => false,
-        datatype => {list, 
-            {in, [<<"application/json">>, <<"application/msgpack">>]}},
-        default => <<"{{defaults.provides}}">>
-    },
-    <<"headers">> => #{
-        required => true,
-        allow_null => false,
-        default => <<"{{defaults.headers}}">>
-    }
-}).
 
 -define(BASIC, #{
     <<"type">> => #{
@@ -309,28 +259,35 @@
     }
 }).
 
+
+-define(DEFAULT_PATH, #{
+    <<"is_collection">> => false,
+    <<"variables">> => #{},
+    <<"defaults">> => #{},
+    <<"accepts">> => <<"{{defaults.accepts}}">>,
+    <<"provides">> => <<"{{defaults.provides}}">>,
+    <<"schemes">> => <<"{{defaults.schemes}}">>,
+    <<"security">> => <<"{{defaults.security}}">>
+}).
+
 -define(API_PATH, #{
     <<"is_collection">> => #{
         required => true,
         allow_null => false,
-        default => false,
         datatype => boolean
     },
     ?VARS_KEY => #{
         required => true,
-        default => #{},
         datatype => map
     },
     ?DEFAULTS_KEY => #{
         required => true,
         allow_null => false,
-        default => #{},
         datatype => map
     },
     <<"accepts">> => #{
         required => true,
         allow_null => false,
-        default => <<"{{defaults.accepts}}">>,
         datatype => {list,
             {in, [
                 <<"application/json">>, <<"application/msgpack">>
@@ -340,7 +297,6 @@
     <<"provides">> => #{
         required => true,
         allow_null => false,
-        default => <<"{{defaults.provides}}">>,
         datatype => {list, 
             {in, [
                 <<"application/json">>, <<"application/msgpack">>
@@ -350,14 +306,12 @@
     <<"schemes">> => #{
         required => true,
         allow_null => false,
-        default => <<"{{defaults.schemes}}">>,
         datatype => {list, binary}
     }, 
     <<"security">> => #{
         required => true,
         allow_null => false,
         datatype => map,
-        default => <<"{{defaults.security}}">>,
         validator => fun
             (#{<<"type">> := <<"oauth2">>} = V) ->
                 {ok, maps_utils:validate(V, ?OAUTH2_SPEC)};
@@ -399,50 +353,109 @@
     }
 }).
 
--define(REQ, #{
+-define(DEFAULT_PATH_DEFAULTS, #{
+    <<"schemes">> => <<"{{defaults.schemes}}">>,
+    <<"security">> => <<"{{defaults.security}}">>,
+    <<"accepts">> => <<"{{defaults.accepts}}">>,
+    <<"provides">> => <<"{{defaults.provides}}">>,
+    <<"headers">> => <<"{{defaults.headers}}">>,
+    <<"timeout">> => <<"{{defaults.timeout}}">>,
+    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
+    <<"retries">> => <<"{{defaults.retries}}">>,
+    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>,
+    <<"security">> => <<"{{defaults.security}}">>
+}).
+
+-define(PATH_DEFAULTS, #{
+    <<"schemes">> => #{
+        required => true,
+        default => <<"{{defaults.schemes}}">>
+    },
+    <<"security">> => #{
+        required => true,
+        allow_null => false,
+        datatype => map
+    },
+    <<"timeout">> => #{
+        required => true,
+        datatype => timeout
+    },
+    <<"connect_timeout">> => #{
+        required => true,
+        datatype => timeout
+    },
+    <<"retries">> => #{
+        required => true,
+        datatype => integer
+    },
+    <<"retry_timeout">> => #{
+        required => true,
+        datatype => integer
+    },
+    <<"accepts">> => #{
+        required => true,
+        allow_null => false,
+        datatype => {list, 
+            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+    },
+    <<"provides">> => #{
+        required => true,
+        allow_null => false,
+        datatype => {list, 
+            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+    },
+    <<"headers">> => #{
+        required => true,
+        allow_null => false
+    }
+}).
+
+
+-define(REQ_SPEC, #{
     <<"info">> => #{
         required => false,
-        validator => ?API_PATH_INFO
+        validator => #{
+            <<"description">> => #{
+                required => false,
+                allow_null => true,
+                datatype => binary
+            },
+            <<"parameters">> => #{
+                required => false,
+                validator => ?API_PARAMS
+            }
+        }
     },
     <<"action">> => #{
         required => true,
         allow_null => false,
         validator => fun
             (#{<<"type">> := <<"static">>} = V) ->
-                {ok, maps_utils:validate(V, ?STATIC_ACTION)};
+                {ok, maps_utils:validate(V, ?STATIC_ACTION_SPEC)};
             (#{<<"type">> := <<"wamp_", _/binary>>} = V) ->
-                {ok, maps_utils:validate(V, ?WAMP_ACTION)};
+                {ok, maps_utils:validate(V, ?WAMP_ACTION_SPEC)};
             (#{<<"type">> := <<"forward">>} = V) ->
-                {ok, maps_utils:validate(V, ?APIKEY)};
+                {ok, maps_utils:validate(V, ?FWD_ACTION_SPEC)};
             (V) ->
                 #{} =:= V
         end
     },
     <<"response">> => #{
         required => true,
-        allow_null => false,
-        validator => #{
-            <<"on_timeout">> => #{
-                required => true,
-                allow_null => false,
-                validator => ?RESPONSE
-            },
-            <<"on_result">> => #{
-                required => true,
-                allow_null => false,
-                validator => ?RESPONSE
-            },
-            <<"on_error">> => #{
-                required => true,
-                allow_null => false,
-                validator => ?RESPONSE
-            }   
-        }
+        allow_null => false
     }
 
 }).
 
--define(STATIC_ACTION, #{
+-define(DEFAULT_STATIC_ACTION, #{
+    <<"resource">> => <<>>,
+    <<"timeout">> => <<"{{defaults.timeout}}">>,
+    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
+    <<"retries">> => <<"{{defaults.retries}}">>,
+    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+}).
+
+-define(STATIC_ACTION_SPEC, #{
     <<"type">> => #{
         required => true,
         allow_null => false,
@@ -450,76 +463,103 @@
     },
     <<"resource">> => #{
         required => true,
-        default => <<"Undefined resource">>,
         allow_null => false,
         datatype => binary
     },
     <<"timeout">> => #{
         required => true,
-        default => <<"{{defaults.timeout}}">>,
         datatype => timeout
     },
     <<"connect_timeout">> => #{
         required => true,
-        default => <<"{{defaults.connect_timeout}}">>,
         datatype => timeout
     },
     <<"retries">> => #{
         required => true,
-        default => <<"{{defaults.retries}}">>,
         datatype => integer
     },
     <<"retry_timeout">> => #{
         required => true,
-        default => <<"{{defaults.retry_timeout}}">>,
         datatype => integer
     }
 }).
 
--define(FORWARD_ACTION, #{
+-define(DEFAULT_FWD_ACTION, #{
+    <<"path">> => <<"{{request.path}}">>,
+    <<"query_string">> => <<"{{request.query_string}}">>,
+    <<"headers">> => <<"{{request.headers}}">>,
+    <<"body">> => <<"{{request.body}}">>,
+    <<"timeout">> => <<"{{defaults.timeout}}">>,
+    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
+    <<"retries">> => <<"{{defaults.retries}}">>,
+    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+}).
+
+-define(FWD_ACTION_SPEC, #{
     <<"type">> => #{
         required => true,
         allow_null => false,
         datatype => {in, [<<"forward">>]}
     },
-    <<"upstream_url">> => #{
+    <<"host">> => #{
         required => true,
         allow_null => false,
-        datatype => binary %% TODO URI 
-    },
-    <<"body">> => #{
-        required => true,
-        default => <<"{{request.body}}">>,
         datatype => binary
+    },
+    <<"path">> => #{
+        required => true,
+        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"query_string">> => #{
         required => true,
-        default => <<"{{request.qs}}">>,
-        datatype => binary
+        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+    },
+    <<"headers">> => #{
+        required => true,
+        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+    },
+    <<"body">> => #{
+        required => true,
+        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
         required => true,
-        default => <<"{{defaults.timeout}}">>,
-        datatype => timeout
+        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"connect_timeout">> => #{
         required => true,
-        default => <<"{{defaults.connect_timeout}}">>,
-        datatype => timeout
+        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
         required => true,
-        default => <<"{{defaults.retries}}">>,
-        datatype => integer
+        datatype => [integer, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retry_timeout">> => #{
         required => true,
-        default => <<"{{defaults.retry_timeout}}">>,
-        datatype => integer
+        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     }
 }).
 
--define(WAMP_ACTION, #{
+-define(MAP_OR_FUNCTION, fun
+    (X) when is_map(X) ->
+        true;
+    (F) when is_function(F) ->
+        true;
+    (_) ->
+        false
+end).
+
+-define(DEFAULT_WAMP_ACTION, #{
+    <<"details">> => #{},
+    <<"arguments">> => [],
+    <<"arguments_kw">> => #{},
+    <<"timeout">> => <<"{{defaults.timeout}}">>,
+    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
+    <<"retries">> => <<"{{defaults.retries}}">>,
+    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+}).
+
+-define(WAMP_ACTION_SPEC, #{
     <<"type">> => #{
         required => true,
         allow_null => false,
@@ -534,13 +574,11 @@
     },
     <<"timeout">> => #{
         required => true,
-        default => <<"{{defaults.timeout}}">>,
-        datatype => timeout
+        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
         required => true,
-        default => <<"{{defaults.retries}}">>,
-        datatype => integer
+        datatype => [integer, ?MOP_PROXY_FUN_TYPE]
     },
     <<"procedure">> => #{
         required => true,
@@ -551,49 +589,38 @@
     <<"details">> => #{
         required => true,
         allow_null => true,
-        default => #{},
-        datatype => map
+        datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"arguments">> => #{
         required => true,
         allow_null => true,
-        default => [],
-        datatype => list
+        datatype => [list, ?MOP_PROXY_FUN_TYPE]
     },
     <<"arguments_kw">> => #{
         required => true,
         allow_null => true,
-        default => #{},
-        datatype => map
+        datatype => [map, ?MOP_PROXY_FUN_TYPE]
     }
 }).
 
--define(RESPONSE, #{
+-define(DEFAULT_RESPONSE, #{
+    <<"headers">> => <<"{{defaults.headers}}">>,
+    <<"body">> => <<>>
+}).
+
+-define(RESPONSE_SPEC, #{
     <<"headers">> => #{
         required => true,
         allow_null => false,
-        default => <<"{{defaults.headers}}">>,
-        datatype => map
+        datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
         required => true,
         allow_null => false,
-        default => <<>>,
-        datatype => binary
+        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
     }
 }).
 
--define(API_PATH_INFO, #{
-    <<"description">> => #{
-        required => false,
-        allow_null => true,
-        datatype => binary
-    },
-    <<"parameters">> => #{
-        required => false,
-        validator => ?API_PARAMS
-    }
-}).
 
 -define(API_PARAMS, #{
     <<"name">> => #{
@@ -666,6 +693,11 @@
 -export([gen_path_code/2]).
 -export([eval_term/2]).
 -export([pp/1]).
+
+-export([maybe_encode/2]).
+-export([method_to_lowercase/1]).
+-export([perform_action/3]).
+
 -compile({parse_transform, parse_trans_codegen}).
 
 
@@ -679,28 +711,24 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Creates a context object based on the passed Request 
-%% (`cowboy_request:request()`).
+%% (`cowboy_request:request()').
 %% @end
 %% -----------------------------------------------------------------------------
 -spec update_context(cowboy_req:req() | map(), map()) -> map().
 
 update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
     M = #{
-        <<"result">> => <<>>,
         <<"error">> => Map
     },
-    maps:update(M, <<"action">>, Ctxt);
+    maps:update(<<"action">>, M, Ctxt);
 
-update_context(Result, #{<<"request">> := _} = Ctxt) ->
+update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
     M = #{
-        <<"result">> => Result,
-        <<"error">> => <<>>
+        <<"result">> => Result
     },
-    maps:update(M, <<"action">>, Ctxt);
+    maps:update(<<"action">>, M, Ctxt);
 
 update_context(Req, Ctxt) ->
-    %% TODO Consider using req directly when upgrading Cowboy as the latest 
-    %% version moved to a maps representation.
     M = #{
         <<"method">> => cowboy_req:method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
@@ -733,7 +761,7 @@ update_context(Req, Ctxt) ->
 from_file(Filename) ->
     case file:consult(Filename) of
         {ok, [Spec]} when is_map(Spec) ->
-            {ok, parse(Spec, get_ctxt_proxy())};
+            {ok, parse(Spec, get_context_proxy())};
         _ ->
             {error, {invalid_specification_format, Filename}}
     end.
@@ -751,7 +779,7 @@ from_file(Filename) ->
 -spec parse(map()) -> map() | no_return().
 
 parse(Spec) ->
-    parse(Spec, get_ctxt_proxy()).
+    parse(Spec, get_context_proxy()).
 
 
 %% -----------------------------------------------------------------------------
@@ -828,7 +856,7 @@ pp(Forms) ->
 
 
 %% =============================================================================
-%% PRIVATE
+%% PRIVATE: PARSING
 %% =============================================================================
 
 
@@ -892,35 +920,41 @@ parse_path(P0, Ctxt0) ->
     %% The path should have at least one HTTP method
     %% otherwise this will fail with an error
     L = allowed_methods(P0),
-    %% We merge variables and defaults
-    {P1, Ctxt1} = merge(P0, eval(Ctxt0)),
-    %% We evaluate before validating
-    Ctxt2 = eval(P1, Ctxt1),
-    P2 = validate(?DEFAULTS_KEY, P1, ?API_PATH_DEFAULTS),
-    %% We merge again in case the validation added defaults
-    {P3, Ctxt3} = merge(P2, eval(P2, Ctxt2)),    
-    P4 = parse_path_elements(P3, Ctxt3),
+    %% We merge path spec with gateway default spec
+    P1  = maps:merge(?DEFAULT_PATH, P0),
+    %% We merge path's defaults key with gateway defaults
+    % Defs0 = maps:merge(?DEFAULT_PATH_DEFAULTS, maps:get(?DEFAULTS_KEY, P1)),
+    % P2 = maps:update(?DEFAULTS_KEY, Defs0, P1),
+    P2 = P1,
+    %% We merge path's variables and defaults into context
+    {P3, Ctxt1} = merge(P2, eval(Ctxt0)),
 
-    %% We then validate the resulting path
-    P5 = maps_utils:validate(P4, ?API_PATH),
+    %% We apply defaults and evaluate before validating
+    Ctxt2 = eval(P3, Ctxt1),
+    P4 = validate(?DEFAULTS_KEY, P3, ?PATH_DEFAULTS),
+
+    P5 = parse_path_elements(P4, Ctxt2),
+
+    %% FInally we validate the resulting path
+    P6 = maps_utils:validate(P5, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
-    P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
-    P7 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P6),    
+    P7 = maps:put(<<"allowed_methods">>, to_uppercase(L), P6),
+    P8 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P7), 
 
     %% Now we evaluate each request type spec
     PFun = fun(Method, IPath) ->
         Sec0 = maps:get(Method, IPath),
         try  
-            Sec1 = parse_request_method(
-                maps_utils:validate(Sec0, ?REQ), Ctxt3), 
-            maps:update(Method, Sec1, IPath)
+            Sec1 = parse_request_method(Sec0, Ctxt2), 
+            Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
+            maps:update(Method, Sec2, IPath)
         catch
             error:{badkey, Key} ->
-                io:format("Method ~p\nCtxt: ~p\nST:~p", [Sec0, Ctxt3, erlang:get_stacktrace()]),
+                io:format("Method ~p\nCtxt: ~p\nST:~p", [Sec0, Ctxt2, erlang:get_stacktrace()]),
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
-    lists:foldl(PFun, P7, L).
+    lists:foldl(PFun, P8, L).
     
 
 %% @private 
@@ -959,74 +993,148 @@ parse_path_elements([], Path, _) ->
     Path.
 
     
-
-
 %% @private
 parse_request_method(Spec, Ctxt) ->
     #{
         % <<"accepts">> := Acc,
         % <<"provides">> := Prov,
         <<"action">> := Act,
-        <<"response">> := #{
-            <<"on_timeout">> := T,
-            <<"on_result">> := R,
-            <<"on_error">> := E
-        }
+        <<"response">> := Resp
     } = Spec,
     Spec#{
         % <<"accepts">> := eval_term(Acc, Ctxt),
         % <<"provides">> := eval_term(Prov, Ctxt),
+        
         <<"action">> => parse_action(Act, Ctxt),
-        <<"response">> => #{
-            <<"on_timeout">> => eval_term(T, Ctxt),
-            <<"on_result">> => eval_term(R, Ctxt),
-            <<"on_error">> => eval_term(E, Ctxt)
-        }
+        %% TODO we should be doing parser_response() here!
+        <<"response">> => parse_response(Resp, Ctxt)
     }.
 
 
 %% @private
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Parses a path action section definition. Before applying validations
+%% this function applies defaults values and evaluates all terms 
+%% (using mop:eval/2).
+%% If the action type provided is not reconised it fails with 
+%% `{unsupported_action_type, Type}'. 
+%% If an action type is not provided if fails with `action_type_missing'.
+%% @end
+%% -----------------------------------------------------------------------------
 -spec parse_action(map(), map()) -> map().
-parse_action(#{<<"type">> := <<"wamp_call">>} = Spec, Ctxt) ->
-    #{
-        <<"timeout">> := TO,
-        <<"retries">> := R,
-        <<"procedure">> := P,
-        <<"details">> := D,
-        <<"arguments">> := A,
-        <<"arguments_kw">> := Akw
-    } = Spec,
-    Spec#{
-        <<"timeout">> => eval_term(TO, Ctxt),
-        <<"retries">> => eval_term(R, Ctxt),
-        <<"procedure">> => eval_term(P, Ctxt),
-        <<"details">> => eval_term(D, Ctxt),
-        <<"arguments">> => eval_term(A, Ctxt),
-        <<"arguments_kw">> => eval_term(Akw, Ctxt)
-    };
+parse_action(#{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
+    maps_utils:validate(
+        eval_term(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt), 
+        ?WAMP_ACTION_SPEC
+    );
 
 parse_action(#{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
-    #{
-        <<"upstream_url">> := Url,
-        <<"timeout">> := TO,
-        <<"connect_timeout">> := CTO,
-        <<"retries">> := R,
-        <<"retry_timeout">> := RTO,
-        <<"body">> := Body,
-        <<"query_string">> := QS
-    } = Spec,
-    Spec#{
-        <<"upstream_url">> := eval_term(Url, Ctxt),
-        <<"timeout">> := eval_term(TO, Ctxt),
-        <<"connect_timeout">> := eval_term(CTO, Ctxt),
-        <<"retries">> := eval_term(R, Ctxt),
-        <<"retry_timeout">> := eval_term(RTO, Ctxt),
-        <<"body">> := eval_term(Body, Ctxt),
-        <<"query_string">> := eval_term(QS, Ctxt)
-    };
+    maps_utils:validate(
+        eval_term(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt), 
+        ?FWD_ACTION_SPEC
+    );
+
+parse_action(#{<<"type">> := <<"static">>} = Spec, Ctxt) ->
+    maps_utils:validate(
+        eval_term(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt), 
+        ?STATIC_ACTION_SPEC
+    );
 
 parse_action(#{<<"type">> := Type}, _) ->
-    error({unsupported_action, Type}).
+    error({unsupported_action_type, Type});
+
+parse_action(_, _) ->
+    error(action_type_missing).
+
+
+
+parse_response(Spec0, Ctxt) ->
+    OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
+    OE0 = maps:get(<<"on_error">>, Spec0, ?DEFAULT_RESPONSE),
+
+    [OR1, OE1] = [
+        maps_utils:validate(
+            eval_term(maps:merge(?DEFAULT_RESPONSE, X), Ctxt), 
+            ?RESPONSE_SPEC
+        ) || X <- [OR0, OE0]
+    ],
+    #{
+        <<"on_result">> => OR1,
+        <<"on_error">> => OE1
+    }.
+
+
+%% @private
+-spec eval_term(any(), map()) -> any().
+eval_term(F, Ctxt) when is_function(F, 1) ->
+    F(Ctxt);
+
+eval_term(Map, Ctxt) when is_map(Map) ->
+    F = fun
+        (_, V) when is_map(V) ->
+            eval_term(V, Ctxt);
+        (_, V) when is_list(V) ->
+            eval_term(V, Ctxt);
+        (_, V) -> 
+            mop:eval(V, Ctxt) 
+    end,
+    maps:map(F, Map);
+
+eval_term(L, Ctxt) when is_list(L) ->
+    [eval_term(X, Ctxt) || X <- L];
+
+eval_term(T, Ctxt) ->
+    mop:eval(T, Ctxt).
+
+
+
+
+merge(S0, Ctxt0) ->
+    %% We merge variables and defaults
+    VVars = maps:get(?VARS_KEY, S0, #{}),
+    VDefs = maps:get(?DEFAULTS_KEY, S0, #{}),
+    MVars = maps:merge(maps:get(?VARS_KEY, Ctxt0), VVars),
+    MDefs = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), VDefs),
+    %% We update section and ctxt
+    S1 = S0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
+    Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
+    Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
+    {S1, Ctxt2}.
+
+
+eval(Ctxt) ->
+    eval(Ctxt, Ctxt).
+
+
+%% @private
+eval(S0, Ctxt0) ->
+    Vars = maps:get(?VARS_KEY, S0),
+    Defs = maps:get(?DEFAULTS_KEY, S0),
+    %% We evaluate variables by iterating over each 
+    %% updating the context in each turn as we might have interdependencies
+    %% amongst them
+    VFun = fun(Var, Val, ICtxt) ->
+        IVars1 = maps:update(
+            Var, eval_term(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
+        maps:update(?VARS_KEY, IVars1, ICtxt)
+    end,
+    Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
+    
+    %% We evaluate defaults
+    DFun = fun(Var, Val, ICtxt) ->
+        IDefs1 = maps:update(
+            Var, eval_term(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
+        maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
+    end,
+    maps:fold(DFun, Ctxt1, Defs).
+
+
+
+%% =============================================================================
+%% PRIVATE: COMPILE
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1138,8 +1246,18 @@ gen_path_code(Name, PathSpec) ->
     IsCollection = maps:get(<<"is_collection">>, PathSpec),
     Accepts = content_types_accepted(maps:get(<<"accepts">>, PathSpec)),
     Provides = content_types_provided(maps:get(<<"provides">>, PathSpec)),
-    Get = maps:get(<<"get">>, PathSpec, undefined),
+    
+    % Delete = maps:get(<<"delete">>, PathSpec, #{}),
+    Get = maps:get(<<"get">>, PathSpec, #{}),
+    Head = maps:get(<<"head">>, PathSpec, #{}),
+    % Options = maps:get(<<"options">>, PathSpec, #{}),
+    Patch = maps:get(<<"patch">>, PathSpec, #{}),
+    Post = maps:get(<<"post">>, PathSpec, #{}),
+    Put = maps:get(<<"put">>, PathSpec, #{}),
 
+    %% The arguments for codegen:gen_module should be inline, so we cannot
+    %% generate the list dynamically and use {'$var', any()} to inject
+    %% values
     Forms = codegen:gen_module(
         {'$var', ModName},
         [
@@ -1151,11 +1269,13 @@ gen_path_code(Name, PathSpec) ->
             {resource_exists, 2},
             {resource_existed, 2},
             {to_json, 2},
-            {from_json, 2},
             {to_msgpack, 2},
+            {provide, 4},
+            {from_json, 2},
             {from_msgpack, 2}
         ],
         [
+            %% API
             {init, fun(Req, St0) ->
                 io:format("Entering init with state: ~p~n", [St0]),
                 Session = undefined, %TODO
@@ -1167,7 +1287,7 @@ gen_path_code(Name, PathSpec) ->
                     is_collection => {'$var', IsCollection}, 
                     session => Session,
                     % context => Ctxt1, 
-                    gateway_context => ?MODULE:update_context(Req)
+                    api_context => update_context(Req, #{})
                 },
                 {cowboy_rest, Req, St1}
             end},
@@ -1181,89 +1301,110 @@ gen_path_code(Name, PathSpec) ->
                 {{'$var', Provides}, Req, St}
             end},
             {is_authorized, fun(Req, St) ->
+                %% TODO get auth method and status from St and validate
+                %% check scopes vs action requirements
                 {true, Req, St}
             end},
             {resource_exists, fun(Req, St) ->
+                %% TODO
                 {true, Req, St}
             end},
-            {resource_existed, fun(Req, St) ->
+            {resource_existed, fun(Req, St) ->  
                 {false, Req, St}
             end},
             {to_json, fun(Req, St) ->
-                to_json(cowboy_req:method(Req), Req, St)
+                provide(cowboy_req:method(Req), json, Req, St)
             end},
-            {to_json, fun
-                (<<"GET">>, Req, St) -> 
+            {to_msgpack, fun(Req, St) ->
+                provide(cowboy_req:method(Req), msgpack, Req, St)
+            end},
+            {provide, fun
+                (<<"GET">>, Enc, Req0, St0) -> 
                     Spec = {'$var', Get},
-                    Action = maps:get(<<"action">>, Spec),
-                    Resp = maps:get(<<"response">>, Spec),
-                    Result = perform_action(Action, St),
-                    Body = response(json, Result, St),
-                    {Body, Req, St};
-                (<<"HEAD">>, Req, St) -> 
-                    {<<>>, Req, St};
-                (<<"OPTIONS">>, Req, St) -> 
-                    {<<>>, Req, St}
+                    case perform_action(<<"GET">>, Spec, St0) of
+                        {ok, Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            {maybe_encode(Enc, Body), Req1, St1};
+                        {error, #{<<"code">> := Code} = Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            Json = maybe_encode(Enc, Body),
+                            Req2 = cowboy_req:set_resp_body(Json, Req1),
+                            Req3 = cowboy_req:reply(
+                                juno_utils:error_http_code(Code), Req2),
+                            {stop, Req3, St1}
+                    end;          
+                (<<"HEAD">>, Enc, Req0, St0) -> 
+                    Spec = {'$var', Head},
+                    case perform_action(<<"HEAD">>, Spec, St0) of
+                        {ok, Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            {maybe_encode(Enc, Body), Req1, St1};
+                        {ok, HTTPCode, Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            Req2 = cowboy_req:set_resp_body(
+                                maybe_encode(Enc, Body), Req1),
+                            Req3 = cowboy_req:reply(HTTPCode, Req2),
+                            {stop, Req3, St1};
+                        {error, #{<<"code">> := Code} = Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            Req2 = cowboy_req:set_resp_body(
+                                maybe_encode(Enc, Body), Req1),
+                            Req3 = cowboy_req:reply(
+                                juno_utils:error_http_code(Code), Req2),
+                            {stop, Req3, St1};
+                        {error, HTTPCode, Body, Headers, St1} ->
+                            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+                            Req2 = cowboy_req:set_resp_body(
+                                maybe_encode(Enc, Body), Req1),
+                            Req3 = cowboy_req:reply(HTTPCode, Req2),
+                            {stop, Req3, St1}
+                    end
             end},
             {from_json, fun(Req, St) ->
                 from_json(cowboy_req:method(Req), Req, St)
             end},
             {from_json, fun
                 (<<"PATCH">>, Req, St) -> 
-                    {<<>>, Req, St};
+                    _Spec = {'$var', Patch},
+                    %% true, {true, URI}, false
+                    {true, Req, St};
                 (<<"POST">>, Req, St) -> 
-                    {<<>>, Req, St};
+                    _Spec = {'$var', Post},
+                    %% true, {true, URI}, false
+                    Uri = <<>>, %TODO
+                    {{true, Uri}, Req, St};
                 (<<"PUT">>, Req, St) -> 
-                    {<<>>, Req, St}
-            end},
-            {to_msgpack, fun(Req, St) ->
-                {<<>>, Req, St}
+                    _Spec = {'$var', Put},
+                    %% true, {true, URI}, false
+                    {true, Req, St}
             end},
             {from_msgpack, fun(Req, St) ->
                 from_msgpack(cowboy_req:method(Req), Req, St)
             end},
             {from_msgpack, fun
                 (<<"PATCH">>, Req, St) -> 
-                    {<<>>, Req, St};
+                    _Spec = {'$var', Patch},
+                    %% true, {true, URI}, false
+                    {true, Req, St};
                 (<<"POST">>, Req, St) -> 
-                    {<<>>, Req, St};
+                    _Spec = {'$var', Post},
+                    %% true, {true, URI}, false
+                    Uri = <<>>, %TODO
+                    {{true, Uri}, Req, St};
                 (<<"PUT">>, Req, St) -> 
-                    {<<>>, Req, St}
+                    _Spec = {'$var', Put},
+                    %% true, {true, URI}, false
+                    {true, Req, St}
             end},
-            {perform_action, fun
-                (#{<<"type">> := <<"wamp_call">>} = M, St0) -> 
-                    GC0 = maps:get(gateway_context, St0),
-                    Action0 = maps:get(<<"action">>, GC0),
-                    %% Arguments might be funs waiting for the
-                    %% request.* values to be bound
-                    %% so we need to evaluate them passing the
-                    %% context
-                    #{
-                        <<"arguments">> := A,
-                        <<"arguments_kw">> := Akw,
-                        <<"details">> := D,
-                        <<"procedure">> := P,
-                        <<"retries">> := _R,
-                        <<"timeout">> := _T
-                    } = ?MODULE:eval_term(M, GC0),
-                    
-                    Msg = juno:call(D, P, A, Akw),
-                    %% Use Map to make wamp call
-                    %% and set the action.[result, error, timeout]
-                    Result = <<>>,
-                    Action1 = maps:update(<<"result">>, Result, Action0),
-                    GC1 = maps:update(<<"action">>, Action1, GC0),
-                    {<<>>, maps:update(gateway_context, GC1, St0)}
-            end},
-            {response, fun
-                (json, Result, St) ->
-                    case jsx:is_json(Result) of
-                        true ->
-                            Result;
-                        false ->
-                            jsx:encode(Result)
-                    end
-            end}     
+            %% PRIVATE
+            {update_context, fun update_context/2},
+            {maybe_encode, fun maybe_encode/2},
+            {perform_action, fun perform_action/3},
+            {to_binary_keys, fun to_binary_keys/1},
+            {eval_term, fun eval_term/2},
+            {method_to_lowercase, fun method_to_lowercase/1},
+            {from_http_response, fun from_http_response/5},
+            {url, fun url/3}
         ]
     ),
     {ModName, Forms}.
@@ -1276,67 +1417,12 @@ gen_path_code(Name, PathSpec) ->
 %% a context as an argument.
 %% @end
 %% -----------------------------------------------------------------------------
-get_ctxt_proxy() ->
+get_context_proxy() ->
     #{
-        <<"request">> => proxy_fun(<<"request">>),
-        <<"action">> => proxy_fun(<<"action">>)
+        <<"request">> => '$mop_proxy',
+        <<"action">> => '$mop_proxy'
     }.
 
-proxy_fun(Key) ->
-    fun(Ctxt) -> maps:get(Key, Ctxt) end.
-
-%% @private
--spec eval_term(any(), map()) -> any().
-eval_term(Map, Ctxt) when is_map(Map) ->
-    maps:map(fun(_, V) -> mop:eval(V, Ctxt) end, Map);
-
-eval_term(L, Ctxt) when is_list(L) ->
-    [mop:eval(X, Ctxt) || X <- L];
-
-eval_term(T, Ctxt) ->
-    mop:eval(T, Ctxt).
-
-
-
-
-merge(S0, Ctxt0) ->
-    %% We merge variables and defaults
-    VVars = maps:get(?VARS_KEY, S0, #{}),
-    VDefs = maps:get(?DEFAULTS_KEY, S0, #{}),
-    MVars = maps:merge(maps:get(?VARS_KEY, Ctxt0), VVars),
-    MDefs = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), VDefs),
-    %% We update section and ctxt
-    S1 = S0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
-    Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
-    Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
-    {S1, Ctxt2}.
-
-
-eval(Ctxt) ->
-    eval(Ctxt, Ctxt).
-
-
-%% @private
-eval(S0, Ctxt0) ->
-    Vars = maps:get(?VARS_KEY, S0),
-    Defs = maps:get(?DEFAULTS_KEY, S0),
-    %% We evaluate variables by iterating over each 
-    %% updating the context in each turn as we might have interdependencies
-    %% amongst them
-    VFun = fun(Var, Val, ICtxt) ->
-        IVars1 = maps:update(
-            Var, eval_term(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
-        maps:update(?VARS_KEY, IVars1, ICtxt)
-    end,
-    Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
-    
-    %% We evaluate defaults
-    DFun = fun(Var, Val, ICtxt) ->
-        IDefs1 = maps:update(
-            Var, eval_term(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
-        maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
-    end,
-maps:fold(DFun, Ctxt1, Defs).
 
 
 %% @private
@@ -1418,3 +1504,174 @@ to_binary_keys(Map) ->
         maps:put(list_to_binary(atom_to_list(K)), V, Acc)
     end,
     maps:fold(F, #{}, Map).
+
+
+
+
+
+%% @private
+perform_action(_, #{}, St) ->
+    {ok, <<>>, [], St};
+
+perform_action(
+    Method,
+    #{<<"action">> := #{<<"type">> := <<"forward">>} = Act} = Spec, 
+    St0) ->
+    Ctxt0 = maps:get(api_context, St0),
+    %% Arguments might be funs waiting for the
+    %% request.* values to be bound
+    %% so we need to evaluate them passing the
+    %% context
+    #{
+        <<"host">> := Host,
+        <<"path">> := Path,
+        <<"query_string">> := QS,
+        <<"headers">> := Headers,
+        <<"timeout">> := T,
+        <<"connect_timeout">> := CT,
+        % <<"retries">> := R,
+        % <<"retry_timeout">> := RT,
+        <<"body">> := Body
+    } = eval_term(Act, Ctxt0),
+    Opts = [
+        {connect_timeout, CT},
+        {recv_timeout, T}
+    ],
+    Url = url(Host, Path, QS),
+    io:format(
+        "Gateway is forwarding request to ~p~n", 
+        [[Method, Url, Headers, Body, Opts]]
+    ),
+    RSpec = maps:get(<<"response">>, Spec),
+
+    case hackney:request(
+        method_to_lowercase(Method), Url, Headers, Body, Opts) 
+    of
+        {ok, StatusCode, RespHeaders} when Method =:= head ->
+            from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
+        
+        {ok, StatusCode, RespHeaders, ClientRef} ->
+            {ok, Body} = hackney:body(ClientRef),
+            from_http_response(StatusCode, RespHeaders, Body, RSpec, St0);
+        
+        {error, Reason} ->
+            Ctxt1 = update_context({error, juno:error_map(Reason)}, Ctxt0),
+            #{
+                <<"body">> := Body,
+                <<"headers">> := Headers
+            } = eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
+            St1 = maps:update(api_context, Ctxt1, St0),
+            {error, Body, Headers, St1}
+    end;
+
+perform_action(
+    _Method, 
+    #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec, St0) ->
+    Ctxt0 = maps:get(api_context, St0),
+    %% Arguments might be funs waiting for the
+    %% request.* values to be bound
+    %% so we need to evaluate them passing the
+    %% context
+    #{
+        <<"arguments">> := A,
+        <<"arguments_kw">> := Akw,
+        <<"details">> := D,
+        <<"procedure">> := P,
+        <<"retries">> := _R,
+        <<"timeout">> := _T
+    } = eval_term(Act, Ctxt0),
+    RSpec = maps:get(<<"response">>, Spec),
+    case juno:call(D, P, A, Akw) of
+        {ok, Result, Ctxt1} ->
+            Ctxt2 = update_context({result, Result}, Ctxt1),
+            #{
+                <<"body">> := Body,
+                <<"headers">> := Headers
+            } = eval_term(maps:get(<<"on_result">>, RSpec), Ctxt2),
+            St1 = maps:update(api_context, Ctxt2, St0),
+            {ok, Body, Headers, St1};
+        {error, Error, Ctxt1} ->
+            Ctxt2 = update_context({error, Error}, Ctxt1),
+            #{
+                <<"body">> := Body,
+                <<"headers">> := Headers
+            } = eval_term(maps:get(<<"on_error">>, RSpec), Ctxt2),
+            St1 = maps:update(api_context, Ctxt2, St0),
+            Code = 500,
+            {error, Code, Body, Headers, St1}
+    end.
+
+
+%% @private
+from_http_response(StatusCode, RespBody, RespHeaders, Spec, St0) 
+when StatusCode >= 400 andalso StatusCode < 600->
+    Ctxt0 = maps:get(api_context, St0),
+    Error = #{ 
+        <<"http_code">> => StatusCode,
+        <<"body">> => RespBody,
+        <<"headers">> => maps:from_list(RespHeaders)
+    },
+    Ctxt1 = update_context({error, Error}, Ctxt0),
+    #{
+        <<"body">> := Body,
+        <<"headers">> := Headers
+    } = eval_term(maps:get(<<"on_error">>, Spec), Ctxt1),
+    St1 = maps:update(api_context, Ctxt1, St0),
+    {error, StatusCode, Body, Headers, St1};
+
+from_http_response(StatusCode, RespBody, RespHeaders, Spec, St0) ->
+    Ctxt0 = maps:get(api_context, St0),
+    Result = #{ 
+        <<"http_code">> => StatusCode,
+        <<"body">> => RespBody,
+        <<"headers">> => maps:from_list(RespHeaders)
+    },
+    Ctxt1 = update_context({error, Result}, Ctxt0),
+    #{
+        <<"body">> := Body,
+        <<"headers">> := Headers
+    } = eval_term(maps:get(<<"on_result">>, Spec), Ctxt1),
+    St1 = maps:update(api_context, Ctxt1, St0),
+    {ok, StatusCode, Body, Headers, St1}.
+
+
+%% @private
+maybe_encode(_, <<>>) ->
+    <<>>;
+
+maybe_encode(json, Term) ->
+    case jsx:is_json(Term) of
+        true ->
+            Term;
+        false ->
+            jsx:encode(Term)
+    end;
+
+ maybe_encode(msgpack, Term) ->
+     %% TODO see if we can catch error when Term is already encoded
+     msgpack:encode(Term).
+
+
+%% @private
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Used for hackney HTTP client
+%% @end
+%% -----------------------------------------------------------------------------
+method_to_lowercase(<<"DELETE">>) -> delete;
+method_to_lowercase(<<"GET">>) -> get;
+method_to_lowercase(<<"HEAD">>) -> head;
+method_to_lowercase(<<"OPTIONS">>) -> options;
+method_to_lowercase(<<"PATCH">>) -> patch;
+method_to_lowercase(<<"POST">>) -> post;
+method_to_lowercase(<<"PUT">>) -> put.
+
+
+%% @private
+url(Host, Path, <<>>) ->
+    <<Host/binary, Path/binary>>;
+
+url(Host, Path, QS) ->
+    <<Host/binary, Path/binary, $?, QS/binary>>.
+
+

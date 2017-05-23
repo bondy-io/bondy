@@ -69,7 +69,7 @@
   0},
  {<<"utils">>,
   {git,"git@gitlab.com:leapsight/utils.git",
-       {ref,"b28adacaa99432b3cada314e70419c79abb27995"}},
+       {ref,"19289da10eb6c43b6de6d590444c2e58da26e58a"}},
   0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
