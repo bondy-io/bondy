@@ -2,56 +2,94 @@
     <<"host">> => <<"_">>,
     <<"realm_uri">> => <<"com.myapi">>,
     <<"variables">> => #{
-        <<"foo">> => 100,
-        <<"schemes">> => [<<"http">>],
-        <<"oauth2">> => #{
-            <<"type">> => <<"oauth2">>,
-            <<"flow">> => <<"resource_owner_password_credentials">>,
-            <<"token_path">> => <<"/auth/access_token">>,
-            <<"revoke_token_path">> => <<"/auth/revoke_token">>,
-            <<"schemes">> => <<"{{variables.schemes}}">>
-        }
+        % <<"oauth2">> => #{
+        %     <<"type">> => <<"oauth2">>,
+        %     <<"flow">> => <<"resource_owner_password_credentials">>,
+        %     <<"token_path">> => <<"/auth/access_token">>,
+        %     <<"revoke_token_path">> => <<"/auth/revoke_token">>,
+        %     <<"schemes">> => <<"{{variables.schemes}}">>
+        % },
+        <<"schemes">> => [<<"http">>]
     },  
     <<"defaults">> => #{
         <<"retries">> => 0,
-        <<"timeout">> => 15000,
-        <<"security">> => <<"{{variables.oauth2}}">>,
+        <<"timeout">> => 5000,
+        <<"connect_timeout">> => 5000,
         <<"schemes">> => <<"{{variables.schemes}}">>
     },
     <<"versions">> =>  #{
         <<"1.0.0">> => #{
             <<"base_path">> => <<"/v1.0">>,
             <<"variables">> => #{
-                <<"foo">> => 200
-            },  
+                <<"host">> => <<"http://node-2.leapsight.io:5557">> 
+            },
             <<"defaults">> => #{
                 <<"timeout">> => 20000
             },
             <<"paths">> => #{
                 <<"/things">> => #{
-                    <<"variables">> => #{
-                        <<"foo">> => 300
-                    },  
-                    <<"defaults">> => #{
-                        <<"timeout">> => 30000
+                    <<"is_collection">> => true,
+                    <<"options">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"head">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
                     },
                     <<"get">> => #{
                         <<"action">> => #{
-                            <<"type">> => <<"wamp_call">>,
-                            <<"procedure">> => <<"com.myapi.foo">>,
-                            <<"details">> => #{},
-                            <<"arguments">> => [<<"{{variables.foo}}">>],
-                            <<"arguments_kw">> => #{}
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
                         },
                         <<"response">> => #{
-                            <<"on_timeout">> => #{
-                            
-                            },
                             <<"on_error">> => #{
-                            
+                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"post">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.rror.body}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
                             }
                         }
                     }
