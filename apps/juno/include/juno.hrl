@@ -123,6 +123,6 @@
 -define(JUNO_ERROR_NOT_IN_SESSION, <<"juno.error.not_in_session">>).
 -define(JUNO_SESSION_ALREADY_EXISTS, <<"juno.error.session_already_exists">>).
 
-
+-define(JUNO_ERROR_TIMEOUT, <<"juno.error.timeout">>).
 
 -type peer_id() :: {integer(), pid()}.
