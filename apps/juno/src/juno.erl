@@ -15,11 +15,9 @@
 
 
 -export([ack/2]).
+-export([call/5]).
 -export([error_map/1]).
--export([error_map/2]).
--export([error_map/3]).
 -export([error_uri/1]).
--export([make/0]).
 -export([send/2]).
 -export([send/3]).
 -export([start/0]).
@@ -38,7 +36,7 @@ start() ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sends a message to a peer.
-%% If the transport is not open it fails with an exception.
+%% It calls `send/3' with a timeout option set to 5 secs.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message()) -> ok | no_return().
@@ -50,6 +48,8 @@ send(PeerId, M) ->
 %% @doc
 %% Sends a message to a peer.
 %% If the transport is not open it fails with an exception.
+%% This function is used by the router (dealer | broker) to send wamp messages 
+%% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
@@ -126,6 +126,41 @@ ack(Pid, Ref) ->
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% A blocking call.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec call(map(), binary(), list(), map(), juno_context:context()) -> 
+    {ok, map(), juno_context:context()} 
+    | {error, map(), juno_context:context()}.
+
+call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
+    ReqId = juno_utils:get_id(global),
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, Payload),
+    case juno_router:forward(M, Ctxt0) of
+        {ok, Ctxt1} ->
+            Timeout = juno_utils:timeout(Opts),
+            receive
+                {?JUNO_PEER_CALL, Pid, Ref, #result{} = M} ->
+                    ok = juno:ack(Pid, Ref),
+                    {ok, to_map(M), Ctxt1};
+                {?JUNO_PEER_CALL, Pid, Ref, #error{} = M} ->
+                    ok = juno:ack(Pid, Ref),
+                    {ok, to_map(M), Ctxt1}
+            after 
+                Timeout ->
+                    Error = {timeout, <<"The operation could not be completed in the time specified.">>},
+                    {error, error_map(Error), Ctxt1}
+            end;
+        {stop, #error{} = Error, Ctxt1} ->
+            %% A sync reply (should not ever happen with calls)
+            {error, Error, Ctxt1};
+        {reply, #error{} = Error, Ctxt1} ->
+            %% A sync reply (should not ever happen with calls)
+            {error, Error, Ctxt1}
+    end.
+
 
 
 %% =============================================================================
@@ -139,31 +174,96 @@ ack(Pid, Ref) ->
 %% API - UTILS
 %% =============================================================================
 
-make() ->
-    make:all([load]).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 error_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
     <<"com.leapsight.error.", R/binary>>.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+error_map(#error{arguments = undefined, payload = undefined} = Err) ->
+    #error{error_uri = Uri} = Err,
+    #{
+        <<"code">> => Uri,
+        <<"message">> => <<>>,
+        <<"description">> => <<>>
+    };
+
+error_map(#error{arguments = L, payload = undefined} = Err)
+when is_list(L) ->
+    #error{error_uri = Uri} = Err,
+    Mssg = hd(L),
+    #{
+        <<"code">> => Uri,
+        <<"message">> => Mssg,
+        <<"description">> => Mssg
+    };
+
+error_map(#error{arguments = undefined, payload = M} = Err)
+when is_map(M) ->
+    #error{error_uri = Uri} = Err,
+    Mssg = maps:get(<<"message">>, M),
+    Desc = maps:get(<<"description">>, M, Mssg),
+    #{
+        <<"code">> => Uri,
+        <<"message">> => Mssg,
+        <<"description">> => Desc
+    };
+
+error_map(#error{arguments = L, payload = M} = Err) ->
+    #error{error_uri = Uri} = Err,
+    Mssg = hd(L),
+    Desc = maps:get(<<"description">>, M, Mssg),
+    #{
+        <<"code">> => Uri,
+        <<"message">> => Mssg,
+        <<"description">> => Desc
+    };
+
+    
+error_map({invalid_json, Data}) ->
+    #{
+        <<"code">> => invalid_data,
+        <<"message">> => <<"The data provided is not a valid json.">>,
+        value => Data,
+        <<"description">> => <<"The data provided is not a valid json.">>
+    };
+
+error_map({invalid_msgpack, Data}) ->
+    #{
+        <<"code">> => invalid_data,
+        <<"message">> => <<"The data provided is not a valid msgpack.">>,
+        value => Data,
+        <<"description">> => <<"The data provided is not a valid msgpack.">>
+    };
+
+error_map({Code, Mssg}) ->
+    #{
+        <<"code">> => Code,
+        <<"message">> => Mssg,
+        <<"description">> => Mssg
+    };
+
+error_map({Code, Mssg, Desc}) ->
+    #{
+        <<"code">> => Code,
+        <<"message">> => Mssg,
+        <<"description">> => Desc
+    };
 
 error_map(Code) ->
     #{
         <<"code">> => Code
     }.
 
-error_map(Code, Description) ->
-    #{
-        <<"code">> => Code,
-        <<"description">> => Description
-    }.
-
-error_map(Code, Description, UserInfo) ->
-    #{
-        <<"code">> => Code,
-        <<"description">> => Description,
-        <<"userInfo">> => UserInfo
-    }.
 
 
 
@@ -181,3 +281,29 @@ maybe_enqueue(true, _SessionId, _M, _) ->
 
 maybe_enqueue(false, _, _, Reason) ->
     exit(Reason).
+
+
+%% @private
+to_map(#result{} = M) ->
+    #result{
+        details = Details,
+        arguments = Args,
+        payload = ArgsKw
+    } = M,
+    #{
+        <<"details">> => Details,
+        <<"arguments">> => args(Args),
+        <<"arguments_kw">> => args_kw(ArgsKw)
+    };
+
+to_map(#error{} = M) ->
+    error_map(M).
+
+
+%% @private
+args(undefined) -> [];
+args(L) -> L.
+
+%% @private
+args_kw(undefined) -> #{};
+args_kw(M) -> M.
