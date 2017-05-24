@@ -125,4 +125,4 @@
 
 -define(JUNO_ERROR_TIMEOUT, <<"juno.error.timeout">>).
 
--type peer_id() :: {integer(), pid()}.
+-type peer_id() :: {pid(), integer()}.
