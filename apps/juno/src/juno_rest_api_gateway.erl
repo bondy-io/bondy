@@ -37,15 +37,18 @@
 %% -----------------------------------------------------------------------------
 start_listeners() ->
     Specs = specs(),
-    Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- Specs],
-    Compiled = juno_rest_api_gateway_spec:compile(Parsed),
-    SchemeRules = case juno_rest_api_gateway_spec:load(Compiled) of
-        [] ->
-            [{<<"http">>, []}];
-        Val ->
-            Val
-    end,
-    _ = [start_listener({Scheme, add_base_rules(Rules)}) 
+    % Parsed = [juno_rest_api_gateway_spec:parse(S) || S <- Specs],
+    % Compiled = juno_rest_api_gateway_spec:compile(Parsed),
+    % SchemeRules = case juno_rest_api_gateway_spec:load(Compiled) of
+    %     [] ->
+    %         [{<<"http">>, []}];
+    %     Val ->
+    %         Val
+    % end,
+    Parsed = [juno_rest_api_gateway_spec_parser:parse(S) || S <- Specs],
+    SchemeRules = juno_rest_api_gateway_spec_parser:dispatch_table(
+        Parsed, base_rules()),
+    _ = [start_listener({Scheme, Rules}) 
         || {Scheme, Rules} <- SchemeRules],
     ok.
 
@@ -73,7 +76,6 @@ start_listener({<<"https">>, Rules}) ->
 %% -----------------------------------------------------------------------------
 -spec start_http(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_http(Rules) ->
-    Table = cowboy_router:compile(Rules),
     % io:format("Rules ~p~n", [Rules]),
     % io:format("Table ~p~n", [Table]),
     cowboy:start_clear(
@@ -188,9 +190,9 @@ read_spec(FName) ->
 
 
 
-add_base_rules(T) ->
+base_rules() ->
     %% The WS entrypoint
-    [{'_', [{"/ws", juno_ws_handler, #{}}]} | T].
+    [{'_', [{"/ws", juno_ws_handler, #{}}]}].
 
 
 % %% @private
@@ -253,3 +255,7 @@ get_value(Key, Env) when is_map(Env) ->
 %         Val ->
 %             Val
 %     end.
+
+
+
+

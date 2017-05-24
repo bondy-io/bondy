@@ -84,10 +84,11 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.rror.body}}">>,
+                                <<"body">> => <<"{{action.error.body}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
+                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }

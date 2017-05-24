@@ -7,6 +7,7 @@
 -export([get_random_string/2]).
 -export([timeout/1]).
 -export([error_http_code/1]).
+-export([eval_term/2]).
 
 
 
@@ -108,6 +109,29 @@ error_http_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->
     500;
 error_http_code(_) ->
     400.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec eval_term(any(), map()) -> any().
+eval_term(F, Ctxt) when is_function(F, 1) ->
+    F(Ctxt);
+
+eval_term(Map, Ctxt) when is_map(Map) ->
+    F = fun
+        (_, V) ->
+            eval_term(V, Ctxt)
+    end,
+    maps:map(F, Map);
+
+eval_term(L, Ctxt) when is_list(L) ->
+    [eval_term(X, Ctxt) || X <- L];
+
+eval_term(T, Ctxt) ->
+    mop:eval(T, Ctxt).
+
 
 %% =============================================================================
 %%  PRIVATE

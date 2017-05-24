@@ -35,7 +35,7 @@
   0},
  {<<"leap">>,
   {git,"git@gitlab.com:leapsight/leap.git",
-       {ref,"65de1edc6b0e24771ce1124cad5d8d3a7a7155e5"}},
+       {ref,"b7cc3d3b6cd18cd185309dc6f1ce06e816c34ff1"}},
   0},
  {<<"ls_cowboy_utils">>,
   {git,"git@gitlab.com:leapsight/ls_cowboy_utils.git",
