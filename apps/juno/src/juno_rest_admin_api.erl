@@ -33,7 +33,7 @@
 start_admin_http() ->
     Port = juno_config:admin_http_port(),
     PoolSize = juno_config:http_acceptors_pool_size(),
-    cowboy:start_http(
+    cowboy:start_clear(
         juno_admin_http_listener,
         PoolSize,
         [{port, Port}],

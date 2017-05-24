@@ -159,7 +159,7 @@ handle_message(#publish{} = M, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Handles the following wamp calls:
+%% Handles the following META API wamp calls:
 %%
 %% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
 %% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.

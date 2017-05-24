@@ -28,7 +28,7 @@
 %% delegating the rest to either {@link juno_broker} or {@link juno_dealer},
 %% which implement the actual PubSub and RPC logic respectively.
 %%
-%%
+%%<pre>
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
 %% `--+---'                                    `--+---'
@@ -69,7 +69,7 @@
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
-%%
+%%</pre>
 %% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
@@ -97,7 +97,7 @@
 
 %% API
 -export([close_context/1]).
--export([handle_message/2]).
+-export([forward/2]).
 -export([roles/0]).
 -export([start_pool/0]).
 %% -export([has_role/2]). ur, ctxt
@@ -173,12 +173,12 @@ start_pool() ->
 %% Most 
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: wamp_message(), Ctxt :: juno_context:context()) ->
+-spec forward(M :: wamp_message(), Ctxt :: juno_context:context()) ->
     {ok, juno_context:context()}
     | {reply, Reply :: wamp_message(), juno_context:context()}
     | {stop, Reply :: wamp_message(), juno_context:context()}.
 
-handle_message(#hello{} = M, #{session := _} = Ctxt) ->
+forward(#hello{} = M, #{session := _} = Ctxt) ->
     %% Client already has a session!
     %% RFC:
     %% It is a protocol error to receive a second "HELLO" message during the
@@ -189,7 +189,7 @@ handle_message(#hello{} = M, #{session := _} = Ctxt) ->
         ?JUNO_SESSION_ALREADY_EXISTS, 
         <<"You've sent a HELLO message more than once.">>, Ctxt);
 
-handle_message(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
+forward(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     ok = update_stats(M, Ctxt), 
@@ -197,7 +197,7 @@ handle_message(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
         ?WAMP_ERROR_CANCELLED, 
         <<"You've sent a HELLO message more than once.">>, Ctxt);
 
-handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
+forward(#hello{realm_uri = Uri} = M, Ctxt0) ->
     %% Client is requesting a session
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     ok = update_stats(M, Ctxt1),
@@ -206,7 +206,7 @@ handle_message(#hello{realm_uri = Uri} = M, Ctxt0) ->
     maybe_open_session(
         maybe_auth_challenge(M#hello.details, get_realm(Uri), Ctxt1));
 
-handle_message(#authenticate{} = M, #{session := _} = Ctxt) ->
+forward(#authenticate{} = M, #{session := _} = Ctxt) ->
     %% Client already has a session so is already authenticated.
     ok = update_stats(M, Ctxt),
     abort(
@@ -214,7 +214,7 @@ handle_message(#authenticate{} = M, #{session := _} = Ctxt) ->
         <<"You've sent an AUTHENTICATE message more than once.">>, 
         Ctxt);
 
-handle_message(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
+forward(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
     %% Client is responding to a challenge
     ok = update_stats(M, Ctxt0),
     #authenticate{signature = Signature, extra = Extra} = M,
@@ -225,7 +225,7 @@ handle_message(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
             abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, Ctxt1)
     end;
             
-handle_message(#authenticate{} = M, Ctxt) ->
+forward(#authenticate{} = M, Ctxt) ->
     %% Client does not have a session and has not been sent a challenge
     ok = update_stats(M, Ctxt),
     abort(
@@ -233,13 +233,13 @@ handle_message(#authenticate{} = M, Ctxt) ->
         <<"You need to request a session first by sending a HELLO message.">>, 
         Ctxt);
 
-handle_message(M, #{session := _} = Ctxt) ->
+forward(M, #{session := _} = Ctxt) ->
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = update_stats(M, Ctxt),
     handle_session_message(M, Ctxt);
 
-handle_message(_M, Ctxt) ->
+forward(_M, Ctxt) ->
     %% Client does not have a session and message is not HELLO
     abort(
         ?JUNO_ERROR_NOT_IN_SESSION, 

@@ -54,9 +54,6 @@ simple_1_test(_) ->
                                 <<"arguments_kw">> => #{}
                             },
                             <<"response">> => #{
-                                <<"on_timeout">> => #{
-                                
-                                },
                                 <<"on_error">> => #{
                                 
                                 },
@@ -77,9 +74,6 @@ simple_1_test(_) ->
                                 <<"arguments_kw">> => #{}
                             },
                             <<"response">> => #{
-                                <<"on_timeout">> => #{
-                                
-                                },
                                 <<"on_error">> => #{
                                 
                                 },
@@ -116,8 +110,8 @@ simple_1_test(_) ->
                                 <<"timeout">> => 20000,
                                 <<"type">> => <<"wamp_call">>},
                             <<"response">> => #{<<"on_error">> => #{<<"body">> => <<>>,<<"headers">> => #{}},
-                            <<"on_result">> => #{<<"body">> => <<>>,<<"headers">> => #{}},
-                            <<"on_timeout">> => #{<<"body">> => <<>>,<<"headers">> => #{}}}},
+                            <<"on_result">> => #{<<"body">> => <<>>,<<"headers">> => #{}}
+                            }},
                         <<"is_collection">> => false,
                         <<"provides">> => [<<"application/json">>,<<"application/msgpack">>],
                         <<"schemes">> => [<<"http">>],
@@ -142,10 +136,6 @@ simple_1_test(_) ->
                                     <<"headers">> => #{}
                                 },
                                 <<"on_result">> => #{
-                                    <<"body">> => <<>>,
-                                    <<"headers">> => #{}
-                                },
-                                <<"on_timeout">> => #{
                                     <<"body">> => <<>>,
                                     <<"headers">> => #{}
                                 }

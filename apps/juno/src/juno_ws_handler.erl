@@ -60,8 +60,8 @@
 
 -export([init/2]).
 -export([websocket_init/1]).
--export([websocket_handle/3]).
--export([websocket_info/3]).
+-export([websocket_handle/2]).
+-export([websocket_info/2]).
 -export([terminate/3]).
 
 
@@ -128,35 +128,35 @@ websocket_init(St) ->
 %% Handles frames sent by client
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_handle(Data, Req, #state{subprotocol = undefined} = St) ->
+websocket_handle(Data, #state{subprotocol = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above, review and eliminate.
     lager:error(
         <<"Unsupported message ~p. Stacktrace: ~p">>, 
         [Data, erlang:get_stacktrace()]
     ),
-    {stop, Req, St};
+    {stop, St};
 
 websocket_handle(
-    {T, Data}, Req, #state{subprotocol = #subprotocol{frame_type = T}} = St) ->
-    wamp_handle(Data, Req, St);
+    {T, Data}, #state{subprotocol = #subprotocol{frame_type = T}} = St) ->
+    wamp_handle(Data, St);
 
-websocket_handle({ping, _Msg}, Req, St) ->
+websocket_handle({ping, _Msg}, St) ->
     %% Cowboy already handles pings for us
     %% We ignore this message and carry on listening
-    {ok, Req, St};
+    {ok, St};
 
-websocket_handle({pong, _Msg}, Req, St) ->
+websocket_handle({pong, _Msg}, St) ->
     %% We ignore this message and carry on listening
-    {ok, Req, St};
+    {ok, St};
 
-websocket_handle(Data, Req, St) ->
+websocket_handle(Data, St) ->
     lager:debug(
         <<"Unsupported message ~p. Stacktrace: ~p">>, 
         [Data, erlang:get_stacktrace()]
     ),
     %% We ignore this message and carry on listening
-    {ok, Req, St}.
+    {ok, St}.
 
 
 %% -----------------------------------------------------------------------------
@@ -165,30 +165,30 @@ websocket_handle(Data, Req, St) ->
 %% client. See {@link juno:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_info({timeout, _Ref, _Msg}, Req, St) ->
+websocket_info({timeout, _Ref, _Msg}, St) ->
     %% erlang:start_timer(1000, self(), <<"How' you doin'?">>),
-    %% reply(text, Msg, Req, St);
-    {ok, Req, St};
+    %% reply(text, Msg, St);
+    {ok, St};
 
-websocket_info({stop, Reason}, Req, St) ->
+websocket_info({stop, Reason}, St) ->
     %% TODO use lager
     lager:debug(
         <<"description='WAMP session shutdown', reason=~p">>, [Reason]),
-    {stop, Req, St};
+    {stop, St};
 
-websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, Req, St0) ->
+websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, St0) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using juno:send/2,3
     ok = juno:ack(Pid, Ref),
-    St1 = maybe_update_state(M, Req, St0),
+    St1 = maybe_update_state(M, St0),
     %% We encode and send the message to the client
     #state{subprotocol = #subprotocol{encoding = E, frame_type = T}} = St1,
     Reply = frame(T, wamp_encoding:encode(M, E)),
-    {reply, Reply, Req, St1};
+    {reply, Reply, St1};
 
-websocket_info(_, Req, St0) ->
+websocket_info(_, St0) ->
     %% Any other unwanted erlang messages
-    {ok, Req, St0}.
+    {ok, St0}.
 
 
 
@@ -272,7 +272,7 @@ subprotocol_init(undefined, Req0, St) ->
 subprotocol_init(#subprotocol{id = SId} = Sub, Req0, St0) ->
     Req1 = cowboy_req:set_resp_header(?WS_SUBPROTOCOL_HEADER_NAME, SId, Req0),
     St1 = St0#state{data = <<>>, subprotocol = Sub},
-    {cowboy_websocket, Req1, St1, ?CONN_TIMEOUT}.
+    {cowboy_websocket, Req1, St1, #{idle_timeout => ?CONN_TIMEOUT}}.
 
 
 %% -----------------------------------------------------------------------------
@@ -317,11 +317,12 @@ select_subprotocol([?WAMP2_MSGPACK_BATCHED | _T]) ->
 
 
 %% @private
-reply(FrameType, Frames, Req, #state{hibernate = true} = St) ->
-    {reply, frame(FrameType, Frames), Req, St, hibernate};
+reply(FrameType, Frames, #state{hibernate = true} = St) ->
+    {reply, frame(FrameType, Frames), St, hibernate};
 
-reply(FrameType, Frames, Req, #state{hibernate = false} = St) ->
-    {reply, frame(FrameType, Frames), Req, St}.
+reply(FrameType, Frames, #state{hibernate = false} = St) ->
+    {reply, frame(FrameType, Frames), St}.
+
 
 %% @private
 frame(Type, L) when is_list(L) ->
@@ -339,14 +340,14 @@ frame(Type, E) when Type == text orelse Type == binary ->
 %% the client when required.
 %% @end
 %% -----------------------------------------------------------------------------
--spec wamp_handle(binary(), cowboy_req:req(), state()) ->
-    {ok, cowboy_req:req(), state()}
-    | {ok, cowboy_req:req(), state(), hibernate}
-    | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state()}
-    | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], cowboy_req:req(), state(), hibernate}
-    | {shutdown, cowboy_req:req(), state()}.
+-spec wamp_handle(binary(), state()) ->
+    {ok, state()}
+    | {ok, state(), hibernate}
+    | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], state()}
+    | {reply, cowboy_websocket:frame() | [cowboy_websocket:frame()], state(), hibernate}
+    | {shutdown, state()}.
     
-wamp_handle(Data1, Req, St0) ->
+wamp_handle(Data1, St0) ->
     Data0 = St0#state.data,
     Ctxt0 = St0#state.context,
     #subprotocol{frame_type = T, encoding = E} = St0#state.subprotocol,
@@ -356,16 +357,16 @@ wamp_handle(Data1, Req, St0) ->
 
     case handle_wamp_messages(Messages, Ctxt0) of
         {ok, Ctxt1} ->
-            {ok, Req, set_ctxt(St1, Ctxt1)};
+            {ok, set_ctxt(St1, Ctxt1)};
         {stop, Ctxt1} ->
-            {shutdown, Req, set_ctxt(St1, Ctxt1)};
+            {shutdown, set_ctxt(St1, Ctxt1)};
         {reply, Replies, Ctxt1} ->
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
-            reply(T, ReplyFrames, Req, set_ctxt(St1, Ctxt1));
+            reply(T, ReplyFrames, set_ctxt(St1, Ctxt1));
         {stop, Replies, Ctxt1} ->
             self() ! {stop, <<"Router dropped session.">>},
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
-            reply(T, ReplyFrames, Req, set_ctxt(St1, Ctxt1))
+            reply(T, ReplyFrames, set_ctxt(St1, Ctxt1))
     end.
 
 
@@ -397,7 +398,7 @@ handle_wamp_messages(
     [#goodbye{} = M|_], Ctxt, Acc) ->
     %% The client initiated a goodbye, so we will not process
     %% any subsequent messages
-   case juno_router:handle_message(M, Ctxt) of
+   case juno_router:forward(M, Ctxt) of
         {stop, Ctxt1} ->
             {stop, lists:reverse(Acc), Ctxt1};
         {stop, Reply, Ctxt1} ->
@@ -405,7 +406,7 @@ handle_wamp_messages(
     end;
 
 handle_wamp_messages([H|T], Ctxt0, Acc) ->
-    case juno_router:handle_message(H, Ctxt0) of
+    case juno_router:forward(H, Ctxt0) of
         {ok, Ctxt1} ->
             handle_wamp_messages(T, Ctxt1, Acc);
         {stop, Reply, Ctxt1} ->
@@ -425,14 +426,14 @@ set_ctxt(St, Ctxt) ->
     St#state{context = juno_context:reset(Ctxt)}.
 
 
-maybe_update_state(#result{request_id = CallId}, _Req, St) ->
+maybe_update_state(#result{request_id = CallId}, St) ->
     Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
     set_ctxt(St, Ctxt1);
 
 maybe_update_state(
-    #error{request_type = ?CALL, request_id = CallId}, _Req, St) ->
+    #error{request_type = ?CALL, request_id = CallId}, St) ->
     Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
     set_ctxt(St, Ctxt1);
 
-maybe_update_state(_, _, St) ->
+maybe_update_state(_, St) ->
     St.
