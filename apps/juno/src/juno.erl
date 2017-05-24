@@ -147,18 +147,21 @@ call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
                     {ok, to_map(M), Ctxt1};
                 {?JUNO_PEER_CALL, Pid, Ref, #error{} = M} ->
                     ok = juno:ack(Pid, Ref),
-                    {ok, to_map(M), Ctxt1}
+                    {error, to_map(M), Ctxt1}
             after 
                 Timeout ->
                     Error = {timeout, <<"The operation could not be completed in the time specified.">>},
                     {error, error_map(Error), Ctxt1}
             end;
-        {stop, #error{} = Error, Ctxt1} ->
-            %% A sync reply (should not ever happen with calls)
-            {error, Error, Ctxt1};
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, Error, Ctxt1}
+            {error, error_map(Error), Ctxt1};
+        {reply, _, Ctxt1} -> 
+            %% A sync reply (should not ever happen with calls)
+            {error, error_map(inconsistency_error), Ctxt1};
+        {stop, #error{} = Error, Ctxt1} ->
+            %% A sync reply (should not ever happen with calls)
+            {error, error_map(Error), Ctxt1}
     end.
 
 

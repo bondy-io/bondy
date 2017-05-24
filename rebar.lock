@@ -73,7 +73,7 @@
   0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"3c7480e23cd4b1d1492584ac6603b364f8b996cd"}},
+       {ref,"705637933bbb3959a9be7253f03c7e58221effc7"}},
   0}]}.
 [
 {pkg_hash,[
