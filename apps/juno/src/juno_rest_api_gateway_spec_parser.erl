@@ -460,27 +460,6 @@
         required => true,
         allow_null => false,
         datatype => {in, [<<"static">>]}
-    },
-    <<"resource">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"timeout">> => #{
-        required => true,
-        datatype => timeout
-    },
-    <<"connect_timeout">> => #{
-        required => true,
-        datatype => timeout
-    },
-    <<"retries">> => #{
-        required => true,
-        datatype => integer
-    },
-    <<"retry_timeout">> => #{
-        required => true,
-        datatype => integer
     }
 }).
 
