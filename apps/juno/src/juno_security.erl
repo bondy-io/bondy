@@ -17,38 +17,10 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-% -module(riak_core_security).
+% -module(juno_security).
 -module(juno_security).
 
 
-% -record(oauth2_credentials, {
-%     id                  ::  binary(),
-%     consumer_id         ::  binary(),
-%     name                ::  binary(),
-%     client_id           ::  binary(),
-%     client_secret       ::  binary(),
-%     redirect_uri        ::  binary(),
-%     created_at          ::  binary()
-% }).
-
-% -record(oauth2_auth_codes, {
-%     id                      ::  binary(),
-%     api_id                  ::  binary(),
-%     code                    ::  binary(),
-%     authenticated_userid    ::  binary(),
-%     scope                   ::  binary(),
-%     created_at              ::  binary()
-% }).
-
-% -record(jwt, {
-%     id                      ::  binary(),
-%     created_at              ::  binary(),
-%     consumer_id             ::  binary(),
-%     key                     ::  binary(),
-%     secret                  ::  binary(),
-%     rsa_public_key          ::  binary(),
-%     algorithm               ::  binary() %% HS256 RS256 ES256
-% }).
 
 %% printing functions
 -export([print_users/1, print_sources/1, print_user/2,
@@ -58,16 +30,40 @@
 -export_type([context/0]).
 
 %% API
--export([authenticate/4, add_user/3, alter_user/3, del_user/2,
-         add_group/3, alter_group/3, del_group/2,
-         add_source/5, del_source/3,
-         add_grant/4, add_revoke/4, check_permission/3, check_permissions/3,
-         get_username/1, is_enabled/1, enable/1, disable/1, status/1,
-         get_ciphers/1, set_ciphers/2, print_ciphers/1]).
+-export([add_grant/4]).
+-export([add_group/3]).
+-export([add_revoke/4]).
+-export([add_source/5]).
+-export([add_user/3]).
+-export([alter_group/3]).
+-export([alter_user/3]).
+-export([authenticate/4]).
+-export([check_permission/2]).
+-export([check_permissions/2]).
+-export([del_group/2]).
+-export([del_source/3]).
+-export([del_user/2]).
+-export([disable/1]).
+-export([enable/1]).
+-export([find_user/2]).
+-export([find_one_user_by_metadata/3]).
+-export([find_unique_user_by_metadata/3]).
+-export([find_bucket_grants/3]).
+-export([get_ciphers/1]).
+-export([get_username/1]).
+-export([get_realm_uri/1]).
+-export([is_enabled/1]).
+-export([print_ciphers/1]).
+-export([set_ciphers/2]).
+-export([status/1]).
 
 %% =============================================================================
 %% ADDED BY US
 %% =============================================================================
+
+%% Note that Buckets are not buckets, 
+%% these are the "resources" or assets being protected
+
 -define(FULL_PREFIX(RealmUri, A, B), 
     {<<RealmUri/binary, $., A/binary>>, B}
 ).
@@ -103,6 +99,8 @@
 -export([lookup_user_sources/2]).
 -export([user_groups/2]).
 -export([list/2]).
+
+
 %% =============================================================================
 
 
@@ -148,24 +146,74 @@
 -define(REFRESH_TIME, 1000).
 -endif.
 
--record(context,
-        {username,
-         grants,
-         epoch}).
+-record(context,{
+    realm_uri, 
+    username,
+    grants,
+    epoch
+}).
 
 -type context() :: #context{}.
 -type bucket() :: {binary(), binary()} | binary().
 -type permission() :: {string()} | {string(), bucket()}.
 -type userlist() :: all | [string()].
+-type metadata_key() :: string().
+-type metadata_value() :: term().
+-type options() :: [{metadata_key(), metadata_value()}].
+
+
+-spec find_user(Realm :: binary(), Username :: string()) -> options() | {error, not_found}.
+find_user(Realm, Username) ->
+    case user_details(Realm, name2bin(Username)) of
+        undefined ->
+            {error, not_found};
+        Options ->
+            Options
+    end.
+
+-spec find_one_user_by_metadata(binary(), metadata_key(), metadata_value()) -> {Username :: string(), options()} | {error, not_found}.
+find_one_user_by_metadata(Realm, Key, Value) ->
+    plumtree_metadata:fold(
+      fun(User, _Acc) -> return_if_user_matches_metadata(Key, Value, User) end,
+      {error, not_found},
+      ?USERS_PREFIX(Realm),
+      [{resolver, lww}, {default, []}]).
+
+return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
+    case lists:member({Key, Value}, Options) of
+        true ->
+            throw({break, User});
+        false ->
+            {error, not_found}
+    end.
+
+-spec find_unique_user_by_metadata(binary(), metadata_key(), metadata_value()) ->
+    {Username :: string(), options()} | {error, not_found | not_unique}.
+find_unique_user_by_metadata(Realm, Key, Value) ->
+    plumtree_metadata:fold(fun (User, Acc) -> accumulate_matching_user(Key, Value, User, Acc) end,
+                            {error, not_found},
+                            ?USERS_PREFIX(Realm),
+                            [{resolver, lww}, {default, []}]).
+
+accumulate_matching_user(Key, Value, {_Username, Options} = User, Acc) ->
+    accumulate_matching_user(lists:member({Key, Value}, Options), User, Acc).
+
+accumulate_matching_user(true, User, {error, not_found}) ->
+    User;
+accumulate_matching_user(true, _User, _Acc) ->
+    throw({break, {error, not_unique}});
+accumulate_matching_user(false, _, Acc) ->
+    Acc.
+
+-spec find_bucket_grants(binary(), bucket(), user | group) -> [{RoleName :: string(), [permission()]}].
+find_bucket_grants(Realm, Bucket, Type) ->
+    Grants = match_grants(Realm, {'_', Bucket}, Type),
+    lists:map(fun ({{Role, _Bucket}, Permissions}) ->
+                      {bin2name(Role), Permissions}
+              end, Grants).
 
 
 
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 prettyprint_users([all], _) ->
     "all";
 prettyprint_users(Users0, Width) ->
@@ -173,10 +221,6 @@ prettyprint_users(Users0, Width) ->
     Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
     prettyprint_permissions(Users, Width).
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 print_sources(RealmUri) ->
     Uri = name2bin(RealmUri),
     Sources = plumtree_metadata:fold(fun({{Username, CIDR}, [{Source, Options}]}, Acc) ->
@@ -464,11 +508,10 @@ prettyprint_permissions([Permission|Rest], Width, [H|T] =Acc) ->
 prettyprint_permissions([Permission|Rest], Width, Acc) ->
     prettyprint_permissions(Rest, Width, [[Permission] | Acc]).
 
--spec check_permission(
-    Permission :: permission(), uri(), Context :: context()) ->
+-spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
-check_permission({Permission}, RealmUri,  Context0) ->
-    Context = maybe_refresh_context(RealmUri, Context0),
+check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
+    Context = maybe_refresh_context(Uri, Context0),
     %% The user needs to have this permission applied *globally*
     %% This is for things like mapreduce with undetermined inputs or
     %% permissions that don't tie to a particular bucket, like 'ping' and
@@ -484,8 +527,8 @@ check_permission({Permission}, RealmUri,  Context0) ->
                        Context#context.username, "' does not have '",
                        Permission, "' on any"], utf8, utf8), Context}
     end;
-check_permission(RealmUri, {Permission, Bucket}, Context0) ->
-    Context = maybe_refresh_context(RealmUri, Context0),
+check_permission({Permission, Bucket}, #context{realm_uri = Uri} = Context0) ->
+    Context = maybe_refresh_context(Uri, Context0),
     MatchG = match_grant(Bucket, Context#context.grants),
     case lists:member(Permission, MatchG) of
         true ->
@@ -499,15 +542,15 @@ check_permission(RealmUri, {Permission, Bucket}, Context0) ->
                        bucket2iolist(Bucket)], utf8, utf8), Context}
     end.
 
-check_permissions(Permission, RealmUri, Ctx) when is_tuple(Permission) ->
+check_permissions(Permission, Ctx) when is_tuple(Permission) ->
     %% single permission
-    check_permission(Permission, RealmUri, Ctx);
-check_permissions([], _, Ctx) ->
+    check_permission(Permission, Ctx);
+check_permissions([], Ctx) ->
     {true, Ctx};
-check_permissions([Permission|Rest], RealmUri, Ctx) ->
-    case check_permission(Permission, RealmUri, Ctx) of
+check_permissions([Permission|Rest], Ctx) ->
+    case check_permission(Permission, Ctx) of
         {true, NewCtx} ->
-            check_permissions(Rest, RealmUri, NewCtx);
+            check_permissions(Rest, NewCtx);
         Other ->
             %% return non-standard result
             Other
@@ -515,6 +558,9 @@ check_permissions([Permission|Rest], RealmUri, Ctx) ->
 
 get_username(#context{username=Username}) ->
     Username.
+
+get_realm_uri(#context{realm_uri=Uri}) ->
+    Uri.
 
 -spec authenticate(
     RealmUri :: uri(), 
@@ -580,7 +626,7 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
                             end;
                         Source ->
                             %% check for a dynamically registered auth module
-                            AuthMods = app_helper:get_env(riak_core,
+                            AuthMods = app_helper:get_env(juno,
                                                           auth_mods, []),
                             case proplists:get_value(Source, AuthMods) of
                                 undefined ->
@@ -980,6 +1026,11 @@ status(RealmUri) ->
 %% INTERNAL
 %% ============
 
+match_grants(Realm, Match, Type) ->
+    Grants = plumtree_metadata:to_list(metadata_grant_prefix(Realm, Type),
+                                        [{match, Match}]),
+    [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
+
 metadata_grant_prefix(RealmUri, user) ->
     Uri = name2bin(RealmUri),
     ?USER_GRANTS_PREFIX(Uri);
@@ -1076,19 +1127,20 @@ concat_role(group, Name) ->
 %% right now, but it'll do for the moment.
 get_context(RealmUri, Username) when is_binary(Username) ->
     Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
-    #context{username=Username, grants=Grants, epoch=os:timestamp()}.
+    #context{
+        realm_uri = name2bin(RealmUri), 
+        username=Username, 
+        grants=Grants, 
+        epoch=os:timestamp()}.
 
 accumulate_grants(RealmUri, Role, Type) ->
     %% The 'all' grants always apply
-    All = plumtree_metadata:fold(fun({{_R, _Bucket}, [?TOMBSTONE]}, A) ->
-                                          A;
-                                     ({{_R, Bucket}, [Permissions]}, A) ->
-                                          [{{<<"group/all">>, Bucket},
-                                            Permissions}|A]
-                                  end, [], metadata_grant_prefix(RealmUri, group),
-                                  [{match, {all, '_'}}]),
+    All = lists:map(fun ({{_Role, Bucket}, Permissions}) ->
+                            {{<<"group/all">>, Bucket}, Permissions}
+                    end, match_grants(RealmUri, {all, '_'}, group)),
     {Grants, _Seen} = accumulate_grants([Role], [], All, Type, RealmUri),
     lists:flatten(Grants).
+
 
 accumulate_grants([], Seen, Acc, _Type, _) ->
     {Acc, Seen};
@@ -1100,16 +1152,14 @@ accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
 
+
     Prefix = metadata_grant_prefix(RealmUri, Type),
 
-    Grants = plumtree_metadata:fold(fun({{_R, _Bucket}, [?TOMBSTONE]}, A) ->
-                                             A;
-                                        ({{R, Bucket}, [Permissions]}, A) ->
-                                             [{{concat_role(Type, R), Bucket},
-                                               Permissions}|A]
-                                     end, [], Prefix,
-                                     [{match, {Role, '_'}}]),
+    Grants = lists:map(fun ({{_Role, Bucket}, Permissions}) ->
+                               {{concat_role(Type, Role), Bucket}, Permissions}
+                       end, match_grants(RealmUri, {Role, '_'}, Type)),
     accumulate_grants(Roles, NewSeen, [Grants|NewAcc], Type, RealmUri).
+
 
 %% lookup a key in a list of key/value tuples. Like proplists:get_value but
 %% faster.
@@ -1202,7 +1252,7 @@ validate_password_option(Pass, Options) ->
 
 
 validate_permissions(Perms) ->
-    KnownPermissions = app_helper:get_env(riak_core, permissions, []),
+    KnownPermissions = app_helper:get_env(juno, permissions, []),
     validate_permissions(Perms, KnownPermissions).
 
 validate_permissions([], _) ->
@@ -1462,6 +1512,11 @@ role_exists(RealmUri, Rolename, RoleType) ->
 illegal_name_chars(Name) ->
     [Name] =/= string:tokens(Name, ?ILLEGAL).
 
+bin2name(Bin) when is_binary(Bin) ->
+    unicode:characters_to_list(Bin, utf8);
+%% 'all' can be stored in a grant instead of a binary name
+bin2name(Name) when is_atom(Name) ->
+    Name.
 
 %% Rather than introduce yet another dependency to Riak this late in
 %% the 2.0 cycle, we'll live with string:to_lower/1. It will lowercase
