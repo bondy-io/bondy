@@ -146,11 +146,11 @@
 -define(REFRESH_TIME, 1000).
 -endif.
 
--record(context,{
-    realm_uri, 
-    username,
-    grants,
-    epoch
+-record(context, {
+    realm_uri   ::  binary(), 
+    username    ::  binary(),
+    grants      ::  [{any(), any()}],
+    epoch       ::  erlang:timestamp()
 }).
 
 -type context() :: #context{}.
@@ -1151,9 +1151,6 @@ accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
                         group_exists(RealmUri, G)],
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
-
-
-    Prefix = metadata_grant_prefix(RealmUri, Type),
 
     Grants = lists:map(fun ({{_Role, Bucket}, Permissions}) ->
                                {{concat_role(Type, Role), Bucket}, Permissions}
