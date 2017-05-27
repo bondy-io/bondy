@@ -19,6 +19,7 @@
             exometer_core,  
             cowboy,
             jsx,
+            jose,
             msgpack,
             hackney,
             wamp
