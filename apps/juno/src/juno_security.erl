@@ -94,6 +94,8 @@
 
 -export_type([cidr/0]).
 
+-export([user_grants/2]).
+-export([group_grants/2]).
 -export([lookup_user/2]).
 -export([lookup_group/2]).
 -export([lookup_user_sources/2]).
@@ -354,9 +356,9 @@ print_grants(RealmUri, RoleName) ->
     Name = name2bin(RoleName),
     case is_prefixed(Name) of
         true ->
-            print_grants(chop_name(Name), role_type(Uri, Name));
+            print_grants(Uri, chop_name(Name), role_type(Uri, Name));
         false ->
-            case { print_grants(Uri, Name, user), print_grants(Name, group) } of
+            case { print_grants(Uri, Name, user), print_grants(Uri, Name, group) } of
                 {{error, _}, {error, _}} ->
                     {error, {unknown_role, Name}};
                 _ ->
@@ -1651,3 +1653,17 @@ user_groups(RealmUri, {_, Opts}) ->
         group_exists(RealmUri, R)].
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+user_grants(RealmUri, Username) ->
+    accumulate_grants(RealmUri, Username, user).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+group_grants(RealmUri, Group) ->
+    accumulate_grants(RealmUri, Group, group).
