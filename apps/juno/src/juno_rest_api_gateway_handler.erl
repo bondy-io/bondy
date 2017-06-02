@@ -1,5 +1,14 @@
 -module(juno_rest_api_gateway_handler).
 
+-type state() :: #{
+    api_context => map(),
+    session => any(),
+    realm_uri => binary(), 
+    deprecated => boolean(),
+    security => map()
+}.
+
+
 -export([init/2]).
 -export([allowed_methods/2]).
 -export([content_types_accepted/2]).
@@ -14,10 +23,6 @@
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
--type state() :: #{
-    api_context => map(),
-    session => any()
-}.
 
 
 
@@ -140,7 +145,7 @@ provide(Enc, Req0, #{api_spec := Spec} = St0)  ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {maybe_encode(Enc, Body), Req1, St1};
+            {juno_utils:maybe_encode(Enc, Body), Req1, St1};
         
         {ok, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
@@ -237,22 +242,6 @@ update_context(Req0, Ctxt) ->
     },
     maps:put(<<"request">>, M, Ctxt).
 
-
-%% @private
-maybe_encode(_, <<>>) ->
-    <<>>;
-
-maybe_encode(json, Term) ->
-    case jsx:is_json(Term) of
-        true ->
-            Term;
-        false ->
-            jsx:encode(Term)
-    end;
-
- maybe_encode(msgpack, Term) ->
-     %% TODO see if we can catch error when Term is already encoded
-     msgpack:encode(Term).
 
 
 
@@ -393,7 +382,7 @@ prepare_request(Encoding, Response, Req0) ->
         <<"headers">> := Headers
     } = Response,
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(maybe_encode(Encoding, Body), Req1).
+    cowboy_req:set_resp_body(juno_utils:maybe_encode(Encoding, Body), Req1).
 
 
 %% @private

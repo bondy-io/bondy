@@ -234,7 +234,10 @@ put(Uri, Opts) ->
         begin
             Priv = jose_jwk:generate_key({namedCurve, secp256r1}),
             Kid = list_to_binary(integer_to_list(erlang:phash2(Priv))),
-            {Kid, jose_jwk:merge(Priv, #{<<"kid">> => Kid})}
+            Fields = #{
+                <<"kid">> => Kid
+            },
+            {Kid, jose_jwk:merge(Priv, Fields)}
         end || _ <- lists:seq(1, 3)
     ]),
     

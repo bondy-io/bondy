@@ -1130,15 +1130,17 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
         <<"content_types_accepted">> => content_types_accepted(Accepts),
         <<"content_types_provided">> => content_types_provided(Provides)
     },
+    
+    Schemes = maps:get(<<"schemes">>, Spec3),
+    Sec = maps:get(<<"security">>, Spec3),
     Mod = juno_rest_api_gateway_handler,
+    %% State informally defined in juno_rest_api_gateway_handler
     State = #{
         api_spec => Spec3,
         realm_uri => Realm, 
         deprecated => Deprecated,
-        authmethod => oauth2 %% TODO Get this from API Version Spec
+        security => Sec
     },
-    Schemes = maps:get(<<"schemes">>, Spec3),
-    Sec = maps:get(<<"security">>, Spec3),
     lists:flatten([
         [
             {S, Host, Realm, AbsPath, Mod, State},
@@ -1163,14 +1165,13 @@ security_scheme_rules(
         <<"revoke_token_path">> := Revoke
     } = Sec,
 
-    A = #{realm_uri => Realm},
-    B = #{authmethod => oauth2, realm_uri => Realm},
+    St = #{realm_uri => Realm},
 
     Mod = juno_rest_oauth2_handler,
     [
-        {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, A},
+        {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, St},
         %% Revoke is secured
-        {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, B}
+        {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St}
     ];
 
 security_scheme_rules(_, _, _, _, _) ->
@@ -1201,10 +1202,13 @@ content_types_accepted(L) when is_list(L) ->
     [content_types_accepted(T) || T <- L];
 
 content_types_accepted(<<"application/json">>) ->
-    {<<"application/json">>, from_json};
+    % {<<"application/json">>, from_json};
+    {{<<"application">>, <<"json">>, '*'}, from_json};
+
 
 content_types_accepted(<<"application/msgpack">>) ->
-    {<<"application/msgpack">>, from_msgpack}.
+    % {<<"application/msgpack">>, from_msgpack}.
+    {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack}.
 
 
 %% @private
@@ -1212,10 +1216,12 @@ content_types_provided(L) when is_list(L) ->
     [content_types_provided(T) || T <- L];
 
 content_types_provided(<<"application/json">>) ->
-    {<<"application/json">>, to_json};
+    % {<<"application/json">>, to_json};
+    {{<<"application">>, <<"json">>, '*'}, to_json};
 
 content_types_provided(<<"application/msgpack">>) ->
-    {<<"application/msgpack">>, to_msgpack}.
+    % {<<"application/msgpack">>, to_msgpack};
+    {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}.
 
 
 

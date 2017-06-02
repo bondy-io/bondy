@@ -8,12 +8,34 @@
 -export([timeout/1]).
 -export([error_http_code/1]).
 -export([eval_term/2]).
+-export([maybe_encode/2]).
 
 
 
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_encode(_, <<>>) ->
+    <<>>;
+
+maybe_encode(json, Term) ->
+    case jsx:is_json(Term) of
+        true ->
+            Term;
+        false ->
+            jsx:encode(Term)
+    end;
+
+ maybe_encode(msgpack, Term) ->
+     %% TODO see if we can catch error when Term is already encoded
+     msgpack:encode(Term).
+
 
 
 %% -----------------------------------------------------------------------------
