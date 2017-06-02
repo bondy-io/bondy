@@ -1,6 +1,7 @@
 {"1.1.0",
 [{<<"base64url">>,{pkg,<<"base64url">>,<<"0.0.1">>},1},
  {<<"bear">>,{pkg,<<"bear">>,<<"0.8.3">>},2},
+ {<<"bert">>,{pkg,<<"bert">>,<<"0.1.0">>},0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"1.1.0">>},1},
  {<<"cf">>,{pkg,<<"cf">>,<<"0.2.2">>},1},
  {<<"cowboy">>,
@@ -71,16 +72,17 @@
   0},
  {<<"utils">>,
   {git,"git@gitlab.com:leapsight/utils.git",
-       {ref,"19289da10eb6c43b6de6d590444c2e58da26e58a"}},
+       {ref,"921257baad6320eba420239de7ef834d0ea54972"}},
   0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"705637933bbb3959a9be7253f03c7e58221effc7"}},
+       {ref,"8827c974f03889ba853ed5337b3b5927aafe5eb1"}},
   0}]}.
 [
 {pkg_hash,[
  {<<"base64url">>, <<"36A90125F5948E3AFD7BE97662A1504B934DD5DAC78451CA6E9ABF85A10286BE">>},
  {<<"bear">>, <<"866002127A97932720A0D475D8582C98EC5FB78DB3A18DFE7EAF91594D9024B8">>},
+ {<<"bert">>, <<"A87D6693515070A9B287C1043CB7E5B2406BE0357685022764BFBD2609703555">>},
  {<<"certifi">>, <<"C9B71A547016C2528A590CCFC28DE786C7EDB74AAFA17446B84F54E04EFC00EE">>},
  {<<"cf">>, <<"7F2913FFF90ABCABD0F489896CFEB0B0674F6C8DF6C10B17A83175448029896C">>},
  {<<"edown">>, <<"6803599606B10F8E328D6D60C44CD16244CD2429908894C415FCE4211C3BFEFD">>},
