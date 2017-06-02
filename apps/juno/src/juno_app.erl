@@ -14,7 +14,7 @@
 
 -define(JUNO_REALM, #{
     <<"description">> => <<"The Juno administrative realm.">>,
-    <<"authmethods">> => [?WAMPCRA_AUTH]
+    <<"authmethods">> => [?WAMPCRA_AUTH, ?TICKET_AUTH]
 }).
 
 

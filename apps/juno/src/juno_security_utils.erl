@@ -26,7 +26,10 @@
 -spec authenticate(auth_scheme(), uri(), juno_session:peer()) -> 
     {ok, juno_security:context()} | {error, auth_error_reason()}.
 
-authenticate({?WAMPCRA_AUTH, AuthId, Signature, _Extra}, Realm, Peer) ->
+authenticate({?TICKET_AUTH, AuthId, Signature}, Realm, Peer) ->
+    authenticate({basic, AuthId, Signature}, Realm, Peer);
+    
+authenticate({?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
     juno_security:authenticate(
         Realm, ?CHARS2LIST(AuthId), {hash, Signature}, conn_info(Peer));
 
