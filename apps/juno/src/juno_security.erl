@@ -56,6 +56,7 @@
 -export([print_ciphers/1]).
 -export([set_ciphers/2]).
 -export([status/1]).
+-export([context_to_map/1]).
 
 %% =============================================================================
 %% ADDED BY US
@@ -162,6 +163,7 @@
 -type metadata_key() :: string().
 -type metadata_value() :: term().
 -type options() :: [{metadata_key(), metadata_value()}].
+
 
 
 -spec find_user(Realm :: binary(), Username :: string()) -> options() | {error, not_found}.
@@ -564,92 +566,208 @@ get_username(#context{username=Username}) ->
 get_realm_uri(#context{realm_uri=Uri}) ->
     Uri.
 
+% -spec authenticate(
+%     RealmUri :: uri(), 
+%     Username::binary(), 
+%     Password::binary(), 
+%     ConnInfo :: [{atom(), any()}]) -> {ok, context()} | {error, term()}.
+% authenticate(RealmUri, Username, Password, ConnInfo) ->
+%     Uri = name2bin(RealmUri),
+%     case user_details(RealmUri, Username) of
+%         undefined ->
+%             {error, unknown_user};
+%         UserData ->
+%             Sources0 = plumtree_metadata:fold(fun({{Un, CIDR}, [{Source, Options}]}, Acc) ->
+%                                                       [{Un, CIDR, Source, Options}|Acc];
+%                                                   ({{_, _}, [?TOMBSTONE]}, Acc) ->
+%                                                        Acc
+%                                               end, [], ?SOURCES_PREFIX(Uri)),
+%             Sources = sort_sources(Sources0),
+%             case match_source(Sources, Username,
+%                               proplists:get_value(ip, ConnInfo)) of
+%                 {ok, Source, SourceOptions} ->
+%                     case Source of
+%                         trust ->
+%                             %% trust always authenticates
+%                             {ok, get_context(Uri, Username)};
+%                         password ->
+%                             %% pull the password out of the userdata
+%                             case lookup("password", UserData) of
+%                                 undefined ->
+%                                     lager:warning("User ~p is configured for "
+%                                                   "password authentication, but has "
+%                                                   "no password", [Username]),
+%                                     {error, missing_password};
+%                                 PasswordData ->
+%                                     HashedPass = lookup(hash_pass, PasswordData),
+%                                     HashFunction = lookup(hash_func, PasswordData),
+%                                     Salt = lookup(salt, PasswordData),
+%                                     Iterations = lookup(iterations, PasswordData),
+%                                     case juno_pw_auth:check_password(Password,
+%                                                                           HashedPass,
+%                                                                           HashFunction,
+%                                                                           Salt,
+%                                                                           Iterations) of
+%                                         true ->
+%                                             {ok, get_context(Uri, Username)};
+%                                         false ->
+%                                             {error, bad_password}
+%                                     end
+%                             end;
+%                         certificate ->
+%                             case proplists:get_value(common_name, ConnInfo) of
+%                                 undefined ->
+%                                     {error, no_common_name};
+%                                 CN ->
+%                                     %% TODO postgres support a map from
+%                                     %% common-name to username, should we?
+%                                     case name2bin(CN) == Username of
+%                                         true ->
+%                                             {ok, get_context(Uri, Username)};
+%                                         false ->
+%                                             {error, common_name_mismatch}
+%                                     end
+%                             end;
+%                         Source ->
+%                             %% check for a dynamically registered auth module
+%                             AuthMods = app_helper:get_env(juno,
+%                                                           auth_mods, []),
+%                             case proplists:get_value(Source, AuthMods) of
+%                                 undefined ->
+%                                     lager:warning("User ~p is configured with unknown "
+%                                                   "authentication source ~p",
+%                                                   [Username, Source]),
+%                                     {error, unknown_source};
+%                                 AuthMod ->
+%                                     case AuthMod:auth(Username, Password,
+%                                                       UserData, SourceOptions) of
+%                                         ok ->
+%                                             {ok, get_context(Uri, Username)};
+%                                         error ->
+%                                             {error, bad_password}
+%                                     end
+%                             end
+%                     end;
+%                 {error, Reason} ->
+%                     {error, Reason}
+%             end
+%     end.
+
+
 -spec authenticate(
     RealmUri :: uri(), 
     Username::binary(), 
-    Password::binary(), 
+    Password::binary() | {hash, binary()}, 
     ConnInfo :: [{atom(), any()}]) -> {ok, context()} | {error, term()}.
+
 authenticate(RealmUri, Username, Password, ConnInfo) ->
-    Uri = name2bin(RealmUri),
     case user_details(RealmUri, Username) of
         undefined ->
             {error, unknown_user};
-        UserData ->
-            Sources0 = plumtree_metadata:fold(fun({{Un, CIDR}, [{Source, Options}]}, Acc) ->
-                                                      [{Un, CIDR, Source, Options}|Acc];
-                                                  ({{_, _}, [?TOMBSTONE]}, Acc) ->
-                                                       Acc
-                                              end, [], ?SOURCES_PREFIX(Uri)),
-            Sources = sort_sources(Sources0),
-            case match_source(Sources, Username,
-                              proplists:get_value(ip, ConnInfo)) of
-                {ok, Source, SourceOptions} ->
-                    case Source of
-                        trust ->
-                            %% trust always authenticates
-                            {ok, get_context(Uri, Username)};
-                        password ->
-                            %% pull the password out of the userdata
-                            case lookup("password", UserData) of
-                                undefined ->
-                                    lager:warning("User ~p is configured for "
-                                                  "password authentication, but has "
-                                                  "no password", [Username]),
-                                    {error, missing_password};
-                                PasswordData ->
-                                    HashedPass = lookup(hash_pass, PasswordData),
-                                    HashFunction = lookup(hash_func, PasswordData),
-                                    Salt = lookup(salt, PasswordData),
-                                    Iterations = lookup(iterations, PasswordData),
-                                    case juno_pw_auth:check_password(Password,
-                                                                          HashedPass,
-                                                                          HashFunction,
-                                                                          Salt,
-                                                                          Iterations) of
-                                        true ->
-                                            {ok, get_context(Uri, Username)};
-                                        false ->
-                                            {error, bad_password}
-                                    end
-                            end;
-                        certificate ->
-                            case proplists:get_value(common_name, ConnInfo) of
-                                undefined ->
-                                    {error, no_common_name};
-                                CN ->
-                                    %% TODO postgres support a map from
-                                    %% common-name to username, should we?
-                                    case name2bin(CN) == Username of
-                                        true ->
-                                            {ok, get_context(Uri, Username)};
-                                        false ->
-                                            {error, common_name_mismatch}
-                                    end
-                            end;
-                        Source ->
-                            %% check for a dynamically registered auth module
-                            AuthMods = app_helper:get_env(juno,
-                                                          auth_mods, []),
-                            case proplists:get_value(Source, AuthMods) of
-                                undefined ->
-                                    lager:warning("User ~p is configured with unknown "
-                                                  "authentication source ~p",
-                                                  [Username, Source]),
-                                    {error, unknown_source};
-                                AuthMod ->
-                                    case AuthMod:auth(Username, Password,
-                                                      UserData, SourceOptions) of
-                                        ok ->
-                                            {ok, get_context(Uri, Username)};
-                                        error ->
-                                            {error, bad_password}
-                                    end
-                            end
-                    end;
-                {error, Reason} ->
-                    {error, Reason}
+        Data ->
+            M = #{
+                username => Username,
+                password => Password,
+                realm_uri => RealmUri,
+                conn_info => ConnInfo 
+            },
+            auth_with_data(Data, M)
+    end.
+
+
+%% @private
+auth_with_data(UserData, M0) ->
+    Uri = name2bin(maps:get(realm_uri, M0)),
+    F = fun
+        ({{Un, CIDR}, [{Source, Options}]}, Acc) ->
+            [{Un, CIDR, Source, Options}|Acc];
+        ({{_, _}, [?TOMBSTONE]}, Acc) ->
+            Acc
+    end,
+    Sources0 = plumtree_metadata:fold(F, [], ?SOURCES_PREFIX(Uri)),
+    Sources = sort_sources(Sources0),
+    IP = proplists:get_value(ip, maps:get(conn_info, M0)),
+    case match_source(Sources, maps:get(username, M0), IP) of
+        {ok, Source, Opts} ->
+            M1 = M0#{source_options => Opts},
+            auth_with_source(Source, UserData, M1);
+        {error, _} = Error ->
+            Error
+    end.
+
+
+%% @private
+auth_with_source(trust, _, M) ->
+    %% trust always authenticates
+    {ok, get_context(M)};
+
+auth_with_source(password, UserData, M) ->
+    % pull the password out of the userdata
+    case lookup("password", UserData) of
+        undefined ->
+            lager:warning("User ~p is configured for "
+                            "password authentication, but has "
+                            "no password", [maps:get(username, M)]),
+            {error, missing_password};
+        PasswordData ->
+            HashedPass = lookup(hash_pass, PasswordData),
+            HashFunction = lookup(hash_func, PasswordData),
+            Salt = lookup(salt, PasswordData),
+            Iterations = lookup(iterations, PasswordData),
+            case 
+                juno_pw_auth:check_password(
+                    maps:get(password, M),
+                    HashedPass,
+                    HashFunction,
+                    Salt,
+                    Iterations) 
+            of
+                true ->
+                    {ok, get_context(M)};
+                false ->
+                    {error, bad_password}
+            end
+    end;
+
+auth_with_source(certificate, _, M) ->
+    case proplists:get_value(common_name, maps:get(conn_info, M)) of
+        undefined ->
+            {error, no_common_name};
+        CN ->
+            %% TODO postgres support a map from
+            %% common-name to username, should we?
+            case name2bin(CN) == maps:get(username, M) of
+                true ->
+                    {ok, get_context(M)};
+                false ->
+                    {error, common_name_mismatch}
+            end
+    end;
+
+auth_with_source(Source, UserData, M) ->
+    %% check for a dynamically registered auth module
+    Opts = maps:get(source_options, M),
+    AuthMods = app_helper:get_env(juno, auth_mods, []),
+    Username = maps:get(username, M),
+    case proplists:get_value(Source, AuthMods) of
+        undefined ->
+            lager:warning(
+                "User ~p is configured with unknown "
+                "authentication source ~p",
+                [Username, Source]),
+            {error, unknown_source};
+        AuthMod ->
+            Password = maps:get(password, M),
+            case AuthMod:auth(Username, Password, UserData, Opts) of
+                ok ->
+                    {ok, get_context(M)};
+                error ->
+                    {error, bad_password}
             end
     end.
+
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1134,6 +1252,11 @@ get_context(RealmUri, Username) when is_binary(Username) ->
         username=Username, 
         grants=Grants, 
         epoch=os:timestamp()}.
+
+
+get_context(#{username := U, realm_uri := R}) ->
+    get_context(U, R).
+
 
 accumulate_grants(RealmUri, Role, Type) ->
     %% The 'all' grants always apply
@@ -1667,3 +1790,25 @@ user_grants(RealmUri, Username) ->
 %% -----------------------------------------------------------------------------
 group_grants(RealmUri, Group) ->
     accumulate_grants(RealmUri, Group, group).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+context_to_map(#context{} = Ctxt) ->
+    #context{
+        realm_uri = Uri, 
+        username = Username, 
+        grants = Grants, 
+        epoch = E
+    } = Ctxt,
+    #{
+        realm_uri => Uri, 
+        username => Username, 
+        grants => Grants,
+        timestamp => E
+    }.
+
+
+

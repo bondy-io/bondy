@@ -56,10 +56,10 @@ remove(RealmUri, Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(uri(), list() | binary()) -> group() | not_found.
-lookup(RealmUri, Id) when is_binary(Id) ->
-    lookup(RealmUri, unicode:characters_to_list(RealmUri, Id, utf8));
+lookup(RealmUri, Id) when is_list(Id) ->
+    lookup(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
-lookup(RealmUri, Id) ->
+lookup(RealmUri, Id) when is_binary(Id) ->
     case juno_security:lookup_group(RealmUri, Id) of
         not_found -> not_found;
         Obj -> to_map(Obj)

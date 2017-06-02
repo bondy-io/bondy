@@ -22,7 +22,7 @@
     realm_uri => uri(),
     session => juno_session:session() | undefined,
     goodbye_initiated => boolean(),
-    challenge_sent => boolean(),
+    challenge_sent => {true, AuthMethod :: any()} | false,
     peer => juno_session:peer(),
     roles => map(),
     request_id => id(),

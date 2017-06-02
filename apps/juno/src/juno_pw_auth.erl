@@ -21,7 +21,8 @@
 % -module(riak_core_pw_auth).
 -module(juno_pw_auth).
 
--export([hash_password/1, check_password/5]).
+-export([hash_password/1]).
+-export([check_password/5]).
 
 %% TOOD should make these configurable in app.config
 -define(SALT_LENGTH, 16).
@@ -42,9 +43,13 @@ hash_password(BinaryPass) when is_binary(BinaryPass) ->
     {ok, HexPass, ?AUTH_NAME, ?HASH_FUNCTION, Salt, ?HASH_ITERATIONS}.
 
 
-%% @doc Check a plaintext password with a hashed password
-check_password(BinaryPass, HashedPassword, HashFunction, Salt, HashIterations) when is_binary(BinaryPass) ->
 
+check_password({hash, BinaryPass}, HashedPassword, _, _, _) ->
+    %% @doc Check a entered hashed password with a stored hashed password
+    pbkdf2:compare_secure(pbkdf2:to_hex(BinaryPass), HashedPassword);
+
+check_password(BinaryPass, HashedPassword, HashFunction, Salt, HashIterations) when is_binary(BinaryPass) ->
+    %% @doc Check a plaintext password with a hashed password
     % Hash EnteredPassword to compare to HashedPassword
     {ok, HashedPass} = pbkdf2:pbkdf2(HashFunction, BinaryPass, Salt, HashIterations),
     HexPass = pbkdf2:to_hex(HashedPass),
