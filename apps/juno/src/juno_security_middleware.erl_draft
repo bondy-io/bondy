@@ -9,16 +9,26 @@
 -export([execute/2]).
 
 
-% TODO Review this function - we are doing some of this in juno_ws_handler
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
 execute(Req0, Env0) ->
-    Ctxt0 = juno_context:set_peer(juno_context:new(), cowboy_req:peer(Req0)),
     try 
         case get_value(handler, Env0) of
             juno_ws_handler -> 
-                %% A WS connection
-                Env1 = set_ctxt(Ctxt0, Env0),
-                {ok, Req0, Env1};
-            _Other ->
+                %% A WS connection, security will be handled by the handler
+                {ok, Req0, Env0};
+            juno_rest_oauth2_handler ->
+                %% The handler will check the Authorization header for a
+                %% Basic scheme with ClientId and Secret
+                {ok, Req0, Env0};
+            juno_rest_api_gateway_handler ->
                 %% A REST API handler
                 %% TODO
                 Ctxt1 = case get_realm_uri(Env0) of
@@ -30,43 +40,35 @@ execute(Req0, Env0) ->
                 {ok, Req0, Env1}
         end
 	catch
-        throw:{authenticate, Realm} ->
-            Req1 = cowboy_req:set_resp_header(
-                <<"www-authenticate">>, 
-                <<"Basic realm=\"", Realm/binary, "\"">>, 
-                Req0),
-            Req2 = cowboy_req:reply(401, Req1),
-			{stop, Req2};
+        % throw:{authenticate, Realm} ->
+        %     Req1 = cowboy_req:set_resp_header(
+        %         <<"www-authenticate">>, 
+        %         <<"Basic realm=\"", Realm/binary, "\"">>, 
+        %         Req0),
+        %     Req2 = cowboy_req:reply(401, Req1),
+		% 	{stop, Req2};
         throw:Reason ->
             Req1 = juno_rest_utils:set_resp_error_body(Reason, Req0),
             Req2 = cowboy_req:reply(401, Req1),
 			{stop, Req2}
     end.
 
-    
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
 %% @private
 authenticate(Req, Ctxt) ->
-    authenticate_scheme(parse_authorization_header(Req, Ctxt), Ctxt).
+    maybe_throw(
+        juno_security_utils:authenticate(
+            parse_authorization_header(Req, Ctxt), Ctxt)).
 
-
-%% @private
-authenticate_scheme({basic, Username, Pass}, #{realm_uri := Uri} = Ctxt) ->
-    SecCtxt = maybe_throw(
-        juno_security:authenticate(
-            Uri, bin2str(Username), Pass, conn_info(Ctxt))),
-    maps:merge(Ctxt, SecCtxt);
-    
-authenticate_scheme({digest, _List}, _Ctxt0) ->
-    %% TODO support
-    throw({unsupported_scheme, <<"Digest">>});
-
-authenticate_scheme({bearer, _Token}, _Ctxt0) ->
-    %% TODO support OAUTH
-    throw({unsupported_scheme, <<"Bearer">>});
-
-authenticate_scheme({Scheme, _Payload}, _Ctxt0) ->
-    %% TODO support via custom functions
-    throw({unsupported_scheme, Scheme}).
 
 
 %% @private
@@ -78,14 +80,6 @@ maybe_throw(Value) ->
     Value.
 
 
-%% @private
-bin2str(Bin) ->
-    unicode:characters_to_list(Bin, utf8, utf8).
-
-
-%% @private
-conn_info(#{peer := {IP, _Port}}) ->
-    [{ip, IP}].
 
 
 %% @private
