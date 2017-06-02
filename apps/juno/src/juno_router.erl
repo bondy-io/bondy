@@ -215,12 +215,13 @@ forward(#authenticate{} = M, #{session := _} = Ctxt) ->
 forward(#authenticate{} = M, #{challenge_sent := {true, AuthMethod}} = Ctxt0) ->
     %% Client is responding to a challenge
     ok = update_stats(M, Ctxt0),
-    #authenticate{signature = Sign, extra = Extra} = M,
+    #authenticate{signature = Sign} = M,
     Realm = maps:get(realm_uri, Ctxt0),
     Peer = maps:get(peer, Ctxt0),
+    AuthId = maps:get(authid, Ctxt0),
     case 
         juno_security_utils:authenticate(
-            {AuthMethod, Sign, Extra}, Realm, Peer) 
+            {AuthMethod, AuthId, Sign}, Realm, Peer) 
     of
         {ok, _AuthCtxt} ->
             %% We already stored the authid (username) in the ctxt
