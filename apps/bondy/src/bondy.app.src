@@ -16,6 +16,8 @@
             tuplespace,
             plumtree,
             lager,
+            cuttlefish,
+            clique,
             exometer_core,  
             cowboy,
             jsx,
