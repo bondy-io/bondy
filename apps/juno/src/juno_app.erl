@@ -1,11 +1,19 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
-
 %% =============================================================================
-%% @doc
+%% juno_app - 
 %%
-%% @end
+%% Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%    http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
 %% =============================================================================
 -module(juno_app).
 -behaviour(application).
@@ -27,9 +35,9 @@ start(_Type, _Args) ->
             ok = juno_router:start_pool(),
             ok = juno_stats:start_pool(),
             ok = juno_stats:create_metrics(),
+            ok = maybe_init_juno_realm(),
             ok = maybe_start_router_services(),
             qdate:register_parser(iso8601, date_parser()),
-            ok = maybe_init_juno_realm(),
             {ok, Pid};
         Other  ->
             Other
