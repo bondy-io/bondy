@@ -5,7 +5,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% An in-memory registry for PubSub subscriptions and RPC registrations,
-%% providing pattern matching capbilities including support for WAMP's
+%% providing pattern matching capabilities including support for WAMP's
 %% version 2.0 match policies (exact, prefix and wilcard).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -28,6 +28,8 @@
 ).
 
 %% An entry denotes a registration or a subscription
+%% TODO entries should be replicated across the cluster via plumtree
+%% maybe using the metadata store directly
 -record(entry, {
     key                     ::  entry_key(),
     type                    ::  entry_type(),
@@ -39,7 +41,8 @@
     options                 ::  map() | atom()
 }).
 
-
+%% TODO indices should be recomputed based on entry creation/deletion but are 
+%% always local (i.e. no replication)
 -record(index, {
     key                     ::  tuple() | atom(),  % dynamically generated
     entry_key               ::  entry_key()
