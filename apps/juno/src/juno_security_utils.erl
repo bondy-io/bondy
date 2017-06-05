@@ -4,11 +4,11 @@
 
 -type auth_error_reason()       ::  realm_not_found 
                                     | {missing_param, binary()} 
-                                | {user_not_found, binary()}.
--type auth_scheme()         ::  {wampcra, binary(), binary(), map()}
-                                | {basic, binary(), binary()}
-	                            | {bearer, binary()}
-	                            | {digest, [{binary(), binary()}]}.
+                                    | {user_not_found, binary()}.
+-type auth_scheme()             ::  {wampcra, binary(), binary(), map()}
+                                    | {basic, binary(), binary()}
+	                                | {bearer, binary()}
+	                                | {digest, [{binary(), binary()}]}.
 
 
 -export([authenticate/3]).
@@ -62,5 +62,5 @@ authenticate(_, _Realm, _Peer) ->
 
 
 %% @private
-conn_info(#{peer := {IP, _Port}}) ->
+conn_info({IP, _Port}) ->
     [{ip, IP}].
