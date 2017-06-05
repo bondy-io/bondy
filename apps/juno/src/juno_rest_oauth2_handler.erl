@@ -131,6 +131,18 @@
     }
 }).
 
+-define(STATE_SPEC, #{
+    realm_uri => #{
+        required => true,
+        allow_null => false,
+        validator => fun wamp_uri:is_valid/1
+    },
+    client_id => #{
+        required  => false,
+        datatype => binary
+    }
+}).
+
 -type state() :: #{
     realm_uri => binary(), 
     client_id => binary()
@@ -147,8 +159,7 @@
 -export([resource_existed/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
--export([from_json/2]).
--export([from_msgpack/2]).
+-export([accept/2]).
 
 
 
@@ -158,8 +169,8 @@
 
 
 
-init(Req, St0) ->
-    {cowboy_rest, Req, St0}.
+init(Req, St) ->
+    {cowboy_rest, Req, maps_utils:validate(St, ?STATE_SPEC)}.
 
 
 allowed_methods(Req, St) ->
@@ -174,37 +185,41 @@ allowed_methods(Req, St) ->
 
 content_types_accepted(Req, St) ->
     L = [
-        {{<<"application">>, <<"json">>, '*'}, to_json},
-        {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}
+        {{<<"application">>, <<"x-www-form-urlencoded">>, '*'}, accept}
     ],
     {L, Req, St}.
 
 
 content_types_provided(Req, St) ->
     L = [
-        {{<<"application">>, <<"json">>, '*'}, from_json},
-        {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack}
+        {{<<"application">>, <<"json">>, '*'}, to_json},
+        {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}
     ],
     {L, Req, St}.
 
 
-is_authorized(Req, St0) ->
+is_authorized(Req0, St0) ->
     %% TODO at the moment the flows that we support required these vals
     %% but not sure all flows do.
-    Val = cowboy_req:parse_header(<<"authorization">>, Req),
+    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
     Realm = maps:get(realm_uri, St0),
-    Peer = cowboy_req:peer(Req),
+    Peer = cowboy_req:peer(Req0),
     case juno_security_utils:authenticate(Val, Realm, Peer) of
         {ok, AuthCtxt} ->
             St1 = St0#{
                 client_id => ?CHARS2BIN(juno_security:get_username(AuthCtxt))
             },
-            {true, Req, St1};
-        {error, _Reason} ->
-            {false, Req, St0}
+            {true, Req0, St1};
+        {error, Reason} ->
+            lager:info("API Consumer login failed, error = ~p", [Reason]),
+            Req1 = cowboy_req:set_resp_header(
+                <<"www-authenticate">>, 
+                <<"Basic realm=\"", Realm/binary, "\"">>, 
+                Req0
+            ),
+            Req2 = cowboy_req:reply(401, Req1),
+            {stop, Req2, St0}
     end.
-
-    
 
 
 resource_exists(Req, St) ->
@@ -223,15 +238,6 @@ to_msgpack(Req, St) ->
     provide(msgpack, Req, St).
 
 
-from_json(Req, St) ->
-    accept(json, Req, St).
-
-
-from_msgpack(Req, St) ->
-    accept(msgpack, Req, St).
-
-
-
 
 
 %% =============================================================================
@@ -242,13 +248,15 @@ provide(_, _, _) -> ok.
 
 
 %% @private
-accept(Encoding, Req, St) ->
+accept(Req0, St) ->
     try
-        accept_flow(maps:from_list(cowboy_req:parse_qs(Req)), Encoding, Req, St)
+        {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
+        accept_flow(maps:from_list(PList), json, Req1, St)
     catch
-        error:_Reason ->
-            %% reply error in body
-            {false, Req, St}
+        error:Reason ->
+            %% reply error in body (check OAUTH)
+            io:format("Error ~p,~nTrace:~p~n", [Reason, erlang:get_stacktrace()]),
+            {false, Req0, St}
     end.
 
 
@@ -266,8 +274,9 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Encoding, Req0, St0) ->
     
     {IP, _Port} = cowboy_req:peer(Req0),
     case juno_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
-        {ok, {RealmUri, U, Grants, _}} ->
+        {ok, AuthCtxt} ->
             %% TODO Scope intersection
+            Grants = juno_security:get_grants(AuthCtxt),
             {JWT, Claims} = juno_oauth2:issue_jwt(RealmUri, U, Grants),
             RefreshToken = <<>>,
             #{
@@ -281,7 +290,8 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Encoding, Req0, St0) ->
                 <<"refresh_token">> => RefreshToken,
                 <<"scope">> => TScope
             },
-            Req1 = cowboy_req:set_resp_body(juno_utils:maybe_encode(Body)),
+            Req1 = cowboy_req:set_resp_body(
+                juno_utils:maybe_encode(Encoding, Body), Req0),
             {true, Req1, St0};
         {error, Error} ->
             Req1 = reply(Error, Encoding, Req0),
@@ -290,16 +300,27 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Encoding, Req0, St0) ->
 
 
 accept_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
-    error({oauth_flow_not_yet_implemented, <<"authorization_code">>});
+    %% TODO
+    error({unsupported_grant_type, <<"authorization_code">>});
 
 accept_flow(#{?GRANT_TYPE := <<"client_credentials">>} = _Map, _, _, _) ->
-    error({oauth_flow_not_yet_implemented, <<"client_credentials">>}).
+    %% TODO
+    error({unsupported_grant_type, <<"client_credentials">>});
+
+accept_flow(Map, _, _, _) ->
+    error({invalid_request, Map}).
 
 
 
 %% @private
 -spec reply(integer(), atom(), cowboy_req:req()) -> 
     cowboy_req:req().
+
+reply(invalid_request, Encoding, Req) ->
+    Desc = <<"The request is missing a required parameter, includes an unsupported parameter value (other than grant type), repeats a parameter, includes multiple credentials, utilizes more than one mechanism for authenticating the client, or is otherwise malformed.">>,
+    Error = juno:error_map(invalid_requestError, Desc),
+    cowboy_req:reply(
+        400, prepare_request(Encoding, Error, #{}, Req));
 
 reply(invalid_client = Error, Encoding, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
