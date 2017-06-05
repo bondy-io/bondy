@@ -39,6 +39,7 @@
 -export([issue_jwt/3]).
 -export([issue_refresh_jwt/2]).
 -export([verify_jwt/2]).
+-export([verify_jwt/3]).
 -export([decode_jwt/1]).
 -export([refresh_jwt/1]).
 
@@ -54,8 +55,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec issue_jwt(binary(), binary(), [{any(), any()}]) -> 
-    {binary(), map()}.
+-spec issue_jwt(binary(), binary(), [{any(), any()}]) -> {binary(), map()}.
 
 issue_jwt(RealmUri, Username, Grants) ->
     Realm = juno_realm:fetch(RealmUri),
@@ -104,8 +104,8 @@ issue_refresh_jwt(RealmUri, Username) ->
 %% The JWT is expected to be valid, no validation will be performed on it.
 %% @end
 %% -----------------------------------------------------------------------------
-refresh_jwt(JWT) ->
-    Claims = decode_jwt(JWT),
+refresh_jwt(JWT0) ->
+    Claims = decode_jwt(JWT0),
     #{
         <<"kid">> := Kid,
         <<"sub">> := Username,
@@ -120,9 +120,9 @@ refresh_jwt(JWT) ->
         <<"exp">> => Exp,
         <<"scope">> => grants_to_scope(Grants)
     },
-    JWT = sign(Key, Claims1),
-    ok = juno_cache:put(RealmUri, JWT, Claims ,#{exp => Exp}),
-    JWT.
+    JWT1 = sign(Key, Claims1),
+    ok = juno_cache:put(RealmUri, JWT1, Claims ,#{exp => Exp}),
+    JWT1.
 
 
 
