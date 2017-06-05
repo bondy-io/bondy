@@ -52,6 +52,7 @@
 -export([get_ciphers/1]).
 -export([get_username/1]).
 -export([get_realm_uri/1]).
+-export([get_grants/1]).
 -export([is_enabled/1]).
 -export([print_ciphers/1]).
 -export([set_ciphers/2]).
@@ -566,6 +567,11 @@ get_username(#context{username=Username}) ->
 get_realm_uri(#context{realm_uri=Uri}) ->
     Uri.
 
+
+get_grants(#context{grants=Val}) ->
+    Val.
+
+
 % -spec authenticate(
 %     RealmUri :: uri(), 
 %     Username::binary(), 
@@ -666,9 +672,9 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
             {error, unknown_user};
         Data ->
             M = #{
-                username => Username,
+                username => name2bin(Username),
                 password => Password,
-                realm_uri => RealmUri,
+                realm_uri => name2bin(RealmUri),
                 conn_info => ConnInfo 
             },
             auth_with_data(Data, M)
@@ -677,7 +683,7 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
 
 %% @private
 auth_with_data(UserData, M0) ->
-    Uri = name2bin(maps:get(realm_uri, M0)),
+    Uri = maps:get(realm_uri, M0),
     F = fun
         ({{Un, CIDR}, [{Source, Options}]}, Acc) ->
             [{Un, CIDR, Source, Options}|Acc];
@@ -1255,7 +1261,7 @@ get_context(RealmUri, Username) when is_binary(Username) ->
 
 
 get_context(#{username := U, realm_uri := R}) ->
-    get_context(U, R).
+    get_context(R, U).
 
 
 accumulate_grants(RealmUri, Role, Type) ->
