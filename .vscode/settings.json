@@ -1,5 +1,6 @@
 // Place your settings in this file to overwrite default and user settings.
 {
+    "files.defaultLanguage":"erlang",
     "editor.wordWrapColumn": 80,
 	"editor.wordWrap": "wordWrapColumn",
     "erlang.linter-erlc.include": [
