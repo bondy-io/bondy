@@ -1,3 +1,35 @@
+%% 
+%%  juno_rest_api_gateway_handler.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This module implements a generic Cowboy rest handler that handles a resource
+%% specified using the Juno API Gateway Specification (JAGS) Description 
+%% Language which is a specification for describing, producing and consuming 
+%% RESTful Web Services from and by Juno.
+%%
+%% For every path defined in a JAGS file, Juno will configure and install a 
+%% Cowboy route using this module. The initial state of the module responds to 
+%% a contract between this module and the {@link juno_api_gateway_spec_parser} 
+%% and contains the parsed and preprocessed definition of the paths 
+%% specification which this module uses to dynamically implement its behaviour.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
 -module(juno_rest_api_gateway_handler).
 -include("juno.hrl").
 
@@ -251,7 +283,8 @@ update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
 
 update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
     Map = #{
-
+        <<"authid">> => maps:get(<<"sub">>, Claims),
+        <<"authscope">> => maps:get(<<"scope">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
 
@@ -284,6 +317,15 @@ update_context(Req0, Ctxt) ->
     | {ok, Code :: integer(), Response :: map(), state()} 
     | {error, Response :: map(), state()} 
     | {error, Code :: integer(), Response :: map(), state()}.
+
+perform_action(
+    _, #{<<"action">> := #{<<"type">> := <<"static">>}} = Spec, St0) ->
+    Ctxt0 = maps:get(api_context, St0),
+    %% We get the response directly as it should be statically defined
+    Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
+    Response = juno_utils:eval_term(Result, Ctxt0),
+    St1 = maps:update(api_context, Ctxt0, St0),
+    {ok, Response, St1};
 
 perform_action(
     Method,
@@ -388,7 +430,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
         <<"body">> => RespBody,
         <<"headers">> => maps:from_list(RespHeaders)
     },
-    Ctxt1 = update_context({error, Result}, Ctxt0),
+    Ctxt1 = update_context({result, Result}, Ctxt0),
     Response = juno_utils:eval_term(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {ok, StatusCode, Response, St1}.

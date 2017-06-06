@@ -449,11 +449,8 @@
 }).
 
 -define(DEFAULT_STATIC_ACTION, #{
-    <<"resource">> => <<>>,
-    <<"timeout">> => <<"{{defaults.timeout}}">>,
-    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
-    <<"retries">> => <<"{{defaults.retries}}">>,
-    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
+    <<"body">> => <<>>,
+    <<"headers">> => #{}
 }).
 
 -define(STATIC_ACTION_SPEC, #{
@@ -461,6 +458,14 @@
         required => true,
         allow_null => false,
         datatype => {in, [<<"static">>]}
+    },
+    <<"headers">> => #{
+        required => true,
+        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+    },
+    <<"body">> => #{
+        required => true,
+        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     }
 }).
 
@@ -496,11 +501,11 @@
     },
     <<"headers">> => #{
         required => true,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
         required => true,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
         required => true,
@@ -597,7 +602,7 @@ end).
     <<"body">> => #{
         required => true,
         allow_null => false,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"uri">> => #{
         required => false,
