@@ -22,6 +22,8 @@
             jose,
             msgpack,
             hackney,
+            qdate,
+            uuid,
             wamp
         ]},
     {env,[]},

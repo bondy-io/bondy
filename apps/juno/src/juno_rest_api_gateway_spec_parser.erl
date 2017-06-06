@@ -219,6 +219,7 @@
     <<"header_name">> => #{
         required => true,
         allow_null => false,
+        default => <<"authorization">>,
         datatype => binary
     }
 }).
@@ -1192,7 +1193,8 @@ get_context_proxy() ->
     %% parse transform, so we use '$mop_proxy'
     #{
         <<"request">> => '$mop_proxy',
-        <<"action">> => '$mop_proxy'
+        <<"action">> => '$mop_proxy',
+        <<"security">> => '$mop_proxy'
     }.
 
 

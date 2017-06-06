@@ -35,7 +35,9 @@
 }).
 -type realm()  ::  #realm{}.
 
+
 -export_type([realm/0]).
+-export_type([uri/0]).
 
 -export([auth_methods/1]).
 -export([delete/1]).
@@ -111,15 +113,6 @@ disable_security(#realm{uri = Uri}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec uri(realm()) -> uri().
-uri(#realm{uri = Uri}) ->
-    Uri.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 -spec public_keys(realm()) -> [map()].
 public_keys(#realm{public_keys = Keys}) ->
     [jose_jwk:to_map(K) || K <- Keys].
@@ -150,6 +143,16 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
 get_random_kid(#realm{private_keys = Map}) ->
     Kids = maps:keys(Map),
 	lists:nth(rand:uniform(length(Kids)), Kids).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec uri(realm()) -> uri().
+uri(#realm{uri = Uri}) ->
+    Uri.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -267,6 +270,7 @@ put(Uri, Opts) ->
 -spec delete(uri()) -> ok.
 delete(?JUNO_REALM_URI) ->
     {error, not_permitted};
+
 delete(Uri) ->
     plumtree_metadata:delete(?PREFIX, Uri),
     % TODO we need to close all sessions for this realm

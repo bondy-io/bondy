@@ -11,13 +11,11 @@
 -include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
-
+-import(juno_error, [error_uri/1, error_map/1]).
 
 
 -export([ack/2]).
 -export([call/5]).
--export([error_map/1]).
--export([error_uri/1]).
 -export([send/2]).
 -export([send/3]).
 -export([start/0]).
@@ -170,102 +168,6 @@ call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
 %% API - CALLEE ROLE
 %% =============================================================================
 
-
-
-
-%% =============================================================================
-%% API - UTILS
-%% =============================================================================
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-error_uri(Reason) when is_atom(Reason) ->
-    R = list_to_binary(atom_to_list(Reason)),
-    <<"com.leapsight.error.", R/binary>>.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-error_map(#error{arguments = undefined, payload = undefined} = Err) ->
-    #error{error_uri = Uri} = Err,
-    #{
-        <<"code">> => Uri,
-        <<"message">> => <<>>,
-        <<"description">> => <<>>
-    };
-
-error_map(#error{arguments = L, payload = undefined} = Err)
-when is_list(L) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = hd(L),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Mssg
-    };
-
-error_map(#error{arguments = undefined, payload = M} = Err)
-when is_map(M) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = maps:get(<<"message">>, M),
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-error_map(#error{arguments = L, payload = M} = Err) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = hd(L),
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-    
-error_map({invalid_json, Data}) ->
-    #{
-        <<"code">> => invalid_data,
-        <<"message">> => <<"The data provided is not a valid json.">>,
-        value => Data,
-        <<"description">> => <<"The data provided is not a valid json.">>
-    };
-
-error_map({invalid_msgpack, Data}) ->
-    #{
-        <<"code">> => invalid_data,
-        <<"message">> => <<"The data provided is not a valid msgpack.">>,
-        value => Data,
-        <<"description">> => <<"The data provided is not a valid msgpack.">>
-    };
-
-error_map({Code, Mssg}) ->
-    #{
-        <<"code">> => Code,
-        <<"message">> => Mssg,
-        <<"description">> => Mssg
-    };
-
-error_map({Code, Mssg, Desc}) ->
-    #{
-        <<"code">> => Code,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-error_map(Code) ->
-    #{
-        <<"code">> => Code
-    }.
 
 
 

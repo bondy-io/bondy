@@ -221,7 +221,7 @@ forward(#authenticate{} = M, #{challenge_sent := {true, AuthMethod}} = Ctxt0) ->
     AuthId = maps:get(authid, Ctxt0),
     case 
         juno_security_utils:authenticate(
-            {AuthMethod, AuthId, Sign}, Realm, Peer) 
+            AuthMethod, {AuthMethod, AuthId, Sign}, Realm, Peer) 
     of
         {ok, _AuthCtxt} ->
             %% We already stored the authid (username) in the ctxt
@@ -516,7 +516,7 @@ handle_session_message(M, Ctxt0) ->
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
-                juno:error_map(Reason),
+                juno_error:error_map(Reason),
                 ?WAMP_ERROR_CANCELLED
             ),
             ok = update_stats(Reply, Ctxt0),

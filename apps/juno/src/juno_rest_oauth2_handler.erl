@@ -109,22 +109,7 @@
         allow_null => false,
         datatype => {in, [<<"refresh_token">>]}
     },
-    <<"client_id">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"client_secret">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
     <<"refresh_token">> => #{
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"scope">> => #{
         required => true,
         allow_null => false,
         datatype => binary
@@ -204,7 +189,7 @@ is_authorized(Req0, St0) ->
     Val = cowboy_req:parse_header(<<"authorization">>, Req0),
     Realm = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
-    case juno_security_utils:authenticate(Val, Realm, Peer) of
+    case juno_security_utils:authenticate(basic, Val, Realm, Peer) of
         {ok, AuthCtxt} ->
             St1 = St0#{
                 client_id => ?CHARS2BIN(juno_security:get_username(AuthCtxt))
@@ -214,7 +199,7 @@ is_authorized(Req0, St0) ->
             lager:info("API Consumer login failed, error = ~p", [Reason]),
             Req1 = cowboy_req:set_resp_header(
                 <<"www-authenticate">>, 
-                <<"Basic realm=\"", Realm/binary, "\"">>, 
+                <<"Basic realm=", $", Realm/binary, $">>, 
                 Req0
             ),
             Req2 = cowboy_req:reply(401, Req1),
@@ -261,10 +246,7 @@ accept(Req0, St) ->
 
 
 %% @private
-accept_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map, _, _, _) ->
-    maps_utils:validate(Map, ?REFRESH_TOKEN_SPEC);
-
-accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Encoding, Req0, St0) ->
+accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     RealmUri = maps:get(realm_uri, St0),
     #{
         <<"username">> := U,
@@ -275,29 +257,37 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Encoding, Req0, St0) ->
     {IP, _Port} = cowboy_req:peer(Req0),
     case juno_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
+            Issuer = maps:get(client_id, St0),
+            G0 = juno_security:get_grants(AuthCtxt),
             %% TODO Scope intersection
-            Grants = juno_security:get_grants(AuthCtxt),
-            {JWT, Claims} = juno_oauth2:issue_jwt(RealmUri, U, Grants),
-            RefreshToken = <<>>,
-            #{
-                <<"exp">> := Exp,
-                <<"scope">> := TScope
-            } = Claims,
-            Body = #{
-                <<"access_token">> => JWT,
-                <<"token_type">> => <<"jwt">>,
-                <<"expires_in">> => Exp,
-                <<"refresh_token">> => RefreshToken,
-                <<"scope">> => TScope
-            },
-            Req1 = cowboy_req:set_resp_body(
-                juno_utils:maybe_encode(Encoding, Body), Req0),
-            {true, Req1, St0};
+            G1 = G0,
+            case juno_oauth2:issue_token(RealmUri, Issuer, U, G1) of
+                {ok, JWT, RefreshToken, Claims} ->
+                    Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
+                    {true, Req1, St0};
+                {error, Error} ->
+                    Req1 = reply(Error, Enc, Req0),
+                    {stop, Req1, St0}
+            end;
         {error, Error} ->
-            Req1 = reply(Error, Encoding, Req0),
+            Req1 = reply(Error, Enc, Req0),
             {stop, Req1, St0}
     end;
 
+accept_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
+    #{
+        <<"refresh_token">> := RT0
+    } = maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC),
+    Realm = maps:get(realm_uri, St0),
+    ClientId = maps:get(client_id, St0),
+    case juno_oauth2:refresh_token(Realm, ClientId, RT0) of
+        {ok, JWT, RT1, Claims} ->
+            Req1 = token_response(JWT, RT1, Claims, Enc, Req0),
+            {true, Req1, St0};
+        {error, Error} ->
+            Req1 = reply(Error, Enc, Req0),
+            {stop, Req1, St0}
+    end;
 
 accept_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
     %% TODO
@@ -316,55 +306,57 @@ accept_flow(Map, _, _, _) ->
 -spec reply(integer(), atom(), cowboy_req:req()) -> 
     cowboy_req:req().
 
-reply(invalid_request, Encoding, Req) ->
-    Desc = <<"The request is missing a required parameter, includes an unsupported parameter value (other than grant type), repeats a parameter, includes multiple credentials, utilizes more than one mechanism for authenticating the client, or is otherwise malformed.">>,
-    Error = juno:error_map(invalid_requestError, Desc),
+reply(invalid_request, Enc, Req) ->
+    Error = juno_error:error_map(invalid_request),
     cowboy_req:reply(
-        400, prepare_request(Encoding, Error, #{}, Req));
+        400, prepare_request(Enc, Error, #{}, Req));
 
-reply(invalid_client = Error, Encoding, Req) ->
+reply(invalid_client = Error, Enc, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     cowboy_req:reply(
-        400, prepare_request(Encoding, error_map(Error), Headers, Req));
+        400, prepare_request(Enc, juno_error:error_map(Error), Headers, Req));
 
-reply(unauthorized_client = Error, Encoding, Req) ->
+reply(unauthorized_client = Error, Enc, Req) ->
     cowboy_req:reply(
-        401, prepare_request(Encoding, error_map(Error), #{}, Req));
+        401, prepare_request(Enc, juno_error:error_map(Error), #{}, Req));
 
-reply(unknown_user = Error, Encoding, Req) ->
+reply(unknown_user = Error, Enc, Req) ->
     cowboy_req:reply(
-        401, prepare_request(Encoding, error_map(Error), #{}, Req));
+        401, prepare_request(Enc, juno_error:error_map(Error), #{}, Req));
 
-reply(missing_password = Error, Encoding, Req) ->
+reply(missing_password = Error, Enc, Req) ->
     cowboy_req:reply(
-        401, prepare_request(Encoding, error_map(Error), #{}, Req));
+        401, prepare_request(Enc, juno_error:error_map(Error), #{}, Req));
 
-reply(bad_password = Error, Encoding, Req) ->
+reply(bad_password = Error, Enc, Req) ->
     cowboy_req:reply(
-        401, prepare_request(Encoding, error_map(Error), #{}, Req));
+        401, prepare_request(Enc, juno_error:error_map(Error), #{}, Req));
 
-reply(unknown_source = Error, Encoding, Req) ->
+reply(unknown_source = Error, Enc, Req) ->
     cowboy_req:reply(
-        401, prepare_request(Encoding, error_map(Error), #{}, Req));
+        401, prepare_request(Enc, juno_error:error_map(Error), #{}, Req));
 
-reply(Error, Encoding, Req) ->
+reply(Error, Enc, Req) ->
     cowboy_req:reply(
-        400, prepare_request(Encoding, error_map(Error), #{}, Req)).
+        400, prepare_request(Enc, juno_error:error_map(Error), #{}, Req)).
 
-
-
-
-
-
-%% @private
-error_map(Error) ->
-    juno:error_map({Error, <<"TBD">>, <<"TBD">>}).
 
 
 %% @private
 -spec prepare_request(atom(), map(), map(), cowboy_req:req()) -> 
     cowboy_req:req().
 
-prepare_request(Encoding, Body, Headers, Req0) ->
+prepare_request(Enc, Body, Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(juno_utils:maybe_encode(Encoding, Body), Req1).
+    cowboy_req:set_resp_body(juno_utils:maybe_encode(Enc, Body), Req1).
+
+
+token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
+    Body = #{
+        <<"token_type">> => <<"jwt">>,
+        <<"access_token">> => JWT,
+        <<"refresh_token">> => RefreshToken,
+        <<"scope">> => maps:get(<<"scope">>, Claims),
+        <<"expires_in">> => maps:get(<<"exp">>, Claims)
+    },
+    cowboy_req:set_resp_body(juno_utils:maybe_encode(Enc, Body), Req0).

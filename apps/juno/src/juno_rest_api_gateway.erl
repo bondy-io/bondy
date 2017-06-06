@@ -8,6 +8,7 @@
 %% @end
 %% =============================================================================
 -module(juno_rest_api_gateway).
+-include("juno.hrl").
 
 -define(DEFAULT_POOL_SIZE, 200).
 -define(HTTP, juno_gateway_http_listener).
@@ -60,6 +61,7 @@ start_listeners() ->
 
 start_listener({<<"http">>, Rules}) ->
     {ok, _} = start_http(Rules),
+    % io:format("HTTP Listener startin with Rules~p~n", [Rules]),
     ok;
 
 start_listener({<<"https">>, Rules}) ->
@@ -151,6 +153,8 @@ add_consumer(RealmUri, ClientId, Password, Info) ->
 
 
 
+
+
 %% =============================================================================
 %% PRIVATE: REST LISTENERS
 %% =============================================================================
@@ -233,7 +237,11 @@ base_rules() ->
 maybe_init_security(RealmUri) ->
     case juno_security_group:lookup(RealmUri, <<"api_consumers">>) of
         not_found -> 
-            juno_security_group:add(RealmUri, <<"api_consumers">>);
+            G = #{
+                <<"name">> => <<"api_consumers">>,
+                <<"description">> => <<"A group of users allowed to consume APIs from the Juno RESTful API Gateway.">>
+            },
+            juno_security_group:add(RealmUri, G);
         _ ->
             ok
     end.
