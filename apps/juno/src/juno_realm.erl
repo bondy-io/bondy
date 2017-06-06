@@ -209,7 +209,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         not_found ->
-            put(Uri, Opts)
+            ok = put(Uri, Opts)
     end.
 
 
@@ -257,7 +257,8 @@ put(Uri, Opts) ->
             ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
             init(Realm);
         _ ->
-            ok = plumtree_metadata:put(?PREFIX, Uri, Realm)
+            ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
+            Realm
     end.
     
 
