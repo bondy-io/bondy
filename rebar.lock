@@ -54,6 +54,7 @@
        {ref,"19a8f526fdc12f0edc0bfc3073f791bcaced32fd"}},
   0},
  {<<"qdate">>,{pkg,<<"qdate">>,<<"0.4.3">>},0},
+ {<<"quickrand">>,{pkg,<<"quickrand">>,<<"1.7.0">>},1},
  {<<"ranch">>,
   {git,"https://github.com/ninenines/ranch",
        {ref,"40809cd2b257a8a53bcb5588ecaa88cc5381ff5c"}},
@@ -74,6 +75,7 @@
   {git,"git@gitlab.com:leapsight/utils.git",
        {ref,"921257baad6320eba420239de7ef834d0ea54972"}},
   0},
+ {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
        {ref,"8827c974f03889ba853ed5337b3b5927aafe5eb1"}},
@@ -103,8 +105,10 @@
  {<<"parse_trans">>, <<"9E96B1C9C3A0DF54E7B76F8F685D38BFA1EB21B31E042B1D1A5A70258E4DB1E3">>},
  {<<"pbkdf2">>, <<"11C23279FDED5C0027AB3996CFAE77805521D7EF4BABDE2BD7EC04A9086CF499">>},
  {<<"qdate">>, <<"6037343CAA1EF8BA8AF13AFD5A2A89CE7695C1E8A12D87702D66624290E3BE76">>},
+ {<<"quickrand">>, <<"FF3916C50BC10A8DC62417FC6049FEF5EA56D5DBCFCE546FAABFB6188E3BAEAA">>},
  {<<"riak_dt">>, <<"56B1898A543C561994F5D052FDEA972525CA98F46FDB3DCDB7366E4F92EE8F54">>},
  {<<"setup">>, <<"15DF8E57C6DF9755E22BFB1AEF0C640BD97E9889396FDFB2A85A5536A9043674">>},
  {<<"sidejob">>, <<"A76BBF3CFB3BDCBAAB354A2099E805F7FFF6E35305C74FECBF4D48C1F7642AB3">>},
- {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>}]}
+ {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>},
+ {<<"uuid">>, <<"EB803855E12D57B1CC10522781D1B42064FA2E4C576731700EE48D84A9283292">>}]}
 ].
