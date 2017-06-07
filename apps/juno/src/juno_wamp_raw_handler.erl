@@ -11,15 +11,24 @@
 -behaviour(ranch_protocol).
 
 -define(MAGIC, 16#7F).
--define(RESERVED, 0). %% Todo all ceros
+-define(TIMEOUT, 5000).
+
+%% 0: illegal (must not be used)
+%% 1: serializer unsupported
+%% 2: maximum message length unacceptable
+%% 3: use of reserved bits (unsupported feature)
+%% 4: maximum connection count reached
+%% 5 - 15: reserved for future errors
+-define(ERROR(Upper), <<?MAGIC:8, Upper:4, 0:4, 0:8, 0:8>>).
 
 -type encoding()    ::  json | msgpack | bert.
 
 -record(state, {
-    socket,
-    transport,
-    encoding    :: encoding(),
-    maxlen  :: integer()
+    socket          ::  gen_tcp:socket(),
+    transport       ::  module(),
+    encoding        ::  encoding(),
+    maxlen          ::  integer(),
+    buffer          ::  binary()
 }).
 -type state() :: #state{}.
 
@@ -50,6 +59,9 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 init(Ref, Socket, Transport, _Opts) ->
+    %% We must call ranch:accept_ack/1 before doing any socket operation. 
+    %% This will ensure the connection process is the owner of the socket. 
+    %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
     Transport:setopts(Socket, [{packet, 4}]),
     State = #state{
@@ -60,7 +72,7 @@ init(Ref, Socket, Transport, _Opts) ->
 
 
 loop(State = #state{socket = Socket, transport = Transport}) ->
-    case Transport:recv(Socket, 0, 15000) of
+    case Transport:recv(Socket, 0, ?TIMEOUT) of
         {ok, Data} ->
             % TODO handle errors
             ok = handle_data(Data, State),
@@ -71,11 +83,10 @@ loop(State = #state{socket = Socket, transport = Transport}) ->
 
 
 -spec handle_data(Data :: binary(), State :: state()) ->
-    ok |
-    {error, atom()}.
+    ok | {error, atom()}.
 
 handle_data(
-    <<?MAGIC:8/integer, Len:4/integer, Encoding:4/integer, _:8, _:8>>,
+    <<?MAGIC:8, Len:4, Encoding:4, _:8, _:8>>,
     #state{encoding = undefined} = State) ->
     handle_handshake(Len, Encoding, State);
 
@@ -91,28 +102,35 @@ handle_data(_Data, #state{encoding = undefined} = State) ->
 
 handle_data(Data, #state{socket = Socket, transport = Transport}) ->
     Cmd = decode(Data),
-    Response = encode(handle_command(Cmd)),
+    Response = encode(handle_message(Cmd)),
     Transport:send(Socket, Response).
 
 
 %% @private
 handle_handshake(Len, Encoding, State) ->
-    validate_length(Len),
-    Key = encoding(Encoding),
-    Response = <<?MAGIC, Len:4/integer, Encoding:4/integer, ?RESERVED:8, ?RESERVED:8>>,
-    (State#state.transport):send(State#state.socket, Response),
-    {ok, State#state{encoding = Key, maxlen = Len}}.
+    try
+        validate_max_length(Len),
+        Key = validate_encoding(Encoding),
+        Response = <<?MAGIC, Len:4, Encoding:4, 0:8, 0:8>>,
+        (State#state.transport):send(State#state.socket, Response),
+        {ok, State#state{encoding = Key, maxlen = Len}}
+    catch
+        throw:Reason ->
+            Error = error_response(Reason),
+            (State#state.transport):send(State#state.socket, Error),
+            {stop, State}
+    end.
 
 
 
--spec handle_command(Cmd :: term()) ->
+-spec handle_message(Cmd :: term()) ->
     {ok, Result :: term()} |
     {error, Reason :: term()}.
 
-handle_command(ping) ->
+handle_message(ping) ->
     {ok, pong};
 
-handle_command({F, Args} = Cmd)
+handle_message({F, Args} = Cmd)
 when is_atom(F), is_list(Args) ->
     try
         apply(juno, F, Args)
@@ -122,7 +140,7 @@ when is_atom(F), is_list(Args) ->
             {error, {unknown_command, Cmd}}
     end;
 
-handle_command(Cmd) ->
+handle_message(Cmd) ->
     {error, {unknown_command, Cmd}}.
 
 %% @private
@@ -142,19 +160,37 @@ encode(Term) ->
 %% 1: 2**10 octets ...
 %% 15: 2**24 octets
 %%
-%% This means a _Client_ can choose the maximum message length between *512* and *16M* octets.
+%% This means a _Client_ can choose the maximum message length between *512* 
+%% and *16M* octets.
 %% @end
 %% -----------------------------------------------------------------------------
-validate_length(N) when N >= 0, N =< 15 ->
+validate_max_length(N) when N >= 0, N =< 15 ->
     ok;
-validate_length(_) ->
+
+validate_max_length(_) ->
     %% TODO define correct error return
-    error({invalid_length}).
+    throw(maximum_message_length_unacceptable).
 
 
-encoding(1) -> json;
-encoding(2) -> msgpack;
-encoding(3) -> bert;
-encoding(_) ->
+%% 0: illegal
+%% 1: JSON
+%% 2: MessagePack
+%% 3 - 15: reserved for future serializers
+validate_encoding(1) -> json;
+validate_encoding(2) -> msgpack;
+validate_encoding(3) -> bert;
+validate_encoding(_) ->
     %% TODO define correct error return
-    error({illegal_serializer}).
+    throw(serializer_unsupported).
+
+
+%% 0: illegal (must not be used)
+%% 1: serializer unsupported
+%% 2: maximum message length unacceptable
+%% 3: use of reserved bits (unsupported feature)
+%% 4: maximum connection count reached
+%% 5 - 15: reserved for future errors
+error_response(serializer_unsupported) ->?ERROR(1);
+error_response(maximum_message_length_unacceptable) ->?ERROR(2);
+error_response(use_of_reserved_bits) ->?ERROR(3);
+error_response(maximum_connection_count_reached) ->?ERROR(4).
