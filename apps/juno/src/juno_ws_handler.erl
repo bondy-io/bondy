@@ -46,7 +46,6 @@
     frame_type              ::  juno_wamp_protocol:frame_type(),
     encoding                ::  juno_wamp_protocol:encoding(),
     protocol_state          ::  juno_wamp_protocol:state() | undefined,
-    context                 ::  juno_context:context() | undefined,
     data = <<>>             ::  binary(),
     hibernate = false       ::  boolean()
 }).
@@ -88,8 +87,7 @@ init(Req0, _) ->
                         frame_type = FrameType,
                         encoding = Enc,
                         data = <<>>, 
-                        protocol_state = CBState,
-                        context = juno_context:new(Peer)
+                        protocol_state = CBState
                     },
                     Req1 = cowboy_req:set_resp_header(
                         ?WS_SUBPROTOCOL_HEADER, BinProto, Req0),
@@ -161,7 +159,7 @@ websocket_handle({pong, _Msg}, St) ->
     {ok, St};
 
 websocket_handle({T, Data}, #state{frame_type = T} = St) ->
-    case juno_wamp_protocol:handle_data(Data, St#state.protocol_state) of
+    case juno_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
             {ok, St#state{protocol_state = PSt}}; 
         {reply, L, PSt} ->
@@ -185,6 +183,22 @@ websocket_handle(Data, St) ->
 %% client. See {@link juno:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
+
+websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, St) ->
+    %% Here we receive the messages that either the router or another peer
+    %% sent to us using juno:send/2,3
+    ok = juno:ack(Pid, Ref),
+    #state{frame_type = T} = St,
+    case juno_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
+        {ok, Bin, PSt} ->
+            {reply, frame(T, Bin), St#state{protocol_state = PSt}};
+        {stop, PSt} ->
+            {stop, St#state{protocol_state = PSt}};
+        {stop, Bin, PSt} ->
+            self() ! {stop, <<"Router dropped session.">>},
+            reply(T, [Bin], St#state{protocol_state = PSt})
+    end;
+
 websocket_info({timeout, _Ref, _Msg}, St) ->
     %% erlang:start_timer(1000, self(), <<"How' you doin'?">>),
     %% reply(text, Msg, St);
@@ -194,19 +208,10 @@ websocket_info({stop, Reason}, St) ->
     lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
     {stop, St};
 
-websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, St0) ->
-    %% Here we receive the messages that either the router or another peer
-    %% sent to us using juno:send/2,3
-    ok = juno:ack(Pid, Ref),
-    St1 = maybe_update_state(M, St0),
-    %% We encode and send the message to the client
-    #state{encoding = E, frame_type = T} = St1,
-    Reply = frame(T, wamp_encoding:encode(M, E)),
-    {reply, Reply, St1};
-
 websocket_info(_, St0) ->
     %% Any other unwanted erlang messages
     {ok, St0}.
+
 
 
 
@@ -272,7 +277,7 @@ terminate({remote, _Code, _Binary}, _Req, St) ->
 
 
 %% =============================================================================
-%% PRIVATE
+%% PRIVATE: WS FRAME / REPLY
 %% =============================================================================
 
 
@@ -294,28 +299,20 @@ frame(Type, E) when Type == text orelse Type == binary ->
     {Type, E}.
 
 
+
+
+
+
+%% =============================================================================
+%% PRIVATE: UTILS
+%% =============================================================================
+
+
+
+
 %% @private
 do_terminate(St) ->
-    juno_wamp_protocol:terminate(St#state.protocol_state),
-    juno_context:close(St#state.context).
-
-
-%% @private
-set_ctxt(St, Ctxt) ->
-    St#state{context = juno_context:reset(Ctxt)}.
-
-
-maybe_update_state(#result{request_id = CallId}, St) ->
-    Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
-    set_ctxt(St, Ctxt1);
-
-maybe_update_state(
-    #error{request_type = ?CALL, request_id = CallId}, St) ->
-    Ctxt1 = juno_context:remove_awaiting_call_id(St#state.context, CallId),
-    set_ctxt(St, Ctxt1);
-
-maybe_update_state(_, St) ->
-    St.
+    juno_wamp_protocol:terminate(St#state.protocol_state).
 
 
 %% -----------------------------------------------------------------------------

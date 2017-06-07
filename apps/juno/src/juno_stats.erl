@@ -15,6 +15,7 @@
 }).
 
 -export([update/1]).
+-export([update/2]).
 -export([get_stats/0]).
 -export([create_metrics/0]).
 -export([start_pool/0]).
@@ -84,6 +85,23 @@ update(Event) ->
     async_update(Event).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(wamp_message:message(), juno_context:context()) -> ok.
+
+update(M, #{peer := {IP, _}} = Ctxt) ->
+    Type = element(1, M),
+    Size = erts_debug:flat_size(M) * 8,
+    case Ctxt of
+        #{realm_uri := Uri, session := S} ->
+            async_update({message, Uri, juno_session:id(S), IP, Type, Size});
+        #{realm_uri := Uri} ->
+            async_update({message, Uri, IP, Type, Size});
+        _ ->
+            async_update({message, IP, Type, Size})
+    end.
 
 
 %% =============================================================================
