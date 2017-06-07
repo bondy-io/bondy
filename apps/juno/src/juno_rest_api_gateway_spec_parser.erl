@@ -935,7 +935,7 @@ parse_request_method(Spec, Ctxt) ->
 %% @doc
 %% Parses a path action section definition. Before applying validations
 %% this function applies defaults values and evaluates all terms 
-%% (using mop:eval/2).
+%% (using mops:eval/2).
 %% If the action type provided is not reconised it fails with 
 %% `{unsupported_action_type, Type}'. 
 %% If an action type is not provided if fails with `action_type_missing'.

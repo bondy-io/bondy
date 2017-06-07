@@ -1015,7 +1015,7 @@ parse_request_method(Spec, Ctxt) ->
 %% @doc
 %% Parses a path action section definition. Before applying validations
 %% this function applies defaults values and evaluates all terms 
-%% (using mop:eval/2).
+%% (using mops:eval/2).
 %% If the action type provided is not reconised it fails with 
 %% `{unsupported_action_type, Type}'. 
 %% If an action type is not provided if fails with `action_type_missing'.
@@ -1076,7 +1076,7 @@ eval_term(Map, Ctxt) when is_map(Map) ->
         (_, V) when is_list(V) ->
             eval_term(V, Ctxt);
         (_, V) -> 
-            mop:eval(V, Ctxt) 
+            mops:eval(V, Ctxt) 
     end,
     maps:map(F, Map);
 
@@ -1084,7 +1084,7 @@ eval_term(L, Ctxt) when is_list(L) ->
     [eval_term(X, Ctxt) || X <- L];
 
 eval_term(T, Ctxt) ->
-    mop:eval(T, Ctxt).
+    mops:eval(T, Ctxt).
 
 
 
