@@ -8,19 +8,18 @@
 %% @end
 %% =============================================================================
 -module(juno_rest_api_gateway).
--behaviour(cowboy_middleware).
+-include("juno.hrl").
 
 -define(DEFAULT_POOL_SIZE, 200).
 -define(HTTP, juno_gateway_http_listener).
 -define(HTTPS, juno_gateway_https_listener).
 
 %% COWBOY MIDDLEWARE CALLBACKS
--export([execute/2]).
 -export([start_listeners/0]).
 -export([start_http/1]).
 -export([start_https/1]).
 % -export([update_hosts/1]).
-
+-export([add_consumer/4]).
 
 
 
@@ -62,6 +61,7 @@ start_listeners() ->
 
 start_listener({<<"http">>, Rules}) ->
     {ok, _} = start_http(Rules),
+    % io:format("HTTP Listener startin with Rules~p~n", [Rules]),
     ok;
 
 start_listener({<<"https">>, Rules}) ->
@@ -122,7 +122,7 @@ start_https(Rules) ->
             middlewares => [
                 cowboy_router, 
                 % juno_rest_api_gateway,
-                juno_security_middleware, 
+                % juno_security_middleware, 
                 cowboy_handler
             ]
         }
@@ -133,21 +133,23 @@ start_https(Rules) ->
 
 
 %% =============================================================================
-%% API: COWBOY MIDDLEWARE CALLBACKS
+%% API: CONSUMERS
 %% =============================================================================
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-execute(Req0, Env0) ->
-    case get_value(handler, Env0) of
-        juno_ws_handler ->
-            {ok, Req0, Env0};
-        _Other ->
-            {ok, Req0, Env0}
-    end.
+add_consumer(RealmUri, ClientId, Password, Info) ->
+    ok = maybe_init_security(RealmUri),
+    Opts = [
+        {info, Info},
+        {"password", binary_to_list(Password)},
+        {"groups", "api_consumers"}
+    ],
+    juno_security:add_user(RealmUri, ClientId, Opts).
+    
+
 
 
 
@@ -227,35 +229,23 @@ base_rules() ->
 
 
 %% =============================================================================
-%% PRIVATE: COWBOY MIDDLEWARE
+%% PRIVATE: SECURITY
 %% =============================================================================
 
 
 %% @private
-get_value(_, undefined) ->
-    undefined;
-
-get_value(Key, Env) when is_list(Env) ->
-    case lists:keyfind(Key, 1, Env) of
-        {Key, Value} -> Value;
-        false -> undefined 
-    end;
-
-get_value(Key, Env) when is_map(Env) ->
-    maps:get(Key, Env, undefined).
-
-
-%% private
-% get_realm_uri(Env) ->
-%     %% We first try in the opts of the handler and revert to the 
-%     %% environment default
-%     case get_value(realm_uri, get_value(handler_opts, Env)) of
-%         undefined ->
-%             get_value(realm_uri, get_value(auth, Env));
-%         Val ->
-%             Val
-%     end.
-
+maybe_init_security(RealmUri) ->
+    case juno_security_group:lookup(RealmUri, <<"api_consumers">>) of
+        not_found -> 
+            G = #{
+                <<"name">> => <<"api_consumers">>,
+                <<"description">> => <<"A group of users allowed to consume APIs from the Juno RESTful API Gateway.">>
+            },
+            juno_security_group:add(RealmUri, G);
+        _ ->
+            ok
+    end.
+    
 
 
 

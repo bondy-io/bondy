@@ -29,6 +29,7 @@
 -define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
 -define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
 
+
 -record(quota_window, {
     limit               ::  pos_integer(),
     %% time when the quota resets in secs
@@ -39,7 +40,7 @@
     %% the length of the window
     duration            ::  pos_integer()
 }).
-
+-type quota_window()                ::  #quota_window{}.
 
 -record(rate_window, {
     %% max number of messages allowed during window 
@@ -47,15 +48,57 @@
     %% duration of window in seconds
     duration            ::  pos_integer()
 }).
+-type rate_window()                 ::  #rate_window{}.
+
+
+-record(oauth2_token, {
+    authid                          ::  binary(),
+    access_token                    ::  binary(),
+    refresh_token                   ::  binary()
+}).
+
+-record(wamp_credential, {
+    %% The authentication ID of the session that joined
+    authid                          ::  binary(),
+    %% The authentication role of the session that joined
+    authrole                        ::  binary(),
+    %% The authentication method that was used for authentication 
+    authmethod                      ::  binary(),
+    %% The provider that performed the authentication of the session that joined
+    authprovider = <<"juno">>       ::  binary()
+}).
+
+-type credential()                  ::  #oauth2_token{}
+                                        | #wamp_credential{}.
+
+% THE NEW SESSION
+% -record(session, {
+%     id                              ::  id(),
+%     realm_uri                       ::  uri(),
+%     expires_in                      ::  pos_integer(),
+%     seq = 0                         ::  non_neg_integer(),
+%     rate = ?DEFAULT_RATE            ::  rate(),
+%     quota = ?DEFAULT_QUOTA          ::  quota(),
+%     is_active = true                ::  boolean(),
+%     %% The credential used to establish the session
+%     credential                      ::  credential(),
+%     rate_window = ?DEFAULT_RATE     ::  rate_window(),
+%     quota_window = ?DEFAULT_QUOTA   ::  quota_window(),
+%     created                         ::  pos_integer(),
+%     last_updated                    ::  pos_integer(),
+%     metadata = #{}                  ::  map()
+% }).
 
 -record(session, {
     id                              ::  id(),
     realm_uri                       ::  uri(),
-    pid = self()                    ::  pid(),
-    peer                            ::  peer(),
-    host                            ::  binary(),
+    %% If a WS connection then we have a pid
+    pid = self()                    ::  pid() | undefined,
+    %% The {IP, Port} of the client
+    peer                            ::  peer() | undefined,
+    %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
-    %% ----
+    %% Sequence number used for ID generation
     seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles
     caller                          ::  map() | undefined,
@@ -63,23 +106,17 @@
     subscriber                      ::  map() | undefined,
     publisher                       ::  map() | undefined,
     %% Auth
-    authid                          ::  binary(),
-    token                           ::  binary(),
+    authid                          ::  binary() | undefined,
     %% Expiration and Limits
     created                         ::  calendar:date_time(),
-    ttl                             ::  timeout(),
-    expires                         ::  pos_integer() | infinity,
-    rate = ?DEFAULT_RATE            ::  rate(),
-    quota = ?DEFAULT_QUOTA           ::  quota()
+    expires_in                      ::  pos_integer() | infinity,
+    rate = ?DEFAULT_RATE            ::  rate_window(),
+    quota = ?DEFAULT_QUOTA          ::  quota_window()
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type session()                 ::  #session{}.
--type quota()                   ::  #quota_window{}.
--type rate()                    ::  #rate_window{}.
--type session_opts()            ::  #{
-    roles => map()
-}.
+-type session_opts()            ::  #{roles => map()}.
 
 -export_type([peer/0]).
 

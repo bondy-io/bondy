@@ -86,9 +86,7 @@
 }).
 
 -type event()                   ::  {wamp_message(), juno_context:context()}.
--type auth_error_reason()       ::  realm_not_found 
-                                    | {missing_param, binary()} 
-                                | {user_not_found, binary()}.
+
                                 
 -record(state, {
     pool_type = permanent       ::  permanent | transient,
@@ -189,7 +187,7 @@ forward(#hello{} = M, #{session := _} = Ctxt) ->
         ?JUNO_SESSION_ALREADY_EXISTS, 
         <<"You've sent a HELLO message more than once.">>, Ctxt);
 
-forward(#hello{} = M, #{challenge_sent := true} = Ctxt) ->
+forward(#hello{} = M, #{challenge_sent := {true, _}} = Ctxt) ->
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     ok = update_stats(M, Ctxt), 
@@ -214,15 +212,22 @@ forward(#authenticate{} = M, #{session := _} = Ctxt) ->
         <<"You've sent an AUTHENTICATE message more than once.">>, 
         Ctxt);
 
-forward(#authenticate{} = M, #{challenge_sent := true} = Ctxt0) ->
+forward(#authenticate{} = M, #{challenge_sent := {true, AuthMethod}} = Ctxt0) ->
     %% Client is responding to a challenge
     ok = update_stats(M, Ctxt0),
-    #authenticate{signature = Signature, extra = Extra} = M,
-    case authenticate(Signature, Extra, Ctxt0) of
-        {ok, Ctxt1} ->
-            open_session(Ctxt1);
-        {error, Reason, Ctxt1} ->
-            abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, Ctxt1)
+    #authenticate{signature = Sign} = M,
+    Realm = maps:get(realm_uri, Ctxt0),
+    Peer = maps:get(peer, Ctxt0),
+    AuthId = maps:get(authid, Ctxt0),
+    case 
+        juno_security_utils:authenticate(
+            AuthMethod, {AuthMethod, AuthId, Sign}, Realm, Peer) 
+    of
+        {ok, _AuthCtxt} ->
+            %% We already stored the authid (username) in the ctxt
+            open_session(Ctxt0);
+        {error, Reason} ->
+            abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, Ctxt0)
     end;
             
 forward(#authenticate{} = M, Ctxt) ->
@@ -376,7 +381,7 @@ maybe_open_session({error, {user_not_found, AuthId}, Ctxt}) ->
 maybe_open_session({challenge, AuthMethod, Challenge, Ctxt0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     Ctxt1 = Ctxt0#{
-        challenge_sent => true % to avoid multiple HELLO messages
+        challenge_sent => {true, AuthMethod} % to avoid multiple HELLO messages
     },
     ok = update_stats(M, Ctxt1),
     {reply, M, Ctxt1}.
@@ -511,7 +516,7 @@ handle_session_message(M, Ctxt0) ->
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
-                juno:error_map(Reason),
+                juno_error:error_map(Reason),
                 ?WAMP_ERROR_CANCELLED
             ),
             ok = update_stats(Reply, Ctxt0),
@@ -707,23 +712,6 @@ abort(Type, Reason, Ctxt) ->
 %% =============================================================================
 %% PRIVATE: AUTH
 %% =============================================================================
-
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec authenticate(binary(), map(), juno_context:context()) -> 
-    {ok, juno_context:context()} 
-    | {error, auth_error_reason(), juno_context:context()}.
-authenticate(Signature, Extra, #{authid := _, realm_uri := _Uri} = Ctxt) 
-when is_binary(Signature), is_map(Extra) ->
-    %% TODO Implement password checking.   
-    % S = base64:decode(Signature),
-    % io:format("Auth sign ~p extra ~p~n", [S, Extra]),
-    {ok, Ctxt}.
 
 
 

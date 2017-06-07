@@ -1,21 +1,22 @@
 #{
     <<"host">> => <<"_">>,
-    <<"realm_uri">> => <<"com.myapi">>,
+    <<"realm_uri">> => <<"com.magenta.public">>,
     <<"variables">> => #{
-        % <<"oauth2">> => #{
-        %     <<"type">> => <<"oauth2">>,
-        %     <<"flow">> => <<"resource_owner_password_credentials">>,
-        %     <<"token_path">> => <<"/auth/access_token">>,
-        %     <<"revoke_token_path">> => <<"/auth/revoke_token">>,
-        %     <<"schemes">> => <<"{{variables.schemes}}">>
-        % },
+        <<"oauth2">> => #{
+            <<"type">> => <<"oauth2">>,
+            <<"flow">> => <<"resource_owner_password_credentials">>,
+            <<"token_path">> => <<"/oauth/token">>,
+            <<"revoke_token_path">> => <<"/oauth/revoke">>,
+            <<"schemes">> => <<"{{variables.schemes}}">>
+        },
         <<"schemes">> => [<<"http">>]
     },  
     <<"defaults">> => #{
         <<"retries">> => 0,
         <<"timeout">> => 5000,
         <<"connect_timeout">> => 5000,
-        <<"schemes">> => <<"{{variables.schemes}}">>
+        <<"schemes">> => <<"{{variables.schemes}}">>,
+        <<"security">> => <<"{{variables.oauth2}}">>
     },
     <<"versions">> =>  #{
         <<"1.0.0">> => #{

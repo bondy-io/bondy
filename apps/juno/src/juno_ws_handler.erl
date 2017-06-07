@@ -358,11 +358,11 @@ wamp_handle(Data1, St0) ->
     case handle_wamp_messages(Messages, Ctxt0) of
         {ok, Ctxt1} ->
             {ok, set_ctxt(St1, Ctxt1)};
-        {stop, Ctxt1} ->
-            {shutdown, set_ctxt(St1, Ctxt1)};
         {reply, Replies, Ctxt1} ->
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
             reply(T, ReplyFrames, set_ctxt(St1, Ctxt1));
+        {stop, Ctxt1} ->
+            {shutdown, set_ctxt(St1, Ctxt1)};
         {stop, Replies, Ctxt1} ->
             self() ! {stop, <<"Router dropped session.">>},
             ReplyFrames = [wamp_encoding:encode(R, E) || R <- Replies],
@@ -394,8 +394,7 @@ handle_wamp_messages([], Ctxt, []) ->
 handle_wamp_messages([], Ctxt, Acc) ->
     {reply, lists:reverse(Acc), Ctxt};
 
-handle_wamp_messages(
-    [#goodbye{} = M|_], Ctxt, Acc) ->
+handle_wamp_messages([#goodbye{} = M|_], Ctxt, Acc) ->
     %% The client initiated a goodbye, so we will not process
     %% any subsequent messages
    case juno_router:forward(M, Ctxt) of

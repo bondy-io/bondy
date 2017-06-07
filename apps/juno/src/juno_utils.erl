@@ -8,12 +8,58 @@
 -export([timeout/1]).
 -export([error_http_code/1]).
 -export([eval_term/2]).
-
+-export([maybe_encode/2]).
+-export([uuid/0]).
+-export([is_uuid/1]).
 
 
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec uuid() -> bitstring().
+
+uuid() ->
+    list_to_bitstring(uuid:uuid_to_string(uuid:get_v4())).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_uuid(Term :: bitstring()) -> boolean().
+
+is_uuid(Term) when is_bitstring(Term) ->
+    uuid:is_v4(uuid:string_to_uuid(bitstring_to_list(Term)));
+is_uuid(_) ->
+    false.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_encode(_, <<>>) ->
+    <<>>;
+
+maybe_encode(json, Term) ->
+    case jsx:is_json(Term) of
+        true ->
+            Term;
+        false ->
+            jsx:encode(Term)
+    end;
+
+ maybe_encode(msgpack, Term) ->
+     %% TODO see if we can catch error when Term is already encoded
+     msgpack:encode(Term).
+
 
 
 %% -----------------------------------------------------------------------------

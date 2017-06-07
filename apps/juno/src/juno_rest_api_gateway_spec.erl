@@ -1556,7 +1556,7 @@ perform_action(
             from_http_response(StatusCode, RespHeaders, Body, RSpec, St0);
         
         {error, Reason} ->
-            Ctxt1 = update_context({error, juno:error_map(Reason)}, Ctxt0),
+            Ctxt1 = update_context({error, juno_error:error_map(Reason)}, Ctxt0),
             #{
                 <<"body">> := Body,
                 <<"headers">> := Headers

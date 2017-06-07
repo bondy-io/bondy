@@ -17,7 +17,7 @@
 -include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(DEFAULT_AUTH_METHOD, ?WAMPCRA_AUTH).
+-define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {global, realms}).
 -define(LOCAL_CIDRS, [
     {{10,0,0,0}, 8},
@@ -29,12 +29,15 @@
 -record(realm, {
     uri                         ::  uri(),
     description                 ::  binary(),
-    authmethods                 ::  [binary()] % a wamp property
-    % account          ::  uri()
+    authmethods                 ::  [binary()], % a wamp property
+    private_keys                ::  map(),
+    public_keys                 ::  map()
 }).
 -type realm()  ::  #realm{}.
 
+
 -export_type([realm/0]).
+-export_type([uri/0]).
 
 -export([auth_methods/1]).
 -export([delete/1]).
@@ -44,6 +47,10 @@
 -export([get/1]).
 -export([get/2]).
 -export([is_security_enabled/1]).
+-export([public_keys/1]).
+-export([get_random_kid/1]).
+-export([get_private_key/2]).
+-export([get_public_key/2]).
 -export([list/0]).
 -export([lookup/1]).
 -export([put/1]).
@@ -71,10 +78,8 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_security_enabled(realm()) -> boolean().
-is_security_enabled(#realm{authmethods = []}) ->
-    false;
-is_security_enabled(#realm{}) ->
-    true.
+is_security_enabled(R) ->
+    security_status(R) =:= enabled.
 
 
 %% -----------------------------------------------------------------------------
@@ -91,9 +96,8 @@ security_status(#realm{uri = Uri}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec enable_security(realm()) -> ok.
-enable_security(#realm{uri = Uri} = Realm) ->
-    ok = juno_security:enable(Uri),
-    Realm.
+enable_security(#realm{uri = Uri}) ->
+    juno_security:enable(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -101,9 +105,44 @@ enable_security(#realm{uri = Uri} = Realm) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec disable_security(realm()) -> ok.
-disable_security(#realm{uri = Uri} = Realm) ->
-    ok = juno_security:disable(Uri),
-    Realm.
+disable_security(#realm{uri = Uri}) ->
+    juno_security:disable(Uri).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec public_keys(realm()) -> [map()].
+public_keys(#realm{public_keys = Keys}) ->
+    [jose_jwk:to_map(K) || K <- Keys].
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_private_key(realm(), Kid :: integer()) -> map().
+get_private_key(#realm{private_keys = Keys}, Kid) ->
+    jose_jwk:to_map(maps:get(Kid, Keys)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_public_key(realm(), Kid :: integer()) -> map().
+get_public_key(#realm{public_keys = Keys}, Kid) ->
+    jose_jwk:to_map(maps:get(Kid, Keys)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+get_random_kid(#realm{private_keys = Map}) ->
+    Kids = maps:keys(Map),
+	lists:nth(rand:uniform(length(Kids)), Kids).
 
 
 %% -----------------------------------------------------------------------------
@@ -113,6 +152,7 @@ disable_security(#realm{uri = Uri} = Realm) ->
 -spec uri(realm()) -> uri().
 uri(#realm{uri = Uri}) ->
     Uri.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -169,7 +209,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         not_found ->
-            put(Uri, Opts)
+            ok = put(Uri, Opts)
     end.
 
 
@@ -193,9 +233,22 @@ put(Uri, Opts) ->
         authmethods := Method
     } = maps_utils:validate(Opts, opts_spec()),
 
+    Keys = maps:from_list([
+        begin
+            Priv = jose_jwk:generate_key({namedCurve, secp256r1}),
+            Kid = list_to_binary(integer_to_list(erlang:phash2(Priv))),
+            Fields = #{
+                <<"kid">> => Kid
+            },
+            {Kid, jose_jwk:merge(Priv, Fields)}
+        end || _ <- lists:seq(1, 3)
+    ]),
+    
     Realm = #realm{
         uri = Uri,
         description = Desc,
+        private_keys = Keys,
+        public_keys = maps:map(fun(_, V) -> jose_jwk:to_public(V) end, Keys),
         authmethods = Method
     },
 
@@ -204,10 +257,11 @@ put(Uri, Opts) ->
             ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
             init(Realm);
         _ ->
-            ok = plumtree_metadata:put(?PREFIX, Uri, Realm)
+            ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
+            Realm
     end.
     
-    
+
 
 
 %% -----------------------------------------------------------------------------
@@ -217,6 +271,7 @@ put(Uri, Opts) ->
 -spec delete(uri()) -> ok.
 delete(?JUNO_REALM_URI) ->
     {error, not_permitted};
+
 delete(Uri) ->
     plumtree_metadata:delete(?PREFIX, Uri),
     % TODO we need to close all sessions for this realm

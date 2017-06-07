@@ -1,4 +1,46 @@
+%% 
+%%  juno_rest_api_gateway_handler.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This module implements a generic Cowboy rest handler that handles a resource
+%% specified using the Juno API Gateway Specification (JAGS) Description 
+%% Language which is a specification for describing, producing and consuming 
+%% RESTful Web Services from and by Juno.
+%%
+%% For every path defined in a JAGS file, Juno will configure and install a 
+%% Cowboy route using this module. The initial state of the module responds to 
+%% a contract between this module and the {@link juno_api_gateway_spec_parser} 
+%% and contains the parsed and preprocessed definition of the paths 
+%% specification which this module uses to dynamically implement its behaviour.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
 -module(juno_rest_api_gateway_handler).
+-include("juno.hrl").
+
+-type state() :: #{
+    api_context => map(),
+    session => any(),
+    realm_uri => binary(), 
+    deprecated => boolean(),
+    security => map()
+}.
+
 
 -export([init/2]).
 -export([allowed_methods/2]).
@@ -14,10 +56,6 @@
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
--type state() :: #{
-    api_context => map(),
-    session => any()
-}.
 
 
 
@@ -53,9 +91,41 @@ content_types_provided(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_provided">>, Spec), Req, St}.
 
 
-is_authorized(Req, St) ->
+is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
+    Realm = maps:get(realm_uri, St0),
+    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
+    Realm = maps:get(realm_uri, St0),
+    Peer = cowboy_req:peer(Req0),
+    case juno_security_utils:authenticate(bearer, Val, Realm, Peer) of
+        {ok, Claims} when is_map(Claims) ->
+            %% The token claims
+            Ctxt = update_context(
+                {security, Claims}, maps:get(api_context, St0)),
+            St1 = maps:update(api_context, Ctxt, St0),
+            {true, Req0, St1};
+        {ok, AuthCtxt} ->
+            %% TODO Here we need the token or the session withe the
+            %% token grants and not the AuthCtxt
+            St1 = St0#{
+                user_id => ?CHARS2BIN(juno_security:get_username(AuthCtxt))
+            },
+            %% TODO update context
+            {true, Req0, St1};
+        {error, Reason} ->
+            Req2 = reply_auth_error(
+                Reason, <<"Bearer">>, Realm, json, Req0),
+            {stop, Req2, St0}
+    end;
+
+
+is_authorized(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+    %% TODO get auth method and status from St and validate
+    %% check scopes vs action requirements
+    {true, Req, St};
+
+is_authorized(Req, #{security := _} = St)  ->
     {true, Req, St}.
 
 
@@ -140,7 +210,7 @@ provide(Enc, Req0, #{api_spec := Spec} = St0)  ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {maybe_encode(Enc, Body), Req1, St1};
+            {juno_utils:maybe_encode(Enc, Body), Req1, St1};
         
         {ok, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
@@ -206,16 +276,17 @@ accept(Enc, Req0, #{api_spec := Spec} = St0) ->
 -spec update_context(cowboy_req:req() | map(), map()) -> map().
 
 update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
-    M = #{
-        <<"error">> => Map
-    },
-    maps:put(<<"action">>, M, Ctxt);
+    maps_utils:put_path([<<"action">>, <<"error">>], Map, Ctxt);
 
 update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
-    M = #{
-        <<"result">> => Result
+    maps_utils:put_path([<<"action">>, <<"result">>], Result, Ctxt);
+
+update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
+    Map = #{
+        <<"authid">> => maps:get(<<"sub">>, Claims),
+        <<"authscope">> => maps:get(<<"scope">>, Claims)
     },
-    maps:put(<<"action">>, M, Ctxt);
+    maps:put(<<"security">>, Map, Ctxt);
 
 update_context(Req0, Ctxt) ->
     %% At the moment we do not support partially reading the body
@@ -238,22 +309,6 @@ update_context(Req0, Ctxt) ->
     maps:put(<<"request">>, M, Ctxt).
 
 
-%% @private
-maybe_encode(_, <<>>) ->
-    <<>>;
-
-maybe_encode(json, Term) ->
-    case jsx:is_json(Term) of
-        true ->
-            Term;
-        false ->
-            jsx:encode(Term)
-    end;
-
- maybe_encode(msgpack, Term) ->
-     %% TODO see if we can catch error when Term is already encoded
-     msgpack:encode(Term).
-
 
 
 %% @private
@@ -262,6 +317,15 @@ maybe_encode(json, Term) ->
     | {ok, Code :: integer(), Response :: map(), state()} 
     | {error, Response :: map(), state()} 
     | {error, Code :: integer(), Response :: map(), state()}.
+
+perform_action(
+    _, #{<<"action">> := #{<<"type">> := <<"static">>}} = Spec, St0) ->
+    Ctxt0 = maps:get(api_context, St0),
+    %% We get the response directly as it should be statically defined
+    Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
+    Response = juno_utils:eval_term(Result, Ctxt0),
+    St1 = maps:update(api_context, Ctxt0, St0),
+    {ok, Response, St1};
 
 perform_action(
     Method,
@@ -305,7 +369,7 @@ perform_action(
             from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
         
         {error, Reason} ->
-            Ctxt1 = update_context({error, juno:error_map(Reason)}, Ctxt0),
+            Ctxt1 = update_context({error, juno_error:error_map(Reason)}, Ctxt0),
             Response = juno_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
             {error, Response, St1}
@@ -366,7 +430,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
         <<"body">> => RespBody,
         <<"headers">> => maps:from_list(RespHeaders)
     },
-    Ctxt1 = update_context({error, Result}, Ctxt0),
+    Ctxt1 = update_context({result, Result}, Ctxt0),
     Response = juno_utils:eval_term(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {ok, StatusCode, Response, St1}.
@@ -374,12 +438,37 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
   
 
 
+
+
+reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
+    #{
+        <<"code">> := Code,
+        <<"message">> := Msg,
+        <<"description">> := Desc
+    } = Body = juno_error:error_map({Error, 401}),
+    Auth = <<
+        Scheme/binary,
+        " realm=", $", Realm/binary, $", $\,,
+        " error=", $", Code/binary, $", $\,,
+        " message=", $", Msg/binary, $", $\,,
+        " description=", $", Desc/binary, $"
+    >>,
+    Resp = #{ 
+        <<"http_code">> => 401,
+        <<"body">> => Body,
+        <<"headers">> => #{
+            <<"www-authenticate">> => Auth
+        }
+    },
+    reply(401, Enc, Resp, Req).
+
+
 %% @private
 -spec reply(integer(), atom(), map(), cowboy_req:req()) -> 
     cowboy_req:req().
 
-reply(HTTPCode, Encoding, Response, Req) ->
-    cowboy_req:reply(HTTPCode, prepare_request(Encoding, Response, Req)).
+reply(HTTPCode, Enc, Response, Req) ->
+    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req)).
 
 
 
@@ -387,13 +476,13 @@ reply(HTTPCode, Encoding, Response, Req) ->
 -spec prepare_request(atom(), map(), cowboy_req:req()) -> 
     cowboy_req:req().
 
-prepare_request(Encoding, Response, Req0) ->
+prepare_request(Enc, Response, Req0) ->
     #{
         <<"body">> := Body,
         <<"headers">> := Headers
     } = Response,
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(maybe_encode(Encoding, Body), Req1).
+    cowboy_req:set_resp_body(juno_utils:maybe_encode(Enc, Body), Req1).
 
 
 %% @private

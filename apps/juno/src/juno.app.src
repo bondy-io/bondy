@@ -19,8 +19,11 @@
             exometer_core,  
             cowboy,
             jsx,
+            jose,
             msgpack,
             hackney,
+            qdate,
+            uuid,
             wamp
         ]},
     {env,[]},

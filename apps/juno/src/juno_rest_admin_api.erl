@@ -48,7 +48,7 @@ start_admin_http() ->
             ]},
             {middlewares, [
                 cowboy_router, 
-                juno_security_middleware, 
+                % juno_security_middleware, 
                 cowboy_handler
             ]}
         ]

@@ -148,7 +148,7 @@ handle_message(#publish{} = M, Ctxt) ->
             Reply = wamp_message:error(
                 ?PUBLISH, 
                 ReqId, 
-                juno:error_map(Reason), 
+                juno_error:error_map(Reason), 
                 ?WAMP_ERROR_CANCELLED),
             juno:send(juno_context:peer_id(Ctxt), Reply);
         {error, _} ->
