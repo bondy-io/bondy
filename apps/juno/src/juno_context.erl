@@ -19,18 +19,21 @@
 
 -type context()       ::  #{
     id => id(),
+    %% Realm and Session
     realm_uri => uri(),
     session => juno_session:session() | undefined,
+    %% Peer Info
+    peer => juno_session:peer(),
+    authmethod => binary(),
+    authid => binary(),
+    roles => map(),
+    %% Protocol State
     goodbye_initiated => boolean(),
     challenge_sent => {true, AuthMethod :: any()} | false,
-    peer => juno_session:peer(),
-    roles => map(),
+    awaiting_call_ids => sets:set(),
     request_id => id(),
     request_timeout => non_neg_integer(),
     request_details => map(),
-    authmethod => binary(),
-    authid => binary(),
-    awaiting_call_ids => sets:set(),
     %% Metadata
     user_info => map()
 }.
