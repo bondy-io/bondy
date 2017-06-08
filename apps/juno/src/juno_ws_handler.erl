@@ -44,9 +44,7 @@
 
 -record(state, {
     frame_type              ::  juno_wamp_protocol:frame_type(),
-    encoding                ::  juno_wamp_protocol:encoding(),
     protocol_state          ::  juno_wamp_protocol:state() | undefined,
-    data = <<>>             ::  binary(),
     hibernate = false       ::  boolean()
 }).
 
@@ -79,14 +77,12 @@ init(Req0, _) ->
     %% correct subprotocol was found.
     All = cowboy_req:parse_header(?WS_SUBPROTOCOL_HEADER, Req0),
     case select_subprotocol(All) of
-        {ok, {ws, FrameType, Enc} = Subproto, BinProto} ->
+        {ok, {ws, FrameType, _Enc} = Subproto, BinProto} ->
             Peer = cowboy_req:peer(Req0),
             case juno_wamp_protocol:init(Subproto, Peer, #{}) of
                 {ok, CBState} ->
                     St = #state{
                         frame_type = FrameType,
-                        encoding = Enc,
-                        data = <<>>, 
                         protocol_state = CBState
                     },
                     Req1 = cowboy_req:set_resp_header(

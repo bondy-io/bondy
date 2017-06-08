@@ -77,7 +77,7 @@ maybe_start_router_services() ->
 %% @private
 -spec start_tcp_handlers() -> ok.
 start_tcp_handlers() ->
-    ServiceName = juno_wamp_tcp_listener,
+    ServiceName = juno_wamp_raw_listener,
     PoolSize = juno_config:tcp_acceptors_pool_size(),
     Port = juno_config:tcp_port(),
     MaxConnections = juno_config:tcp_max_connections(),
