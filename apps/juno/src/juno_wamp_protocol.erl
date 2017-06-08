@@ -151,6 +151,7 @@ handle_inbound(Data0, #wamp_state{frame_type = T, encoding = E} = St) ->
     | {stop, binary(), state()}.
 
 handle_outbound(#result{} = M, St0) ->
+    ok = juno_stats:update(M, St0#wamp_state.context),
     CallId = M#result.request_id,
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
@@ -159,6 +160,7 @@ handle_outbound(#result{} = M, St0) ->
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
+    ok = juno_stats:update(M, St0#wamp_state.context),
     CallId = M#result.request_id,
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
@@ -169,6 +171,7 @@ handle_outbound(#error{request_type = ?CALL} = M, St0) ->
 handle_outbound(M, St) ->
     case wamp_message:is_message(M) of
         true ->
+            ok = juno_stats:update(M, St#wamp_state.context),
             Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
             {ok, Bin, St};
         false ->
@@ -436,6 +439,7 @@ parse_roles([<<"publisher">>|T], Roles) ->
 
 parse_roles([_|T], Roles) ->
     parse_roles(T, Roles).
+
 
 %% @private
 abort(Type, Reason, St) ->
