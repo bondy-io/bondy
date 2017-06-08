@@ -44,6 +44,7 @@
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
+-export([new/1]).
 -export([peer/1]).
 -export([add_awaiting_call_id/2]).
 -export([awaiting_call_ids/1]).
@@ -78,6 +79,15 @@ new() ->
         awaiting_call_ids => sets:new()
     },
     set_roles(Ctxt, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(juno_session:peer()) -> context().
+new(Peer) ->
+    set_peer(new(), Peer).
 
 
 %% -----------------------------------------------------------------------------
@@ -128,7 +138,7 @@ peer(#{peer := Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_peer(context(), juno_session:peer()) -> context().
-set_peer(Ctxt, Peer) when is_map(Ctxt) ->
+set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
     Ctxt#{peer => Peer}.
 
 

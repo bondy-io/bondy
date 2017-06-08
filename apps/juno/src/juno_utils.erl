@@ -155,7 +155,7 @@ eval_term(L, Ctxt) when is_list(L) ->
     [eval_term(X, Ctxt) || X <- L];
 
 eval_term(T, Ctxt) ->
-    mop:eval(T, Ctxt).
+    mops:eval(T, Ctxt).
 
 
 %% =============================================================================

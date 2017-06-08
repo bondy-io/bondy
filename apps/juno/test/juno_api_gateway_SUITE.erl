@@ -48,9 +48,9 @@ simple_1_test(_) ->
                         <<"get">> => #{
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
-                                <<"procedure">> => <<"com.myapi.foo">>,
+                                <<"procedure">> => <<"com.magenta.things.list">>,
                                 <<"details">> => #{},
-                                <<"arguments">> => [<<"{{variables.foo}}">>],
+                                <<"arguments">> => [<<"{{request.query_params}}">>],
                                 <<"arguments_kw">> => #{}
                             },
                             <<"response">> => #{
@@ -58,7 +58,7 @@ simple_1_test(_) ->
                                 
                                 },
                                 <<"on_result">> => #{
-                                  
+                                  <<"body">> => <<"{{action.result}}">>
                                 }
                             }
                         }

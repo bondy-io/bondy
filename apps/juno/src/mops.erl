@@ -2,7 +2,7 @@
 %% Copyright (C) Ngineo Limited 2017. All rights reserved.
 %% -----------------------------------------------------------------------------
 
--module(mop).
+-module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
 -define(PIPE_OP, <<$|,$>>>).
@@ -90,13 +90,13 @@ eval(Val, _) ->
 %%
 %% Examples:
 %% <pre language="erlang">
-%% > mop:eval(foo, #{<<"foo">> => bar}).
+%% > mops:eval(foo, #{<<"foo">> => bar}).
 %% > foo
-%% > mop:eval(<<"foo">>, #{<<"foo">> => bar}).
+%% > mops:eval(<<"foo">>, #{<<"foo">> => bar}).
 %% > <<"foo">>
-%% > mop:eval(<<"{{foo}}">>, #{<<"foo">> => bar}).
+%% > mops:eval(<<"{{foo}}">>, #{<<"foo">> => bar}).
 %% > bar
-%% > mop:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => foobar}}).
+%% > mops:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => foobar}}).
 %% > foobar
 %% </pre>
 %% @end
