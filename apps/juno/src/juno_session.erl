@@ -31,22 +31,22 @@
 
 
 -record(quota_window, {
-    limit               ::  pos_integer(),
+    limit                           ::  pos_integer(),
     %% time when the quota resets in secs
-    renews              ::  pos_integer(),
+    renews                          ::  pos_integer(),
     %% number of requests remaining in quota
-    remaining           ::  pos_integer(),
+    remaining                       ::  pos_integer(),
     %% time in seconds during which quota is valid e.g. 
     %% the length of the window
-    duration            ::  pos_integer()
+    duration                        ::  pos_integer()
 }).
 -type quota_window()                ::  #quota_window{}.
 
 -record(rate_window, {
     %% max number of messages allowed during window 
-    limit               ::  pos_integer(), 
+    limit                           ::  pos_integer(), 
     %% duration of window in seconds
-    duration            ::  pos_integer()
+    duration                        ::  pos_integer()
 }).
 -type rate_window()                 ::  #rate_window{}.
 
