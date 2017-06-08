@@ -138,7 +138,7 @@ peer(#{peer := Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_peer(context(), juno_session:peer()) -> context().
-set_peer(Ctxt, Peer) when is_map(Ctxt) ->
+set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
     Ctxt#{peer => Peer}.
 
 
