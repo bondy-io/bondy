@@ -35,13 +35,6 @@
     context                 ::  juno_context:context() | undefined
 }).
 
--type frame_type()          ::  text | binary.
--type transport()           ::  ws | raw.
--type encoding()            ::  json 
-                                | msgpack 
-                                | json_batched 
-                                | msgpack_batched
-                                | bert.
 
 -type subprotocol()         ::  {transport(), frame_type(), encoding()}.
 
@@ -368,18 +361,19 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     {reply, binary(), state()}
     | {stop, binary(), state()}.
 
-open_session(St) ->
+open_session(St0) ->
     try 
         #{
             realm_uri := Uri, 
             id := Id, 
             request_details := Details
-        } = Ctxt0 = St#wamp_state.context,
+        } = Ctxt0 = St0#wamp_state.context,
         Session = juno_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
         Ctxt1 = Ctxt0#{
             session => Session,
             roles => parse_roles(maps:get(<<"roles">>, Details))
         },
+        St1 = update_context(Ctxt1, St0),
 
         Welcome = wamp_message:welcome(
             Id,
@@ -389,14 +383,14 @@ open_session(St) ->
             }
         ),
         ok = juno_stats:update(Welcome, Ctxt1),
-        Bin = wamp_encoding:encode(Welcome, St#wamp_state.encoding),
-        {reply, Bin, St}
+        Bin = wamp_encoding:encode(Welcome, St1#wamp_state.encoding),
+        {reply, Bin, St1}
     catch
         error:{invalid_options, missing_client_role} ->
             abort(
                 <<"wamp.error.missing_client_role">>, 
                 <<"Please provide at least one client role.">>,
-                St)
+                St0)
     end.
 
 
@@ -443,7 +437,11 @@ parse_roles([_|T], Roles) ->
 
 %% @private
 abort(Type, Reason, St) ->
-    M = wamp_message:abort(#{message => Reason}, Type),
+    Details = #{
+        <<"message">> => Reason,
+        <<"timestamp">> => erlang:system_time(seconds)
+    },
+    M = wamp_message:abort(Details, Type),
     ok = juno_stats:update(M, St#wamp_state.context),
     Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
     {stop, Bin, St}.
@@ -454,12 +452,12 @@ maybe_auth_challenge(_, not_found, St) ->
     #{realm_uri := Uri} = St#wamp_state.context,
     {error, {realm_not_found, Uri}, St};
 
-maybe_auth_challenge(#{<<"authid">> := UserId} = Details, Realm, St0) ->
+maybe_auth_challenge(Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
-    St1 = update_context(Ctxt1, St0),
-    case juno_realm:is_security_enabled(Realm) of
-        true ->
+    case {juno_realm:is_security_enabled(Realm), Details} of
+        {true, #{<<"authid">> := UserId}} ->
+            Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+            St1 = update_context(Ctxt1, St0),
             AuthMethods = maps:get(<<"authmethods">>, Details, []),
             AuthMethod = juno_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
@@ -471,13 +469,13 @@ maybe_auth_challenge(#{<<"authid">> := UserId} = Details, Realm, St0) ->
                     Ch = challenge(AuthMethod, User, Details, St1),
                     {challenge, AuthMethod, Ch, St1}
             end;
-        false ->
-            {ok, Ctxt1}
-    end;
-
-%% @private
-maybe_auth_challenge(_, _, St) ->
-    {error, {missing_param, <<"authid">>}, St}.
+        {true, _} ->
+            {error, {missing_param, <<"authid">>}, St0};
+        {false, _} ->
+            Ctxt1 = Ctxt0#{authid => undefined, request_details => Details},
+            St1 = update_context(Ctxt1, St0),
+            {ok, St1}
+    end.
 
 
 %% @private

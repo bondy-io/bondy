@@ -86,6 +86,9 @@
 %     quota_window = ?DEFAULT_QUOTA   ::  quota_window(),
 %     created                         ::  pos_integer(),
 %     last_updated                    ::  pos_integer(),
+%     resumed                         ::  boolean(),
+%     resumable                       ::  boolean(),
+%     resumed_token                   ::  binary(),
 %     metadata = #{}                  ::  map()
 % }).
 
