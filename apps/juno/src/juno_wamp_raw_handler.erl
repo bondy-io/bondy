@@ -8,11 +8,13 @@
 %% @end
 %% =============================================================================
 -module(juno_wamp_raw_handler).
+-behaviour(gen_server).
 -behaviour(ranch_protocol).
+-include("juno.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 
--define(TIMEOUT, 60000*15). % 15 mins
+-define(TIMEOUT, 60000*10).
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -39,7 +41,14 @@
 -type state() :: #state{}.
 
 -export([start_link/4]).
--export([init/4]).
+
+-export([init/1]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+
 
 
 
@@ -53,8 +62,78 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
-    Pid = spawn_link(?MODULE, init, [Ref, Socket, Transport, Opts]),
-    {ok, Pid}.
+    {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
+
+
+
+init({Ref, Socket, Transport, _Opts}) ->
+    %% We must call ranch:accept_ack/1 before doing any socket operation. 
+    %% This will ensure the connection process is the owner of the socket. 
+    %% It expects the listener’s name as argument.
+    ok = ranch:accept_ack(Ref),
+    Transport:setopts(Socket, [{active, once}, {packet, 0}]),    
+    St = #state{
+        socket = Socket,
+        transport = Transport
+    },
+    io:format("Init ~p~n", [self()]),
+    gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
+
+
+handle_info(
+    {tcp, Socket, Data}, 
+    #state{socket = Socket, transport = Transport} = St0) ->
+
+    case handle_data(Data, St0) of
+        {ok, St1} -> 
+            Transport:setopts(Socket, [{active, once}]),
+            {noreply, St1, ?TIMEOUT};
+        {stop, St1} ->
+            {stop, normal, St1};
+        {error, Reason, St1} ->
+            lager:info("TCP Connection closing, error=~p", [Reason]),
+            {stop, reason, St1}
+    end;
+
+handle_info({?JUNO_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+    handle_outbound(M, St);
+
+handle_info({?JUNO_PEER_CALL, Pid, Ref, M}, St) ->
+    %% Here we receive the messages that either the router or another peer
+    %% sent to us using juno:send/2,3
+    ok = juno:ack(Pid, Ref),
+    handle_outbound(M, St);
+
+handle_info({tcp_closed, _Socket}, State) ->
+	{stop, normal, State};
+
+handle_info({tcp_error, _, Reason}, State) ->
+	{stop, Reason, State};
+
+handle_info(timeout, State) ->
+	{stop, normal, State};
+
+handle_info(_Info, State) ->
+	{stop, normal, State}.
+
+
+handle_call(_Request, _From, State) ->
+	{reply, ok, State}.
+
+
+handle_cast(_Msg, State) ->
+	{noreply, State}.
+
+
+terminate(_Reason, _State) ->
+	ok.
+
+code_change(_OldVsn, State, _Extra) ->
+	{ok, State}.
+
+
+
+
 
 
 
@@ -62,41 +141,6 @@ start_link(Ref, Socket, Transport, Opts) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-init(Ref, Socket, Transport, _Opts) ->
-    %% We must call ranch:accept_ack/1 before doing any socket operation. 
-    %% This will ensure the connection process is the owner of the socket. 
-    %% It expects the listener’s name as argument.
-    ok = ranch:accept_ack(Ref),
-    Transport:setopts(Socket, [{packet, 0}]),    
-    St = #state{
-        socket = Socket,
-        transport = Transport
-    },
-    loop(St).
-
-
-loop(#state{socket = Socket, transport = Transport} = St0) ->
-    case Transport:recv(Socket, 0, ?TIMEOUT) of
-        {ok, Data} ->
-            % TODO handle errors
-            case handle_data(Data, St0) of
-                {ok, St1} -> 
-                    loop(St1);
-                {stop, _St1} ->
-                    ok = Transport:close(Socket);
-                {error, Reason, St0} ->
-                    lager:info("TCP Connection closing, error=~p", [Reason]),
-                    ok = Transport:close(Socket)
-            end;
-        {error, timeout} ->
-            io:format("closing socket , timeout~n"),
-            ok = Transport:close(Socket);
-        _ ->
-            io:format("closing socket~n"),
-            ok = Transport:close(Socket)
-    end.
 
 
 -spec handle_data(Data :: binary(), State :: state()) ->
@@ -164,6 +208,18 @@ handle_data(<<0:5, 0:3, _Len:24, Data/binary>>, St) ->
 
 
 
+handle_outbound(M, St0) ->
+    case juno_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
+        {ok, Bin, PSt} ->
+            St1 = St0#state{protocol_state = PSt},
+            send(Bin, St1),
+            {noreply, St1, ?TIMEOUT};
+        {stop, PSt} ->
+            {stop, normal, St0#state{protocol_state = PSt}};
+        {stop, Bin, PSt} ->
+            send(Bin, St0#state{protocol_state = PSt}),
+            {stop, normal, St0#state{protocol_state = PSt}}
+    end.
 
 
 %% =============================================================================

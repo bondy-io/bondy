@@ -460,13 +460,12 @@ handle_message(#call{} = M, Ctxt0) ->
     end,
 
     %% A response will be send asynchronously by another router process instance
-    {ok, _Ctxt2} = invoke(
+    invoke(
         M#call.request_id,
         M#call.procedure_uri,
         Fun,
         M#call.options,
-        Ctxt0),
-    ok.
+        Ctxt0).
 
 
 %% =============================================================================
@@ -593,8 +592,9 @@ registrations(RealmUri, SessionId, Limit) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_registrations(uri(), juno_context:context()) ->
+-spec match_registrations(uri(), juno_context:context()) -> 
     [juno_registry:entry()].
+
 match_registrations(ProcUri, Ctxt) ->
     case juno_registry:match(registration, ProcUri, Ctxt) of
         {L, '$end_of_table'} -> L;
@@ -636,39 +636,49 @@ match_registrations(Cont) ->
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     S = juno_context:session(Ctxt0),
     SId = juno_session:id(S),
-    Caller = juno_session:pid(S),
-    Timeout = juno_utils:timeout(Opts),
-    %%  A promise is used to implement a capability and a feature:
-    %% - the capability to match wamp_yiled() or wamp_error() messages
-    %%   to the originating wamp_call() and the Caller
-    %% - call_timeout feature at the dealer level
-    Template = #promise{
-        procedure_uri = ProcUri, 
-        call_request_id = CallId,
-        caller_pid = Caller,
-        caller_session_id = SId
-    },
-
-    Fun = fun(Entry, Ctxt1) ->
-        CalleeSessionId = juno_registry:session_id(Entry),
-        Callee = juno_session:pid(CalleeSessionId),
-        RegId = juno_registry:entry_id(Entry),
-        {ok, Id, Ctxt2} = UserFun(RegId, Callee, Ctxt1),
-        Promise = Template#promise{
-            invocation_request_id = Id,
-            callee_session_id = CalleeSessionId,
-            callee_pid = Callee
-        }, 
-        %% We enqueue the promise with a timeout
-        ok = enqueue_promise(Id, Promise, Timeout, Ctxt2),
-        {ok, Ctxt2}
-    end,
 
     %% We asume that as with pubsub, the _Caller_ should not receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    Regs = match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}),
-    do_invoke(Regs, Fun, Ctxt0).
+    Result = match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}),
+    io:format("Result ~p~n", [Result]),
+    case Result of
+        {[], '$end_of_table'} ->
+            Error = wamp_message:error(
+                ?CALL, CallId, #{}, ?WAMP_ERROR_NO_SUCH_PROCEDURE),
+            juno:send(juno_context:peer_id(Ctxt0), Error);
+        Regs ->
+            %%  A promise is used to implement a capability and a feature:
+            %% - the capability to match wamp_yiled() or wamp_error() messages
+            %%   to the originating wamp_call() and the Caller
+            %% - call_timeout feature at the dealer level
+            
+            Caller = juno_session:pid(S),
+            Timeout = juno_utils:timeout(Opts),
+            Template = #promise{
+                procedure_uri = ProcUri, 
+                call_request_id = CallId,
+                caller_pid = Caller,
+                caller_session_id = SId
+            },
+            Fun = fun(Entry, Ctxt1) ->
+                CalleeSessionId = juno_registry:session_id(Entry),
+                Callee = juno_session:pid(CalleeSessionId),
+                RegId = juno_registry:entry_id(Entry),
+                {ok, Id, Ctxt2} = UserFun(RegId, Callee, Ctxt1),
+                Promise = Template#promise{
+                    invocation_request_id = Id,
+                    callee_session_id = CalleeSessionId,
+                    callee_pid = Callee
+                }, 
+                %% We enqueue the promise with a timeout
+                ok = enqueue_promise(Id, Promise, Timeout, Ctxt2),
+                {ok, Ctxt2}
+            end,
+            Reply = do_invoke(Regs, Fun, Ctxt0),
+            juno:send(juno_context:peer_id(Ctxt0), Reply)
+    end.
+    
 
 
 
@@ -740,7 +750,7 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 2) ->
 
 
 %% @private
-do_invoke('$end_of_table', _, _) ->
+do_invoke({[],'$end_of_table'}, _, _) ->
     ok;
 
 do_invoke({L, '$end_of_table'}, Fun, Ctxt) ->

@@ -154,7 +154,7 @@ handle_outbound(#result{} = M, St0) ->
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
     ok = juno_stats:update(M, St0#wamp_state.context),
-    CallId = M#result.request_id,
+    CallId = M#error.request_id,
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = juno_context:remove_awaiting_call_id(Ctxt0, CallId),
     St1 = update_context(juno_context:reset(Ctxt1), St0),

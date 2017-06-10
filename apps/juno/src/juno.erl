@@ -51,7 +51,12 @@ send(PeerId, M) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
-send({Pid, SessionId}, M, Opts0) when is_pid(Pid) ->
+
+send({_, Pid}, M, _) when Pid =:= self() ->
+    Pid ! {?JUNO_PEER_CALL, Pid, M},
+    ok;
+
+send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
     Opts1 = maps_utils:validate(Opts0, #{
         timeout => #{
             required => true,
@@ -78,12 +83,14 @@ send({Pid, SessionId}, M, Opts0) when is_pid(Pid) ->
     erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
+            io:format("Process down ~p error=~p~n", [Pid, Reason]),
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?JUNO_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
     after 
         Timeout ->
+            io:format("Timeout~n"),
             demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.

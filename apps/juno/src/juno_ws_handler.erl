@@ -179,21 +179,14 @@ websocket_handle(Data, St) ->
 %% client. See {@link juno:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
+websocket_info({?JUNO_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+    handle_outbound(St#state.frame_type, M, St);
 
 websocket_info({?JUNO_PEER_CALL, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using juno:send/2,3
     ok = juno:ack(Pid, Ref),
-    #state{frame_type = T} = St,
-    case juno_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
-        {ok, Bin, PSt} ->
-            {reply, frame(T, Bin), St#state{protocol_state = PSt}};
-        {stop, PSt} ->
-            {stop, St#state{protocol_state = PSt}};
-        {stop, Bin, PSt} ->
-            self() ! {stop, <<"Router dropped session.">>},
-            reply(T, [Bin], St#state{protocol_state = PSt})
-    end;
+    handle_outbound(St#state.frame_type, M, St);
 
 websocket_info({timeout, _Ref, _Msg}, St) ->
     %% erlang:start_timer(1000, self(), <<"How' you doin'?">>),
@@ -269,6 +262,17 @@ terminate({crash, throw, Reason}, _Req, St) ->
 terminate({remote, _Code, _Binary}, _Req, St) ->
     do_terminate(St).
 
+
+handle_outbound(T, M, St) ->
+    case juno_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
+        {ok, Bin, PSt} ->
+            {reply, frame(T, Bin), St#state{protocol_state = PSt}};
+        {stop, PSt} ->
+            {stop, St#state{protocol_state = PSt}};
+        {stop, Bin, PSt} ->
+            self() ! {stop, <<"Router dropped session.">>},
+            reply(T, [Bin], St#state{protocol_state = PSt})
+    end.
 
 
 
