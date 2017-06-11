@@ -135,6 +135,6 @@
 %% UTILS
 %% =============================================================================
 
-
+-define(EOT, '$end_of_table').
 -define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
 -define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).

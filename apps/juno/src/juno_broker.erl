@@ -100,6 +100,7 @@ is_feature_enabled(F) when is_binary(F) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: wamp_message(), Ctxt :: juno_context:context()) -> ok.
+
 handle_message(#subscribe{} = M, Ctxt) ->
     subscribe(M, Ctxt);
 
@@ -226,6 +227,7 @@ handle_call(
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(wamp_subscribe(), juno_context:context()) -> ok.
+
 subscribe(M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
@@ -252,6 +254,7 @@ subscribe(M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 %% TODO Rename to flush()
 -spec unsubscribe_all(juno_context:context()) -> ok.
+
 unsubscribe_all(Ctxt) ->
     juno_registry:remove_all(subscription, Ctxt).
 
@@ -262,6 +265,7 @@ unsubscribe_all(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unsubscribe(id(), juno_context:context()) -> ok | {error, not_found}.
+
 unsubscribe(SubsId, Ctxt) ->
     case juno_registry:remove(subscription, SubsId, Ctxt) of
         ok ->
@@ -283,6 +287,7 @@ unsubscribe(SubsId, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec publish(uri(), map(), list(), map(), juno_context:context()) ->
     {ok, id()}.
+
 publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     Session = juno_context:session(Ctxt),
     SessionId = juno_session:id(Session),
@@ -319,16 +324,13 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 %% subscriptions/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(
-    ContextOrCont :: juno_context:context() | juno_registry:continuation()) ->
-    [juno_registry:entry()].
-subscriptions(Ctxt) when is_map(Ctxt) ->
-    RealmUri = juno_context:realm_uri(Ctxt),
-    SessionId = juno_context:session_id(Ctxt),
-    juno_registry:entries(
-        subscription, RealmUri, SessionId);
+-spec subscriptions(juno_registry:continuation()) ->
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
 
-subscriptions(Cont) ->
+subscriptions({subscription, _} = Cont) ->
     juno_registry:entries(Cont).
 
 
@@ -344,9 +346,9 @@ subscriptions(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->       
     [juno_registry:entry()].
+
 subscriptions(RealmUri, SessionId) ->
-    juno_registry:entries(
-        subscription, RealmUri, SessionId, infinity).
+    juno_registry:entries(subscription, RealmUri, SessionId, infinity).
 
 
 %% -----------------------------------------------------------------------------
@@ -359,8 +361,11 @@ subscriptions(RealmUri, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
-    {[juno_registry:entry()], juno_registry:continuation()}
-    | '$end_of_table'.
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 subscriptions(RealmUri, SessionId, Limit) ->
     juno_registry:entries(
         subscription, RealmUri, SessionId, Limit).
@@ -372,12 +377,13 @@ subscriptions(RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), juno_context:context()) ->
-    [{SessionId :: id(), pid(), SubsId :: id(), Opts :: map()}].
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 match_subscriptions(TopicUri, Ctxt) ->
-    case juno_registry:match(subscription, TopicUri, Ctxt) of
-        {L, '$end_of_table'} -> L;
-        '$end_of_table' -> []
-    end.
+    juno_registry:match(subscription, TopicUri, Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -385,10 +391,12 @@ match_subscriptions(TopicUri, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_subscriptions(
-    uri(), juno_context:context(), non_neg_integer()) ->
-    {[juno_registry:entry()], juno_registry:continuation()}
-    | '$end_of_table'.
+-spec match_subscriptions(uri(), juno_context:context(), non_neg_integer()) ->
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 match_subscriptions(TopicUri, Ctxt, Opts) ->
     juno_registry:match(subscription, TopicUri, Ctxt, Opts).
 
@@ -399,24 +407,25 @@ match_subscriptions(TopicUri, Ctxt, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(juno_registry:continuation()) ->
-    {[juno_registry:entry()], juno_registry:continuation()} | '$end_of_table'.
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 match_subscriptions(Cont) ->
     ets:select(Cont).
 
 
 %% @private
-publish('$end_of_table', _Fun) ->
+publish({[], ?EOT}, _Fun) ->
     ok;
 
-publish({L, '$end_of_table'}, Fun) ->
+publish({L, ?EOT}, Fun) ->
     lists:foreach(Fun, L);
 
 publish({L, Cont}, Fun ) ->
     ok = lists:foreach(Fun, L),
-    publish(match_subscriptions(Cont), Fun);
-
-publish(L, Fun) when is_list(L) ->
-    lists:foreach(Fun, L).
+    publish(match_subscriptions(Cont), Fun).
 
 
 

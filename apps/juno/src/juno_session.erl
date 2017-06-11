@@ -255,6 +255,9 @@ realm_uri(Id) ->
 %% -----------------------------------------------------------------------------
 -spec pid(session()) -> pid().
 
+pid(Id) when is_integer(Id) ->
+    pid(fetch(Id));
+
 pid(#session{pid = Pid}) ->
     Pid.
 

@@ -69,7 +69,7 @@
   1},
  {<<"tuplespace">>,
   {git,"git@gitlab.com:leapsight/tuplespace.git",
-       {ref,"4b8b270feaba9631d305f52b15e22bdf6efec5e8"}},
+       {ref,"730b03b6cd9c19afce5c68de931427e0fcd173d6"}},
   0},
  {<<"utils">>,
   {git,"git@gitlab.com:leapsight/utils.git",

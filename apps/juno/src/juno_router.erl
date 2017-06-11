@@ -383,7 +383,8 @@ do_forward(#register{} = M, Ctxt) ->
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
 
     Reply = case juno_dealer:register(Uri, Opts, Ctxt) of
-        {ok, RegId} ->
+        {ok, Map} ->
+            RegId = maps:get(<<"id">>, Map),
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->
             wamp_message:error(

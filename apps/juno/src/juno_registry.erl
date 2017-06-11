@@ -11,6 +11,7 @@
 %% -----------------------------------------------------------------------------
 -module(juno_registry).
 -include_lib("wamp/include/wamp.hrl").
+-include("juno.hrl").
 
 -define(ANY, <<"*">>).
 
@@ -19,7 +20,7 @@
 -define(SUBSCRIPTION_INDEX_TABLE_NAME, juno_subscription_index).
 -define(REGISTRATION_TABLE_NAME, juno_registration).
 -define(REGISTRATION_INDEX_TABLE_NAME, juno_registration_index).
--define(MAX_LIMIT, 100000).
+-define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
 
@@ -55,13 +56,14 @@
                                 }.
 -type entry()               ::  #entry{}.
 -type entry_type()          ::  registration | subscription.
--type continuation()        ::  {entry_type(), etc:continuation()} 
-                                | ets:continuation().
-
+-type eot()                 ::  ?EOT.
+-type continuation()        ::  {entry_type(), etc:continuation()}.
 
 -export_type([entry/0]).
 -export_type([entry_key/0]).
 -export_type([entry_type/0]).
+-export_type([eot/0]).
+-export_type([continuation/0]).
 
 
 -export([add/4]).
@@ -201,6 +203,7 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 -spec add(entry_type(), uri(), map(), juno_context:context()) -> 
     {ok, map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, id()}}.
+
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -278,6 +281,7 @@ add(Type, Uri, Options, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), juno_context:context()) -> ok.
+
 remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
     Pattern = #entry{
         key = {RealmUri, juno_context:session_id(Ctxt), '_'},
@@ -290,7 +294,7 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
     },
     Tab = entry_table(Type, RealmUri),
     case ets:match_object(Tab, Pattern, 1) of
-        '$end_of_table' ->
+        ?EOT ->
             %% There are no entries for this session
             ok;
         {[First], _} ->
@@ -308,6 +312,7 @@ remove_all(_, _) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(entry_type(), id(), juno_context:context()) -> entry() | not_found.
+
 lookup(Type, EntryId, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -319,6 +324,7 @@ lookup(Type, EntryId, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(entry_type(), id(), id(), uri()) -> entry() | not_found.
+
 lookup(Type, EntryId, SessionId, RealmUri) ->
     % TODO Use UserId when there is no SessionId
     Tab = entry_table(Type, RealmUri),
@@ -337,6 +343,7 @@ lookup(Type, EntryId, SessionId, RealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec remove(entry_type(), id(), juno_context:context()) -> 
     ok | {error, not_found}.
+
 remove(Type, EntryId, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -366,6 +373,7 @@ remove(Type, EntryId, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(entry_type(), juno_context:context()) -> [entry()].
+
 entries(Type, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -382,6 +390,7 @@ entries(Type, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [entry()].
+
 entries(Type, RealmUri, SessionId) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
@@ -399,10 +408,18 @@ entries(Type, RealmUri, SessionId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(continuation()) -> 
-    {[entry()], continuation()} | '$end_of_table'.
-entries(Cont) ->
-    ets:match_object(Cont).
+-spec entries(continuation()) -> {[entry()], continuation() | eot()}.
+
+entries(?EOT) -> 
+    {[], ?EOT};
+
+entries({Type, Cont}) when Type == registration orelse Type == subscription ->
+    case ets:match_object(Cont) of
+        ?EOT -> 
+            {[], ?EOT};
+        {L, NewCont} ->
+            {L, {Type, NewCont}}
+    end.
 
 
 
@@ -416,9 +433,7 @@ entries(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec entries(
     entry_type(), Realm :: uri(), SessionId :: id(), Limit :: pos_integer()) ->
-    {[entry()], continuation()} | '$end_of_table'.
-entries(Type, RealmUri, SessionId, infinity) ->
-    entries(Type, RealmUri, SessionId);
+    {[entry()], continuation() | eot()}.
 
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = #entry{
@@ -437,7 +452,8 @@ entries(Type, RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context()) ->
-    {[entry()], continuation()} | '$end_of_table'.
+    {[entry()], continuation()} | eot().
+
 match(Type, Uri, Ctxt) ->
     match(Type, Uri, Ctxt, #{}).
 
@@ -447,28 +463,43 @@ match(Type, Uri, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(entry_type(), uri(), juno_context:context(), map()) ->
-    {[entry()], continuation()} | '$end_of_table'.
+    {[entry()], continuation()} | eot().
+
 match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
-    lookup_entries(Type, ets:select(Tab, MS, Limit));
+    case ets:select(Tab, MS, Limit) of
+        ?EOT -> 
+            {[], ?EOT};
+        Result ->
+            lookup_entries(Type, Result)
+    end;
 
 match(Type, Uri, Ctxt, Opts) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     MS = index_ms(RealmUri, Uri, Opts),
     % io:format("MS ~p~n", [MS]),
     Tab = index_table(Type, RealmUri),
-    lookup_entries(Type, {ets:select(Tab, MS), '$end_of_table'}).
+    lookup_entries(Type, {ets:select(Tab, MS), ?EOT}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation()) -> {[entry()], continuation()} | '$end_of_table'.
-match({Type, Cont}) when Type == registration orelse Type == subscription ->
-    lookup_entries(Type, ets:select(Cont)).
+-spec match(continuation()) -> {[entry()], continuation()} | eot().
+
+match(?EOT) ->
+    {[], ?EOT};
+
+match({Type, Cont}) ->
+    case ets:select(Cont) of
+        ?EOT -> 
+            {[], ?EOT};
+        Result ->
+            lookup_entries(Type, Result)
+    end.
 
 
 
@@ -480,7 +511,7 @@ match({Type, Cont}) when Type == registration orelse Type == subscription ->
 
 
 %% @private
-do_remove_all('$end_of_table', _, _) ->
+do_remove_all(?EOT, _, _) ->
     ok;
 
 do_remove_all([], _, _) ->
@@ -530,6 +561,7 @@ validate_match_policy(Options) when is_map(Options) ->
 %% @private
 parse_options(subscription, Opts) ->
     parse_subscription_options(Opts);
+
 parse_options(registration, Opts) ->
     parse_registration_options(Opts).
 
@@ -566,6 +598,7 @@ index_table(registration, RealmUri) ->
 %% @private
 -spec do_add(atom(), entry(), juno_context:context()) -> 
     {ok, entry(), IsFirstEntry :: boolean()}.
+
 do_add(Type, Entry, Ctxt) ->
     #entry{
         key = {RealmUri, _, EntryId},
@@ -585,6 +618,7 @@ do_add(Type, Entry, Ctxt) ->
 %% @private
 -spec index_entry(
     id(), uri(), binary(), juno_context:context()) -> #index{}.
+
 index_entry(EntryId, Uri, Policy, Ctxt) ->
     RealmUri = juno_context:realm_uri(Ctxt),
     SessionId = juno_context:session_id(Ctxt),
@@ -604,6 +638,7 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
     
 %% @private
 -spec index_ms(uri(), uri(), map()) -> ets:match_spec().
+
 index_ms(RealmUri, Uri, Opts) ->
     Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
@@ -635,14 +670,17 @@ index_ms(RealmUri, Uri, Opts) ->
 
 %% @private
 -spec prefix_conditions(list()) -> list().
+
 prefix_conditions(L) ->
     prefix_conditions(L, []).
 
 
 %% @private
 -spec prefix_conditions(list(), list()) -> list().
+
 prefix_conditions(L, Acc) when length(L) == 2 ->
     lists:reverse(Acc);
+
 prefix_conditions(L0, Acc) ->
     L1 = lists:droplast(L0),
     C = {'=:=', '$1', {const, list_to_tuple(L1 ++ [?ANY])}},
@@ -651,6 +689,7 @@ prefix_conditions(L0, Acc) ->
 
 %% @private
 -spec wilcard_conditions(list()) -> list().
+
 wilcard_conditions([H|T] = L) ->
     Ordered = lists:zip(T, lists:seq(2, length(T) + 1)),
     Cs0 = [
@@ -670,19 +709,11 @@ wilcard_conditions([H|T] = L) ->
 
 
 %% @private
-lookup_entries(_Type, '$end_of_table') ->
-    '$end_of_table';
-
-lookup_entries(Type, {Keys, '$end_of_table'}) ->
-    {do_lookup_entries(Type, Keys), '$end_of_table'};
+lookup_entries(Type, {Keys, ?EOT}) ->
+    {do_lookup_entries(Keys, Type, []), ?EOT};
 
 lookup_entries(Type, {Keys, Cont}) ->
-    {do_lookup_entries(Type, Keys), {Type, Cont}}.
-
-
-%% @private
-do_lookup_entries(Type, Keys) ->
-    do_lookup_entries(Keys, Type, []).
+    {do_lookup_entries(Keys, Type, []), {Type, Cont}}.
 
 
 %% @private
@@ -691,8 +722,10 @@ do_lookup_entries([], _, Acc) ->
 
 do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
     case ets:lookup(entry_table(Type, RealmUri), Key) of
-        [] -> do_lookup_entries(T, Type, Acc);
-        [Entry] -> do_lookup_entries(T, Type, [Entry|Acc])
+        [] -> 
+            do_lookup_entries(T, Type, Acc);
+        [Entry] -> 
+            do_lookup_entries(T, Type, [Entry|Acc])
     end.
 
 
@@ -708,12 +741,15 @@ do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri_components(uri()) -> [binary()].
+
 uri_components(<<"wamp.", Rest/binary>>) ->
     L = binary:split(Rest, <<".">>, [global]),
     [<<"wamp">> | L];
+
 uri_components(<<"juno.", Rest/binary>>) ->
     L = binary:split(Rest, <<".">>, [global]),
     [<<"juno">> | L];
+
 uri_components(Uri) ->
     case binary:split(Uri, <<".">>, [global]) of
         [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
@@ -735,13 +771,14 @@ key_pattern(registration, RealmUri, _) ->
 
 %% @private
 incr_counter(Tab, Key, N) ->
-    ets:update_counter(Tab, Key, {2, N}, {Key, 1}).
+    Default = {counter, Key, 1},
+    ets:update_counter(Tab, Key, {3, N}, Default).
 
 
 %% @private
 decr_counter(Tab, Key, N) ->
-    Default = {Key, 0},
-    case ets:update_counter(Tab, Key, {2, -N, 0, 0}, Default) of
+    Default = {counter, Key, 0},
+    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
         0 ->
             %% Other process might have incremented the count, 
             %% so we do a match delete

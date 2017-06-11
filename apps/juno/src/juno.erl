@@ -80,7 +80,7 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
     %% use erlang:send/3 with the 'noconnect' option so that it
     %% will fail immediately if there is no connection to the
     %% remote node.
-    erlang:send(Pid , {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
+    erlang:send(Pid, {?JUNO_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
             io:format("Process down ~p error=~p~n", [Pid, Reason]),

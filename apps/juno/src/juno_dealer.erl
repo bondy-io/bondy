@@ -151,6 +151,8 @@
 -define(INVOCATION_QUEUE, juno_rpc_promise).
 -define(RPC_STATE_TABLE, juno_rpc_state).
 
+
+
 -record(last_invocation, {
     key     ::  {uri(), uri()},
     value   ::  id()
@@ -213,8 +215,8 @@ handle_message(
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
     %% Check if it has callee role?
     Reply = case register(Uri, Opts, Ctxt) of
-        {ok, RegId} ->
-            wamp_message:registered(ReqId, RegId);
+        {ok, Map} ->
+            wamp_message:registered(ReqId, maps:get(<<"id">>, Map));
         {error, not_authorized} ->
             wamp_message:error(
                 ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
@@ -249,9 +251,9 @@ handle_message(#cancel{} = M, Ctxt0) ->
     Opts = M#cancel.options,
     
     %% A response will be send asynchronously by another router process instance
-    Fun = fun(InvocationId, Callee, Ctxt1) ->
-        M = wamp_message:interrupt(InvocationId, Opts),
-        ok = juno:send(Callee, M),
+    Fun = fun(InvocationId, CalleeId, Ctxt1) ->
+        R = wamp_message:interrupt(InvocationId, Opts),
+        ok = juno:send(CalleeId, R),
         {ok, Ctxt1}
     end,
     {ok, _Ctxt2} = dequeue_invocations(CallId, Fun, Ctxt0),
@@ -267,12 +269,12 @@ handle_message(#yield{} = M, Ctxt0) ->
 
     %% @TODO
     Fun = fun(CallId, Caller, Ctxt1) ->
-        M = wamp_message:result(
+        R = wamp_message:result(
             CallId, 
             M#yield.options,  %% TODO check if yield.options should be assigned to result.details
             M#yield.arguments, 
             M#yield.payload),
-        ok = juno:send(Caller, M),
+        ok = juno:send(Caller, R),
         {ok, Ctxt1}
     end,
     {ok, _Ctxt2} = dequeue_call(M#yield.request_id, Fun, Ctxt0),
@@ -281,14 +283,14 @@ handle_message(#yield{} = M, Ctxt0) ->
 handle_message(#error{request_type = Type} = M, Ctxt0)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     Fun = fun(CallId, Caller, Ctxt1) ->
-        M = wamp_message:error(
-                Type, 
-                CallId, 
-                M#error.details, 
-                M#error.error_uri, 
-                M#error.arguments, 
-                M#error.payload),
-        ok = juno:send(Caller, M),
+        R = wamp_message:error(
+            Type, 
+            CallId, 
+            M#error.details, 
+            M#error.error_uri, 
+            M#error.arguments, 
+            M#error.payload),
+        ok = juno:send(Caller, R),
         {ok, Ctxt1}
     end,
     {ok, _Ctxt2} = dequeue_call(M#error.request_id, Fun, Ctxt0),
@@ -298,99 +300,99 @@ handle_message(#call{procedure_uri = ?JUNO_USER_ADD} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_USER_DELETE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_USER_LIST} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_USER_LOOKUP} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_USER_UPDATE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_GROUP_ADD} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_GROUP_DELETE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_GROUP_LIST} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_GROUP_LOOKUP} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_GROUP_UPDATE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_SOURCE_ADD} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_SOURCE_DELETE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_SOURCE_LIST} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = ?JUNO_SOURCE_LOOKUP} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
     juno_broker:handle_call(M, Ctxt);
@@ -402,45 +404,45 @@ handle_message(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
         <<"prefix">> => [], % @TODO
         <<"wildcard">> => [] % @TODO
     },
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = <<"wamp.registration.lookup">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = <<"wamp.registration.match">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(
     #call{procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(
     #call{procedure_uri = <<"wamp.registration.count_callees">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{count => 0},
-    M = wamp_message:result(ReqId, #{}, [], Res),
-    juno:send(juno_context:peer_id(Ctxt), M);
+    R = wamp_message:result(ReqId, #{}, [], Res),
+    juno:send(juno_context:peer_id(Ctxt), R);
 
 handle_message(#call{} = M, Ctxt0) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
@@ -454,18 +456,13 @@ handle_message(#call{} = M, Ctxt0) ->
         ReqId = juno_utils:get_id(global),
         Args = M#call.arguments,
         Payload = M#call.payload,
-        M = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
-        ok = juno:send(Callee, M, Ctxt1),
+        R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
+        ok = juno:send(Callee, R, Ctxt1),
         {ok, ReqId, Ctxt1}
     end,
 
     %% A response will be send asynchronously by another router process instance
-    invoke(
-        M#call.request_id,
-        M#call.procedure_uri,
-        Fun,
-        M#call.options,
-        Ctxt0).
+    invoke(M#call.request_id, M#call.procedure_uri, Fun, M#call.options, Ctxt0).
 
 
 %% =============================================================================
@@ -482,7 +479,8 @@ handle_message(#call{} = M, Ctxt0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), juno_context:context()) -> 
-    {ok, id()} | {error, not_authorized | procedure_already_exists}.
+    {ok, map()} | {error, not_authorized | procedure_already_exists}.
+
 register(<<"juno.", _/binary>>, _, _) ->
     %% Reserved namespace
     {error, not_authorized};
@@ -493,8 +491,8 @@ register(<<"wamp.", _/binary>>, _, _) ->
 
 register(ProcUri, Options, Ctxt) ->
     case juno_registry:add(registration, ProcUri, Options, Ctxt) of
-        {ok, Id, _IsFirst} -> 
-            {ok, Id};
+        {ok, Map, _IsFirst} -> 
+            {ok, Map};
         {error, {already_exists, _}} -> 
             {error, procedure_already_exists}
     end.
@@ -510,6 +508,7 @@ register(ProcUri, Options, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec unregister(id(), juno_context:context()) -> 
     ok | {error, not_authorized | not_found}.
+
 unregister(<<"juno.", _/binary>>, _) ->
     %% Reserved namespace
     {error, not_authorized};
@@ -529,6 +528,7 @@ unregister(RegId, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unregister_all(juno_context:context()) -> ok.
+
 unregister_all(Ctxt) ->
     juno_registry:remove_all(registration, Ctxt).
 
@@ -543,14 +543,13 @@ unregister_all(Ctxt) ->
 %% registrations/2 with the RealmUri and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(juno_context:context() | juno_registry:continuation()) ->
-    [juno_registry:entry()] 
-    | {[juno_registry:entry()], juno_registry:continuation()}
-    | '$end_of_table'. 
-registrations(#{realm_uri := RealmUri} = Ctxt) ->
-    registrations(RealmUri, juno_context:session_id(Ctxt));
+-spec registrations(juno_registry:continuation()) ->
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
 
-registrations(Cont) ->
+registrations({registration, _} = Cont) ->
     juno_registry:entries(Cont).
 
 
@@ -567,21 +566,25 @@ registrations(Cont) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id()) ->
     [juno_registry:entry()].
+
 registrations(RealmUri, SessionId) ->
-    juno_registry:entries(registration, RealmUri, SessionId, infinity).
+    juno_registry:entries(registration, RealmUri, SessionId).
 
 
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Returns the complete list of registrations matching the RealmUri
-%% and SessionId.
+%% Returns the  list of registrations matching the RealmUri and SessionId.
 %%
 %% Use {@link registrations/3} to limit the number of registrations returned.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec registrations(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
-    {[juno_registry:entry()], Cont :: '$end_of_table' | term()}.
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 registrations(RealmUri, SessionId, Limit) ->
     juno_registry:entries(registration, RealmUri, SessionId, Limit).
 
@@ -593,13 +596,13 @@ registrations(RealmUri, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), juno_context:context()) -> 
-    [juno_registry:entry()].
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
 
 match_registrations(ProcUri, Ctxt) ->
-    case juno_registry:match(registration, ProcUri, Ctxt) of
-        {L, '$end_of_table'} -> L;
-        '$end_of_table' -> []
-    end.
+    juno_registry:match(registration, ProcUri, Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -608,7 +611,11 @@ match_registrations(ProcUri, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), juno_context:context(), map()) ->
-    {[juno_registry:entry()], ets:continuation()} | '$end_of_table'.
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
 match_registrations(ProcUri, Ctxt, Opts) ->
     juno_registry:match(registration, ProcUri, Ctxt, Opts).
 
@@ -619,9 +626,13 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_registrations(juno_registry:continuation()) ->
-    {[juno_registry:entry()], juno_registry:continuation()} | '$end_of_table'.
-match_registrations(Cont) ->
-    ets:select(Cont).
+    {
+        [juno_registry:entry()], 
+        juno_registry:continuation() | juno_registry:eot()
+    }.
+
+match_registrations({registration, _} = Cont) ->
+    juno_registry:match(Cont).
 
 
 
@@ -633,6 +644,7 @@ match_registrations(Cont) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec invoke(id(), uri(), function(), map(), juno_context:context()) -> ok.
+
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     S = juno_context:session(Ctxt0),
     SId = juno_session:id(S),
@@ -640,19 +652,19 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% We asume that as with pubsub, the _Caller_ should not receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    Result = match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}),
-    io:format("Result ~p~n", [Result]),
-    case Result of
-        {[], '$end_of_table'} ->
+    case match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}) of
+        {[], ?EOT} ->
             Error = wamp_message:error(
                 ?CALL, CallId, #{}, ?WAMP_ERROR_NO_SUCH_PROCEDURE),
             juno:send(juno_context:peer_id(Ctxt0), Error);
         Regs ->
             %%  A promise is used to implement a capability and a feature:
-            %% - the capability to match wamp_yiled() or wamp_error() messages
+            %% - the capability to match wamp_yield() or wamp_error() messages
             %%   to the originating wamp_call() and the Caller
             %% - call_timeout feature at the dealer level
             
+            %% TODO SHould we invoke all matching invocations?
+
             Caller = juno_session:pid(S),
             Timeout = juno_utils:timeout(Opts),
             Template = #promise{
@@ -663,9 +675,11 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
             },
             Fun = fun(Entry, Ctxt1) ->
                 CalleeSessionId = juno_registry:session_id(Entry),
-                Callee = juno_session:pid(CalleeSessionId),
+                Session = juno_session:fetch(juno_registry:session_id(Entry)),
+                Callee = juno_session:pid(Session),
                 RegId = juno_registry:entry_id(Entry),
-                {ok, Id, Ctxt2} = UserFun(RegId, Callee, Ctxt1),
+                {ok, Id, Ctxt2} = UserFun(
+                    RegId, {CalleeSessionId, Callee}, Ctxt1),
                 Promise = Template#promise{
                     invocation_request_id = Id,
                     callee_session_id = CalleeSessionId,
@@ -675,8 +689,9 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                 ok = enqueue_promise(Id, Promise, Timeout, Ctxt2),
                 {ok, Ctxt2}
             end,
-            Reply = do_invoke(Regs, Fun, Ctxt0),
-            juno:send(juno_context:peer_id(Ctxt0), Reply)
+            % Reply = do_invoke(Regs, Fun, Ctxt0),
+            % juno:send(juno_context:peer_id(Ctxt0), Reply)
+            do_invoke(Regs, Fun, Ctxt0)
     end.
     
 
@@ -690,6 +705,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 %% -----------------------------------------------------------------------------
 -spec dequeue_invocations(id(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
+
 dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     % #{session := S} = Ctxt,
     % Caller = juno_session:pid(S),
@@ -723,6 +739,7 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
 %% -----------------------------------------------------------------------------
 -spec dequeue_call(id(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
+
 dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 2) ->
     case dequeue_promise(invocation_request_id, ReqId, Ctxt) of
         ok ->
@@ -750,17 +767,19 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 2) ->
 
 
 %% @private
-do_invoke({[],'$end_of_table'}, _, _) ->
+do_invoke({[], ?EOT}, _, _) ->
     ok;
 
-do_invoke({L, '$end_of_table'}, Fun, Ctxt) ->
+do_invoke({L, ?EOT}, Fun, Ctxt) ->
     do_invoke(L, Fun, Ctxt);
 
 do_invoke({L, Cont}, Fun, Ctxt) ->
-    ok = do_invoke(Fun, L, Ctxt),
+    ok = do_invoke(L, Fun, Ctxt),
     do_invoke(match_registrations(Cont), Fun, Ctxt);
 
 do_invoke(L, Fun, Ctxt) ->
+    %% Registrations have different invocation strategies provided by the
+    %% 'invoke' key.
     Triples = [{
         juno_registry:uri(E),
         maps:get(<<"invoke">>, juno_registry:options(E), <<"single">>),
@@ -770,11 +789,11 @@ do_invoke(L, Fun, Ctxt) ->
 
 
 %% @private
-do_invoke([], undefined, _, _) ->
+do_invoke([], _, _, _) ->
     ok;
 
 do_invoke([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt0) ->
-    {ok, Ctxt1} = apply_strategy(E, Fun, Ctxt0),
+    {ok, Ctxt1} = apply_invocation_strategy(E, Fun, Ctxt0),
     do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt1);
 
 do_invoke(
@@ -794,12 +813,12 @@ do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
     do_invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
 
 do_invoke([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
-    {ok, Ctxt1} = apply_strategy({Invoke, L}, Fun, Ctxt0),
-    {ok, Ctxt2} = apply_strategy(E, Fun, Ctxt1),
+    {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt2} = apply_invocation_strategy(E, Fun, Ctxt1),
     do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt2);
 
 do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
-    {ok, Ctxt1} = apply_strategy({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
     %% We build a list for subsequent entries for same Uri.
     do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
 
@@ -810,21 +829,22 @@ do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
 %% Implements load balancing and fail over invocation strategies
 %% @end
 %% -----------------------------------------------------------------------------
--spec apply_strategy(tuple(), function(), juno_context:context()) -> 
+-spec apply_invocation_strategy(term(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
-apply_strategy({<<"first">>, L}, Fun, Ctxt) ->
+
+apply_invocation_strategy({<<"first">>, L}, Fun, Ctxt) ->
     apply_first_available(L, Fun, Ctxt);
 
-apply_strategy({<<"last">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({<<"last">>, L}, Fun, Ctxt) ->
     apply_first_available(lists:reverse(L), Fun, Ctxt);
 
-apply_strategy({<<"random">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({<<"random">>, L}, Fun, Ctxt) ->
     apply_first_available(shuffle(L), Fun, Ctxt);
 
-apply_strategy({<<"roundrobin">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({<<"roundrobin">>, L}, Fun, Ctxt) ->
     apply_round_robin(L, Fun, Ctxt);
 
-apply_strategy(Entry, Fun, Ctxt) ->
+apply_invocation_strategy(Entry, Fun, Ctxt) ->
     Fun(Entry, Ctxt).
 
 
@@ -845,6 +865,7 @@ apply_first_available([H|T], Fun, Ctxt) ->
 %% @private
 -spec apply_round_robin(list(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
+
 apply_round_robin([], _, Ctxt) ->
     {ok, Ctxt};
 
@@ -908,12 +929,14 @@ update_last_invocation(RealmUri, Uri, Val) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% A table that persists across calls and maintains the state of the load 
+%% A table that persists calls and maintains the state of the load 
 %% balancing of invocations 
 %% @end
 %% -----------------------------------------------------------------------------
 rpc_state_table(RealmUri, Uri) ->
     tuplespace:locate_table(?RPC_STATE_TABLE, {RealmUri, Uri}).
+
+
 
 
 
@@ -923,13 +946,15 @@ rpc_state_table(RealmUri, Uri) ->
 
 
 
+
 %% @private
 -spec enqueue_promise(
-    id(), promise(), pos_integer(), juno_context:context()) -> ok.
+id(), promise(), pos_integer(), juno_context:context()) -> ok.
+
 enqueue_promise(Id, Promise, Timeout, #{realm_uri := Uri}) ->
     #promise{call_request_id = CallId} = Promise,
     Key = {Uri, Id, CallId},
-    Opts = #{key => Key, timeout => Timeout},
+    Opts = #{key => Key, ttl => Timeout},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, Promise, Opts).
 
 
@@ -943,6 +968,7 @@ dequeue_promise(call_request_id, Id, #{realm_uri := Uri}) ->
 
 %% @private
 -spec dequeue_promise(tuple()) -> ok | {ok, timeout} | {ok, promise()}.
+
 dequeue_promise(Key) ->
     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Key}) of
         empty ->
@@ -991,6 +1017,7 @@ shuffle(List) ->
 %% @private
 randomize(1, List) ->
     randomize(List);
+
 randomize(T, List) ->
     lists:foldl(
         fun(_E, Acc) -> randomize(Acc) end, 
