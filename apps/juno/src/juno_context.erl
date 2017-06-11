@@ -112,15 +112,14 @@ reset(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec close(context()) -> ok.
 
-close(#{session := S} = Ctxt) ->
-    %% We close the session
-    juno_session:close(S),
-    close(maps:without([session], Ctxt));
-
 close(Ctxt0) ->
-    %% We cleanup session and router data for this Ctxt
-    _Ctxt1 = juno_router:close_context(Ctxt0),
-    ok.
+    %% We cleanup router first as cleanup requires the session
+    case maps:find(session, juno_router:close_context(Ctxt0)) of
+        {ok, Session} ->
+            juno_session:close(Session);
+        error ->
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------

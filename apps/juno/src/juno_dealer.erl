@@ -740,7 +740,7 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
 -spec dequeue_call(id(), function(), juno_context:context()) -> 
     {ok, juno_context:context()}.
 
-dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 2) ->
+dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
     case dequeue_promise(invocation_request_id, ReqId, Ctxt) of
         ok ->
             %% Promise was fulfilled or timed out and garbage collected,
@@ -755,7 +755,7 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 2) ->
                 caller_pid = Pid,
                 caller_session_id = SessionId
             } = P,
-            Fun(CallId, {SessionId, Pid})
+            Fun(CallId, {SessionId, Pid}, Ctxt)
     end.
 
 
@@ -977,7 +977,7 @@ dequeue_promise(Key) ->
                 0 -> ok;
                 _ -> {ok, timeout}
             end;
-        Promise ->
+        [Promise] ->
             {ok, Promise}
     end.
 
