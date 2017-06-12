@@ -1,0 +1,6 @@
+-define(DELETE, <<"DELETE">>).
+-define(GET, <<"GET">>).
+-define(HEAD, <<"HEAD">>).
+-define(OPTIONS, <<"OPTIONS">>).
+-define(POST, <<"POST">>).
+-define(PUT, <<"PUT">>).
