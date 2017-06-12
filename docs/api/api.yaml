@@ -3,7 +3,7 @@ swagger: '2.0'
 # This is your document metadata
 info:
   version: "0.1.0"
-  title: Juno
+  title: Bondy
 
 # Describe your paths here
 paths:
@@ -32,7 +32,7 @@ paths:
     get:
       # Describe this verb here. Note: you can use markdown
       description: |
-        Reports about the performance and configuration of the Juno node to which it was requested. You must have the {juno_stat,true} configuration setting in app.config for this endpoint to be active.
+        Reports about the performance and configuration of the Bondy node to which it was requested. You must have the {bondy_stat,true} configuration setting in app.config for this endpoint to be active.
       parameters:
         -
           name: size
@@ -110,7 +110,7 @@ paths:
   /apis/{uri}   :
     get:
       description: |
-        The API Collection Resource represents the APIs exposed by JUNO's API Gateway capability.
+        The API Collection Resource represents the APIs exposed by BONDY's API Gateway capability.
       responses:
         200:
           description: Successful response  
@@ -138,7 +138,7 @@ paths:
     get:
       # Describe this verb here. Note: you can use markdown
       description: |
-        Reports about the performance and configuration of the Juno node to which it was requested. You must have the {juno_stat,true} configuration setting in app.config for this endpoint to be active.
+        Reports about the performance and configuration of the Bondy node to which it was requested. You must have the {bondy_stat,true} configuration setting in app.config for this endpoint to be active.
       parameters:
         -
           name: size

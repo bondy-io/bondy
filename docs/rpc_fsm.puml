@@ -1,30 +1,30 @@
 @startuml
 
 participant caller <<µservice>>
-participant juno_ws_handler_1 <<cowboy_ws_handler>>
-participant "juno_router 1\n(transient worker)" as juno_router <<gen_fsm>>
+participant bondy_ws_handler_1 <<cowboy_ws_handler>>
+participant "bondy_router 1\n(transient worker)" as bondy_router <<gen_fsm>>
 participant tuplespace_queue
-participant "juno_router 2\n(transient worker)" as juno_router_2 <<gen_fsm>>
-participant juno_ws_handler_2 <<cowboy_ws_handler>>
+participant "bondy_router 2\n(transient worker)" as bondy_router_2 <<gen_fsm>>
+participant bondy_ws_handler_2 <<cowboy_ws_handler>>
 participant callee <<µservice>>
 
-activate juno_ws_handler_1
-activate juno_ws_handler_2
-caller -> juno_ws_handler_1: call(CallerID, CallReqId, ...)
-activate juno_router
-juno_ws_handler_1 -> juno_router: call(CallerID, CallReqId, ...)
-juno_router -> tuplespace_queue: enqueue(invocations, #{\n caller_req_id, \n caller_pid\n}, #{key => InvReqId, ttl => 5000})
-juno_router -> juno_ws_handler_2: invocation(InvReqId,...)
-juno_ws_handler_2 -> callee: invocation(InvReqId,...)
-deactivate juno_router
+activate bondy_ws_handler_1
+activate bondy_ws_handler_2
+caller -> bondy_ws_handler_1: call(CallerID, CallReqId, ...)
+activate bondy_router
+bondy_ws_handler_1 -> bondy_router: call(CallerID, CallReqId, ...)
+bondy_router -> tuplespace_queue: enqueue(invocations, #{\n caller_req_id, \n caller_pid\n}, #{key => InvReqId, ttl => 5000})
+bondy_router -> bondy_ws_handler_2: invocation(InvReqId,...)
+bondy_ws_handler_2 -> callee: invocation(InvReqId,...)
+deactivate bondy_router
 ...wait(Timeout)...
-callee -> juno_ws_handler_2: yield(...,InvReqId,...)
-activate juno_router_2
-juno_ws_handler_2 -> juno_router_2: yield(...,InvReqId,...)
-juno_router_2 -> tuplespace_queue: dequeue(invocations, #{key => InvReqId})
-tuplespace_queue -> juno_router_2: \#{\n caller_req_id, \n caller_pid\n router_pid}
+callee -> bondy_ws_handler_2: yield(...,InvReqId,...)
+activate bondy_router_2
+bondy_ws_handler_2 -> bondy_router_2: yield(...,InvReqId,...)
+bondy_router_2 -> tuplespace_queue: dequeue(invocations, #{key => InvReqId})
+tuplespace_queue -> bondy_router_2: \#{\n caller_req_id, \n caller_pid\n router_pid}
 
-juno_router_2 -> juno_ws_handler_1: result(CallReqId,...)
-juno_ws_handler_1 -> caller: result(CallReqId,...)
-deactivate juno_router
+bondy_router_2 -> bondy_ws_handler_1: result(CallReqId,...)
+bondy_ws_handler_1 -> caller: result(CallReqId,...)
+deactivate bondy_router
 @enduml

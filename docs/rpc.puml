@@ -1,28 +1,28 @@
 @startuml
 
 participant caller
-participant juno_ws_handler_1
-participant juno_router
-participant juno_call_queue
-participant juno_router_2
-participant juno_ws_handler_2
+participant bondy_ws_handler_1
+participant bondy_router
+participant bondy_call_queue
+participant bondy_router_2
+participant bondy_ws_handler_2
 participant callee
 
-activate juno_ws_handler_1
-activate juno_ws_handler_2
-caller -> juno_ws_handler_1: call(CallerID,...)
-activate juno_router
-juno_ws_handler_1 -> juno_router: call(CallerID,...)
-juno_router -> juno_call_queue: add(InvReqId, CallReqId, CallerId)
-juno_router -> juno_ws_handler_2: invocation(InvReqId,...)
-juno_ws_handler_2 -> callee: invocation(InvReqId,...)
-deactivate juno_router
-callee -> juno_ws_handler_2: yield
-activate juno_router_2
-juno_ws_handler_2 -> juno_router_2: yield
-juno_router_2 -> juno_call_queue: caller_id(InvReqId)
-juno_call_queue -> juno_router_2: pid()
-juno_router_2 -> juno_ws_handler_1: result(CallReqId,...)
-juno_ws_handler_1 -> caller: result(CallReqId,...)
-deactivate juno_router_2
+activate bondy_ws_handler_1
+activate bondy_ws_handler_2
+caller -> bondy_ws_handler_1: call(CallerID,...)
+activate bondy_router
+bondy_ws_handler_1 -> bondy_router: call(CallerID,...)
+bondy_router -> bondy_call_queue: add(InvReqId, CallReqId, CallerId)
+bondy_router -> bondy_ws_handler_2: invocation(InvReqId,...)
+bondy_ws_handler_2 -> callee: invocation(InvReqId,...)
+deactivate bondy_router
+callee -> bondy_ws_handler_2: yield
+activate bondy_router_2
+bondy_ws_handler_2 -> bondy_router_2: yield
+bondy_router_2 -> bondy_call_queue: caller_id(InvReqId)
+bondy_call_queue -> bondy_router_2: pid()
+bondy_router_2 -> bondy_ws_handler_1: result(CallReqId,...)
+bondy_ws_handler_1 -> caller: result(CallReqId,...)
+deactivate bondy_router_2
 @enduml

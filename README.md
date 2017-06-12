@@ -1,4 +1,4 @@
-# LEAPSIGHT JUNO
+# LEAPSIGHT BONDY
 
 ## Running a single node
 ```bash
@@ -31,14 +31,14 @@ make node2
 ```bash
 make node3
 ```
-These will leave you in the juno console (Erlang Shell)
+These will leave you in the bondy console (Erlang Shell)
 
 At the moment joining the nodes in a cluster is done manually through the Erlang Shell.
 
 In any the shell of node1 run:
 ```erlang
-plumtree_service:join('juno_2@127.0.0.1').
-plumtree_service:join('juno_3@127.0.0.1').
+plumtree_service:join('bondy_2@127.0.0.1').
+plumtree_service:join('bondy_3@127.0.0.1').
 plumtree_metadata:put({foo,bar}, <<"fede">>, #{name => fede}).
 ```
 
