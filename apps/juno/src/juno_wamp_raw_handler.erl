@@ -125,8 +125,9 @@ handle_cast(_Msg, State) ->
 	{noreply, State}.
 
 
-terminate(_Reason, _State) ->
-	ok.
+terminate(_Reason, St) ->
+	juno_wamp_protocol:terminate(St#state.protocol_state).
+
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
