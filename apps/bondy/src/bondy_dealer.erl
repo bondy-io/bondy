@@ -888,7 +888,7 @@ apply_round_robin(undefined, [H|T], Fun, Ctxt) ->
             ok = update_last_invocation(
                 bondy_context:realm_uri(Ctxt),
                 bondy_registry:uri(H),
-                bondy_registry:id(H)
+                bondy_registry:entry_id(H)
             ),
             Fun(H, Ctxt)
     end;
@@ -896,7 +896,7 @@ apply_round_robin(undefined, [H|T], Fun, Ctxt) ->
 apply_round_robin(RegId, L0, Fun, Ctxt) ->
     Folder = fun
         (X, {PreAcc, []}) ->
-            case bondy_registry:id(X) of
+            case bondy_registry:entry_id(X) of
                 RegId ->
                     {RegId, PreAcc, [X]};
                 _ ->
