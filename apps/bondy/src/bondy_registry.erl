@@ -809,7 +809,7 @@ key_pattern(registration, RealmUri, _) ->
 
 %% @private
 incr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 1},
+    Default = {counter, Key, 0},
     ets:update_counter(Tab, Key, {3, N}, Default).
 
 
