@@ -597,7 +597,9 @@ do_remove_all(_, _, _) ->
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
     P = maps:get(<<"match">>, Options, ?EXACT_MATCH),
-    P == ?EXACT_MATCH orelse P == ?PREFIX_MATCH orelse P == ?WILDCARD_MATCH
+    P == ?EXACT_MATCH 
+    orelse P == ?PREFIX_MATCH 
+    orelse P == ?WILDCARD_MATCH
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
@@ -620,7 +622,12 @@ parse_registration_options(Opts) ->
     maps:without([<<"match">>], Opts).
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Uses the tuplespace to locate the ets table name assigned to the Realm
+%% @end
+%% -----------------------------------------------------------------------------
 -spec entry_table(entry_type(), uri()) -> ets:tid().
 entry_table(subscription, RealmUri) ->
     tuplespace:locate_table(?SUBSCRIPTION_TABLE_NAME, RealmUri);

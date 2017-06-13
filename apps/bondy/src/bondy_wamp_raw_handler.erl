@@ -1,6 +1,19 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% 
+%%  bondy_wamp_raw_handler.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
 
 %% =============================================================================
 %% @doc
@@ -26,7 +39,7 @@
 %% 3: use of reserved bits (unsupported feature)
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
--define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:4, 0:8, 0:8>>).
+-define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:20>>).
 -define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
@@ -163,32 +176,35 @@ handle_data(_Data, #state{protocol_state = undefined} = St) ->
     %% _Router_ MUST *fail the connection*.
     {error, invalid_wamp_data, St};
 
+handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
+    {error, error_reason(Error), St};
+
 handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St) 
 when byte_size(Data) > Max->
     io:format("Message length is ~p~n", [byte_size(Data)]), 
-    send_frame(error_response(maximum_message_length_unacceptable), St),
+    send_frame(error_number(maximum_message_length_unacceptable), St),
     {stop, St};
 
-handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
     %% We received a PING, send a PONG
-    send_frame(<<0:5, 2:3, Len, Data>>, St),
+    send_frame(<<0:5, 2:3, Rest>>, St),
     {ok, St};
 
-handle_data(<<0:5, 2:3, _Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
     %% We received a PONG
     case St#state.ping_sent of
         undefined ->
             %% We never sent this ping
             {ok, St};
-        Data ->
+        Rest ->
             {ok, St#state{ping_sent = undefined}};
         _ ->
             %% Wrong answer
-            {error, wrong_ping_answer, St}
+            {error, invalid_response, St}
     end;
 
 handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
-    send_frame(error_response(use_of_reserved_bits), St),
+    send_frame(error_number(use_of_reserved_bits), St),
     {stop, St};
 
 handle_data(<<0:5, 0:3, _Len:24, Data/binary>>, St) ->
@@ -234,7 +250,7 @@ handle_handshake(Len, Enc, St) ->
         init_wamp(Len, Enc, St)
     catch
         throw:Reason ->
-            send_frame(error_response(Reason), St),
+            send_frame(error_number(Reason), St),
             lager:info("TCP Connection closing, error=~p", [Reason]),
             {stop, St}
     end.
@@ -307,11 +323,16 @@ validate_encoding(_) ->
 %% 3: use of reserved bits (unsupported feature)
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
-error_response(serializer_unsupported) ->?RAW_ERROR(1);
-error_response(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
-error_response(use_of_reserved_bits) ->?RAW_ERROR(3);
-error_response(maximum_connection_count_reached) ->?RAW_ERROR(4).
+error_number(serializer_unsupported) ->?RAW_ERROR(1);
+error_number(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
+error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
+error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
+
+error_reason(1) -> serializer_unsupported;
+error_reason(2) -> maximum_message_length_unacceptable;
+error_reason(3) -> use_of_reserved_bits;
+error_reason(4) -> maximum_connection_count_reached.
 
 %% @private
 send(L, St) when is_list(L) ->
