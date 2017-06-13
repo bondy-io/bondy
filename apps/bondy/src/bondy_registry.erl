@@ -22,7 +22,9 @@
 -define(REGISTRATION_INDEX_TABLE_NAME, bondy_registration_index).
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
-
+-define(EXACT_MATCH, <<"exact">>).
+-define(PREFIX_MATCH, <<"prefix">>).
+-define(WILDCARD_MATCH, <<"wildcard">>).
 
 %% An entry denotes a registration or a subscription
 %% TODO entries should be replicated across the cluster via plumtree
@@ -548,10 +550,6 @@ match({Type, Cont}) ->
 do_remove_all(?EOT, _, _) ->
     ok;
 
-do_remove_all([], _, _) ->
-    ok;
-
-
 do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
     {RealmUri, _, EntryId} = Key,
     %% We first delete the index entry associated with this Entry
@@ -568,7 +566,15 @@ do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
 do_remove_all({_, Sid, _} = Key, ETab, Ctxt) ->
     case bondy_context:session_id(Ctxt) of
         Sid ->
-            do_remove_all(hd(ets:lookup(ETab, Key)), ETab, Ctxt);
+            case ets:lookup(ETab, Key) of
+                [] ->
+                    ok;
+                [Entry] ->
+                    %% We should not be getting more than one
+                    %% with ordered_set and the matching semantics
+                    %% we are using
+                    do_remove_all(Entry, ETab, Ctxt)
+            end;
         _ ->
             %% No longer our session
             ok
@@ -590,8 +596,8 @@ do_remove_all(_, _, _) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(<<"match">>, Options, <<"exact">>),
-    P == <<"exact">> orelse P == <<"prefix">> orelse P == <<"wildcard">>
+    P = maps:get(<<"match">>, Options, ?EXACT_MATCH),
+    P == ?EXACT_MATCH orelse P == ?PREFIX_MATCH orelse P == ?WILDCARD_MATCH
     orelse error({invalid_pattern_match_policy, P}),
     P.
 
@@ -663,11 +669,11 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
     Entry = #index{entry_key = {RealmUri, SessionId, EntryId}},
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of
-        <<"exact">> ->
+        ?EXACT_MATCH ->
             Entry#index{key = list_to_tuple(Cs)};
-        <<"prefix">> ->
+        ?PREFIX_MATCH ->
             Entry#index{key = list_to_tuple(Cs ++ [?ANY])};
-        <<"wildcard">> ->
+        ?WILDCARD_MATCH ->
             %% Wildcard-matching allows to provide wildcards for *whole* URI
             %% components.
             Entry#index{key = list_to_tuple(Cs)}
@@ -818,7 +824,7 @@ decr_counter(Tab, Key, N) ->
     Default = {counter, Key, 0},
     case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
         0 ->
-            %% Other process might have incremented the count, 
+            %% Other process might have concurrently incremented the count, 
             %% so we do a match delete
             true = ets:match_delete(Tab, Default),
             0;
