@@ -551,6 +551,7 @@ do_remove_all(?EOT, _, _) ->
 do_remove_all([], _, _) ->
     ok;
 
+
 do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
     {RealmUri, _, EntryId} = Key,
     %% We first delete the index entry associated with this Entry
@@ -567,7 +568,7 @@ do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
 do_remove_all({_, Sid, _} = Key, ETab, Ctxt) ->
     case bondy_context:session_id(Ctxt) of
         Sid ->
-            do_remove_all(ets:lookup(ETab, Key), ETab, Ctxt);
+            do_remove_all(hd(ets:lookup(ETab, Key)), ETab, Ctxt);
         _ ->
             %% No longer our session
             ok
