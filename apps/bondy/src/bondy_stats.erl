@@ -4,29 +4,12 @@
 
 
 -module(bondy_stats).
--behaviour(gen_server).
-
--define(POOL_NAME, bondy_stats_pool).
-
-
--record(state, {
-    pool_type = permanent       ::  permanent | transient,
-    event                       ::  tuple()
-}).
 
 -export([update/1]).
 -export([update/2]).
 -export([get_stats/0]).
 -export([create_metrics/0]).
--export([start_pool/0]).
 
-%% GEN_SERVER CALLBACKS
--export([init/1]).
--export([handle_info/2]).
--export([terminate/2]).
--export([code_change/3]).
--export([handle_call/3]).
--export([handle_cast/2]).
 
 
 %% =============================================================================
@@ -34,19 +17,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec start_pool() -> ok.
-start_pool() ->
-    case do_start_pool() of
-        {ok, _Child} -> ok;
-        {ok, _Child, _Info} -> ok;
-        {error, already_present} -> ok;
-        {error, {already_started, _Child}} -> ok;
-        {error, Reason} -> error(Reason)
-    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -72,6 +42,7 @@ create_metrics() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_stats() -> any().
+
 get_stats() ->
     exometer:get_values([bondy]).
 
@@ -81,8 +52,9 @@ get_stats() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec update(tuple()) -> ok.
+
 update(Event) ->
-    async_update(Event).
+    do_update(Event).
 
 
 %% -----------------------------------------------------------------------------
@@ -92,140 +64,23 @@ update(Event) ->
 -spec update(wamp_message:message(), bondy_context:context()) -> ok.
 
 update(M, #{peer := {IP, _}} = Ctxt) ->
-    Type = element(1, M),
+    MsgType = element(1, M),
     Size = erts_debug:flat_size(M) * 8,
     case Ctxt of
         #{realm_uri := Uri, session := S} ->
-            async_update({message, Uri, bondy_session:id(S), IP, Type, Size});
+            Id = bondy_session:id(S),
+            do_update({message, Uri, Id, IP, MsgType, Size});
         #{realm_uri := Uri} ->
-            async_update({message, Uri, IP, Type, Size});
+            do_update({message, Uri, IP, MsgType, Size});
         _ ->
-            async_update({message, IP, Type, Size})
+            do_update({message, IP, MsgType, Size})
     end.
-
-
-%% =============================================================================
-%% API : GEN_SERVER CALLBACKS
-%% =============================================================================
-
-
-
-init([?POOL_NAME]) ->
-    %% We've been called by sidejob_worker
-    %% We will be called via a a cast (handle_cast/2)
-    %% TODO publish metaevent and stats
-    {ok, #state{pool_type = permanent}};
-
-init([Event]) ->
-    %% We've been called by sidejob_supervisor
-    %% We immediately timeout so that we find ourselfs in handle_info/2.
-    %% TODO publish metaevent and stats
-    State = #state{
-        pool_type = transient,
-        event = Event
-    },
-    {ok, State, 0}.
-
-
-handle_call(Event, _From, State) ->
-    lager:debug("Received unknown call ~p.", [Event]),
-    {noreply, State}.
-
-
-handle_cast(Event, State) ->
-    try
-        ok = do_update(Event)
-    catch
-        Class:Reason ->
-            lager:debug(
-                "Failed to update stat ~p due to (~p) ~p.", 
-                [Event, Class, Reason])
-    end,
-    {noreply, State}.
-
-
-handle_info(timeout, #state{pool_type = transient} = State) ->
-    %% We've been spawned to handle this single event, so we should stop after
-    ok = do_update(State#state.event),
-    {stop, normal, State};
-
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-
-terminate(normal, _State) ->
-    ok;
-terminate(shutdown, _State) ->
-    ok;
-terminate({shutdown, _}, _State) ->
-    ok;
-terminate(_Reason, _State) ->
-    ok.
-
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Actually starts a sidejob pool based on system configuration.
-%% @end
-%% -----------------------------------------------------------------------------
-do_start_pool() ->
-    Size = bondy_config:pool_size(?POOL_NAME),
-    Capacity = bondy_config:pool_capacity(?POOL_NAME),
-    case bondy_config:pool_type(?POOL_NAME) of
-        permanent ->
-            sidejob:new_resource(?POOL_NAME, ?MODULE, Capacity, Size);
-        transient ->
-            sidejob:new_resource(?POOL_NAME, sidejob_supervisor, Capacity, Size)
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-async_update(Event) ->
-    PoolName = ?POOL_NAME,
-    PoolType = bondy_config:pool_type(PoolName),
-    case async_update(PoolType, PoolName, Event) of
-        ok ->
-            ok;
-        {ok, _} ->
-            ok;
-        overload ->
-            overload
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Helper function for {@link async_route_event/2}
-%% @end
-%% -----------------------------------------------------------------------------
-async_update(permanent, PoolName, Event) ->
-    %% We send a request to an existing permanent worker
-    %% using bondy_stats acting as a sidejob_worker
-    sidejob:unbounded_cast(PoolName, Event);
-
-async_update(transient, PoolName, Event) ->
-    %% We spawn a transient worker using sidejob_supervisor
-    sidejob_supervisor:start_child(
-        PoolName,
-        gen_server,
-        start_link,
-        [?MODULE, [Event], []]
-    ).
 
 
 
@@ -349,10 +204,6 @@ static_specs() ->
             spiral, [], [
                 {one, messages}, 
                 {count, messages_total}]},
-        {[bondy, requests], 
-            spiral, [], [
-                {one, requests}, 
-                {count, requests_total}]},
         {[bondy, sessions, active], 
             counter, [], [
                 {value, sessions_active}]},
