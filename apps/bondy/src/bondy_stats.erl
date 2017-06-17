@@ -112,14 +112,14 @@ do_update({session_closed, SessionId, Realm, IP, Secs}) ->
     exometer:update([bondy, sessions, duration], Secs),
 
     exometer:update_or_create(
-        [bondy, realm, sessions, active, Realm], -1, []),
+        [bondy, realm, sessions, active, Realm], -1, counter, []),
     exometer:update_or_create(
-        [bondy, realm, sessions, duration, Realm], Secs, []),
+        [bondy, realm, sessions, duration, Realm], Secs, histogram, []),
     
     exometer:update_or_create(
-        [bondy, ip, sessions, active, BIP], -1, []),
+        [bondy, ip, sessions, active, BIP], -1, counter, []),
     exometer:update_or_create(
-        [bondy, ip, sessions, duration, BIP], Secs, []),
+        [bondy, ip, sessions, duration, BIP], Secs, histogram, []),
     
     %% Cleanup
     exometer:delete([bondy, session, messages, SessionId]),
