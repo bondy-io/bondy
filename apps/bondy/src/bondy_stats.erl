@@ -64,16 +64,16 @@ update(Event) ->
 -spec update(wamp_message:message(), bondy_context:context()) -> ok.
 
 update(M, #{peer := {IP, _}} = Ctxt) ->
-    MsgType = element(1, M),
+    Type = element(1, M),
     Size = erts_debug:flat_size(M) * 8,
     case Ctxt of
         #{realm_uri := Uri, session := S} ->
             Id = bondy_session:id(S),
-            do_update({message, Uri, Id, IP, MsgType, Size});
+            do_update({message, Id, Uri, IP, Type, Size});
         #{realm_uri := Uri} ->
-            do_update({message, Uri, IP, MsgType, Size});
+            do_update({message, Uri, IP, Type, Size});
         _ ->
-            do_update({message, IP, MsgType, Size})
+            do_update({message, IP, Type, Size})
     end.
 
 
@@ -82,11 +82,17 @@ update(M, #{peer := {IP, _}} = Ctxt) ->
 %% PRIVATE
 %% =============================================================================
 
-
+%% @private
+baddress(T) when is_tuple(T), (tuple_size(T) == 4 orelse tuple_size(T) == 8) ->
+  list_to_binary(inet_parse:ntoa(T));
+baddress(T) when is_list(T) ->
+  list_to_binary(T);
+baddress(T) when is_binary(T) ->
+  T.
 
 %% @private
 do_update({session_opened, Realm, _SessionId, IP}) ->
-    BIP = list_to_binary(inet_parse:ntoa(IP)),
+    BIP = baddress(IP),
     exometer:update([bondy, sessions], 1),
     exometer:update([bondy, sessions, active], 1),
 
@@ -100,8 +106,8 @@ do_update({session_opened, Realm, _SessionId, IP}) ->
     exometer:update_or_create(
         [bondy, ip, sessions, active, BIP], 1, counter, []);
 
-do_update({session_closed, Realm, SessionId, IP, Secs}) ->
-    BIP = list_to_binary(inet_parse:ntoa(IP)),
+do_update({session_closed, SessionId, Realm, IP, Secs}) ->
+    BIP = baddress(IP),
     exometer:update([bondy, sessions, active], -1),
     exometer:update([bondy, sessions, duration], Secs),
 
@@ -126,7 +132,7 @@ do_update({session_closed, Realm, SessionId, IP, Secs}) ->
     ok;
 
 do_update({message, IP, Type, Sz}) ->
-    BIP = list_to_binary(inet_parse:ntoa(IP)),
+    BIP = baddress(IP),
     exometer:update([bondy, messages], 1),
     exometer:update([bondy, messages, size], Sz),
     exometer:update_or_create([bondy, messages, Type], 1, spiral, []),
@@ -140,7 +146,7 @@ do_update({message, IP, Type, Sz}) ->
 
 
 do_update({message, Realm, IP, Type, Sz}) ->
-    BIP = list_to_binary(inet_parse:ntoa(IP)),
+    BIP = baddress(IP),
     exometer:update([bondy, messages], 1),
     exometer:update([bondy, messages, size], Sz),
     exometer:update_or_create([bondy, messages, Type], 1, spiral, []),
@@ -159,8 +165,8 @@ do_update({message, Realm, IP, Type, Sz}) ->
     exometer:update_or_create(
         [bondy, realm, messages, Type, Realm], 1, spiral, []);
 
-do_update({message, Realm, Session, IP, Type, Sz}) ->
-    BIP = list_to_binary(inet_parse:ntoa(IP)),
+do_update({message, Session, Realm, IP, Type, Sz}) ->
+    BIP = baddress(IP),
     exometer:update([bondy, messages], 1),
     exometer:update([bondy, messages, size], Sz),
     exometer:update_or_create([bondy, messages, Type], 1, spiral, []),

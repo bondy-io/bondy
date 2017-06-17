@@ -191,8 +191,7 @@ open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = bondy_stats:update(
-                {session_opened, RealmUri, Id, IP}),
+            ok = bondy_stats:update({session_opened, RealmUri, Id, IP}),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -219,7 +218,7 @@ close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
     Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created), 
     ok = bondy_stats:update(
-        {session_closed, Realm, IP, Id, Secs}),
+        {session_closed, Id, Realm, IP, Secs}),
     true = ets:delete(table(Id), Id),
     ok.
 

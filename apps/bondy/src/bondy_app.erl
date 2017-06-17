@@ -33,7 +33,6 @@ start(_Type, _Args) ->
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = bondy_router:start_pool(),
-            ok = bondy_stats:start_pool(),
             ok = bondy_stats:create_metrics(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
