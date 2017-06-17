@@ -73,12 +73,12 @@
   0},
  {<<"utils">>,
   {git,"git@gitlab.com:leapsight/utils.git",
-       {ref,"921257baad6320eba420239de7ef834d0ea54972"}},
+       {ref,"d9d278eda83151f70390dad87382f14d11067361"}},
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"faf217b4c339056918223b7b7e861331fe6d9b94"}},
+       {ref,"e24ba000b4cdff3a757c6182dc4b69f32bf5bd5d"}},
   0}]}.
 [
 {pkg_hash,[
