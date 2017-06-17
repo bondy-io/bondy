@@ -30,7 +30,7 @@
     %% Protocol State
     goodbye_initiated => boolean(),
     challenge_sent => {true, AuthMethod :: any()} | false,
-    awaiting_call_ids => sets:set(),
+    awaiting_calls => sets:set(),
     request_id => id(),
     request_timeout => non_neg_integer(),
     request_details => map(),
@@ -46,8 +46,8 @@
 -export([new/0]).
 -export([new/1]).
 -export([peer/1]).
--export([add_awaiting_call_id/2]).
--export([awaiting_call_ids/1]).
+-export([add_awaiting_call/2]).
+-export([awaiting_calls/1]).
 -export([realm_uri/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
@@ -57,7 +57,7 @@
 -export([session_id/1]).
 -export([peer_id/1]).
 -export([set_peer/2]).
--export([remove_awaiting_call_id/2]).
+-export([remove_awaiting_call/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
@@ -76,7 +76,7 @@ new() ->
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => bondy_config:request_timeout(),
-        awaiting_call_ids => sets:new()
+        awaiting_calls => sets:new()
     },
     set_roles(Ctxt, #{}).
 
@@ -283,8 +283,8 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) when is_binary(Feature) ->
 %% mechanism which is based on promises.
 %% @end
 %% -----------------------------------------------------------------------------
--spec awaiting_call_ids(context()) -> [id()].
-awaiting_call_ids(#{awaiting_call_ids := S}) ->
+-spec awaiting_calls(context()) -> [id()].
+awaiting_calls(#{awaiting_calls := S}) ->
     sets:to_list(S).
 
 
@@ -292,15 +292,15 @@ awaiting_call_ids(#{awaiting_call_ids := S}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_awaiting_call_id(context(), id()) -> ok.
-add_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
-    C#{awaiting_call_ids => sets:add_element(Id, S)}.
+-spec add_awaiting_call(context(), id()) -> ok.
+add_awaiting_call(#{awaiting_calls := S} = C, Id) ->
+    C#{awaiting_calls => sets:add_element(Id, S)}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_awaiting_call_id(context(), id()) -> ok.
-remove_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
-    C#{awaiting_call_ids => sets:del_element(Id, S)}.
+-spec remove_awaiting_call(context(), id()) -> ok.
+remove_awaiting_call(#{awaiting_calls := S} = C, Id) ->
+    C#{awaiting_calls => sets:del_element(Id, S)}.

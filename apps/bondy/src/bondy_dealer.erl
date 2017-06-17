@@ -983,12 +983,12 @@ dequeue_promise(Key) ->
 
 
 %% @private
-cleanup_queue(#{realm_uri := Uri, awaiting_call_ids := Set} = Ctxt) ->
+cleanup_queue(#{realm_uri := Uri, awaiting_calls := Set} = Ctxt) ->
     sets:fold(
         fun(Id, Acc) ->
             Key = {Uri, Id},
             ok = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
-            bondy_context:remove_awaiting_call_id(Acc, Id)
+            bondy_context:remove_awaiting_call(Acc, Id)
         end,
         Ctxt,
         Set

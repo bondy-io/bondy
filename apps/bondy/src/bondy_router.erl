@@ -403,7 +403,7 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% distributed Erlang).
     ok = route_event({M, Ctxt0}),
     %% The Call response will be delivered asynchronously by the dealer
-    {ok, bondy_context:add_awaiting_call_id(Ctxt0, ReqId)};
+    {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
 
 do_forward(M, Ctxt0) ->
     %% Client already has a session.
