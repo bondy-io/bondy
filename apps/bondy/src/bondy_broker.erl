@@ -126,8 +126,8 @@ handle_message(#publish{} = M, Ctxt) ->
     Opts = M#publish.options,
     TopicUri = M#publish.topic_uri,
     Args = M#publish.arguments,
-    Payload = M#publish.payload,
-    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
+    Payload = M#publish.arguments_kw,
+    Acknowledge = maps:get(acknowledge, Opts, false),
     %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
@@ -175,9 +175,9 @@ handle_message(#publish{} = M, Ctxt) ->
 handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
     %% TODO, BUT This call might be too big, dos not make any sense as it is a dump of the whole database
     Res = #{
-        <<"exact">> => [],
-        <<"prefix">> => [],
-        <<"wildcard">> => []
+        ?EXACT_MATCH => [],
+        ?PREFIX_MATCH=> [],
+        ?WILDCARD_MATCH => []
     },
     M = wamp_message:result(M#call.request_id, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), M);
@@ -236,10 +236,10 @@ subscribe(M, Ctxt) ->
     %% TODO check authorization and reply with wamp.error.not_authorized if not
 
     case bondy_registry:add(subscription, Topic, Opts, Ctxt) of
-        {ok, #{<<"id">> := Id} = Details, true} ->
+        {ok, #{id := Id} = Details, true} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_create(Details, Ctxt);
-        {ok, #{<<"id">> := Id}, false} ->
+        {ok, #{id := Id}, false} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Id, Ctxt);
         {error, {already_exists, #{id := Id}}} -> 
@@ -441,7 +441,7 @@ publish({L, Cont}, Fun ) ->
 on_create(Details, Ctxt) ->
     Map = #{
         <<"session">> => bondy_context:session_id(Ctxt), 
-        <<"SubscriptionDetails">> => Details
+        <<"subscriptionDetails">> => Details
     },
     % TODO Records stats
     {ok, _} = publish(

@@ -360,19 +360,19 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 
 %% @private
 
-parse_details(<<"roles">>, Roles, Session) when is_map(Roles) ->
+parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
-parse_details(<<"caller">>, V, Session) when is_map(V) ->
+parse_details(caller, V, Session) when is_map(V) ->
     Session#session{caller = V};
-parse_details(<<"calle">>, V, Session) when is_map(V) ->
+parse_details(callee, V, Session) when is_map(V) ->
     Session#session{callee = V};
-parse_details(<<"subscriber">>, V, Session) when is_map(V) ->
+parse_details(subscriber, V, Session) when is_map(V) ->
     Session#session{subscriber = V};
-parse_details(<<"publisher">>, V, Session) when is_map(V) ->
+parse_details(publisher, V, Session) when is_map(V) ->
     Session#session{publisher = V};
-parse_details(<<"authid">>, V, Session) when is_binary(V) ->
+parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
-parse_details(<<"agent">>, V, Session) when is_binary(V) ->
+parse_details(agent, V, Session) when is_binary(V) ->
     Session#session{agent = V};
 parse_details(_, _, Session) ->
     Session.

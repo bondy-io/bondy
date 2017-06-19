@@ -372,15 +372,15 @@ open_session(St0) ->
         Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
         Ctxt1 = Ctxt0#{
             session => Session,
-            roles => parse_roles(maps:get(<<"roles">>, Details))
+            roles => parse_roles(maps:get(roles, Details))
         },
         St1 = update_context(Ctxt1, St0),
 
         Welcome = wamp_message:welcome(
             Id,
             #{
-                <<"agent">> => ?BONDY_VERSION_STRING,
-                <<"roles">> => bondy_router:roles()
+                agent => ?BONDY_VERSION_STRING,
+                roles => bondy_router:roles()
             }
         ),
         ok = bondy_stats:update(Welcome, Ctxt1),
@@ -412,25 +412,25 @@ parse_roles(Roles) ->
 parse_roles([], Roles) ->
     Roles;
 
-parse_roles([<<"caller">>|T], Roles) ->
+parse_roles([caller|T], Roles) ->
     F = bondy_utils:merge_map_flags(
-        maps:get(<<"caller">>, Roles), ?CALLER_FEATURES),
-    parse_roles(T, Roles#{<<"caller">> => F});
+        maps:get(caller, Roles), ?CALLER_FEATURES),
+    parse_roles(T, Roles#{caller => F});
 
-parse_roles([<<"callee">>|T], Roles) ->
+parse_roles([callee|T], Roles) ->
     F = bondy_utils:merge_map_flags(
-        maps:get(<<"callee">>, Roles), ?CALLEE_FEATURES),
-    parse_roles(T, Roles#{<<"callee">> => F});
+        maps:get(callee, Roles), ?CALLEE_FEATURES),
+    parse_roles(T, Roles#{callee => F});
 
-parse_roles([<<"subscriber">>|T], Roles) ->
+parse_roles([subscriber|T], Roles) ->
     F = bondy_utils:merge_map_flags(
-        maps:get(<<"subscriber">>, Roles), ?SUBSCRIBER_FEATURES),
-    parse_roles(T, Roles#{<<"subscriber">> => F});
+        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
+    parse_roles(T, Roles#{subscriber => F});
 
-parse_roles([<<"publisher">>|T], Roles) ->
+parse_roles([publisher|T], Roles) ->
     F = bondy_utils:merge_map_flags(
-        maps:get(<<"publisher">>, Roles), ?PUBLISHER_FEATURES),
-    parse_roles(T, Roles#{<<"publisher">> => F});
+        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
+    parse_roles(T, Roles#{publisher => F});
 
 parse_roles([_|T], Roles) ->
     parse_roles(T, Roles).
@@ -439,8 +439,8 @@ parse_roles([_|T], Roles) ->
 %% @private
 abort(Type, Reason, St) ->
     Details = #{
-        <<"message">> => Reason,
-        <<"timestamp">> => erlang:system_time(seconds)
+        message => Reason,
+        timestamp => erlang:system_time(seconds)
     },
     M = wamp_message:abort(Details, Type),
     ok = bondy_stats:update(M, St#wamp_state.context),
@@ -456,10 +456,10 @@ maybe_auth_challenge(_, not_found, St) ->
 maybe_auth_challenge(Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
     case {bondy_realm:is_security_enabled(Realm), Details} of
-        {true, #{<<"authid">> := UserId}} ->
+        {true, #{authid := UserId}} ->
             Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
             St1 = update_context(Ctxt1, St0),
-            AuthMethods = maps:get(<<"authmethods">>, Details, []),
+            AuthMethods = maps:get(authmethods, Details, []),
             AuthMethod = bondy_realm:select_auth_method(Realm, AuthMethods),
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
@@ -471,7 +471,7 @@ maybe_auth_challenge(Details, Realm, St0) ->
                     {challenge, AuthMethod, Ch, St1}
             end;
         {true, _} ->
-            {error, {missing_param, <<"authid">>}, St0};
+            {error, {missing_param, authid}, St0};
         {false, _} ->
             Ctxt1 = Ctxt0#{authid => undefined, request_details => Details},
             St1 = update_context(Ctxt1, St0),
@@ -486,13 +486,13 @@ challenge(?WAMPCRA_AUTH, User, Details, St) ->
     #{username := UserId} = User,
     Ch0 = #{
         challenge => #{
-            <<"authmethod">> => ?WAMPCRA_AUTH,
-            <<"authid">> => UserId,
-            <<"authprovider">> => <<"bondy">>, 
-            <<"authrole">> => maps:get(authrole, Details, <<"user">>), % @TODO
-            <<"nonce">> => bondy_utils:get_nonce(),
-            <<"session">> => Id,
-            <<"timestamp">> => calendar:universal_time()
+            authmethod => ?WAMPCRA_AUTH,
+            authid => UserId,
+            authprovider => <<"bondy">>, 
+            authrole => maps:get(authrole, Details, <<"user">>), % @TODO
+            nonce => bondy_utils:get_nonce(),
+            session => Id,
+            timestamp => erlang:system_time(seconds)
         }
     },
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -507,9 +507,9 @@ challenge(?WAMPCRA_AUTH, User, Details, St) ->
                 salt := Salt
             } = Pass,
             Ch0#{
-                <<"salt">> => Salt,
-                <<"keylen">> => 16, % see bondy_pw_auth.erl
-                <<"iterations">> => Iter
+                salt => Salt,
+                keylen => 16, % see bondy_pw_auth.erl
+                iterations => Iter
             }
     end;
 

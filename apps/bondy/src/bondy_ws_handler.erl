@@ -20,7 +20,7 @@
 %% *  "wamp.2.msgpack"
 %%
 %% With "wamp.2.json", _all_ WebSocket messages MUST BE of type *text*
-%% (UTF8 encoded payload) and use the JSON message serialization.
+%% (UTF8 encoded arguments_kw) and use the JSON message serialization.
 %%
 %% With "wamp.2.msgpack", _all_ WebSocket messages MUST BE of type
 %% *binary* and use the MsgPack message serialization.

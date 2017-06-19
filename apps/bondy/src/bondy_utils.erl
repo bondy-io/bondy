@@ -90,9 +90,9 @@ get_id({session, SessionId}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 
-timeout(#{<<"timeout">> := T}) when is_integer(T), T > 0 ->
+timeout(#{timeout := T}) when is_integer(T), T > 0 ->
     T;
-timeout(#{<<"timeout">> := 0}) ->
+timeout(#{timeout := 0}) ->
     infinity;
 timeout(_) ->
     bondy_config:request_timeout().

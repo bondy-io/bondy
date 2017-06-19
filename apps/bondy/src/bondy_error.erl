@@ -38,7 +38,7 @@ error_uri(Reason) when is_atom(Reason) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-error_map(#error{arguments = undefined, payload = undefined} = Err) ->
+error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
     #error{error_uri = Uri} = Err,
     #{
         <<"code">> => Uri,
@@ -46,7 +46,7 @@ error_map(#error{arguments = undefined, payload = undefined} = Err) ->
         <<"description">> => <<>>
     };
 
-error_map(#error{arguments = L, payload = undefined} = Err)
+error_map(#error{arguments = L, arguments_kw = undefined} = Err)
 when is_list(L) ->
     #error{error_uri = Uri} = Err,
     Mssg = hd(L),
@@ -56,7 +56,7 @@ when is_list(L) ->
         <<"description">> => Mssg
     };
 
-error_map(#error{arguments = undefined, payload = M} = Err)
+error_map(#error{arguments = undefined, arguments_kw = M} = Err)
 when is_map(M) ->
     #error{error_uri = Uri} = Err,
     Mssg = maps:get(<<"message">>, M),
@@ -67,7 +67,7 @@ when is_map(M) ->
         <<"description">> => Desc
     };
 
-error_map(#error{arguments = L, payload = M} = Err) ->
+error_map(#error{arguments = L, arguments_kw = M} = Err) ->
     #error{error_uri = Uri} = Err,
     Mssg = hd(L),
     Desc = maps:get(<<"description">>, M, Mssg),

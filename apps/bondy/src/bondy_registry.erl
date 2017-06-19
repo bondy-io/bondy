@@ -22,9 +22,7 @@
 -define(REGISTRATION_INDEX_TABLE_NAME, bondy_registration_index).
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
--define(EXACT_MATCH, <<"exact">>).
--define(PREFIX_MATCH, <<"prefix">>).
--define(WILDCARD_MATCH, <<"wildcard">>).
+
 
 %% An entry denotes a registration or a subscription
 %% TODO entries should be replicated across the cluster via plumtree
@@ -185,10 +183,10 @@ options(#entry{options = Val}) -> Val.
 
 to_details_map(#entry{key = {_, _, Id}} = E) ->
     #{
-        <<"id">> => Id,
-        <<"created">> => E#entry.created,
-        <<"uri">> => E#entry.uri,
-        <<"match">> => E#entry.match_policy
+        id => Id,
+        created => E#entry.created,
+        uri => E#entry.uri,
+        match => E#entry.match_policy
     }.
 
 
@@ -271,9 +269,9 @@ add(Type, Uri, Options, Ctxt) ->
 
         [#entry{options = EOpts} = Entry| _] when Type == registration ->
             SharedEnabled = bondy_context:is_feature_enabled(
-                Ctxt, <<"callee">>, <<"shared_registration">>),
-            NewPolicy = maps:get(<<"invoke">>, Options, <<"single">>),
-            PrevPolicy = maps:get(<<"invoke">>, EOpts, <<"single">>),
+                Ctxt, callee, shared_registration),
+            NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
+            PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
             %% As a default, only a single Callee may register a procedure
             %% for an URI.
             %% Shared Registration (RFC 13.3.9)
@@ -287,7 +285,7 @@ add(Type, Uri, Options, Ctxt) ->
             %% where the value for the invoke option does not match that of
             %% the initial registration.
             Flag = SharedEnabled andalso
-                NewPolicy =/= <<"single">> andalso
+                NewPolicy =/= ?INVOKE_SINGLE andalso
                 NewPolicy =:= PrevPolicy,
 
             MaybeAdd(Flag orelse Entry)
@@ -596,7 +594,7 @@ do_remove_all(_, _, _) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(<<"match">>, Options, ?EXACT_MATCH),
+    P = maps:get(match, Options, ?EXACT_MATCH),
     P == ?EXACT_MATCH 
     orelse P == ?PREFIX_MATCH 
     orelse P == ?WILDCARD_MATCH
@@ -614,12 +612,12 @@ parse_options(registration, Opts) ->
 
 %% @private
 parse_subscription_options(Opts) ->
-    maps:without([<<"match">>], Opts).
+    maps:without([match], Opts).
 
 
 %% @private
 parse_registration_options(Opts) ->
-    maps:without([<<"match">>], Opts).
+    maps:without([match], Opts).
 
 
 %% -----------------------------------------------------------------------------

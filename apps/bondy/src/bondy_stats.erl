@@ -26,6 +26,7 @@
 -spec create_metrics() -> ok.
 
 create_metrics() ->
+    %% We are assumming exometer was started by wamp app.
     %% TODO Process aliases
     lists:foreach(
         fun({Name, Type , Opts, _Aliases}) ->

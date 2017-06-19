@@ -200,12 +200,12 @@ to_map(#result{} = M) ->
     #result{
         details = Details,
         arguments = Args,
-        payload = ArgsKw
+        arguments_kw = ArgsKw
     } = M,
     #{
-        <<"details">> => Details,
-        <<"arguments">> => args(Args),
-        <<"arguments_kw">> => args_kw(ArgsKw)
+        details => Details,
+        arguments => args(Args),
+        arguments_kw => args_kw(ArgsKw)
     };
 
 to_map(#error{} = M) ->

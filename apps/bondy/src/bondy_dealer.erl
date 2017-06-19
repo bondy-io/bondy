@@ -216,7 +216,7 @@ handle_message(
     %% Check if it has callee role?
     Reply = case register(Uri, Opts, Ctxt) of
         {ok, Map} ->
-            wamp_message:registered(ReqId, maps:get(<<"id">>, Map));
+            wamp_message:registered(ReqId, maps:get(id, Map));
         {error, not_authorized} ->
             wamp_message:error(
                 ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
@@ -273,7 +273,7 @@ handle_message(#yield{} = M, Ctxt0) ->
             CallId, 
             M#yield.options,  %% TODO check if yield.options should be assigned to result.details
             M#yield.arguments, 
-            M#yield.payload),
+            M#yield.arguments_kw),
         ok = bondy:send(Caller, R),
         {ok, Ctxt1}
     end,
@@ -289,7 +289,7 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
             M#error.details, 
             M#error.error_uri, 
             M#error.arguments, 
-            M#error.payload),
+            M#error.arguments_kw),
         ok = bondy:send(Caller, R),
         {ok, Ctxt1}
     end,
@@ -400,9 +400,9 @@ handle_message(#call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ct
 handle_message(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
     ReqId = M#call.request_id,
     Res = #{
-        <<"exact">> => [], % @TODO
-        <<"prefix">> => [], % @TODO
-        <<"wildcard">> => [] % @TODO
+        ?EXACT_MATCH => [], % @TODO
+        ?PREFIX_MATCH => [], % @TODO
+        ?WILDCARD_MATCH => [] % @TODO
     },
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
@@ -455,7 +455,7 @@ handle_message(#call{} = M, Ctxt0) ->
     Fun = fun(RegId, Callee, Ctxt1) ->
         ReqId = bondy_utils:get_id(global),
         Args = M#call.arguments,
-        Payload = M#call.payload,
+        Payload = M#call.arguments_kw,
         R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
         ok = bondy:send(Callee, R, Ctxt1),
         {ok, ReqId, Ctxt1}
@@ -777,48 +777,74 @@ do_invoke({L, Cont}, Fun, Ctxt) ->
     ok = do_invoke(L, Fun, Ctxt),
     do_invoke(match_registrations(Cont), Fun, Ctxt);
 
-do_invoke(L, Fun, Ctxt) ->
+do_invoke(L, Fun, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
     Triples = [{
         bondy_registry:uri(E),
-        maps:get(<<"invoke">>, bondy_registry:options(E), <<"single">>),
+        maps:get(invoke, bondy_registry:options(E), ?INVOKE_SINGLE),
         E
     } || E <- L],
     do_invoke(Triples, undefined, Fun, Ctxt).
 
 
 %% @private
-do_invoke([], _, _, _) ->
+-spec do_invoke(
+    [{uri(), Strategy :: binary(), Entry :: tuple()}], 
+    Acc :: tuple() | undefined, 
+    Fun :: function(), 
+    Ctxt :: bondy_context:context()) ->
+    ok.
+
+do_invoke([], undefined, _, _) ->
     ok;
 
-do_invoke([{Uri, <<"single">>, E}|T], undefined, Fun, Ctxt0) ->
+do_invoke([], {_, ?INVOKE_SINGLE, []}, _, _) ->
+    ok;
+
+do_invoke([], {_, Invoke, L}, Fun, Ctxt0) ->
+    {ok, _Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+    ok;
+
+do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Ctxt0) ->
     {ok, Ctxt1} = apply_invocation_strategy(E, Fun, Ctxt0),
-    do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt1);
+    %% We add an accummulator to drop any subsequent matching Uris.
+    do_invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt1);
 
 do_invoke(
-    [{Uri, <<"single">>, _}|T], {Uri, <<"single">>, _} = Last, Fun, Ctxt) ->
-    %% We drop subsequent entries for same Uri.
+    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last, Fun, Ctxt) ->
+    %% A single invocation strategy and we have multiple registrations so we
+    %% ignore them
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
     do_invoke(T, Last, Fun, Ctxt);
 
 do_invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
+    %% We do not apply the invocation yet as is not single, so we need
+    %% to accummulate and apply at the end.
+    %% We build a list for subsequent entries for same Uri.
     do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
 
 do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
+    %% We do not apply the invocation yet as is not single, so we need
+    %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
     do_invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
 
-do_invoke([{Uri, <<"single">>, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+    %% We found another Uri so we invoke the previous one
     {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+    %% The new one is a sigle so we also invoke and continue
     {ok, Ctxt2} = apply_invocation_strategy(E, Fun, Ctxt1),
-    do_invoke(T, {Uri, <<"single">>, []}, Fun, Ctxt2);
+    do_invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
 
 do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+    %% We found another Uri so we invoke the previous one
     {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+    %% We do not apply the invocation yet as is not single, so we need
+    %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
 
@@ -832,16 +858,16 @@ do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
 -spec apply_invocation_strategy(term(), function(), bondy_context:context()) -> 
     {ok, bondy_context:context()}.
 
-apply_invocation_strategy({<<"first">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({?INVOKE_FIRST, L}, Fun, Ctxt) ->
     apply_first_available(L, Fun, Ctxt);
 
-apply_invocation_strategy({<<"last">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({?INVOKE_LAST, L}, Fun, Ctxt) ->
     apply_first_available(lists:reverse(L), Fun, Ctxt);
 
-apply_invocation_strategy({<<"random">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({?INVOKE_RANDOM, L}, Fun, Ctxt) ->
     apply_first_available(shuffle(L), Fun, Ctxt);
 
-apply_invocation_strategy({<<"roundrobin">>, L}, Fun, Ctxt) ->
+apply_invocation_strategy({?INVOKE_ROUND_ROBIN, L}, Fun, Ctxt) ->
     apply_round_robin(L, Fun, Ctxt);
 
 apply_invocation_strategy(Entry, Fun, Ctxt) ->

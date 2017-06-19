@@ -81,8 +81,8 @@
 
 -define(POOL_NAME, bondy_router_pool).
 -define(ROUTER_ROLES, #{
-    <<"broker">> => ?BROKER_FEATURES,
-    <<"dealer">> => ?DEALER_FEATURES
+    broker => ?BROKER_FEATURES,
+    dealer => ?DEALER_FEATURES
 }).
 
 -type event()                   ::  {wamp_message(), bondy_context:context()}.
@@ -292,7 +292,7 @@ do_start_pool() ->
 %% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
 acknowledge_message(#publish{options = Opts}) ->
-    maps:get(<<"acknowledge">>, Opts, false);
+    maps:get(acknowledge, Opts, false);
 
 acknowledge_message(_) ->
     false.
@@ -384,7 +384,7 @@ do_forward(#register{} = M, Ctxt) ->
 
     Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
         {ok, Map} ->
-            RegId = maps:get(<<"id">>, Map),
+            RegId = maps:get(id, Map),
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->
             wamp_message:error(
