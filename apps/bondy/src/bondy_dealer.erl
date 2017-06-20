@@ -852,7 +852,9 @@ do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Implements load balancing and fail over invocation strategies
+%% Implements load balancing and fail over invocation strategies.
+%% This works over a list of registration entries for the SAME
+%% procedure
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_invocation_strategy(term(), function(), bondy_context:context()) -> 
@@ -884,6 +886,7 @@ apply_first_available([H|T], Fun, Ctxt) ->
         true ->
             apply_first_available(T, Fun, Ctxt);
         false ->
+            %% We finish doing the invocation
             Fun(H, Ctxt)
     end.
 
@@ -895,9 +898,9 @@ apply_first_available([H|T], Fun, Ctxt) ->
 apply_round_robin([], _, Ctxt) ->
     {ok, Ctxt};
 
-apply_round_robin([H|_] = L, Fun, Ctxt) ->
+apply_round_robin(L, Fun, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
-    Uri = bondy_registry:uri(H),
+    Uri = bondy_registry:uri(hd(L)),
     apply_round_robin(get_last_invocation(RealmUri, Uri), L, Fun, Ctxt).
 
 
@@ -906,37 +909,29 @@ apply_round_robin(_, [], _, Ctxt) ->
     {ok, Ctxt};
 
 apply_round_robin(undefined, [H|T], Fun, Ctxt) ->
+    %% We never invoke this procedure before or we reordered the round
     Pid = bondy_session:pid(bondy_registry:session_id(H)),
     case process_info(Pid) of
         undefined ->
+            %% The peer connection must have been closed between
+            %% the time we read and now.
             apply_round_robin(undefined, T, Fun, Ctxt);
         _ ->
+            %% We update the invocation state
             ok = update_last_invocation(
                 bondy_context:realm_uri(Ctxt),
                 bondy_registry:uri(H),
                 bondy_registry:entry_id(H)
             ),
+            %% We do the invocation
             Fun(H, Ctxt)
     end;
 
-apply_round_robin(RegId, L0, Fun, Ctxt) ->
-    Folder = fun
-        (X, {PreAcc, []}) ->
-            case bondy_registry:entry_id(X) of
-                RegId ->
-                    {RegId, PreAcc, [X]};
-                _ ->
-                    {RegId, [X|PreAcc], []}
-            end;
-        (X, {Id, PreAcc, PostAcc}) ->
-            {Id, PreAcc, [X|PostAcc]}
-    end,
-    case lists:foldr(Folder, {[], []}, L0) of
-        {Pre, []} ->
-            apply_round_robin(undefined, Pre, Fun, Ctxt);
-        {Pre, [H|T]} ->
-            apply_round_robin(undefined, T ++ Pre ++ [H], Fun, Ctxt)
-    end.
+
+apply_round_robin(#last_invocation{value = LastId}, L0, Fun, Ctxt) ->
+    Pred = fun(E) -> LastId =:= bondy_registry:entry_id(E) end,
+    L1 = lists_utils:rotate_right_with(Pred, L0),
+    apply_round_robin(undefined, L1, Fun, Ctxt).
 
 
 %% @private
