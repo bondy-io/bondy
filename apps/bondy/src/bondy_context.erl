@@ -272,8 +272,9 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_feature_enabled(context(), atom(), binary()) -> boolean().
-is_feature_enabled(#{roles := Roles}, Role, Feature) when is_binary(Feature) ->
-    maps:get(Feature, maps:get(Role, Roles, #{}), false).
+
+is_feature_enabled(#{roles := Roles}, Role, Feature) ->
+    maps_utils:get_path([Role, Feature], Roles, false).
 
 
 %% -----------------------------------------------------------------------------
