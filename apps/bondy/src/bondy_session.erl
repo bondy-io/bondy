@@ -130,6 +130,8 @@
 -export([id/1]).
 -export([incr_seq/1]).
 -export([lookup/1]).
+-export([new/3]).
+-export([new/4]).
 -export([open/3]).
 -export([open/4]).
 -export([peer/1]).
@@ -148,6 +150,33 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+-spec new(peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+    session() | no_return().
+
+new(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    new(bondy_utils:get_id(global), Peer, bondy_realm:fetch(RealmUri), Opts);
+
+new(Peer, Realm, Opts) when is_map(Opts) ->
+    new(bondy_utils:get_id(global), Peer, Realm, Opts).
+
+
+-spec new(id(), peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+    session() | no_return().
+    
+new(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    new(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
+
+new(Id, Peer, Realm, Opts) when is_map(Opts) ->
+    RealmUri = bondy_realm:uri(Realm),
+    S0 = #session{
+        id = Id,
+        peer = Peer,
+        realm_uri = RealmUri,
+        created = calendar:local_time()
+    },
+    parse_details(Opts, S0).
 
 
 %% -----------------------------------------------------------------------------
@@ -181,13 +210,7 @@ open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
 
 open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
-    S0 = #session{
-        id = Id,
-        peer = Peer,
-        realm_uri = RealmUri,
-        created = calendar:local_time()
-    },
-    S1 = parse_details(Opts, S0),
+    S1 = new(Id, Peer, Realm, Opts),
 
     case ets:insert_new(table(Id), S1) of
         true ->
