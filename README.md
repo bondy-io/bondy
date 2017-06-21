@@ -2,8 +2,15 @@
 
 ## Running a single node
 ```bash
-rebar3 shell
+rebar3 release
+
 ```
+
+We need to allow connections 
+```
+bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
+```
+
 ## Using a WS Client
 
 ```
