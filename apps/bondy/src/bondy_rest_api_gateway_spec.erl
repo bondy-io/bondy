@@ -550,7 +550,7 @@
 end).
 
 -define(DEFAULT_WAMP_ACTION, #{
-    <<"details">> => #{},
+    <<"options">> => #{},
     <<"arguments">> => [],
     <<"arguments_kw">> => #{},
     <<"timeout">> => <<"{{defaults.timeout}}">>,
@@ -586,7 +586,7 @@ end).
         datatype => binary,
         validator => fun wamp_uri:is_valid/1
     },
-    <<"details">> => #{
+    <<"options">> => #{
         required => true,
         allow_null => true,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
@@ -1576,13 +1576,13 @@ perform_action(
     #{
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
-        <<"details">> := D,
+        <<"options">> := Opts,
         <<"procedure">> := P,
         <<"retries">> := _R,
         <<"timeout">> := _T
     } = eval_term(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
-    case bondy:call(D, P, A, Akw) of
+    case bondy:call(P, Opts, A, Akw) of
         {ok, Result, Ctxt1} ->
             Ctxt2 = update_context({result, Result}, Ctxt1),
             #{

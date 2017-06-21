@@ -384,25 +384,56 @@ perform_action(
     %% so we need to evaluate them passing the
     %% context
     #{
+        <<"procedure">> := P,
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
-        <<"details">> := D,
-        <<"procedure">> := P,
+        <<"options">> := Opts,
         <<"retries">> := _R,
         <<"timeout">> := _T
     } = bondy_utils:eval_term(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
-    case bondy:call(D, P, A, Akw) of
-        {ok, Result, Ctxt1} ->
-            Ctxt2 = update_context({result, Result}, Ctxt1),
+
+    %% @TODO We need to recreate ctxt and session from token
+    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], Ctxt0),
+    RealmUri = maps:get(realm_uri, St0),
+    WampCtxt0 = #{
+        peer => Peer, 
+        realm_uri => RealmUri,
+        awaiting_calls => sets:new(),
+        session => bondy_session:new(Peer, RealmUri, #{
+            roles => #{
+                callee => #{
+                    features => #{
+                        call_timeout => true,
+                        call_canceling => false,
+                        caller_identification => true,
+                        call_trustlevels => true,
+                        progressive_call_results => false
+                    }
+                }
+            }
+        })
+    },
+    case bondy:call(P, Opts, A, Akw, WampCtxt0) of
+        {ok, Result0, _WampCtxt1} ->
+            %% mops uses binary keys
+            Result1 = #{
+                <<"details">> => maps:get(details, Result0),
+                <<"arguments">> => maps:get(arguments, Result0),
+                <<"arguments_kw">> => maps:get(arguments_kw, Result0)
+            },
+            Ctxt1 = update_context({result, Result1}, Ctxt0),
             Response = bondy_utils:eval_term(
-                maps:get(<<"on_result">>, RSpec), Ctxt2),
-            St1 = maps:update(api_context, Ctxt2, St0),
+                maps:get(<<"on_result">>, RSpec), Ctxt1),
+            St1 = maps:update(api_context, Ctxt1, St0),
             {ok, Response, St1};
-        {error, Error, Ctxt1} ->
-            Ctxt2 = update_context({error, Error}, Ctxt1),
-            Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt2),
-            St1 = maps:update(api_context, Ctxt2, St0),
+        {error, Error, _WampCtxt1} ->
+            %% @REVIEW At the moment all error maps use binary keys, if we 
+            %% move to atoms we need to turn them into binaries 
+            Ctxt1 = update_context({error, Error}, Ctxt0),
+            Response = bondy_utils:eval_term(
+                maps:get(<<"on_error">>, RSpec), Ctxt1),
+            St1 = maps:update(api_context, Ctxt1, St0),
             Code = 500,
             {error, Code, Response, St1}
     end.
