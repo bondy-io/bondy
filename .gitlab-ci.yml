@@ -1,0 +1,15 @@
+before_script:
+   - export IMAGE_TAG=registry.gitlab.com/leapsight/$CI_PROJECT_NAME:$CI_COMMIT_SHA
+   - docker login -p $CI_JOB_TOKEN registry.gitlab.com
+
+build1:
+ stage: build
+ tags:
+   - k8s
+ script:   
+   - echo "Build release tgz"
+   - docker run --rm --env-file `pwd`/docker/app.env -v `pwd`/docker:/opt/output -v /root/build_keys:/root/.ssh erlang-build
+   - echo "Build image ${IMAGE_TAG}"
+   - cd docker
+   - docker build --pull --force-rm --no-cache -f Dockerfile -t $IMAGE_TAG .
+   - docker push $IMAGE_TAG
