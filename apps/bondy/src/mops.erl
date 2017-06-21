@@ -1,6 +1,21 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% 
+%%  mops.erl - a mustache inspired map expression language
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+
+
 
 -module(mops).
 -define(START, <<"{{">>).
@@ -9,18 +24,20 @@
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{
+    %% Defines the format of the keys in the map
     labels => #{
         required => true,
         default => binary,
         allow_null => false,
         datatype => {in, [binary, atom]}
     },
+    %% Allows to register custom pipe operators (aka filters)
     operators => #{
         required => false,
         allow_null => false,
         validator => fun
-            ({Name, Fun} = Op) 
-            when (is_atom(Name) orelse is_binary(Name)) 
+            ({Name, Fun} = Op) when (is_atom(Name) 
+            orelse is_binary(Name)) 
             andalso is_function(Fun, 1) ->
                 {ok, Op};
             (_) ->
@@ -30,11 +47,15 @@
 }).
 
 -record(state, {
-    context             :: map(),
-    opts                :: map(),
-    acc = []            :: any(),
-    is_ground = true    :: boolean(),
-    is_open = false     :: boolean()
+    context                                                     ::  map(),
+    opts                                                        ::  map(),
+    acc = []                                                    ::  any(),
+    is_ground = true                                            ::  boolean(),
+    is_open = false                                             ::  boolean(),
+    sp = binary:compile_pattern(?START)                         ::  any(),
+    dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
+    pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
+    ep = binary:compile_pattern(?END)                           ::  any()
 }).
 -type state()       :: #state{}.
 
@@ -72,10 +93,10 @@ eval(Val, _) ->
 %% @doc
 %% Evaluates **Term** ( `any()') using the context **Ctxt** (`map()').
 %% Returns **Term** in case the term is not a binary and does not contain a 
-%% mop expression. Otherwise, it tries to resolve the expression using the
+%% mops expression. Otherwise, it tries to resolve the expression using the
 %% **Ctxt**.
 %%
-%% The following are valid mop expressions and their meanings:
+%% The following are example mops expressions and their meanings:
 %% - `<<"{{foo}}">>' - resolve the value for key `<<"foo">>` in the context. 
 %% It fails if the context does not have a key named `<<"foo">>'.
 %% - `<<"\"{{foo}}\">>' - return a string by resolving the value for key 
@@ -156,7 +177,7 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
 do_eval(Bin0, #state{acc = []} = St0) ->
     %% We start processing a binary
     Bin1 = trim(Bin0),
-    case binary:match(Bin1, ?START) of
+    case binary:match(Bin1, St0#state.sp) of
         nomatch ->
             %% Not a mop expression, so we return and finish
             Bin1;         
@@ -164,7 +185,7 @@ do_eval(Bin0, #state{acc = []} = St0) ->
             %% Maybe a mop expression as we found the left moustache
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
-            case binary:matches(Bin1, ?DOUBLE_QUOTES) of
+            case binary:matches(Bin1, St0#state.dqp) of
                 [] when Pos =:= 0 ->
                     %% Not a string so we should have a single 
                     %% mustache expression
@@ -175,7 +196,7 @@ do_eval(Bin0, #state{acc = []} = St0) ->
                     %% mustache expressions
                     %% e.g. "Hello {{foo}}. Today is {{date}}."
                     Unquoted = binary:part(Bin1, 1, Len - 2),
-                    [Pre, Rest] = binary:split(Unquoted, ?START),
+                    [Pre, Rest] = binary:split(Unquoted, St0#state.sp),
                     do_eval(Rest, acc(St1, Pre));
                 _ ->
                     %% We found quotes that are in the middle of the string
@@ -187,7 +208,11 @@ do_eval(Bin0, #state{acc = []} = St0) ->
     end;
 
 do_eval(Bin, #state{is_open = true} = St0) ->
-    case binary:split(Bin, ?END) of
+    %% Split produces a list of binaries that are all referencing Bin. 
+    %% This means that the data in Bin is not copied to new binaries, 
+    %% and that Bin cannot be garbage collected until the results of the split 
+    %% are no longer referenced.
+    case binary:split(Bin, St0#state.ep) of
         [Expr, Rest] ->
             St1 = St0#state{is_open = false},
             do_eval(Rest, acc(St1, parse_expr(Expr, St1)));
@@ -197,7 +222,11 @@ do_eval(Bin, #state{is_open = true} = St0) ->
     end;
 
 do_eval(Bin, #state{is_open = false} = St) ->
-    case binary:split(Bin, ?START) of
+    %% Split produces a list of binaries that are all referencing Bin. 
+    %% This means that the data in Bin is not copied to new binaries, 
+    %% and that Bin cannot be garbage collected until the results of the split 
+    %% are no longer referenced.
+    case binary:split(Bin, St#state.sp) of
         [Pre, Rest]->
             do_eval(Rest, acc(St#state{is_open = true}, Pre));
         [Bin] ->
@@ -235,8 +264,8 @@ acc(#state{acc = Acc} = St, Val) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-parse_expr(Bin, #state{context = Ctxt}) ->
-    case binary:split(Bin, ?PIPE_OP, [global]) of
+parse_expr(Bin, #state{context = Ctxt} = St) ->
+    case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
             get_value(trim(Val), Ctxt);
         [Val | Ops] ->
@@ -333,6 +362,7 @@ apply_op(Op, _) ->
 
 
 %% @private
+%% TODO Replace this as it id not efficient, it generates a new binary each time
 trim(Bin) ->
     re:replace(Bin, "^\\s+|\\s+$", "", [{return, binary}, global]).
 

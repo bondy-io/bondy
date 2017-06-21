@@ -33,6 +33,7 @@
 
 -define(API_HOST, #{
     <<"host">> => #{
+        alias => host,
         required => true,
         allow_null => false,
         datatype => binary,
@@ -42,17 +43,20 @@
         end
     },
     <<"realm_uri">> => #{
+        alias => realm_uri,
         required => true,
         allow_null => false,
         datatype => binary
     },
     ?VARS_KEY => #{
+        alias => variables,
         required => true,
         allow_null => false,
         default => #{},
         datatype => map
     },
     ?DEFAULTS_KEY => #{
+        alias => defaults,
         required => true,
         allow_null => false,
         default => #{},
@@ -60,6 +64,7 @@
         validator => ?DEFAULTS_SPEC
     },
     <<"versions">> => #{
+        alias => versions,
         required => true,
         allow_null => false,
         datatype => map
@@ -73,55 +78,65 @@
 
 -define(API_VERSION, #{
     <<"base_path">> => #{
+        alias => base_path,
         required => true,
         allow_null => false,
         datatype => binary
     },
     <<"is_active">> => #{
+        alias => is_active,
         required => true, 
         allow_null => false,
         default => false,
         datatype => boolean
     },
     <<"is_deprecated">> => #{
+        alias => is_deprecated,
         required => true, 
         allow_null => false,
         default => false,
         datatype => boolean
     },
     <<"pool_size">> => #{
+        alias => pool_size,
         required => true,
         allow_null => false,
         default => 200,
         datatype => pos_integer
     },
     <<"info">> => #{
+        alias => info,
         required => false,
         datatype => map,
         validator => #{
             <<"title">> => #{
+                alias => title,
                 required => true,
                 allow_null => true,
                 datatype => binary},
             <<"description">> => #{
+                alias => description,
                 required => true,
                 allow_null => true,
                 datatype => binary}
         }
     },
     ?VARS_KEY => #{
+        alias => variables,
         required => true,
         allow_null => false,
         default => #{},
         datatype => map
     },
     ?DEFAULTS_KEY => #{
+        alias => defaults,
         required => true,
         allow_null => false,
         default => #{},
         datatype => map
     },
     <<"paths">> => #{
+        alias => paths,
         required => true,
         allow_null => false,
         datatype => map,
@@ -143,44 +158,53 @@
 
 -define(DEFAULTS_SPEC, #{
     <<"schemes">> => #{
+        alias => schemes,
         required => true,
         default => ?DEFAULT_SCHEMES
     },
     <<"security">> => #{
+        alias => security,
         required => true,
         allow_null => false,
         % datatype => map,
         default => #{}
     },
     <<"timeout">> => #{
+        alias => timeout,
         required => true,
         % datatype => timeout,
         default => ?DEFAULT_TIMEOUT
     },
     <<"connect_timeout">> => #{
+        alias => connect_timeout,
         required => true,
         default => ?DEFAULT_CONN_TIMEOUT
     },
     <<"retries">> => #{
+        alias => retries,
         required => true,
         % datatype => integer,
         default => ?DEFAULT_RETRIES
     },
     <<"retry_timeout">> => #{
+        alias => retry_timeout,
         required => true,
         default => ?DEFAULT_RETRY_TIMEOUT
     },
     <<"accepts">> => #{
+        alias => accepts,
         required => true,
         allow_null => false,
         default => ?DEFAULT_ACCEPTS
     },
     <<"provides">> => #{
+        alias => provides,
         required => true,
         allow_null => false,
         default => ?DEFAULT_PROVIDES
     },
     <<"headers">> => #{
+        alias => headers,
         required => true,
         allow_null => false,
         default => ?DEFAULT_HEADERS
@@ -190,12 +214,14 @@
 
 -define(BASIC, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         default => <<"basic">>,
         datatype => {in, [<<"basic">>]}
     },
     <<"schemes">> => #{
+        alias => schemes,
         required => true,
         allow_null => false,
         default => ?DEFAULT_SCHEMES,
@@ -205,18 +231,21 @@
 
 -define(APIKEY, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         default => <<"api_key">>,
         datatype => {in, [<<"api_key">>]}
     },
     <<"schemes">> => #{
+        alias => schemes,
         required => true,
         allow_null => false,
         default => ?DEFAULT_SCHEMES,
         datatype => {list, binary}
     }, 
     <<"header_name">> => #{
+        alias => header_name,
         required => true,
         allow_null => false,
         default => <<"authorization">>,
@@ -226,17 +255,20 @@
 
 -define(OAUTH2_SPEC, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         datatype => {in, [<<"oauth2">>]}
     },
     <<"schemes">> => #{
+        alias => scheme,
         required => true,
         allow_null => false,
         default => ?DEFAULT_SCHEMES,
         datatype => {list, binary}
     }, 
     <<"flow">> => #{
+        alias => flow,
         required => true,
         default => null,
         datatype => {in, [
@@ -247,14 +279,17 @@
         ]}
     },
     <<"token_path">> => #{
+        alias => token_path,
         required => false,
         datatype => binary
     },
     <<"revoke_token_path">> => #{
+        alias => revoke_token_path,
         required => false,
         datatype => binary
     },
     <<"description">> => #{
+        alias => description,
         required => false,
         datatype => binary   
     }
@@ -273,20 +308,24 @@
 
 -define(API_PATH, #{
     <<"is_collection">> => #{
+        alias => is_collection,
         required => true,
         allow_null => false,
         datatype => boolean
     },
     ?VARS_KEY => #{
+        alias => variables,
         required => true,
         datatype => map
     },
     ?DEFAULTS_KEY => #{
+        alias => defaults,
         required => true,
         allow_null => false,
         datatype => map
     },
     <<"accepts">> => #{
+        alias => accepts,
         required => true,
         allow_null => false,
         datatype => {list,
@@ -296,6 +335,7 @@
         }
     },
     <<"provides">> => #{
+        alias => provides,
         required => true,
         allow_null => false,
         datatype => {list, 
@@ -305,11 +345,13 @@
         }
     },
     <<"schemes">> => #{
+        alias => schemes,
         required => true,
         allow_null => false,
         datatype => {list, binary}
     }, 
     <<"security">> => #{
+        alias => security,
         required => true,
         allow_null => false,
         datatype => map,
@@ -325,30 +367,37 @@
         end
     },
     <<"delete">> => #{
+        alias => delete,
         required => false,
         datatype => map
     },
     <<"get">> => #{
+        alias => get,
         required => false,
         datatype => map
     },
     <<"head">> => #{
+        alias => head,
         required => false,
         datatype => map
     },
     <<"options">> => #{
+        alias => options,
         required => false,
         datatype => map
     },
     <<"patch">> => #{
+        alias => patch,
         required => false,
         datatype => map
     },
     <<"post">> => #{
+        alias => post,
         required => false,
         datatype => map
     },
     <<"put">> => #{
+        alias => put,
         required => false,
         datatype => map
     }
@@ -369,43 +418,52 @@
 
 -define(PATH_DEFAULTS, #{
     <<"schemes">> => #{
+        alias => schemes,
         required => true,
         default => <<"{{defaults.schemes}}">>
     },
     <<"security">> => #{
+        alias => security,
         required => true,
         allow_null => false,
         datatype => map
     },
     <<"timeout">> => #{
+        alias => timeout,
         required => true,
         datatype => timeout
     },
     <<"connect_timeout">> => #{
+        alias => connect_timeout,
         required => true,
         datatype => timeout
     },
     <<"retries">> => #{
+        alias => retries,
         required => true,
         datatype => integer
     },
     <<"retry_timeout">> => #{
+        alias => retry_timeout,
         required => true,
         datatype => integer
     },
     <<"accepts">> => #{
+        alias => accepts,
         required => true,
         allow_null => false,
         datatype => {list, 
             {in, [<<"application/json">>, <<"application/msgpack">>]}}
     },
     <<"provides">> => #{
+        alias => provides,
         required => true,
         allow_null => false,
         datatype => {list, 
             {in, [<<"application/json">>, <<"application/msgpack">>]}}
     },
     <<"headers">> => #{
+        alias => headers,
         required => true,
         allow_null => false
     }
@@ -414,20 +472,24 @@
 
 -define(REQ_SPEC, #{
     <<"info">> => #{
+        alias => info,
         required => false,
         validator => #{
             <<"description">> => #{
+                alias => description,
                 required => false,
                 allow_null => true,
                 datatype => binary
             },
             <<"parameters">> => #{
+                alias => parameters,
                 required => false,
                 validator => ?API_PARAMS
             }
         }
     },
     <<"action">> => #{
+        alias => action,
         required => true,
         allow_null => false,
         validator => fun
@@ -442,6 +504,7 @@
         end
     },
     <<"response">> => #{
+        alias => response,
         required => true,
         allow_null => false
     }
@@ -455,15 +518,18 @@
 
 -define(STATIC_ACTION_SPEC, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         datatype => {in, [<<"static">>]}
     },
     <<"headers">> => #{
+        alias => headers,
         required => true,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
+        alias => body,
         required => true,
         datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     }
@@ -482,44 +548,54 @@
 
 -define(FWD_ACTION_SPEC, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         datatype => {in, [<<"forward">>]}
     },
     <<"host">> => #{
+        alias => host,
         required => true,
         allow_null => false,
         datatype => binary
     },
     <<"path">> => #{
+        alias => path,
         required => true,
         datatype => [binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"query_string">> => #{
+        alias => query_string,
         required => true,
         datatype => [binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"headers">> => #{
+        alias => headers,
         required => true,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
+        alias => body,
         required => true,
         datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
+        alias => timeout,
         required => true,
         datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"connect_timeout">> => #{
+        alias => connect_timeout,
         required => true,
         datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
+        alias => retries,
         required => true,
         datatype => [integer, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retry_timeout">> => #{
+        alias => retry_timeout,
         required => true,
         datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     }
@@ -535,7 +611,7 @@
 end).
 
 -define(DEFAULT_WAMP_ACTION, #{
-    <<"details">> => #{},
+    <<"options">> => #{},
     <<"arguments">> => [],
     <<"arguments_kw">> => #{},
     <<"timeout">> => <<"{{defaults.timeout}}">>,
@@ -546,6 +622,7 @@ end).
 
 -define(WAMP_ACTION_SPEC, #{
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         datatype => {in, [
@@ -558,30 +635,36 @@ end).
         ]}
     },
     <<"timeout">> => #{
+        alias => timeout,
         required => true,
         datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
+        alias => retries,
         required => true,
         datatype => [integer, ?MOP_PROXY_FUN_TYPE]
     },
     <<"procedure">> => #{
+        alias => procedure,
         required => true,
         allow_null => false,
         datatype => binary,
         validator => fun wamp_uri:is_valid/1
     },
-    <<"details">> => #{
+    <<"options">> => #{
+        alias => options,
         required => true,
         allow_null => true,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"arguments">> => #{
+        alias => arguments,
         required => true,
         allow_null => true,
         datatype => [list, ?MOP_PROXY_FUN_TYPE]
     },
     <<"arguments_kw">> => #{
+        alias => arguments_kw,
         required => true,
         allow_null => true,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
@@ -595,16 +678,19 @@ end).
 
 -define(RESPONSE_SPEC, #{
     <<"headers">> => #{
+        alias => headers,
         required => true,
         allow_null => false,
         datatype => [map, ?MOP_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
+        alias => body,
         required => true,
         allow_null => false,
         datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     },
     <<"uri">> => #{
+        alias => uri,
         required => false,
         allow_null => false,
         datatype => [binary, ?MOP_PROXY_FUN_TYPE]
@@ -614,26 +700,31 @@ end).
 
 -define(API_PARAMS, #{
     <<"name">> => #{
+        alias => name,
         required => true,
         allow_null => false,
         datatype => binary
     },
     <<"in">> => #{
+        alias => in,
         required => true,
         allow_null => false,
         datatype => binary
     },
     <<"description">> => #{
+        alias => description,
         required => true,
         allow_null => false,
         datatype => binary
     },
     <<"required">> => #{
+        alias => required,
         required => true,
         allow_null => false,
         datatype => boolean
     },
     <<"type">> => #{
+        alias => type,
         required => true,
         allow_null => false,
         datatype => binary

@@ -2,8 +2,15 @@
 
 ## Running a single node
 ```bash
-rebar3 shell
+rebar3 release
+
 ```
+
+We need to allow connections 
+```
+bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
+```
+
 ## Using a WS Client
 
 ```
@@ -54,4 +61,13 @@ And in the other shells do:
 
 ```erlang
 plumtree_metadata:get({foo,bar}, <<"fede">>).
+```
+
+## Making a local call
+
+Open a bondy shell 
+
+```
+C = #{realm_uri => <<"magenta">>, awaiting_calls => sets:new(), peer => {{127,0,0,1}, 8080}, session => bondy_session:new({{127,0,0,1}, 8080}, <<"magenta">>, #{roles => #{caller => #{features => #{}}}}), timeout => 5000}.
+bondy:call(<<"com.example.add2">>, #{}, [1,1], #{}, C).
 ```

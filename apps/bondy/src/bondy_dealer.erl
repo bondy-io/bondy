@@ -445,17 +445,20 @@ handle_message(
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_message(#call{} = M, Ctxt0) ->
-    %% TODO check if authorized and if not throw wamp.error.not_authorized
-    Details = #{}, % @TODO
-
     %% invoke/5 takes a fun which takes the registration_id of the 
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-    Fun = fun(RegId, Callee, Ctxt1) ->
+    Fun = fun(Entry, Callee, Ctxt1) ->
         ReqId = bondy_utils:get_id(global),
         Args = M#call.arguments,
         Payload = M#call.arguments_kw,
+        RegId = bondy_registry:entry_id(Entry),
+        RegOpts = bondy_registry:options(Entry),
+        CallOpts = M#call.options,
+        Uri = M#call.procedure_uri,
+        %% TODO check if authorized and if not throw wamp.error.not_authorized
+        Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
         R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
         ok = bondy:send(Callee, R, Ctxt1),
         {ok, ReqId, Ctxt1}
@@ -469,6 +472,21 @@ handle_message(#call{} = M, Ctxt0) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
+    DiscloseMe = maps:get(disclose_me, CallOpts, false),
+    DiscloseCaller = maps:get(disclose_caller, RegOpts, false),
+    M0 = #{
+        procedure => Uri,
+        trust_level => 0
+    },
+    case DiscloseCaller orelse DiscloseMe of
+        true ->
+            M0#{caller => bondy_context:session_id(Ctxt)};
+        false ->
+            M0
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -677,9 +695,8 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                 CalleeSessionId = bondy_registry:session_id(Entry),
                 Session = bondy_session:fetch(bondy_registry:session_id(Entry)),
                 Callee = bondy_session:pid(Session),
-                RegId = bondy_registry:entry_id(Entry),
                 {ok, Id, Ctxt2} = UserFun(
-                    RegId, {CalleeSessionId, Callee}, Ctxt1),
+                    Entry, {CalleeSessionId, Callee}, Ctxt1),
                 Promise = Template#promise{
                     invocation_request_id = Id,
                     callee_session_id = CalleeSessionId,

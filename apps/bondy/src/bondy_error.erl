@@ -49,7 +49,12 @@ error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
 error_map(#error{arguments = L, arguments_kw = undefined} = Err)
 when is_list(L) ->
     #error{error_uri = Uri} = Err,
-    Mssg = hd(L),
+    Mssg = case L of
+        [] ->
+            [];
+        _ ->
+            hd(L)
+    end,
     #{
         <<"code">> => Uri,
         <<"message">> => Mssg,
@@ -69,7 +74,12 @@ when is_map(M) ->
 
 error_map(#error{arguments = L, arguments_kw = M} = Err) ->
     #error{error_uri = Uri} = Err,
-    Mssg = hd(L),
+    Mssg = case L of
+        [] ->
+            [];
+        _ ->
+            hd(L)
+    end,
     Desc = maps:get(<<"description">>, M, Mssg),
     #{
         <<"code">> => Uri,

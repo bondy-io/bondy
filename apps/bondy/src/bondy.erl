@@ -53,7 +53,7 @@ send(PeerId, M) ->
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
 send({_, Pid}, M, _) when Pid =:= self() ->
-    Pid ! {?BONDY_PEER_CALL, Pid, M},
+    Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
     ok;
 
 send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
@@ -136,23 +136,29 @@ ack(Pid, Ref) ->
 %% A blocking call.
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(map(), binary(), list(), map(), bondy_context:context()) -> 
+-spec call(binary(), map(), list(), map(), bondy_context:context()) -> 
     {ok, map(), bondy_context:context()} 
     | {error, map(), bondy_context:context()}.
 
-call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
+call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
+    %% @TODO ID should be session scoped and not global
     ReqId = bondy_utils:get_id(global),
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, Payload),
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
-            Timeout = bondy_utils:timeout(Opts),
+            %% Timeout = bondy_utils:timeout(Opts),
+            Timeout = 5000,
             receive
-                {?BONDY_PEER_CALL, Pid, Ref, #result{} = M} ->
+                {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    {ok, to_map(M), Ctxt1};
-                {?BONDY_PEER_CALL, Pid, Ref, #error{} = M} ->
+                    Ctxt2 = bondy_context:remove_awaiting_call(
+                        Ctxt1, R#result.request_id),
+                    {ok, to_map(R), Ctxt2};
+                {?BONDY_PEER_CALL, Pid, Ref, #error{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    {error, to_map(M), Ctxt1}
+                    Ctxt2 = bondy_context:remove_awaiting_call(
+                        Ctxt1, R#error.request_id),
+                    {error, to_map(R), Ctxt2}
             after 
                 Timeout ->
                     Error = {timeout, <<"The operation could not be completed in the time specified.">>},

@@ -38,7 +38,8 @@
     session => any(),
     realm_uri => binary(), 
     deprecated => boolean(),
-    security => map()
+    security => map(),
+    encoding => json | msgpack
 }.
 
 
@@ -170,19 +171,19 @@ delete_completed(Req, St) ->
 
 
 to_json(Req, St) ->
-    provide(json, Req, St).
+    provide(Req, St#{encoding => json}).
 
 
 to_msgpack(Req, St) ->
-    provide(msgpack, Req, St).
+    provide(Req, St#{encoding => msgpack}).
 
 
 from_json(Req, St) ->
-    accept(json, Req, St).
+    accept(Req, St#{encoding => json}).
 
 
 from_msgpack(Req, St) ->
-    accept(msgpack, Req, St).
+    accept(Req, St#{encoding => msgpack}).
 
 
 
@@ -201,7 +202,7 @@ from_msgpack(Req, St) ->
 %% executing the configured action
 %% @end
 %% -----------------------------------------------------------------------------
-provide(Enc, Req0, #{api_spec := Spec} = St0)  -> 
+provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  -> 
     Method = method(Req0),
     case perform_action(Method, maps:get(Method, Spec), St0) of
         {ok, Response, St1} ->
@@ -210,7 +211,7 @@ provide(Enc, Req0, #{api_spec := Spec} = St0)  ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {bondy_utils:maybe_encode(Enc, Body), Req1, St1};
+            {encode(Enc, Body), Req1, St1};
         
         {ok, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
@@ -235,25 +236,28 @@ provide(Enc, Req0, #{api_spec := Spec} = St0)  ->
 %% Accepts an POST, PATCH, PUT or DELETE over a resource by executing the configured action
 %% @end
 %% -----------------------------------------------------------------------------
-accept(Enc, Req0, #{api_spec := Spec} = St0) -> 
+accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) -> 
     Method = method(Req0),
-    case perform_action(Method, maps:get(Method, Spec), St0) of
-        {ok, Response, St1} ->
+    %% We now know the encoding so we will decode the body
+    St1 = decode_body_in_context(St0),
+
+    case perform_action(Method, maps:get(Method, Spec), St1) of
+        {ok, Response, St2} ->
             Req1 = prepare_request(Enc, Response, Req0),
-            {maybe_location(Method, Response), Req1, St1};
+            {maybe_location(Method, Response), Req1, St2};
         
-        {ok, HTTPCode, Response, St1} ->
+        {ok, HTTPCode, Response, St2} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
-            {stop, Req1, St1};
+            {stop, Req1, St2};
         
-        {error, #{<<"code">> := Code} = Response, St1} ->
+        {error, #{<<"code">> := Code} = Response, St2} ->
             Req1 = reply(
                 bondy_utils:error_http_code(Code), Enc, Response, Req0),
-            {stop, Req1, St1};
+            {stop, Req1, St2};
         
-        {error, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, St1),
-            {stop, Req1, St1}
+        {error, HTTPCode, Response, St2} ->
+            Req1 = reply(HTTPCode, Enc, Response, Req0),
+            {stop, Req1, St2}
     end.
 
 
@@ -273,7 +277,7 @@ accept(Enc, Req0, #{api_spec := Spec} = St0) ->
 %% (`cowboy_request:request()').
 %% @end
 %% -----------------------------------------------------------------------------
--spec update_context(cowboy_req:req() | map(), map()) -> map().
+-spec update_context(tuple(), map()) -> map().
 
 update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
     maps_utils:put_path([<<"action">>, <<"error">>], Map, Ctxt);
@@ -291,7 +295,7 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
 update_context(Req0, Ctxt) ->
     %% At the moment we do not support partially reading the body
     %% nor streams so we drop the NewReq
-    {ok, Body, Req1} = cowboy_req:read_body(Req0),
+    {ok, Bin, Req1} = cowboy_req:read_body(Req0),
     M = #{
         <<"method">> => method(Req1),
         <<"scheme">> => cowboy_req:scheme(Req1),
@@ -303,11 +307,19 @@ update_context(Req0, Ctxt) ->
         <<"query_string">> => cowboy_req:qs(Req1),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req1)),
         <<"bindings">> => to_binary_keys(cowboy_req:bindings(Req1)),
-        <<"body">> => Body,
+        <<"body">> => Bin,
         <<"body_length">> => cowboy_req:body_length(Req1) 
     },
     maps:put(<<"request">>, M, Ctxt).
 
+
+%% @private
+decode_body_in_context(St) ->
+    Ctxt = maps:get(api_context, St),
+    Path = [<<"request">>, <<"body">>],
+    Bin = maps_utils:get_path(Path, Ctxt),
+    Body = decode(maps:get(encoding, St), Bin),
+    maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St).
 
 
 
@@ -369,7 +381,8 @@ perform_action(
             from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
         
         {error, Reason} ->
-            Ctxt1 = update_context({error, bondy_error:error_map(Reason)}, Ctxt0),
+            Ctxt1 = update_context(
+                {error, bondy_error:error_map(Reason)}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
             {error, Response, St1}
@@ -384,25 +397,58 @@ perform_action(
     %% so we need to evaluate them passing the
     %% context
     #{
+        <<"procedure">> := P,
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
-        <<"details">> := D,
-        <<"procedure">> := P,
+        <<"options">> := Opts,
         <<"retries">> := _R,
         <<"timeout">> := _T
     } = bondy_utils:eval_term(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
-    case bondy:call(D, P, A, Akw) of
-        {ok, Result, Ctxt1} ->
-            Ctxt2 = update_context({result, Result}, Ctxt1),
+
+    %% @TODO We need to recreate ctxt and session from token
+    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], Ctxt0),
+    RealmUri = maps:get(realm_uri, St0),
+    WampCtxt0 = #{
+        peer => Peer, 
+        realm_uri => RealmUri,
+        awaiting_calls => sets:new(),
+        timeout => 5000,
+        session => bondy_session:new(Peer, RealmUri, #{
+            roles => #{
+                caller => #{
+                    features => #{
+                        call_timeout => true,
+                        call_canceling => false,
+                        caller_identification => true,
+                        call_trustlevels => true,
+                        progressive_call_results => false
+                    }
+                }
+            }
+        })
+    },
+
+    case bondy:call(P, Opts, A, Akw, WampCtxt0) of
+        {ok, Result0, _WampCtxt1} ->
+            %% mops uses binary keys
+            Result1 = #{
+                <<"details">> => maps:get(details, Result0),
+                <<"arguments">> => maps:get(arguments, Result0),
+                <<"arguments_kw">> => maps:get(arguments_kw, Result0)
+            },
+            Ctxt1 = update_context({result, Result1}, Ctxt0),
             Response = bondy_utils:eval_term(
-                maps:get(<<"on_result">>, RSpec), Ctxt2),
-            St1 = maps:update(api_context, Ctxt2, St0),
+                maps:get(<<"on_result">>, RSpec), Ctxt1),
+            St1 = maps:update(api_context, Ctxt1, St0),
             {ok, Response, St1};
-        {error, Error, Ctxt1} ->
-            Ctxt2 = update_context({error, Error}, Ctxt1),
-            Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt2),
-            St1 = maps:update(api_context, Ctxt2, St0),
+        {error, Error, _WampCtxt1} ->
+            %% @REVIEW At the moment all error maps use binary keys, if we 
+            %% move to atoms we need to turn them into binaries 
+            Ctxt1 = update_context({error, Error}, Ctxt0),
+            Response = bondy_utils:eval_term(
+                maps:get(<<"on_error">>, RSpec), Ctxt1),
+            St1 = maps:update(api_context, Ctxt1, St0),
             Code = 500,
             {error, Code, Response, St1}
     end.
@@ -482,7 +528,7 @@ prepare_request(Enc, Response, Req0) ->
         <<"headers">> := Headers
     } = Response,
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(encode(Enc, Body), Req1).
 
 
 %% @private
@@ -537,3 +583,29 @@ method_to_atom(<<"options">>) -> options;
 method_to_atom(<<"patch">>) -> patch;
 method_to_atom(<<"post">>) -> post;
 method_to_atom(<<"put">>) -> put.
+
+
+%% @private
+decode(json, Term) ->
+    jsx:decode(Term, [return_maps]);
+
+decode(msgpack, Term) ->
+    Opts = [
+        {map_format, map}, 
+        {unpack_str, as_binary}
+    ],
+    {ok, Bin} = msgpack:unpack(Term, Opts),
+    Bin.
+
+
+%% @private
+encode(json, Term) ->
+    jsx:encode(Term);
+
+encode(msgpack, Term) ->
+    Opts = [
+        {map_format, map},
+        {pack_str, from_binary}
+    ],
+    msgpack:pack(Term, Opts).
+    

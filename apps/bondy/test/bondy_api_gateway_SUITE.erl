@@ -49,8 +49,10 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.magenta.things.list">>,
-                                <<"details">> => #{},
-                                <<"arguments">> => [<<"{{request.query_params}}">>],
+                                <<"options">> => #{},
+                                <<"arguments">> => [
+                                    <<"{{request.query_params}}">>
+                                ],
                                 <<"arguments_kw">> => #{}
                             },
                             <<"response">> => #{
@@ -69,7 +71,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.myapi.foo">>,
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"arguments">> => [<<"{{variables.foo}}">>],
                                 <<"arguments_kw">> => #{}
                             },
@@ -104,7 +106,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"arguments">> => [200],
                                 <<"arguments_kw">> => #{},
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"retries">> => 0,
                                 <<"timeout">> => 20000,
@@ -124,7 +126,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"arguments">> => [300],
                                 <<"arguments_kw">> => #{},
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"retries">> => 0,
                                 <<"timeout">> => 30000,
