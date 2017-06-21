@@ -211,7 +211,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {encode(Enc, Body), Req1, St1};
+            {bondy_utils:encode(Enc, Body), Req1, St1};
         
         {ok, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
@@ -318,7 +318,7 @@ decode_body_in_context(St) ->
     Ctxt = maps:get(api_context, St),
     Path = [<<"request">>, <<"body">>],
     Bin = maps_utils:get_path(Path, Ctxt),
-    Body = decode(maps:get(encoding, St), Bin),
+    Body = bondy_utils:decode(maps:get(encoding, St), Bin),
     maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St).
 
 
@@ -528,7 +528,7 @@ prepare_request(Enc, Response, Req0) ->
         <<"headers">> := Headers
     } = Response,
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(bondy_utils:encode(Enc, Body), Req1).
 
 
 %% @private
@@ -585,27 +585,5 @@ method_to_atom(<<"post">>) -> post;
 method_to_atom(<<"put">>) -> put.
 
 
-%% @private
-decode(json, Term) ->
-    jsx:decode(Term, [return_maps]);
 
-decode(msgpack, Term) ->
-    Opts = [
-        {map_format, map}, 
-        {unpack_str, as_binary}
-    ],
-    {ok, Bin} = msgpack:unpack(Term, Opts),
-    Bin.
-
-
-%% @private
-encode(json, Term) ->
-    jsx:encode(Term);
-
-encode(msgpack, Term) ->
-    Opts = [
-        {map_format, map},
-        {pack_str, from_binary}
-    ],
-    msgpack:pack(Term, Opts).
     

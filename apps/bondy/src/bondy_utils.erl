@@ -9,6 +9,8 @@
 -export([error_http_code/1]).
 -export([eval_term/2]).
 -export([maybe_encode/2]).
+-export([encode/2]).
+-export([decode/2]).
 -export([uuid/0]).
 -export([is_uuid/1]).
 
@@ -61,6 +63,30 @@ maybe_encode(json, Term) ->
      msgpack:encode(Term).
 
 
+
+%% @private
+decode(json, Term) ->
+    jsx:decode(Term, [return_maps]);
+
+decode(msgpack, Term) ->
+    Opts = [
+        {map_format, map}, 
+        {unpack_str, as_binary}
+    ],
+    {ok, Bin} = msgpack:unpack(Term, Opts),
+    Bin.
+
+
+%% @private
+encode(json, Term) ->
+    jsx:encode(Term);
+
+encode(msgpack, Term) ->
+    Opts = [
+        {map_format, map},
+        {pack_str, from_binary}
+    ],
+    msgpack:pack(Term, Opts).
 
 %% -----------------------------------------------------------------------------
 %% @doc
