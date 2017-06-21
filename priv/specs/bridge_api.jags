@@ -1,6 +1,6 @@
 #{
     <<"host">> => <<"_">>,
-    <<"realm_uri">> => <<"com.magenta.public">>,
+    <<"realm_uri">> => <<"magenta">>,
     <<"variables">> => #{
         <<"oauth2">> => #{
             <<"type">> => <<"oauth2">>,
@@ -29,12 +29,12 @@
             },
             <<"paths">> => #{
                 <<"/add">> => #{
-                    <<"get">> => #{
+                    <<"post">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
                             <<"procedure">> => <<"com.example.add2">>,
                             <<"options">> => #{},
-                            <<"arguments">> => <<"request.body">>,
+                            <<"arguments">> => <<"{{request.body}}">>,
                             <<"arguments_kw">> => #{
                                 <<"magenta_context">> => #{
 
@@ -43,12 +43,12 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
-                                <<"headers">> => <<"{{action.error.headers}}">>
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
                                 <<"body">> => <<"{{action.result.arguments}}">>,
-                                <<"headers">> => <<"{{action.result.headers}}">>
+                                <<"headers">> => #{}
                             } 
                         }
                     }

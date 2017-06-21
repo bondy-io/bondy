@@ -252,7 +252,7 @@ accept(Enc, Req0, #{api_spec := Spec} = St0) ->
             {stop, Req1, St1};
         
         {error, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, St1),
+            Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St1}
     end.
 
@@ -369,7 +369,8 @@ perform_action(
             from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
         
         {error, Reason} ->
-            Ctxt1 = update_context({error, bondy_error:error_map(Reason)}, Ctxt0),
+            Ctxt1 = update_context(
+                {error, bondy_error:error_map(Reason)}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
             {error, Response, St1}
