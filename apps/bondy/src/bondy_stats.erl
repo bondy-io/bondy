@@ -9,12 +9,72 @@
 -export([update/2]).
 -export([get_stats/0]).
 -export([create_metrics/0]).
-
+-export([otp_release/0]).
+-export([sys_driver_version/0]).
+-export([system_version/0]).
+-export([system_architecture/0]).
+-export([sys_monitor_count/0]).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+otp_release() ->
+    list_to_binary(erlang:system_info(otp_release)).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+sys_driver_version() ->
+    list_to_binary(erlang:system_info(driver_version)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+system_version() ->
+    list_to_binary(
+        string:strip(erlang:system_info(system_version), right, $\n)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+system_architecture() ->
+    list_to_binary(erlang:system_info(system_architecture)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Count up all monitors, unfortunately has to obtain process_info
+%% from all processes to work it out.
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+sys_monitor_count() ->
+    lists:foldl(
+        fun(Pid, Count) ->
+            case erlang:process_info(Pid, monitors) of
+                {monitors, Mons} ->
+                    Count + length(Mons);
+                _ ->
+                    Count
+            end
+        end, 0, processes()).
 
 
 
@@ -26,14 +86,12 @@
 -spec create_metrics() -> ok.
 
 create_metrics() ->
-    %% We are assumming exometer was started by wamp app.
-    %% TODO Process aliases
-    lists:foreach(
-        fun({Name, Type , Opts, _Aliases}) ->
-            exometer:new(Name, Type, Opts)
-        end,
-        static_specs()
-    ).
+
+    %% create_metrics(system_specs()).
+    create_metrics(bc_specs()),
+    create_metrics(static_specs()).
+
+
 
 
 
@@ -45,7 +103,7 @@ create_metrics() ->
 -spec get_stats() -> any().
 
 get_stats() ->
-    exometer:get_values([bondy]).
+    exometer:get_values([bondy]) ++ expand_disk_stats(disk_stats()).
 
 
 %% -----------------------------------------------------------------------------
@@ -94,106 +152,122 @@ baddress(T) when is_binary(T) ->
 %% @private
 do_update({session_opened, Realm, _SessionId, IP}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, sessions], 1),
-    exometer:update([bondy, sessions, active], 1),
+    exometer:update([bondy, node, sessions], 1),
+    exometer:update([bondy, node, sessions, active], 1),
 
     exometer:update_or_create(
-        [bondy, realm, sessions, Realm], 1, spiral, []),
+        [bondy, node, realm, sessions, Realm], 1, spiral, []),
     exometer:update_or_create(
-        [bondy, realm, sessions, active, Realm], 1, counter, []),
+        [bondy, node, realm, sessions, active, Realm], 1, counter, []),
     
     exometer:update_or_create(
-        [bondy, ip, sessions, BIP], 1, spiral, []),
+        [bondy, node, ip, sessions, BIP], 1, spiral, []),
     exometer:update_or_create(
-        [bondy, ip, sessions, active, BIP], 1, counter, []);
+        [bondy, node, ip, sessions, active, BIP], 1, counter, []);
 
 do_update({session_closed, SessionId, Realm, IP, Secs}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, sessions, active], -1),
-    exometer:update([bondy, sessions, duration], Secs),
+    exometer:update([bondy, node, sessions, active], -1),
+    exometer:update([bondy, node, sessions, duration], Secs),
 
     exometer:update_or_create(
-        [bondy, realm, sessions, active, Realm], -1, counter, []),
+        [bondy, node, realm, sessions, active, Realm], -1, counter, []),
     exometer:update_or_create(
-        [bondy, realm, sessions, duration, Realm], Secs, histogram, []),
+        [bondy, node, realm, sessions, duration, Realm], Secs, histogram, []),
     
     exometer:update_or_create(
-        [bondy, ip, sessions, active, BIP], -1, counter, []),
+        [bondy, node, ip, sessions, active, BIP], -1, counter, []),
     exometer:update_or_create(
-        [bondy, ip, sessions, duration, BIP], Secs, histogram, []),
+        [bondy, node, ip, sessions, duration, BIP], Secs, histogram, []),
     
     %% Cleanup
-    exometer:delete([bondy, session, messages, SessionId]),
+    exometer:delete([bondy, node, session, messages, SessionId]),
     lists:foreach(
         fun({Name, _, _}) ->
             exometer:delete(Name)
         end,
-        exometer:find_entries([bondy, session, messages, '_', SessionId])
+        exometer:find_entries([bondy, node, session, messages, '_', SessionId])
     ), 
     ok;
 
 do_update({message, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, messages], 1),
-    exometer:update([bondy, messages, size], Sz),
-    exometer:update_or_create([bondy, messages, Type], 1, spiral, []),
+    exometer:update([bondy, node, messages], 1),
+    exometer:update([bondy, node, messages, size], Sz),
+    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, ip, messages, BIP], 1, counter, []),
+        [bondy, node, ip, messages, BIP], 1, counter, []),
     exometer:update_or_create(
-        [bondy, ip, messages, size, BIP], Sz, histogram, []),
+        [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, ip, messages, Type, BIP], 1, spiral, []);
+        [bondy, node, ip, messages, Type, BIP], 1, spiral, []);
 
 
 do_update({message, Realm, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, messages], 1),
-    exometer:update([bondy, messages, size], Sz),
-    exometer:update_or_create([bondy, messages, Type], 1, spiral, []),
+    exometer:update([bondy, node, messages], 1),
+    exometer:update([bondy, node, messages, size], Sz),
+    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, ip, messages, BIP], 1, counter, []),
+        [bondy, node, ip, messages, BIP], 1, counter, []),
     exometer:update_or_create(
-        [bondy, ip, messages, size, BIP], Sz, histogram, []),
+        [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, ip, messages, Type, BIP], 1, spiral, []),
+        [bondy, node, ip, messages, Type, BIP], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, realm, messages, Realm], 1, counter, []),
+        [bondy, node, realm, messages, Realm], 1, counter, []),
     exometer:update_or_create(
-        [bondy, realm, messages, size, Realm], Sz, histogram, []),
+        [bondy, node, realm, messages, size, Realm], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, realm, messages, Type, Realm], 1, spiral, []);
+        [bondy, node, realm, messages, Type, Realm], 1, spiral, []);
 
 do_update({message, Session, Realm, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, messages], 1),
-    exometer:update([bondy, messages, size], Sz),
-    exometer:update_or_create([bondy, messages, Type], 1, spiral, []),
+    exometer:update([bondy, node, messages], 1),
+    exometer:update([bondy, node, messages, size], Sz),
+    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, ip, messages, BIP], 1, counter, []),
+        [bondy, node, ip, messages, BIP], 1, counter, []),
     exometer:update_or_create(
-        [bondy, ip, messages, size, BIP], Sz, histogram, []),
+        [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, ip, messages, Type, BIP], 1, spiral, []),
+        [bondy, node, ip, messages, Type, BIP], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, realm, messages, Realm], 1, counter, []),
+        [bondy, node, realm, messages, Realm], 1, counter, []),
     exometer:update_or_create(
-        [bondy, realm, messages, size, Realm], Sz, histogram, []),
+        [bondy, node, realm, messages, size, Realm], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, realm, messages, Type, Realm], 1, spiral, []),
+        [bondy, node, realm, messages, Type, Realm], 1, spiral, []),
 
     exometer:update_or_create(
-        [bondy, session, messages, Session], 1, counter, []),
+        [bondy, node, session, messages, Session], 1, counter, []),
     exometer:update_or_create(
-        [bondy, session, messages, size, Session], Sz, histogram, []),
+        [bondy, node, session, messages, size, Session], Sz, histogram, []),
     exometer:update_or_create(
-        [bondy, session, messages, Type, Session], 1, spiral, []).
+        [bondy, node, session, messages, Type, Session], 1, spiral, []).
 
 
+%% @private
+create_metrics(Stats) ->
+    %% We are assumming exometer was started by wamp app.
+    %% TODO Process aliases
+    lists:foreach(
+        fun({Name, Type , Opts, Aliases}) ->
+            exometer:re_register(Name, Type, Opts),
+            lists:foreach(
+                fun({DP, Alias}) ->
+                    exometer_alias:new(Alias, Name, DP)
+                end, 
+                Aliases
+            )
+        end,
+        Stats
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -203,24 +277,131 @@ do_update({message, Session, Realm, IP, Type, Sz}) ->
 %% -----------------------------------------------------------------------------
 static_specs() ->
     [
-        {[bondy, sessions], 
+        {[bondy, node, sessions], 
             spiral, [], [
-                {one, sessions}, 
-                {count, sessions_total}]},
-        {[bondy, messages], 
+                {one, bondy_node_sessions}, 
+                {count, bondy_node_sessions_total}]},
+        {[bondy, node, messages], 
             spiral, [], [
-                {one, messages}, 
-                {count, messages_total}]},
-        {[bondy, sessions, active], 
+                {one, bondy_node_messages}, 
+                {count, bondy_node_messages_total}]},
+        {[bondy, node, sessions, active], 
             counter, [], [
-                {value, sessions_active}]},
-        {[bondy, sessions, duration], 
+                {value, bondy_node_sessions_active}]},
+        {[bondy, node, sessions, duration], 
             histogram, [], [
-                {mean, sessions_duration_mean},
-                {median, sessions_duration_median},
-                {95, sessions_duration_95},
-                {99, sessions_duration_99},
-                {max, sessions_duration_100}]}
+                {mean, bondy_node_sessions_duration_mean},
+                {median, bondy_node_sessions_duration_median},
+                {95, bondy_node_sessions_duration_95},
+                {99, bondy_node_sessions_duration_99},
+                {max, bondy_node_sessions_duration_100}]}
     ].
 
 
+%% borrowed from Riak Core
+system_specs() ->
+    [
+     {
+         cpu_stats, 
+         cpu, 
+         [{sample_interval, 5000}], 
+         [
+            {nprocs, cpu_nprocs},
+            {avg1  , cpu_avg1},
+            {avg5  , cpu_avg5},
+            {avg15 , cpu_avg15}
+        ]
+    },
+    {
+        mem_stats, 
+        {function, memsup, get_memory_data, [], match, {total, allocated, '_'}},
+        [], 
+        [
+            {total, mem_total},
+            {allocated, mem_allocated}
+        ]
+    },
+    {
+        memory_stats, 
+        {function, erlang, memory, [], proplist, [
+            total, 
+            processes, 
+            processes_used,
+            system, 
+            atom, 
+            atom_used, 
+            binary,
+            code, 
+            ets
+        ]},
+        [], 
+        [
+            {total         , memory_total},
+            {processes     , memory_processes},
+            {processes_used, memory_processes_used},
+            {system        , memory_system},
+            {atom          , memory_atom},
+            {atom_used     , memory_atom_used},
+            {binary        , memory_binary},
+            {code          , memory_code},
+            {ets           , memory_ets}
+        ]
+    }
+].
+
+
+
+bc_specs() ->
+    Spec = fun(N, M, F, As) ->
+        {[bondy, node, N], {function, M, F, As, match, value}, [], [{value, N}]}
+    end,
+
+    [Spec(N, M, F, As) ||
+        {N, M, F, As} <- [{nodename, erlang, node, []},
+                          {connected_nodes, erlang, nodes, []},
+                          {sys_driver_version, ?MODULE, sys_driver_version, []},
+                          {sys_heap_type, erlang, system_info, [heap_type]},
+                          {sys_logical_processors, erlang, system_info, [logical_processors]},
+                          {sys_monitor_count, ?MODULE, sys_monitor_count, []},
+                          {sys_otp_release, ?MODULE, otp_release, []},
+                          {sys_port_count, erlang, system_info, [port_count]},
+                          {sys_process_count, erlang, system_info, [process_count]},
+                          {sys_smp_support, erlang, system_info, [smp_support]},
+                          {sys_system_version, ?MODULE, system_version, []},
+                          {sys_system_architecture, ?MODULE, system_architecture, []},
+                          {sys_threads_enabled, erlang, system_info, [threads]},
+                          {sys_thread_pool_size, erlang, system_info, [thread_pool_size]},
+                          {sys_wordsize, erlang, system_info, [wordsize]}]].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_status.erl
+%% -----------------------------------------------------------------------------
+expand_disk_stats([{disk, Stats}]) ->
+    [{disk, [{struct, [{id, list_to_binary(Id)}, {size, Size}, {used, Used}]}
+             || {Id, Size, Used} <- Stats]}].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_status.erl
+%% -----------------------------------------------------------------------------
+disk_stats() ->
+    [{disk, disksup:get_disk_data()}].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
+%% -----------------------------------------------------------------------------
+app_stats() ->
+    [{list_to_atom(atom_to_list(A) ++ "_version"), list_to_binary(V)}
+     || {A,_,V} <- application:which_applications()].
+    
