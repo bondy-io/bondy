@@ -211,7 +211,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 <<"headers">> := Headers
             } = Response,
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {bondy_utils:encode(Enc, Body), Req1, St1};
+            {maybe_encode(Enc, Body), Req1, St1};
         
         {ok, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
@@ -528,7 +528,7 @@ prepare_request(Enc, Response, Req0) ->
         <<"headers">> := Headers
     } = Response,
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(bondy_utils:encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(maybe_encode(Enc, Body), Req1).
 
 
 %% @private
@@ -586,4 +586,8 @@ method_to_atom(<<"put">>) -> put.
 
 
 
+maybe_encode(_, <<>>) ->
+    <<>>;
+maybe_encode(Enc, Body) ->
+    bondy_utils:encode(Enc, Body).
     
