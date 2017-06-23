@@ -10,6 +10,9 @@ build1:
  stage: build
  tags:
    - packet
+ cache:
+   paths:
+   - app.tar.gz
  script:   
    - $LS_SCRIPTS/build.sh
 # artifacts:
