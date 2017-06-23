@@ -1744,7 +1744,7 @@ list(RealmUri, group) when is_binary(RealmUri) ->
             ({_Groupname, [?TOMBSTONE]}, Acc) ->
                 Acc;
             ({Groupname, Options}, Acc) ->
-            [{Groupname, Options}|Acc]
+                [{Groupname, Options}|Acc]
         end, 
         [], 
         ?GROUPS_PREFIX(RealmUri)
