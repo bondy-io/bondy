@@ -1,15 +1,45 @@
 before_script:
    - export IMAGE_TAG=$CI_REGISTRY/leapsight/$CI_PROJECT_NAME:$CI_COMMIT_SHA
    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+   - export LS_CI_TEMP=`pwd`/`mktemp -d ls-ci.XXXXXXXX`   
+   - ssh-agent bash -c "ssh-add /root/build_keys/id_rsa; git clone git@gitlab.com:leapsight-lojack/magenta-env.git $LS_CI_TEMP"
+   - export LS_SCRIPTS=$LS_CI_TEMP/erlang/ci
+   - source $LS_SCRIPTS/before.sh
 
 build1:
  stage: build
  tags:
-   - k8s    
+   - packet
  script:   
-   - echo "Build release tgz"
-   - docker run --rm --env-file `pwd`/docker/app.env -v `pwd`/docker:/opt/output -v /root/build_keys:/root/.ssh erlang-build
-   - echo "Build image ${IMAGE_TAG}"
-   - cd docker
-   - docker build --pull --force-rm --no-cache -f Dockerfile -t $IMAGE_TAG .
-   - docker push $IMAGE_TAG
+   - $LS_SCRIPTS/build.sh
+# artifacts:
+#   name: "${CI_JOB_STAGE}-${CI_COMMIT_SHA}"
+#   paths:
+#     - docker/app.tar.gz
+
+publish1:
+ stage: publish
+ tags:
+   - packet
+ script:
+   - $LS_SCRIPTS/publish.sh
+
+test1:
+ stage: test
+ tags:
+   - packet
+ script:
+   - $LS_SCRIPTS/test.sh
+
+deploy1:
+ stage: deploy
+ tags:
+   - packet
+ script:
+   - $LS_SCRIPTS/deploy.sh
+
+stages:
+  - build
+  - publish
+  - test
+  - deploy
