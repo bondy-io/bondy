@@ -1,6 +1,4 @@
 before_script:
-   - export IMAGE_TAG=$CI_REGISTRY/leapsight/$CI_PROJECT_NAME:$CI_COMMIT_SHA
-   - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
    - export LS_CI_TEMP=`pwd`/`mktemp -d ls-ci.XXXXXXXX`   
    - ssh-agent bash -c "ssh-add ~/build_keys/id_rsa; git clone git@gitlab.com:leapsight-lojack/magenta-env.git $LS_CI_TEMP"
    - export LS_SCRIPTS=$LS_CI_TEMP/erlang/ci
