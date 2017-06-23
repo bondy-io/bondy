@@ -87,37 +87,37 @@
 %% =============================================================================
 
 % USER
--define(BONDY_USER_ADD, <<"bondy.security.user.add">>).
--define(BONDY_USER_DELETE, <<"bondy.security.user.delete">>).
--define(BONDY_USER_LIST, <<"bondy.security.user.list">>).
--define(BONDY_USER_LOOKUP, <<"bondy.security.user.get">>).
--define(BONDY_USER_UPDATE, <<"bondy.security.user.update">>).
+-define(BONDY_USER_ADD, <<"bondy.security.users.add">>).
+-define(BONDY_USER_DELETE, <<"bondy.security.users.delete">>).
+-define(BONDY_USER_LIST, <<"bondy.security.users.list">>).
+-define(BONDY_USER_LOOKUP, <<"bondy.security.users.get">>).
+-define(BONDY_USER_UPDATE, <<"bondy.security.users.update">>).
 
--define(BONDY_USER_ON_ADD, <<"bondy.security.user.on_add">>).
--define(BONDY_USER_ON_DELETE, <<"bondy.security.user.on_delete">>).
--define(BONDY_USER_ON_UPDATE, <<"bondy.security.user.on_update">>).
+-define(BONDY_USER_ON_ADD, <<"bondy.security.users.on_add">>).
+-define(BONDY_USER_ON_DELETE, <<"bondy.security.users.on_delete">>).
+-define(BONDY_USER_ON_UPDATE, <<"bondy.security.users.on_update">>).
 
 
 % GROUP
--define(BONDY_GROUP_ADD, <<"bondy.security.group.add">>).
--define(BONDY_GROUP_DELETE, <<"bondy.security.group.delete">>).
--define(BONDY_GROUP_LIST, <<"bondy.security.group.list">>).
--define(BONDY_GROUP_LOOKUP, <<"bondy.security.group.get">>).
--define(BONDY_GROUP_UPDATE, <<"bondy.security.group.update">>).
+-define(BONDY_GROUP_ADD, <<"bondy.security.groups.add">>).
+-define(BONDY_GROUP_DELETE, <<"bondy.security.groups.delete">>).
+-define(BONDY_GROUP_LIST, <<"bondy.security.groups.list">>).
+-define(BONDY_GROUP_LOOKUP, <<"bondy.security.groups.get">>).
+-define(BONDY_GROUP_UPDATE, <<"bondy.security.groups.update">>).
 
--define(BONDY_GROUP_ON_ADD, <<"bondy.security.group.on_add">>).
--define(BONDY_GROUP_ON_DELETE, <<"bondy.security.group.on_delete">>).
--define(BONDY_GROUP_ON_UPDATE, <<"bondy.security.group.on_update">>).
+-define(BONDY_GROUP_ON_ADD, <<"bondy.security.groups.on_add">>).
+-define(BONDY_GROUP_ON_DELETE, <<"bondy.security.groups.on_delete">>).
+-define(BONDY_GROUP_ON_UPDATE, <<"bondy.security.groups.on_update">>).
 
 
 % SOURCE
--define(BONDY_SOURCE_ADD, <<"bondy.security.source.add">>).
--define(BONDY_SOURCE_DELETE, <<"bondy.security.source.delete">>).
--define(BONDY_SOURCE_LIST, <<"bondy.security.source.list">>).
--define(BONDY_SOURCE_LOOKUP, <<"bondy.security.source.get">>).
+-define(BONDY_SOURCE_ADD, <<"bondy.security.sources.add">>).
+-define(BONDY_SOURCE_DELETE, <<"bondy.security.sources.delete">>).
+-define(BONDY_SOURCE_LIST, <<"bondy.security.sources.list">>).
+-define(BONDY_SOURCE_LOOKUP, <<"bondy.security.sources.get">>).
 
--define(BONDY_SOURCE_ON_ADD, <<"bondy.security.source.on_add">>).
--define(BONDY_SOURCE_ON_DELETE, <<"bondy.security.source.on_delete">>).
+-define(BONDY_SOURCE_ON_ADD, <<"bondy.security.sources.on_add">>).
+-define(BONDY_SOURCE_ON_DELETE, <<"bondy.security.sources.on_delete">>).
 
 
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
