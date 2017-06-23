@@ -10,18 +10,18 @@ build1:
  stage: build
  tags:
    - packet
- cache:
-   paths:
-   - app.tar.gz
  script:   
    - $LS_SCRIPTS/build.sh
 # artifacts:
 #   name: "${CI_JOB_STAGE}-${CI_COMMIT_SHA}"
 #   paths:
-#     - docker/app.tar.gz
+#     - app.tar.gz
 
 publish1:
  stage: publish
+ cache:
+   paths:
+   - app.tar.gz
  tags:
    - packet
  script:
