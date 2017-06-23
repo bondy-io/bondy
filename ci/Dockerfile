@@ -3,8 +3,6 @@ FROM erlang:19-slim
 
 MAINTAINER Javier Bucar <javier.bucar@leapsight.com>
 
-WORKDIR /opt/app
-
 # Env
 ENV NODE_NAME=bondy@127.0.0.1 \
 	HTTP_PORT=18080 \
@@ -15,9 +13,14 @@ ENV NODE_NAME=bondy@127.0.0.1 \
 EXPOSE 18080 18081 18082
 
 # Copy source code
-COPY app.tar.gz /opt/app/
+COPY app.tar.gz /tmp
 
-RUN tar xf app.tar.gz && \
-  rm app.tar.gz
+RUN groupadd -r app -g 1000 && \
+	useradd -u 1000 -r -g app -m -d /opt/app -s /bin/bash -c "App user" app && \
+	su - app -c "tar xf /tmp/app.tar.gz -C /opt/app" && \
+	rm /tmp/app.tar.gz
 
+USER app
+VOLUME /opt/app/data
+WORKDIR /opt/app
 CMD /opt/app/bin/bondy foreground
