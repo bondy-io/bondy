@@ -296,153 +296,11 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     {ok, _Ctxt2} = dequeue_call(M#error.request_id, Fun, Ctxt0),
     ok;
 
-handle_message(#call{procedure_uri = ?BONDY_USER_ADD} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_USER_DELETE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_USER_LIST} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_USER_LOOKUP} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_USER_UPDATE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_GROUP_ADD} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_GROUP_DELETE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_GROUP_LIST} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_GROUP_LOOKUP} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_GROUP_UPDATE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_SOURCE_ADD} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_SOURCE_DELETE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_SOURCE_LIST} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = ?BONDY_SOURCE_LOOKUP} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_message(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+    bondy_dealer_meta:handle_call(M, Ctxt);
 
 handle_message(#call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
     bondy_broker:handle_call(M, Ctxt);
-
-handle_message(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
-    ReqId = M#call.request_id,
-    Res = #{
-        ?EXACT_MATCH => [], % @TODO
-        ?PREFIX_MATCH => [], % @TODO
-        ?WILDCARD_MATCH => [] % @TODO
-    },
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = <<"wamp.registration.lookup">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = <<"wamp.registration.match">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(
-    #call{procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_message(
-    #call{procedure_uri = <<"wamp.registration.count_callees">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{count => 0},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_message(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the 
@@ -706,8 +564,6 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                 ok = enqueue_promise(Id, Promise, Timeout, Ctxt2),
                 {ok, Ctxt2}
             end,
-            % Reply = do_invoke(Regs, Fun, Ctxt0),
-            % bondy:send(bondy_context:peer_id(Ctxt0), Reply)
             do_invoke(Regs, Fun, Ctxt0)
     end.
     

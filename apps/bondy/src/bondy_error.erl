@@ -31,13 +31,21 @@
 %% -----------------------------------------------------------------------------
 error_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
-    <<"com.leapsight.error.", R/binary>>.
+    <<"com.bondy.error.", R/binary>>;
+
+error_uri(Reason) when is_binary(Reason) ->
+    <<"com.bondy.error.", Reason/binary>>.
+
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+error_map(#{code := _} = M) ->
+    M;
+
+
 error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
     #error{error_uri = Uri} = Err,
     #{
@@ -45,6 +53,8 @@ error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
         <<"message">> => <<>>,
         <<"description">> => <<>>
     };
+
+
 
 error_map(#error{arguments = L, arguments_kw = undefined} = Err)
 when is_list(L) ->
@@ -145,3 +155,5 @@ error_map(Code) ->
     #{
         <<"code">> => Code
     }.
+
+

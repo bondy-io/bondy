@@ -10,11 +10,27 @@
 -type user() :: map().
 
 -define(INFO_KEYS, [
-    first_name, 
-    last_name,
-    email, 
-    enternal_id
+    external_id
 ]).
+
+-define(USER_SPEC, #{
+    username => #{
+        required => true,
+        datatype => binary
+    },
+    password => #{
+        required => false,
+        datatype => binary
+    },
+    external_id => #{
+        required => false,
+        datatype => binary
+    },
+    groups => #{
+        required => false,
+        datatype => {list, binary}
+    }
+}).
 
 -export([add/2]).
 -export([fetch/2]).
@@ -30,16 +46,27 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri(), user()) -> ok.
+-spec add(uri(), user()) -> ok | {error, map()}.
+
 add(RealmUri, User) ->
-    Info = maps:with(?INFO_KEYS, User),
-    #{username := BinName, password := Pass} = User,
-    Username = unicode:characters_to_list(BinName, utf8),
-    Opts = [
-        {info, Info},
-        {"password", binary_to_list(Pass)}
-    ],
-    bondy_security:add_user(RealmUri, Username, Opts).
+    try 
+        User1 = maps_utils:validate(User, ?USER_SPEC),
+        #{
+            username := BinName, 
+            password := Pass,
+            groups := Groups
+        } = User1,
+        Username = unicode:characters_to_list(BinName, utf8),
+        Opts = [
+            {info, maps:with(?INFO_KEYS, User1)},
+            {"password", binary_to_list(Pass)},
+            {"groups", Groups}
+        ],
+        bondy_security:add_user(RealmUri, Username, Opts)
+    catch
+        error:Reason ->
+            {error, Reason}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -154,12 +181,12 @@ password(RealmUri, Username) ->
 
 
 %% @private
-to_map(RealmUri, {Username, Opts} = User) ->
-    Map0 = proplists:get_value(info, Opts, #{}),
+to_map(RealmUri, {Username, [PL]}) ->
+    Map0 = proplists:get_value(info, PL, #{}),
     Map1 = Map0#{
         username => Username,
-        <<"has_password">> => has_password(Opts),
-        <<"groups">> => bondy_security:user_groups(RealmUri, User)
+        has_password => has_password(PL),
+        groups => proplists:get_value("groups", PL, [])
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         not_found ->
@@ -167,7 +194,7 @@ to_map(RealmUri, {Username, Opts} = User) ->
         Sources ->
             [maps:without([username], S) || S <- Sources]
     end,
-    Map1#{<<"sources">> => L}.
+    Map1#{sources => L}.
 
 
 %% @private
