@@ -123,3 +123,28 @@ without_1_test(_) ->
         }
     },
     #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([y,z])}}">>, Ctxt).
+
+without_2_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"key">> => <<"y">>,
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([{{foo.key}},z])}}">>, Ctxt).
+
+lists_1_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    1 =:= mops:eval(<<"{{foo |> head}}">>, Ctxt).
+
+lists_2_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [2,3] =:= mops:eval(<<"{{foo |> tail}}">>, Ctxt).
+
+lists_3_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [3] =:= mops:eval(<<"{{foo |> last}}">>, Ctxt).

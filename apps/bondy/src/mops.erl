@@ -272,7 +272,7 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
             get_value(trim(Val), Ctxt);
         [Val | Ops] ->
             %% We evaluate the value and apply the ops in the pipe
-            apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt));
+            apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
             error(badarg)
     end.
@@ -320,72 +320,74 @@ get([H|T], Ctxt) when is_map(Ctxt) ->
 
 
 %% @private
-apply_ops([H|T], Acc) ->
-    apply_ops(T, apply_op(H, Acc));
+apply_ops([H|T], Acc, Ctxt) ->
+    apply_ops(T, apply_op(H, Acc, Ctxt), Ctxt);
 
-apply_ops([], Acc) ->
+apply_ops([], Acc, _) ->
     Acc.
 
 
 %% @private
-apply_op(<<"abs">>, Val) when is_number(Val) ->
+apply_op(<<"abs">>, Val, _) when is_number(Val) ->
     abs(Val);
 
-apply_op(<<"integer">>, Val) when is_binary(Val) ->
+apply_op(<<"integer">>, Val, _) when is_binary(Val) ->
     binary_to_integer(Val);
 
-apply_op(<<"integer">>, Val) when is_list(Val) ->
+apply_op(<<"integer">>, Val, _) when is_list(Val) ->
     list_to_integer(Val);
 
-apply_op(<<"integer">>, Val) when is_integer(Val) ->
+apply_op(<<"integer">>, Val, _) when is_integer(Val) ->
     Val;
 
-apply_op(<<"integer">>, Val) when is_float(Val) ->
+apply_op(<<"integer">>, Val, _) when is_float(Val) ->
     trunc(Val);
 
-apply_op(<<"integer">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end;
+apply_op(<<"integer">> = Op, Val, Ctxt) when is_function(Val, 1) ->
+    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
 
-apply_op(<<"float">>, Val) when is_binary(Val) ->
+apply_op(<<"float">>, Val, _) when is_binary(Val) ->
     binary_to_float(Val);
 
-apply_op(<<"float">>, Val) when is_list(Val) ->
+apply_op(<<"float">>, Val, _) when is_list(Val) ->
     float(list_to_integer(Val));
 
-apply_op(<<"float">>, Val) when is_float(Val) ->
+apply_op(<<"float">>, Val, _) when is_float(Val) ->
     Val;
 
-apply_op(<<"float">>, Val) when is_integer(Val) ->
+apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
 
-apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end;
+apply_op(<<"float">> = Op, Val, Ctxt) when is_function(Val, 1) ->
+    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
 
-apply_op(_, []) ->
+apply_op(_, [], _) ->
     [];
 
-apply_op(<<"head">>, Val) when is_list(Val) ->
+apply_op(<<"head">>, Val, _) when is_list(Val) ->
     hd(Val);
 
-apply_op(<<"tail">>, Val) when is_list(Val) ->
+apply_op(<<"tail">>, Val, _) when is_list(Val) ->
     tl(Val);
 
-apply_op(<<"last">>, Val) when is_list(Val) ->
+apply_op(<<"last">>, Val, _) when is_list(Val) ->
     lists:last(Val);
 
-apply_op(<<"length">>, Val) when is_list(Val) ->
+apply_op(<<"length">>, Val, _) when is_list(Val) ->
     length(Val);
 
-apply_op(Bin, Val) ->
-    apply_custom_op(Bin, Val).
+apply_op(Bin, Val, Ctxt) ->
+    apply_custom_op(Bin, Val, Ctxt).
 
 
 
-apply_custom_op(<<"with([", Rest/binary>> = Op, Val) when is_map(Val)->
-    maps:with(get_list_elements(Rest, Op), Val);
+apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    Keys = [eval(K, Ctxt) || K <- get_list_elements(Rest, Op)],
+    maps:with(Keys, Val);
 
-apply_custom_op(<<"without([", Rest/binary>> = Op, Val) when is_map(Val)->
-    maps:without(get_list_elements(Rest, Op), Val).
+apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    Keys = [eval(K, Ctxt) || K <- get_list_elements(Rest, Op)],
+    maps:without(Keys, Val).
 
 
 
