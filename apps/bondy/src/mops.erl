@@ -21,6 +21,7 @@
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
 -define(PIPE_OP, <<$|,$>>>).
+-define(GET_OP, <<$-,$>,$>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{
@@ -55,6 +56,7 @@
     sp = binary:compile_pattern(?START)                         ::  any(),
     dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
     pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
+    gop = binary:compile_pattern(?GET_OP)                       ::  any(),
     ep = binary:compile_pattern(?END)                           ::  any()
 }).
 -type state()       :: #state{}.
@@ -326,6 +328,9 @@ apply_ops([], Acc) ->
 
 
 %% @private
+apply_op(<<"abs">>, Val) when is_number(Val) ->
+    abs(Val);
+
 apply_op(<<"integer">>, Val) when is_binary(Val) ->
     binary_to_integer(Val);
 
@@ -356,8 +361,46 @@ apply_op(<<"float">>, Val) when is_integer(Val) ->
 apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
     fun(X) -> apply_op(Op, Val(X)) end;
 
-apply_op(Op, _) ->
-    error({unknown_pipe_operator, Op}).
+apply_op(_, []) ->
+    [];
+
+apply_op(<<"head">>, Val) when is_list(Val) ->
+    hd(Val);
+
+apply_op(<<"tail">>, Val) when is_list(Val) ->
+    tl(Val);
+
+apply_op(<<"last">>, Val) when is_list(Val) ->
+    lists:last(Val);
+
+apply_op(<<"length">>, Val) when is_list(Val) ->
+    length(Val);
+
+apply_op(Bin, Val) ->
+    apply_custom_op(Bin, Val).
+
+
+
+apply_custom_op(<<"with([", Rest/binary>> = Op, Val) when is_map(Val)->
+    maps:with(get_list_elements(Rest, Op), Val);
+
+apply_custom_op(<<"without([", Rest/binary>> = Op, Val) when is_map(Val)->
+    maps:without(get_list_elements(Rest, Op), Val).
+
+
+
+get_list_elements(Rest, Op) ->
+    Len = byte_size(Rest),
+    case binary:matches(Rest, <<"])">>) of
+        [{Pos, 2}] when Len - 2 == Pos ->
+            Part = binary:part(Rest, 0, Len - 2),
+            binary:split(Part, <<$,>>, [global, trim_all]);
+        _ ->
+            error({invalid_expression, Op})
+    end.
+
+    
+    
 
 
 

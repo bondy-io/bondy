@@ -97,3 +97,29 @@ funny_2_test(_) ->
         }
     },
     200 =:= mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
+
+
+with_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt).
+
+
+without_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([y,z])}}">>, Ctxt).
