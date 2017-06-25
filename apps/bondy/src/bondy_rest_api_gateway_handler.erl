@@ -287,8 +287,13 @@ update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
 
 update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
     Map = #{
+        <<"realm_uri">> => maps:get(<<"aud">>, Claims),
+        <<"session">> => maps:get(<<"id">>, Claims),
         <<"authid">> => maps:get(<<"sub">>, Claims),
-        <<"authscope">> => maps:get(<<"scope">>, Claims)
+        <<"authrole">> => maps:get(<<"scope">>, Claims),
+        <<"authscope">> => maps:get(<<"scope">>, Claims),
+        <<"authmethod">> => <<"oauth2">>,
+        <<"authprovider">> => maps:get(<<"iss">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
 
@@ -449,7 +454,7 @@ perform_action(
             Response = bondy_utils:eval_term(
                 maps:get(<<"on_error">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
-            Code = 500,
+            Code = maps:get(<<"status_code">>, Response, 500),
             {error, Code, Response, St1}
     end.
 
