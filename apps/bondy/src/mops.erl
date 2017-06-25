@@ -382,20 +382,31 @@ apply_op(Bin, Val, Ctxt) ->
 
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    Keys = [eval(K, Ctxt) || K <- get_list_elements(Rest, Op)],
+    Keys = [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<"])">>)],
     maps:with(Keys, Val);
 
 apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    Keys = [eval(K, Ctxt) || K <- get_list_elements(Rest, Op)],
-    maps:without(Keys, Val).
+    Keys = [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<"])">>)],
+    maps:without(Keys, Val);
+
+apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    case [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+        [Key] ->
+            maps:get(Key, Val);
+        [Key, Default] ->
+            maps:get(Key, Val, Default);
+        _ -> 
+            error({invalid_expression, Op})
+    end.
 
 
 
-get_list_elements(Rest, Op) ->
+get_arguments(Rest, Op, Terminal) ->
     Len = byte_size(Rest),
-    case binary:matches(Rest, <<"])">>) of
-        [{Pos, 2}] when Len - 2 == Pos ->
-            Part = binary:part(Rest, 0, Len - 2),
+    TLen = size(Terminal),
+    case binary:matches(Rest, Terminal) of
+        [{Pos, TLen}] when Len - TLen == Pos ->
+            Part = binary:part(Rest, 0, Len - TLen),
             binary:split(Part, <<$,>>, [global, trim_all]);
         _ ->
             error({invalid_expression, Op})

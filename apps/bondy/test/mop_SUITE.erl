@@ -148,3 +148,7 @@ lists_2_test(_) ->
 lists_3_test(_) ->
     Ctxt = #{<<"foo">> => [1,2,3]},
     [3] =:= mops:eval(<<"{{foo |> last}}">>, Ctxt).
+
+maps_get_1_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
