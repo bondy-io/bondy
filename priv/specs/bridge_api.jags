@@ -9,7 +9,14 @@
             <<"revoke_token_path">> => <<"/oauth/revoke">>,
             <<"schemes">> => <<"{{variables.schemes}}">>
         },
-        <<"schemes">> => [<<"http">>]
+        <<"query_spec">> => 
+            <<"{{request.query_params |> with([_q,_p,_limit,_sort,_page])}}">>,
+        <<"query_match">> => 
+            <<"{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}">>,
+        <<"schemes">> => [<<"http">>],
+        <<"error_codes">> => #{
+            <<"com.magenta.error.not_found">> => 404
+        }
     },  
     <<"defaults">> => #{
         <<"retries">> => 0,
@@ -22,23 +29,107 @@
         <<"1.0.0">> => #{
             <<"base_path">> => <<"/v1.0">>,
             <<"variables">> => #{
-                <<"host">> => <<"http://node-2.leapsight.io:5557">> 
+                <<"host">> => <<"http://node-2.leapsight.io:5557">>
             },
             <<"defaults">> => #{
                 <<"timeout">> => 20000
             },
             <<"paths">> => #{
-                <<"/add">> => #{
+                <<"/services/users/check_username">> => #{
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.check_username">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.query_params.username}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<>>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    }
+                },
+                <<"/accounts">> => #{
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.find">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{variables.query_match}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"query_spec">> => 
+                                    <<"{{variables.query_spec}}">>,
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => 
+                                    <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{
+
+                                }
+                            } 
+                        }
+                    },
                     <<"post">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
-                            <<"procedure">> => <<"com.example.add2">>,
+                            <<"procedure">> => <<"com.magenta.accounts.create">>,
                             <<"options">> => #{},
-                            <<"arguments">> => <<"{{request.body}}">>,
+                            <<"arguments">> => [
+                                <<"{{request.body}}">>
+                            ],
                             <<"arguments_kw">> => #{
-                                <<"magenta_context">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => 
+                                    <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{
 
-                                } 
+                                }
+                            } 
+                        }
+                    }
+                },
+                <<"/users">> => #{
+                    <<"post">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.add_user">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.body}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
                             }
                         },
                         <<"response">> => #{
@@ -47,7 +138,139 @@
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
-                                <<"body">> => <<"{{action.result.arguments}}">>,
+                                <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => 
+                                    <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{
+
+                                }
+                            } 
+                        }
+                    },
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.users.find">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{variables.query_match}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                               <<"query_spec">> => 
+                                    <<"{{variables.query_spec}}">>,
+                               <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"body">> => <<"{{action.error}}">>,
+                               <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                               <<"body">> => 
+                                    <<"{{action.result.arguments |> head}}">>,
+                               <<"headers">> => #{
+
+                               }
+                            } 
+                        }
+                    }
+                },
+                <<"/users/:id">> => #{
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.users.fetch">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [<<"{{request.bindings.id}}">>],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    },
+                    <<"put">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.bindings.id}}">>,
+                                <<"{{request.body}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    },
+                    <<"patch">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.bindings.id}}">>,
+                                <<"{{request.body}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    },
+                    <<"delete">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.bindings.id}}">>,
+                                <<"{{request.body}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
                                 <<"headers">> => #{}
                             } 
                         }
