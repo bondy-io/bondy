@@ -15,6 +15,14 @@
             <<"{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}">>,
         <<"schemes">> => [<<"http">>],
         <<"error_codes">> => #{
+            <<"wamp.error.authorization_failed">> => 403,
+            <<"wamp.error.invalid_argument">> => 400,
+            <<"wamp.error.invalid_uri">> => 502,
+            <<"wamp.error.no_eligible_callee">> => 502,
+            <<"wamp.error.no_such_realm">> => 502,
+            <<"wamp.error.no_such_procedure">> => 501,
+            <<"wamp.error.not_authorized">> => 401,
+            <<"wamp.error.option_not_allowed">> => 400,
             <<"com.magenta.error.not_found">> => 404
         }
     },  
