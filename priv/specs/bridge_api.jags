@@ -50,7 +50,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -78,7 +78,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -105,7 +105,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -138,7 +138,7 @@
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
-                                <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                                <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => 
                                     <<"{{action.result.arguments |> head}}">>,
                                 <<"headers">> => #{
@@ -163,7 +163,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                <<"body">> => <<"{{action.error}}">>,
                                <<"headers">> => #{}
                             },
@@ -190,7 +190,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -215,7 +215,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -240,7 +240,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
@@ -265,7 +265,7 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500)}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
                                 <<"body">> => <<"{{action.error}}">>,
                                 <<"headers">> => #{}
                             },
