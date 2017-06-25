@@ -689,6 +689,12 @@ end).
         allow_null => false,
         datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
     },
+    <<"status_code">> => #{
+        alias => status_code,
+        required => false,
+        allow_null => false,
+        datatype => [integer, binary, ?MOP_PROXY_FUN_TYPE]
+    },
     <<"uri">> => #{
         alias => uri,
         required => false,
