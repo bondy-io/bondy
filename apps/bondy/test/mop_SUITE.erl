@@ -152,3 +152,8 @@ lists_3_test(_) ->
 maps_get_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
     1 =:= mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
+
+
+maps_get_2_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
