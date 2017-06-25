@@ -338,7 +338,7 @@ when is_function(Val, 1) andalso (
     Op == <<"last">> orelse
     Op == <<"length">>
     ) ->
-    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
+    fun(X) -> apply_op(Op, Val(X), X) end;
 
 
 apply_op(<<"abs">>, Val, _) when is_number(Val) ->
@@ -390,24 +390,64 @@ apply_op(Bin, Val, Ctxt) ->
 %% @private
 apply_custom_op(<<"with", _/binary>> = Op, Val, Ctxt)
 when is_function(Val, 1) ->
-    fun(X) -> apply_custom_op(Op, Val(X), Ctxt) end;
+    fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
 apply_custom_op(<<"get", _/binary>> = Op, Val, Ctxt)
 when is_function(Val, 1) ->
-    fun(X) -> apply_custom_op(Op, Val(X), Ctxt) end;
+    fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    Keys = [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<"])">>)],
-    maps:with(Keys, Val);
+    Fold = fun(K, {L, R}) ->
+        case eval(K, Ctxt) of
+            V when is_function(V, 1) ->
+                {L, [V|R]};
+            V ->
+                {[V|L], R}
+        end
+    end,
+    Args = get_arguments(Rest, Op, <<"])">>),
+    case lists:foldl(Fold, {[], []}, Args) of
+        {L, []} ->
+            maps:with(L, Val);
+        {L, R} ->
+            fun(X) -> 
+                Keys = lists:append(L, [F(X) || F <- R]),
+                maps:with(Keys, Val) 
+            end
+    end;
 
 apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    Keys = [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<"])">>)],
-    maps:without(Keys, Val);
+    Fold = fun(K, {L, R}) ->
+        case eval(K, Ctxt) of
+            V when is_function(V, 1) ->
+                {L, [V|R]};
+            V ->
+                {[V|L], R}
+        end
+    end,
+    Args = get_arguments(Rest, Op, <<"])">>),
+    case lists:foldl(Fold, {[], []}, Args) of
+        {L, []} ->
+            maps:with(L, Val);
+        {L, R} ->
+            fun(X) -> 
+                Keys = lists:append(L, [F(X) || F <- R]),
+                maps:with(Keys, Val) 
+            end
+    end;
 
 apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     case [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+        [Key] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val) end;
         [Key] ->
             maps:get(Key, Val);
+        [Key, Default] when is_function(Key, 1), is_function(Default, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default(X)) end;
+        [Key, Default] when is_function(Default, 1) ->
+            fun(X) -> maps:get(Key, Val, Default(X)) end;
+        [Key, Default] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default) end;
         [Key, Default] ->
             maps:get(Key, Val, Default);
         _ -> 
