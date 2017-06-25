@@ -328,6 +328,19 @@ apply_ops([], Acc, _) ->
 
 
 %% @private
+apply_op(Op, Val, Ctxt) 
+when is_function(Val, 1) andalso (
+    Op == <<"integer">> orelse 
+    Op == <<"float">> orelse
+    Op == <<"abs">> orelse
+    Op == <<"head">> orelse
+    Op == <<"tail">> orelse
+    Op == <<"last">> orelse
+    Op == <<"length">>
+    ) ->
+    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
+
+
 apply_op(<<"abs">>, Val, _) when is_number(Val) ->
     abs(Val);
 
@@ -343,9 +356,6 @@ apply_op(<<"integer">>, Val, _) when is_integer(Val) ->
 apply_op(<<"integer">>, Val, _) when is_float(Val) ->
     trunc(Val);
 
-apply_op(<<"integer">> = Op, Val, Ctxt) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
-
 apply_op(<<"float">>, Val, _) when is_binary(Val) ->
     binary_to_float(Val);
 
@@ -357,9 +367,6 @@ apply_op(<<"float">>, Val, _) when is_float(Val) ->
 
 apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
-
-apply_op(<<"float">> = Op, Val, Ctxt) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X), Ctxt) end;
 
 apply_op(_, [], _) ->
     [];
@@ -380,6 +387,14 @@ apply_op(Bin, Val, Ctxt) ->
     apply_custom_op(Bin, Val, Ctxt).
 
 
+%% @private
+apply_custom_op(<<"with", _/binary>> = Op, Val, Ctxt)
+when is_function(Val, 1) ->
+    fun(X) -> apply_custom_op(Op, Val(X), Ctxt) end;
+
+apply_custom_op(<<"get", _/binary>> = Op, Val, Ctxt)
+when is_function(Val, 1) ->
+    fun(X) -> apply_custom_op(Op, Val(X), Ctxt) end;
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Keys = [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<"])">>)],
