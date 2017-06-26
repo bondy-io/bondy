@@ -1731,7 +1731,7 @@ list(RealmUri, user) when is_binary(RealmUri) ->
         fun
             ({_Username, [?TOMBSTONE]}, Acc) ->
                 Acc;
-            ({Username, Options}, Acc) ->
+            ({Username, [Options]}, Acc) ->
                 [{Username, Options}|Acc]
         end, 
         [], 
@@ -1743,7 +1743,7 @@ list(RealmUri, group) when is_binary(RealmUri) ->
         fun
             ({_Groupname, [?TOMBSTONE]}, Acc) ->
                 Acc;
-            ({Groupname, Options}, Acc) ->
+            ({Groupname, [Options]}, Acc) ->
                 [{Groupname, Options}|Acc]
         end, 
         [], 
