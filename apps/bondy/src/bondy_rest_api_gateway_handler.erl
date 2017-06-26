@@ -152,9 +152,8 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St1};
         
-        {error, #{<<"body">> := #{<<"code">> := Code}} = Response, St1} ->
-            Req1 = reply(
-                bondy_utils:error_http_code(Code), Enc, Response, Req0),
+        {error, Response, St1} ->
+            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
             {stop, Req1, St1};
         
         {error, HTTPCode, Response, St1} ->
@@ -218,9 +217,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St1};
         
-        {error, #{<<"body">> := #{<<"code">> := Code}} = Response, St1} ->
-            Req1 = reply(
-                bondy_utils:error_http_code(Code), Enc, Response, Req0),
+        {error, Response, St1} ->
+            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
             {stop, Req1, St1};
         
         {error, HTTPCode, Response, St1} ->
@@ -252,9 +250,9 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St2};
         
-        {error, #{<<"code">> := Code} = Response, St2} ->
+        {error, Response, St2} ->
             Req1 = reply(
-                bondy_utils:error_http_code(Code), Enc, Response, Req0),
+                get_status_code(Response), Enc, Response, Req0),
             {stop, Req1, St2};
         
         {error, HTTPCode, Response, St2} ->
@@ -265,12 +263,32 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+
+
+%% @private
+get_status_code(#{<<"status_code">> := Code}) ->
+    Code;
+
+get_status_code(#{<<"body">> := ErrorBody}) ->
+    get_status_code(ErrorBody);
+    
+get_status_code(ErrorBody) ->
+    case maps:find(<<"status_code">>, ErrorBody) of
+        {ok, Val} -> 
+            Val;
+        _ -> 
+            case maps:find(<<"code">>, ErrorBody) of
+                {ok, Val} ->
+                    bondy_utils:error_http_code(Val);
+                _ ->
+                    500
+            end
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -388,11 +406,15 @@ perform_action(
             from_http_response(StatusCode, RespHeaders, RespBody, RSpec, St0);
         
         {error, Reason} ->
-            Ctxt1 = update_context(
-                {error, bondy_error:error_map(Reason)}, Ctxt0),
+            Error = #{
+                <<"status_code">> => 502,
+                <<"headers">> => #{},
+                <<"details">> => bondy_error:error_map(Reason)
+            },
+            Ctxt1 = update_context({error, Error}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
-            {error, Response, St1}
+            {error, 502, Response, St1}
     end;
 
 perform_action(
@@ -449,9 +471,13 @@ perform_action(
                 maps:get(<<"on_result">>, RSpec), Ctxt1),
             St1 = maps:update(api_context, Ctxt1, St0),
             {ok, Response, St1};
-        {error, Error, _WampCtxt1} ->
+        {error, Reason, _WampCtxt1} ->
             %% @REVIEW At the moment all error maps use binary keys, if we 
             %% move to atoms we need to turn them into binaries 
+            Error = #{
+                <<"headers">> => #{},
+                <<"details">> => Reason
+            },
             Ctxt1 = update_context({error, Error}, Ctxt0),
             Response = bondy_utils:eval_term(
                 maps:get(<<"on_error">>, RSpec), Ctxt1),
@@ -468,7 +494,7 @@ when StatusCode >= 400 andalso StatusCode < 600->
     Ctxt0 = maps:get(api_context, St0),
     Error = #{ 
         <<"status_code">> => StatusCode,
-        <<"body">> => RespBody,
+        <<"details">> => RespBody,
         <<"headers">> => maps:from_list(RespHeaders)
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
@@ -530,10 +556,8 @@ reply(HTTPCode, Enc, Response, Req) ->
     cowboy_req:req().
 
 prepare_request(Enc, Response, Req0) ->
-    #{
-        <<"body">> := Body,
-        <<"headers">> := Headers
-    } = Response,
+    Body = maps:get(<<"body">>, Response),
+    Headers = maps:get(<<"headers">>, Response),
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
 

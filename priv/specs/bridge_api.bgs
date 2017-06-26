@@ -77,8 +77,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -96,7 +96,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -115,7 +115,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -134,7 +134,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -163,8 +163,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -190,8 +190,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -216,8 +216,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -238,8 +238,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -263,8 +263,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -290,11 +290,11 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
-                                <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
+                                <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
                                 <<"body">> => 
                                     <<"{{action.result.arguments |> head}}">>,
                                 <<"headers">> => #{
@@ -319,8 +319,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                               <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                               <<"body">> => <<"{{action.error.details}}">>,
                                <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -346,8 +346,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -371,8 +371,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -384,7 +384,7 @@
                     <<"patch">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
-                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"procedure">> => <<"com.magenta.users.update">>,
                             <<"options">> => #{},
                             <<"arguments">> => [
                                 <<"{{request.bindings.id}}">>,
@@ -396,8 +396,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -409,7 +409,7 @@
                     <<"delete">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
-                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"procedure">> => <<"com.magenta.users.delete">>,
                             <<"options">> => #{},
                             <<"arguments">> => [
                                 <<"{{request.bindings.id}}">>,
@@ -421,8 +421,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -436,7 +436,7 @@
                     <<"post">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
-                            <<"procedure">> => <<"com.magenta.users.replace">>,
+                            <<"procedure">> => <<"com.magenta.users.tbd">>,
                             <<"options">> => #{},
                             <<"arguments">> => [
                                 <<"{{request.bindings.id}}">>,
@@ -448,8 +448,8 @@
                         },
                         <<"response">> => #{
                            <<"on_error">> => #{
-                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
-                                <<"body">> => <<"{{action.error}}">>,
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
@@ -468,7 +468,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -484,7 +484,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -500,7 +500,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -516,7 +516,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -533,7 +533,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -550,7 +550,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -570,7 +570,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -586,7 +586,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -602,7 +602,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -618,7 +618,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -635,7 +635,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -652,7 +652,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -672,7 +672,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -688,7 +688,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -704,7 +704,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -720,7 +720,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -737,7 +737,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -754,7 +754,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -774,7 +774,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -790,7 +790,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -806,7 +806,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -822,7 +822,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -839,7 +839,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -856,7 +856,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -876,7 +876,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -892,7 +892,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -908,7 +908,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -924,7 +924,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -941,7 +941,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -958,7 +958,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -978,7 +978,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -994,7 +994,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -1010,7 +1010,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -1026,7 +1026,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -1043,7 +1043,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
@@ -1060,7 +1060,7 @@
                         },
                         <<"response">> => #{
                             <<"on_error">> => #{
-                                <<"body">> => <<"{{action.error.body}}">>,
+                                <<"body">> => <<"{{action.error.details}}">>,
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{

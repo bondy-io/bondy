@@ -158,7 +158,7 @@ error_http_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
 error_http_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
 error_http_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
 error_http_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
-error_http_code(_) ->                                           400.
+error_http_code(_) ->                                           500.
 
 
 %% -----------------------------------------------------------------------------
