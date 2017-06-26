@@ -241,7 +241,7 @@ do_eval(Bin, #state{is_open = false} = St) ->
 %% @private
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Accummulates the evaluation in the case of strings.
+%% Accumulates the evaluation in the case of strings.
 %% @end
 %% -----------------------------------------------------------------------------
 acc(#state{acc = []} = St, Val) ->
@@ -297,8 +297,6 @@ get_value(Key, Ctxt) ->
 
 
 %% @private
-
-
 get(Rem, '$mop_proxy') ->
     {ok, '$mop_proxy', Rem};
 
@@ -341,6 +339,8 @@ when is_function(Val, 1) andalso (
     ) ->
     fun(X) -> apply_op(Op, Val(X), X) end;
 
+apply_op(_, <<>>, _) ->
+    <<>>;
 
 apply_op(<<"abs">>, Val, _) when is_number(Val) ->
     abs(Val);
@@ -369,14 +369,21 @@ apply_op(<<"float">>, Val, _) when is_float(Val) ->
 apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
 
-apply_op(_, [], _) ->
-    [];
+apply_op(<<"head">>, [], _) ->
+    <<>>;
 
 apply_op(<<"head">>, Val, _) when is_list(Val) ->
     hd(Val);
 
+apply_op(<<"tail">>, [], _) ->
+    %% To avoid getting an exception at runtime we return []
+    [];
+
 apply_op(<<"tail">>, Val, _) when is_list(Val) ->
     tl(Val);
+
+apply_op(<<"last">>, [], _) ->
+    <<>>;
 
 apply_op(<<"last">>, Val, _) when is_list(Val) ->
     lists:last(Val);
@@ -384,6 +391,7 @@ apply_op(<<"last">>, Val, _) when is_list(Val) ->
 apply_op(<<"length">>, Val, _) when is_list(Val) ->
     length(Val);
 
+%% Custom ops
 apply_op(Bin, Val, Ctxt) ->
     apply_custom_op(Bin, Val, Ctxt).
 
@@ -453,7 +461,10 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
             maps:get(Key, Val, Default);
         _ -> 
             error({invalid_expression, Op})
-    end.
+    end;
+
+apply_custom_op(Op, _, _) ->
+    error({invalid_expression, Op}).
 
 
 %% @private
