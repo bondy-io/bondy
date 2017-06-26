@@ -139,6 +139,7 @@
                     }
                 },
                 <<"/accounts">> => #{
+                    <<"is_collection">> => true,
                     <<"get">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
@@ -187,16 +188,87 @@
                                 <<"headers">> => #{}
                             },
                             <<"on_result">> => #{
+                                <<"uri">> => <<"{{request.path}}/{{action.result.arguments |> head |> get('id')}}">>,
                                 <<"body">> => 
                                     <<"{{action.result.arguments |> head}}">>,
-                                <<"headers">> => #{
-
-                                }
+                                <<"headers">> => #{}
                             } 
                         }
                     }
                 },
+                <<"/accounts/:id">> => #{
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.fetch">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [<<"{{request.bindings.id}}">>],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    },
+                    <<"delete">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.delete">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [<<"{{request.bindings.id}}">>],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.arguments |> head}}">>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    }
+                    <<"patch">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"wamp_call">>,
+                            <<"procedure">> => <<"com.magenta.accounts.update">>,
+                            <<"options">> => #{},
+                            <<"arguments">> => [
+                                <<"{{request.bindings.id}}">>,
+                                <<"{{request.body}}">>
+                            ],
+                            <<"arguments_kw">> => #{
+                                <<"security">> => <<"{{security}}">>
+                            }
+                        },
+                        <<"response">> => #{
+                           <<"on_error">> => #{
+                               <<"status_code">> => <<"{{variables.error_codes |> get({{action.error.code}}, 500) |> integer}}">>,
+                                <<"body">> => <<"{{action.error}}">>,
+                                <<"headers">> => #{}
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<>>,
+                                <<"headers">> => #{}
+                            } 
+                        }
+                    },
+                },
                 <<"/users">> => #{
+                    <<"is_collection">> => true,
                     <<"post">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
