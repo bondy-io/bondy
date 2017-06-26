@@ -537,7 +537,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -554,7 +553,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -639,7 +637,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -656,7 +653,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -741,7 +737,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -758,7 +753,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -843,7 +837,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -860,7 +853,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -945,7 +937,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -962,7 +953,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -1047,7 +1037,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
@@ -1064,7 +1053,6 @@
                                 <<"headers">> => <<"{{action.error.headers}}">>
                             },
                             <<"on_result">> => #{
-                                <<"uri">> => <<"{{action.result.uri}}">>,
                                 <<"body">> => <<"{{action.result.body}}">>,
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
