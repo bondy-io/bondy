@@ -20,6 +20,7 @@
 -export([start_https/1]).
 % -export([update_hosts/1]).
 -export([add_consumer/4]).
+-export([dispatch_table/1]).
 
 
 
@@ -82,7 +83,7 @@ start_http(Rules) ->
     % io:format("Rules ~p~n", [Rules]),
     % io:format("Table ~p~n", [Table]),
     cowboy:start_clear(
-        ?HTTPS,
+        ?HTTP,
         bondy_config:http_acceptors_pool_size(),
         [{port, bondy_config:http_port()}],
         #{
@@ -131,6 +132,28 @@ start_https(Rules) ->
         }
     ).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dispatch_table(binary() | atom()) -> any().
+
+dispatch_table(<<"http">>) ->
+    dispatch_table(http);
+
+dispatch_table(<<"https">>) ->
+    dispatch_table(https);
+
+dispatch_table(http) ->
+    Map = ranch:get_protocol_options(?HTTP),
+    maps_utils:get_path([env, bondy], Map);
+
+dispatch_table(https) ->
+    Map = ranch:get_protocol_options(?HTTPS),
+    maps_utils:get_path([env, bondy], Map).
+
+
 % update_hosts(Hosts) ->
 %     cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Hosts)).
 
@@ -164,35 +187,39 @@ add_consumer(RealmUri, ClientId, Password, Info) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Reads all Bondy Gateway Specification files in the provided `specs_path`
+%% configuration option.
+%% @end
+%% -----------------------------------------------------------------------------
 specs() ->
     case bondy_config:api_gateway() of
         undefined ->
             [];
-        L ->
-            case lists:keyfind(specs_path, 1, L) of
+        Opts ->
+            case lists:keyfind(specs_path, 1, Opts) of
                 false ->
                     [];
                 {_, Path} ->
-                    Expr = filename:join([Path, "*.jags"]),
-                    case filelib:wildcard(Expr) of
+                    case filelib:wildcard(filename:join([Path, "*.bgs"])) of
                         [] ->
                             [];
                         FNames ->
-                            lists:append([read_spec(FName) || FName <- FNames])
+                            Fold = fun(FName, Acc) ->
+                                case file:consult(FName) of
+                                    {ok, Terms} ->
+                                        [Terms|Acc];
+                                    {error, _} ->
+                                        lager:error("Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
+                                        Acc
+                                end
+                            end,
+                            lists:append(lists:foldl(Fold, [], FNames))
                     end
             end
     end.
-
-%% @private
-read_spec(FName) ->
-    case file:consult(FName) of
-        {ok, L} ->
-            L;
-        {error, _} ->
-            {error, {invalid_specification_format, FName}}
-    end.
-
 
 
 base_rules() ->
