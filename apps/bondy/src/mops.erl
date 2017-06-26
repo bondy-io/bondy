@@ -57,7 +57,8 @@
     dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
     pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
     gop = binary:compile_pattern(?GET_OP)                       ::  any(),
-    ep = binary:compile_pattern(?END)                           ::  any()
+    ep = binary:compile_pattern(?END)                           ::  any(),
+    re = element(2, re:compile("^\\s+|\\s+$", ""))              ::  any()
 }).
 -type state()       :: #state{}.
 
@@ -178,7 +179,7 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
 
 do_eval(Bin0, #state{acc = []} = St0) ->
     %% We start processing a binary
-    Bin1 = trim(Bin0),
+    Bin1 = trim(Bin0, St0),
     case binary:match(Bin1, St0#state.sp) of
         nomatch ->
             %% Not a mop expression, so we return and finish
@@ -269,10 +270,10 @@ acc(#state{acc = Acc} = St, Val) ->
 parse_expr(Bin, #state{context = Ctxt} = St) ->
     case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
-            get_value(trim(Val), Ctxt);
+            get_value(trim(Val, St), Ctxt);
         [Val | Ops] ->
             %% We evaluate the value and apply the ops in the pipe
-            apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
+            apply_ops([trim(P, St) || P <- Ops], get_value(trim(Val, St), Ctxt), Ctxt);
         _ ->
             error(badarg)
     end.
@@ -491,9 +492,9 @@ get_arguments(Rest, Op, Terminal) ->
 
 
 %% @private
-%% TODO Replace this as it id not efficient, it generates a new binary each time
-trim(Bin) ->
-    re:replace(Bin, "^\\s+|\\s+$", "", [{return, binary}, global]).
+%% TODO Replace this as it is not efficient, it generates a new binary each time
+trim(Bin, St) ->
+    re:replace(Bin, St#state.re, "", [{return, binary}, global]).
 
 
 %% @private
