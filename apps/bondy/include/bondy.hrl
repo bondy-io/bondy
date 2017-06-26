@@ -92,6 +92,7 @@
 -define(BONDY_USER_LIST, <<"bondy.security.users.list">>).
 -define(BONDY_USER_LOOKUP, <<"bondy.security.users.get">>).
 -define(BONDY_USER_UPDATE, <<"bondy.security.users.update">>).
+-define(BONDY_USER_CHANGE_PASSWORD, <<"bondy.security.users.change_password">>).
 
 -define(BONDY_USER_ON_ADD, <<"bondy.security.users.on_add">>).
 -define(BONDY_USER_ON_DELETE, <<"bondy.security.users.on_delete">>).
