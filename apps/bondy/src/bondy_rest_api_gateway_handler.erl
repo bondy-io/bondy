@@ -371,7 +371,7 @@ perform_action(
         {recv_timeout, T}
     ],
     Url = url(Host, Path, QS),
-    io:format(
+    lager:info(
         "Gateway is forwarding request to ~p~n", 
         [[Method, Url, Headers, Body, Opts]]
     ),
