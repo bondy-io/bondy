@@ -43,13 +43,20 @@
         <<"timeout">> => 5000,
         <<"connect_timeout">> => 5000,
         <<"schemes">> => <<"{{variables.schemes}}">>,
-        <<"security">> => <<"{{variables.oauth2}}">>
+        <<"security">> => <<"{{variables.oauth2}}">>,
+        <<"headers">> => #{
+            <<"access-control-allow-origin">> => <<"*">>,
+            <<"access-control-allow-methods">> => <<"{{request.methods.access-control-request-method}}">>,
+            <<"access-control-allow-headers">> => <<"{{request.headers.access-control-request-headers}}">>,
+            <<"access-control-max-age">> => 86400
+        }
     },
     <<"versions">> =>  #{
         <<"1.0.0">> => #{
-            <<"base_path">> => <<"/v1.0">>,
+            <<"base_path">> => <<"/[v1.0]">>,
             <<"variables">> => #{
-                <<"host">> => <<"http://node-2.leapsight.io:5557">>
+                %% <<"host">> => <<"http://node-2.leapsight.io:5557">>
+                <<"host">> => <<"http://localhost:5557">>
             },
             <<"defaults">> => #{
                 <<"timeout">> => 20000
@@ -164,7 +171,7 @@
                                 <<"body">> => 
                                     <<"{{action.result.arguments |> head}}">>,
                                 <<"headers">> => #{
-
+                                    
                                 }
                             } 
                         }
@@ -240,7 +247,7 @@
                                 <<"headers">> => #{}
                             } 
                         }
-                    }
+                    },
                     <<"patch">> => #{
                         <<"action">> => #{
                             <<"type">> => <<"wamp_call">>,
@@ -265,7 +272,7 @@
                                 <<"headers">> => #{}
                             } 
                         }
-                    },
+                    }
                 },
                 <<"/users">> => #{
                     <<"is_collection">> => true,
