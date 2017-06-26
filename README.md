@@ -73,5 +73,5 @@ bondy:call(<<"com.example.add2">>, #{}, [1,1], #{}, C).
 
 bondy:call(<<"bondy.security.users.add">>, #{}, [#{username => <<"chaski">>, password => <<"chaski">>, groups => []}], #{}, C).
 
-bondy:call(<<"bondy.security.users.list">>, #{}, [#{username => <<"chaski">>, password => <<"chaski">>, groups => []}], #{}, C).
+bondy:call(<<"bondy.security.users.list">>, #{}, [], #{}, C).
 ```
