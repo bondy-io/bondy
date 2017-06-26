@@ -153,7 +153,8 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             {stop, Req1, St1};
         
         {error, #{<<"body">> := #{<<"code">> := Code}} = Response, St1} ->
-            Req1 = reply(bondy_utils:error_http_code(Code), Enc, Response, Req0),
+            Req1 = reply(
+                bondy_utils:error_http_code(Code), Enc, Response, Req0),
             {stop, Req1, St1};
         
         {error, HTTPCode, Response, St1} ->
@@ -195,8 +196,8 @@ from_msgpack(Req, St) ->
 
 
 
-%% @private
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% Provides the resource representation for a GET or HEAD 
 %% executing the configured action
@@ -233,7 +234,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 %% @private
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Accepts an POST, PATCH, PUT or DELETE over a resource by executing the configured action
+%% Accepts a POST, PATCH, PUT or DELETE over a resource by executing 
+%% the configured action
 %% @end
 %% -----------------------------------------------------------------------------
 accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) -> 
