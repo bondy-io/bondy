@@ -65,6 +65,9 @@ maybe_encode(json, Term) ->
 
 
 %% @private
+decode(json, <<>>) ->
+    <<>>;
+
 decode(json, Term) ->
     jsx:decode(Term, [return_maps]);
 
