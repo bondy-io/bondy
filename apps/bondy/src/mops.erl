@@ -219,7 +219,7 @@ do_eval(Bin, #state{is_open = true} = St0) ->
             St1 = St0#state{is_open = false},
             do_eval(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
-            %% We did not find a matching closing mustaches
+            %% We did not find matching closing mustaches
             error(badarg)
     end;
 
@@ -328,7 +328,7 @@ apply_ops([], Acc, _) ->
 
 
 %% @private
-apply_op(Op, Val, Ctxt) 
+apply_op(Op, Val, _) 
 when is_function(Val, 1) andalso (
     Op == <<"integer">> orelse 
     Op == <<"float">> orelse
@@ -388,17 +388,17 @@ apply_op(Bin, Val, Ctxt) ->
 
 
 %% @private
-apply_custom_op(<<"with", _/binary>> = Op, Val, Ctxt)
+apply_custom_op(<<"with", _/binary>> = Op, Val, _)
 when is_function(Val, 1) ->
     fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
-apply_custom_op(<<"get", _/binary>> = Op, Val, Ctxt)
+apply_custom_op(<<"get", _/binary>> = Op, Val, _)
 when is_function(Val, 1) ->
     fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Fold = fun(K, {L, R}) ->
-        case eval(K, Ctxt) of
+        case maybe_eval(K, Ctxt) of
             V when is_function(V, 1) ->
                 {L, [V|R]};
             V ->
@@ -418,7 +418,7 @@ apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
 
 apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Fold = fun(K, {L, R}) ->
-        case eval(K, Ctxt) of
+        case maybe_eval(K, Ctxt) of
             V when is_function(V, 1) ->
                 {L, [V|R]};
             V ->
@@ -437,7 +437,7 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     end;
 
 apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    case [eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
         [Key] when is_function(Key, 1) ->
             fun(X) -> maps:get(Key(X), Val) end;
         [Key] ->
@@ -455,7 +455,25 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     end.
 
 
+%% @private
+maybe_eval(Term, Ctxt) ->
+    case unquote(Term) of
+        {true, Key} ->
+            Key;
+        {false, Expr} ->
+            eval(Expr, Ctxt)
+    end.
 
+
+%% @private
+unquote(<<$', Rest/binary>>) ->
+    {true, binary:part(Rest, {0, byte_size(Rest) - 1})};
+    
+unquote(Bin) ->
+    {false, Bin}.    
+
+
+%% @private
 get_arguments(Rest, Op, Terminal) ->
     Len = byte_size(Rest),
     TLen = size(Terminal),
