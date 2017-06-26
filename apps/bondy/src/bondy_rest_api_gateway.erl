@@ -47,7 +47,7 @@ start_listeners() ->
     % end,
     L = case [bondy_rest_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
-            [{http, []}, {https, []}];
+            [{<<"http">>, []}, {<<"https">>, []}];
         Parsed ->
             bondy_rest_api_gateway_spec_parser:dispatch_table(
                 Parsed, base_rules())
