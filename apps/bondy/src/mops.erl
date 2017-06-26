@@ -14,9 +14,10 @@
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
-
-
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
@@ -496,10 +497,6 @@ get_arguments(Rest, Op, Terminal) ->
         _ ->
             error({invalid_expression, Op})
     end.
-
-    
-    
-
 
 
 %% @private
