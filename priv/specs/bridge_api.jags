@@ -98,7 +98,7 @@
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
                         }
-                    },
+                    }
                 },
                 <<"/services/users/change_password">> => #{
                     <<"post">> => #{
@@ -117,7 +117,7 @@
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
                         }
-                    },
+                    }
                 },
                 <<"/services/users/agents/panic">> => #{
                     <<"post">> => #{
@@ -136,7 +136,7 @@
                                 <<"headers">> => <<"{{action.result.headers}}">>
                             }
                         }
-                    },
+                    }
                 },
                 <<"/accounts">> => #{
                     <<"get">> => #{
@@ -379,7 +379,7 @@
                             } 
                         }
                     }
-                }
+                },
                 <<"/devices">> => #{
                     <<"is_collection">> => true,
                     <<"options">> => #{
