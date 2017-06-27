@@ -14,14 +14,16 @@
 -define(HTTP, bondy_gateway_http_listener).
 -define(HTTPS, bondy_gateway_https_listener).
 
+%% API
+-export([add_client/4]).
+-export([add_resource_owner/4]).
+-export([dispatch_table/1]).
+-export([load/1]).
+
 %% COWBOY MIDDLEWARE CALLBACKS
 -export([start_listeners/0]).
 -export([start_http/1]).
 -export([start_https/1]).
-% -export([update_hosts/1]).
--export([add_consumer/4]).
--export([dispatch_table/1]).
--export([load/1]).
 
 
 
@@ -31,13 +33,69 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec load(file:filename()) -> ok | {error, any()}.
+
+load(FName) ->
+    try jsx:consult(FName, [return_maps]) of
+        [Spec] ->
+            %% We append the new spec to the base ones
+            Specs = [Spec | specs()],
+            _ = [
+                update_dispatch_table(Scheme, Routes) 
+                || {Scheme, Routes} <- Specs
+            ],
+            ok
+    catch
+        error:badarg ->
+            {error, {invalid_specification_format, FName}}
+    end.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Adds an API client to realm RealmUri.
+%% Creates a new user adding it to the `api_clients` group.
+%% @end
+%% -----------------------------------------------------------------------------
+add_client(RealmUri, ClientId, Password, Info) ->
+    ok = maybe_init_security(RealmUri),
+    Opts = [
+        {info, Info},
+        {"password", binary_to_list(Password)},
+        {"groups", "api_clients"}
+    ],
+    bondy_security:add_user(RealmUri, ClientId, Opts).
+    
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Adds a resource owner (end-user or system) to realm RealmUri.
+%% Creates a new user adding it to the `resource_owners` group.
+%% @end
+%% -----------------------------------------------------------------------------
+add_resource_owner(RealmUri, Username, Password, Info) ->
+    ok = maybe_init_security(RealmUri),
+    Opts = [
+        {info, Info},
+        {"password", binary_to_list(Password)},
+        {"groups", "resource_owners"}
+    ],
+    bondy_security:add_user(RealmUri, Username, Opts).
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Conditionally start http and https listeners based on the configured APIs
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    Specs = specs(),
     % Parsed = [bondy_rest_api_gateway_spec:parse(S) || S <- Specs],
     % Compiled = bondy_rest_api_gateway_spec:compile(Parsed),
     % SchemeRoutes = case bondy_rest_api_gateway_spec:load(Compiled) of
@@ -46,14 +104,9 @@ start_listeners() ->
     %     Val ->
     %         Val
     % end,
-    L = case [bondy_rest_api_gateway_spec_parser:parse(S) || S <- Specs] of
-        [] ->
-            [{<<"http">>, []}, {<<"https">>, []}];
-        Parsed ->
-            bondy_rest_api_gateway_spec_parser:dispatch_table(
-                Parsed, base_routes())
-    end,
-    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- L],
+    _ = [
+        start_listener({Scheme, Routes}) 
+        || {Scheme, Routes} <- parse_specs(specs())],
     ok.
 
 
@@ -81,7 +134,7 @@ start_listener({<<"https">>, Routes}) ->
 %% -----------------------------------------------------------------------------
 -spec start_http(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_http(Routes) ->
-    % io:format("Routes ~p~n", [Routes]),
+    %% io:format("HTTP Routes ~p~n", [Routes]),
     % io:format("Table ~p~n", [Table]),
     cowboy:start_clear(
         ?HTTP,
@@ -110,6 +163,7 @@ start_http(Routes) ->
 
 -spec start_https(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_https(Routes) ->
+    %% io:format("HTTPS Routes ~p~n", [Routes]),
     cowboy:start_tls(
         ?HTTPS,
         bondy_config:https_acceptors_pool_size(),
@@ -135,31 +189,6 @@ start_https(Routes) ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec load(file:filename()) -> ok | {error, any()}.
-
-load(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
-            L = case bondy_rest_api_gateway_spec_parser:parse(Spec) of
-                [] ->
-                    [{<<"http">>, []}, {<<"https">>, []}];
-                Parsed ->
-                    bondy_rest_api_gateway_spec_parser:dispatch_table(
-                        Parsed, base_routes())
-            end,
-            _ = [
-                update_dispatch_table(Scheme, Routes) || {Scheme, Routes} <- L
-            ],
-            ok
-    catch
-        error:badarg ->
-            {error, {invalid_specification_format, FName}}
-    end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -183,29 +212,6 @@ dispatch_table(https) ->
     maps_utils:get_path([env, dispatch], Map).
 
 
-
-
-
-%% =============================================================================
-%% API: CONSUMERS
-%% =============================================================================
-
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-add_consumer(RealmUri, ClientId, Password, Info) ->
-    ok = maybe_init_security(RealmUri),
-    Opts = [
-        {info, Info},
-        {"password", binary_to_list(Password)},
-        {"groups", "api_consumers"}
-    ],
-    bondy_security:add_user(RealmUri, ClientId, Opts).
-    
 
 
 
@@ -235,6 +241,15 @@ update_dispatch_table(<<"https">>, Routes) ->
     cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes)).
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+base_routes() ->
+    %% The WS entrypoint required for WAMP WS subprotocol
+    [ {'_', [{"/ws", bondy_ws_handler, #{}}]} ].
+
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -246,38 +261,45 @@ update_dispatch_table(<<"https">>, Routes) ->
 specs() ->
     case bondy_config:api_gateway() of
         undefined ->
-            [];
+            specs("./etc");
         Opts ->
             case lists:keyfind(specs_path, 1, Opts) of
                 false ->
-                    [];
+                    specs("./etc");
                 {_, Path} ->
-                    case filelib:wildcard(filename:join([Path, "*.bgs"])) of
-                        [] ->
-                            [];
-                        FNames ->
-                            Fold = fun(FName, Acc) ->
-                                case file:consult(FName) of
-                                    {ok, Terms} ->
-                                        [Terms|Acc];
-                                    {error, _} ->
-                                        lager:error("Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
-                                        Acc
-                                end
-                            end,
-                            lists:append(lists:foldl(Fold, [], FNames))
-                    end
+                    lists:append([specs(Path), specs("./etc")])
             end
     end.
 
 
 %% @private
-base_routes() ->
-    %% The WS entrypoint
-    [{'_', [{"/ws", bondy_ws_handler, #{}}]}].
+specs(Path) ->
+    case filelib:wildcard(filename:join([Path, "*.bgs"])) of
+        [] ->
+            [];
+        FNames ->
+            Fold = fun(FName, Acc) ->
+                case file:consult(FName) of
+                    {ok, Terms} ->
+                        [Terms|Acc];
+                    {error, _} ->
+                        lager:error("Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
+                        Acc
+                end
+            end,
+            lists:append(lists:foldl(Fold, [], FNames))
+    end.
 
 
 
+parse_specs(Specs) ->
+    case [bondy_rest_api_gateway_spec_parser:parse(S) || S <- Specs] of
+        [] ->
+            [{<<"http">>, []}, {<<"https">>, []}];
+        Parsed ->
+            bondy_rest_api_gateway_spec_parser:dispatch_table(
+                Parsed, base_routes())
+    end.
 
 
 %% =============================================================================
@@ -285,14 +307,26 @@ base_routes() ->
 %% =============================================================================
 
 
+
 %% @private
 maybe_init_security(RealmUri) ->
-    case bondy_security_group:lookup(RealmUri, <<"api_consumers">>) of
+    Gs = [
+        #{
+            <<"name">> => <<"api_clients">>,
+            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>
+        },
+        #{
+            <<"name">> => <<"resource_owners">>,
+            <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
+        }
+    ],
+    [maybe_init_group(RealmUri, G) || G <- Gs].
+
+
+%% @private
+maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
+    case bondy_security_group:lookup(RealmUri, Name) of
         not_found -> 
-            G = #{
-                <<"name">> => <<"api_consumers">>,
-                <<"description">> => <<"A group of users allowed to consume APIs from the Bondy RESTful API Gateway.">>
-            },
             bondy_security_group:add(RealmUri, G);
         _ ->
             ok
