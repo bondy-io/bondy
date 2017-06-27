@@ -8,7 +8,9 @@
 %% @end
 %% =============================================================================
 -module(bondy_rest_api_gateway).
+-include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+
 
 -define(DEFAULT_POOL_SIZE, 200).
 -define(HTTP, bondy_gateway_http_listener).
@@ -47,7 +49,7 @@ load(FName) ->
             Specs = [Spec | specs()],
             _ = [
                 update_dispatch_table(Scheme, Routes) 
-                || {Scheme, Routes} <- Specs
+                || {Scheme, Routes} <- parse_specs(Specs)
             ],
             ok
     catch
@@ -64,6 +66,8 @@ load(FName) ->
 %% Creates a new user adding it to the `api_clients` group.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec add_client(uri(), binary(), binary(), map()) -> ok.
+
 add_client(RealmUri, ClientId, Password, Info) ->
     ok = maybe_init_security(RealmUri),
     Opts = [
@@ -71,7 +75,8 @@ add_client(RealmUri, ClientId, Password, Info) ->
         {"password", binary_to_list(Password)},
         {"groups", "api_clients"}
     ],
-    bondy_security:add_user(RealmUri, ClientId, Opts).
+    _ = bondy_security:add_user(RealmUri, ClientId, Opts),
+    ok.
     
 
 %% -----------------------------------------------------------------------------
@@ -160,7 +165,10 @@ start_http(Routes) ->
     ).
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec start_https(list()) -> {ok, Pid :: pid()} | {error, any()}.
 start_https(Routes) ->
     %% io:format("HTTPS Routes ~p~n", [Routes]),
@@ -186,9 +194,6 @@ start_https(Routes) ->
             ]
         }
     ).
-
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -274,6 +279,8 @@ specs() ->
 
 %% @private
 specs(Path) ->
+    %% @TODO this is loading erlang terms, we need to settle on JSON see load/1
+    %% maybe *.bgs.json and *.bgs
     case filelib:wildcard(filename:join([Path, "*.bgs"])) of
         [] ->
             [];
@@ -291,7 +298,7 @@ specs(Path) ->
     end.
 
 
-
+%% @private
 parse_specs(Specs) ->
     case [bondy_rest_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
@@ -300,6 +307,7 @@ parse_specs(Specs) ->
             bondy_rest_api_gateway_spec_parser:dispatch_table(
                 Parsed, base_routes())
     end.
+
 
 
 %% =============================================================================
