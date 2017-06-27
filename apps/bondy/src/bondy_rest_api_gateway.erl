@@ -21,6 +21,7 @@
 % -export([update_hosts/1]).
 -export([add_consumer/4]).
 -export([dispatch_table/1]).
+-export([load_spec/1]).
 
 
 
@@ -39,7 +40,7 @@ start_listeners() ->
     Specs = specs(),
     % Parsed = [bondy_rest_api_gateway_spec:parse(S) || S <- Specs],
     % Compiled = bondy_rest_api_gateway_spec:compile(Parsed),
-    % SchemeRules = case bondy_rest_api_gateway_spec:load(Compiled) of
+    % SchemeRoutes = case bondy_rest_api_gateway_spec:load(Compiled) of
     %     [] ->
     %         [{<<"http">>, []}];
     %     Val ->
@@ -50,9 +51,9 @@ start_listeners() ->
             [{<<"http">>, []}, {<<"https">>, []}];
         Parsed ->
             bondy_rest_api_gateway_spec_parser:dispatch_table(
-                Parsed, base_rules())
+                Parsed, base_routes())
     end,
-    _ = [start_listener({Scheme, Rules}) || {Scheme, Rules} <- L],
+    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- L],
     ok.
 
 
@@ -63,13 +64,13 @@ start_listeners() ->
 %% -----------------------------------------------------------------------------
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
-start_listener({<<"http">>, Rules}) ->
-    {ok, _} = start_http(Rules),
-    % io:format("HTTP Listener startin with Rules~p~n", [Rules]),
+start_listener({<<"http">>, Routes}) ->
+    {ok, _} = start_http(Routes),
+    % io:format("HTTP Listener startin with Routes~p~n", [Routes]),
     ok;
 
-start_listener({<<"https">>, Rules}) ->
-    {ok, _} = start_https(Rules),
+start_listener({<<"https">>, Routes}) ->
+    {ok, _} = start_https(Routes),
     ok.
 
 
@@ -79,8 +80,8 @@ start_listener({<<"https">>, Rules}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_http(list()) -> {ok, Pid :: pid()} | {error, any()}.
-start_http(Rules) ->
-    % io:format("Rules ~p~n", [Rules]),
+start_http(Routes) ->
+    % io:format("Routes ~p~n", [Routes]),
     % io:format("Table ~p~n", [Table]),
     cowboy:start_clear(
         ?HTTP,
@@ -93,7 +94,7 @@ start_http(Rules) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Rules), 
+                dispatch => cowboy_router:compile(Routes), 
                 max_connections => infinity
             },
             middlewares => [
@@ -108,7 +109,7 @@ start_http(Rules) ->
 
 
 -spec start_https(list()) -> {ok, Pid :: pid()} | {error, any()}.
-start_https(Rules) ->
+start_https(Routes) ->
     cowboy:start_tls(
         ?HTTPS,
         bondy_config:https_acceptors_pool_size(),
@@ -120,7 +121,7 @@ start_https(Rules) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Rules), 
+                dispatch => cowboy_router:compile(Routes), 
                 max_connections => infinity
             },
             middlewares => [
@@ -131,6 +132,33 @@ start_https(Rules) ->
             ]
         }
     ).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec load_spec(file:filename()) -> ok | {error, any()}.
+
+load_spec(FName) ->
+    case file:consult(FName) of
+        {ok, [Spec]} ->
+            L = case bondy_rest_api_gateway_spec_parser:parse(Spec) of
+                [] ->
+                    [{<<"http">>, []}, {<<"https">>, []}];
+                Parsed ->
+                    bondy_rest_api_gateway_spec_parser:dispatch_table(
+                        Parsed, base_routes())
+            end,
+            _ = [
+                update_dispatch_table(Scheme, Routes) || {Scheme, Routes} <- L
+            ],
+            ok;
+        {error, _} = Error ->
+            Error
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -147,20 +175,22 @@ dispatch_table(<<"https">>) ->
 
 dispatch_table(http) ->
     Map = ranch:get_protocol_options(?HTTP),
-    maps_utils:get_path([env, bondy], Map);
+    maps_utils:get_path([env, dispatch], Map);
 
 dispatch_table(https) ->
     Map = ranch:get_protocol_options(?HTTPS),
-    maps_utils:get_path([env, bondy], Map).
+    maps_utils:get_path([env, dispatch], Map).
 
 
-% update_hosts(Hosts) ->
-%     cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Hosts)).
+
 
 
 %% =============================================================================
 %% API: CONSUMERS
 %% =============================================================================
+
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -179,11 +209,29 @@ add_consumer(RealmUri, ClientId, Password, Info) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE: REST LISTENERS
 %% =============================================================================
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+update_dispatch_table(http, Routes) ->
+    update_dispatch_table(<<"http">>, Routes);
+
+update_dispatch_table(https, Routes) ->
+    update_dispatch_table(<<"http">>, Routes);
+
+update_dispatch_table(<<"http">>, Routes) ->
+    cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Routes));
+
+update_dispatch_table(<<"https">>, Routes) ->
+    cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes)).
 
 
 
@@ -222,40 +270,13 @@ specs() ->
     end.
 
 
-base_rules() ->
+%% @private
+base_routes() ->
     %% The WS entrypoint
     [{'_', [{"/ws", bondy_ws_handler, #{}}]}].
 
 
-% %% @private
-% bridge_dispatch_table() ->
-%     Hosts = [
-%         {'_', [
-%             {"/",
-%                 bondy_rest_wamp_bridge_handler, #{entity => entry_point}},
-%             %% Used to establish a websockets connection
-%             {"/ws",
-%                 bondy_ws_handler, #{}},
-%             %% BONDY HTTP/REST - WAMP BRIDGE
-%             % Used by HTTP publishers to publish an event
-%             {"/events",
-%                 bondy_rest_wamp_bridge_handler, #{entity => event}},
-%             % Used by HTTP callers to make a call
-%             {"/calls",
-%                 bondy_rest_wamp_bridge_handler, #{entity => call}},
-%             % Used by HTTP subscribers to list, add and remove HTTP subscriptions
-%             {"/subscriptions",
-%                 bondy_rest_wamp_bridge_handler, #{entity => subscription}},
-%             {"/subscriptions/:id",
-%                 bondy_rest_wamp_bridge_handler, #{entity => subscription}},
-%             %% Used by HTTP callees to list, register and unregister HTTP endpoints
-%             {"/registrations",
-%                 bondy_rest_wamp_bridge_handler, #{entity => registration}},
-%             {"/registrations/:id",
-%                 bondy_rest_wamp_bridge_handler, #{entity => registration}}
-%         ]}
-%     ],
-%     cowboy_router:compile(Hosts).
+
 
 
 %% =============================================================================
