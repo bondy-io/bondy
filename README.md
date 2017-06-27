@@ -11,6 +11,11 @@ We need to allow connections
 bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
 ```
 
+# Manually loading an API Gateway Spec
+```
+bondy_rest_api_gateway:load("/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json").
+```
+
 ## Using a WS Client
 
 ```

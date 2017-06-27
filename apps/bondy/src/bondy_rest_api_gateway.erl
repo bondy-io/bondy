@@ -21,7 +21,7 @@
 % -export([update_hosts/1]).
 -export([add_consumer/4]).
 -export([dispatch_table/1]).
--export([load_spec/1]).
+-export([load/1]).
 
 
 
@@ -139,11 +139,11 @@ start_https(Routes) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec load_spec(file:filename()) -> ok | {error, any()}.
+-spec load(file:filename()) -> ok | {error, any()}.
 
-load_spec(FName) ->
-    case file:consult(FName) of
-        {ok, [Spec]} ->
+load(FName) ->
+    try jsx:consult(FName, [return_maps]) of
+        [Spec] ->
             L = case bondy_rest_api_gateway_spec_parser:parse(Spec) of
                 [] ->
                     [{<<"http">>, []}, {<<"https">>, []}];
@@ -154,9 +154,10 @@ load_spec(FName) ->
             _ = [
                 update_dispatch_table(Scheme, Routes) || {Scheme, Routes} <- L
             ],
-            ok;
-        {error, _} = Error ->
-            Error
+            ok
+    catch
+        error:badarg ->
+            {error, {invalid_specification_format, FName}}
     end.
 
 
