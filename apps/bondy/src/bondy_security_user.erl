@@ -14,19 +14,29 @@
 ]).
 
 -define(USER_SPEC, #{
-    username => #{
+    <<"username">> => #{
+        alias => username,
         required => true,
-        datatype => binary
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
     },
-    password => #{
+    <<"password">> => #{
+        alias => password,
         required => false,
-        datatype => binary
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
     },
-    external_id => #{
+    <<"info">> => #{
+        alias => info,
         required => false,
-        datatype => binary
+        datatype => map
     },
-    groups => #{
+    <<"groups">> => #{
+        alias => groups,
         required => false,
         datatype => {list, binary}
     }
@@ -48,21 +58,17 @@
 %% -----------------------------------------------------------------------------
 -spec add(uri(), user()) -> ok | {error, map()}.
 
-add(RealmUri, User) ->
+add(RealmUri, User0) ->
     try 
-        User1 = maps_utils:validate(User, ?USER_SPEC),
-        #{
-            username := BinName, 
-            password := Pass,
-            groups := Groups
-        } = User1,
-        Username = unicode:characters_to_list(BinName, utf8),
-        Opts = [
-            {info, maps:with(?INFO_KEYS, User1)},
-            {"password", binary_to_list(Pass)},
-            {"groups", Groups}
-        ],
-        bondy_security:add_user(RealmUri, Username, Opts)
+        User1 = maps_utils:validate(User0, ?USER_SPEC),
+        Username = maps:get(<<"username">>, User1),
+        Opts = maps:fold(
+            fun(K, V, Acc) -> 
+                maps:put(?CHARS2LIST(K), V, Acc) end,
+            #{}, 
+            User1
+        ),
+        bondy_security:add_user(RealmUri, Username, maps:to_list(Opts))
     catch
         error:Reason ->
             {error, Reason}
@@ -181,7 +187,7 @@ password(RealmUri, Username) ->
 
 
 %% @private
-to_map(RealmUri, {Username, [PL]}) ->
+to_map(RealmUri, {Username, PL}) ->
     Map0 = proplists:get_value(info, PL, #{}),
     Map1 = Map0#{
         username => Username,

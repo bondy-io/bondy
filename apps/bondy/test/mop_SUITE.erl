@@ -97,3 +97,68 @@ funny_2_test(_) ->
         }
     },
     200 =:= mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
+
+
+with_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt).
+
+
+without_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([y,z])}}">>, Ctxt).
+
+without_2_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"key">> => <<"y">>,
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([{{foo.key}},z])}}">>, Ctxt).
+
+lists_1_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    1 =:= mops:eval(<<"{{foo |> head}}">>, Ctxt).
+
+lists_2_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [2,3] =:= mops:eval(<<"{{foo |> tail}}">>, Ctxt).
+
+lists_3_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [3] =:= mops:eval(<<"{{foo |> last}}">>, Ctxt).
+
+maps_get_1_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
+
+
+maps_get_2_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
+
+
+maps_get_string_1_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
+    1 =:= mops:eval(<<"{{foo |> get('bar')}}">>, Ctxt).

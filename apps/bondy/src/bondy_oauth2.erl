@@ -212,7 +212,7 @@ do_issue_token(Realm, Data0) ->
     %% We generate and sign the JWT
     Scope = grants_to_scope(Grants),
     Claims = #{
-        % <<"id">> => bondy_utils:uuid(),
+        <<"id">> => wamp_utils:rand_uniform(),
         <<"exp">> => Exp,
         <<"iat">> => Now,
         <<"kid">> => Kid,

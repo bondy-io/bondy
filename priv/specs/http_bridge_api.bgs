@@ -1,0 +1,155 @@
+#{
+    <<"host">> => <<"_">>,
+    <<"realm_uri">> => <<"bondy">>,
+    <<"variables">> => #{
+        <<"schemes">> => [<<"http">>],
+        <<"error_codes">> => #{
+            <<"com.magenta.error.not_found">> => 404,
+            <<"wamp.error.authorization_failed">> => 403,
+            <<"wamp.error.cancelled​">> => 500,
+            <<"wamp.error.close_realm">> => 500,
+            <<"wamp.error.disclose_me.not_allowed">> => 500,
+            <<"wamp.error.goodbye_and_out">> => 500,
+            <<"wamp.error.invalid_argument">> => 400,
+            <<"wamp.error.invalid_uri">> => 502,
+            <<"wamp.error.network_failure">> => 502,
+            <<"wamp.error.no_eligible_callee">> => 502,
+            <<"wamp.error.no_such_procedure">> => 501,
+            <<"wamp.error.no_such_realm">> => 502,
+            <<"wamp.error.no_such_registration">> => 502,
+            <<"wamp.error.no_such_role">> => 500,
+            <<"wamp.error.no_such_session">> => 500,
+            <<"wamp.error.no_such_subscription">> => 500,
+            <<"wamp.error.not_authorized">> => 401,
+            <<"wamp.error.option_disallowed.disclose_me">> => 400,
+            <<"wamp.error.option_not_allowed">> => 400,
+            <<"wamp.error.procedure_already_exists">> => 400,
+            <<"wamp.error.system_shutdown">> => 400
+        }
+    },  
+    <<"defaults">> => #{
+        <<"retries">> => 0,
+        <<"timeout">> => 5000,
+        <<"connect_timeout">> => 5000,
+        <<"schemes">> => <<"{{variables.schemes}}">>,
+        <<"headers">> => #{
+            <<"access-control-allow-origin">> => <<"*">>,
+            <<"access-control-allow-methods">> => <<"{{request.methods.access-control-request-method}}">>,
+            <<"access-control-allow-headers">> => <<"{{request.headers.access-control-request-headers}}">>,
+            <<"access-control-max-age">> => 86400
+        }
+    },
+    <<"versions">> =>  #{
+        <<"1.0.0">> => #{
+            <<"base_path">> => <<"/bondy/[v1.0]">>,
+            <<"variables">> => #{
+                <<"host">> => <<"http://localhost:9000">>
+            },
+            <<"defaults">> => #{
+                <<"timeout">> => 20000
+            },
+            <<"paths">> => #{
+                <<"/foo">> => #{
+                    <<"is_collection">> => true,
+                    <<"options">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"head">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"get">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"post">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"uri">> => <<"{{action.result.uri}}">>,
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"put">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    },
+                    <<"delete">> => #{
+                        <<"action">> => #{
+                            <<"type">> => <<"forward">>,
+                            <<"host">> => <<"{{variables.host}}">>
+                        },
+                        <<"response">> => #{
+                            <<"on_error">> => #{
+                                <<"body">> => <<"{{action.error.details}}">>,
+                                <<"headers">> => <<"{{action.error.headers}}">>
+                            },
+                            <<"on_result">> => #{
+                                <<"body">> => <<"{{action.result.body}}">>,
+                                <<"headers">> => <<"{{action.result.headers}}">>
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}.

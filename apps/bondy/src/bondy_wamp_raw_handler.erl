@@ -27,7 +27,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
--define(TIMEOUT, 60000*10).
+-define(TIMEOUT, 60000 * 60).
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).

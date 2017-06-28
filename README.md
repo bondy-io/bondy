@@ -1,14 +1,15 @@
 # LEAPSIGHT BONDY
 
 ## Running a single node
+
+### Compiling
 ```bash
 rebar3 release
-
 ```
 
-We need to allow connections 
-```
-bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
+### Running
+```bash
+_build/default/rel/bondy/bin/bondy start
 ```
 
 ## Using a WS Client
@@ -73,5 +74,5 @@ bondy:call(<<"com.example.add2">>, #{}, [1,1], #{}, C).
 
 bondy:call(<<"bondy.security.users.add">>, #{}, [#{username => <<"chaski">>, password => <<"chaski">>, groups => []}], #{}, C).
 
-bondy:call(<<"bondy.security.users.list">>, #{}, [#{username => <<"chaski">>, password => <<"chaski">>, groups => []}], #{}, C).
+bondy:call(<<"bondy.security.users.list">>, #{}, [], #{}, C).
 ```

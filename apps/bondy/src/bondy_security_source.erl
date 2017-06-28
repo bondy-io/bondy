@@ -26,7 +26,7 @@
     CIDR :: bondy_security:cidr(), 
     Source :: atom(),
     Options :: list()) -> ok.
-add(RealmUri, Usernames, CIDR, Source, Opts ) ->
+add(RealmUri, Usernames, CIDR, Source, Opts) ->
     bondy_security:add_source(RealmUri, Usernames, CIDR, Source, Opts).
 
 

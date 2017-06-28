@@ -14,13 +14,15 @@
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
-
-
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
 -define(PIPE_OP, <<$|,$>>>).
+-define(GET_OP, <<$-,$>,$>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{
@@ -55,7 +57,9 @@
     sp = binary:compile_pattern(?START)                         ::  any(),
     dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
     pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
-    ep = binary:compile_pattern(?END)                           ::  any()
+    gop = binary:compile_pattern(?GET_OP)                       ::  any(),
+    ep = binary:compile_pattern(?END)                           ::  any(),
+    re = element(2, re:compile("^\\s+|\\s+$", ""))              ::  any()
 }).
 -type state()       :: #state{}.
 
@@ -176,7 +180,7 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
 
 do_eval(Bin0, #state{acc = []} = St0) ->
     %% We start processing a binary
-    Bin1 = trim(Bin0),
+    Bin1 = trim(Bin0, St0),
     case binary:match(Bin1, St0#state.sp) of
         nomatch ->
             %% Not a mop expression, so we return and finish
@@ -217,7 +221,7 @@ do_eval(Bin, #state{is_open = true} = St0) ->
             St1 = St0#state{is_open = false},
             do_eval(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
-            %% We did not find a matching closing mustaches
+            %% We did not find matching closing mustaches
             error(badarg)
     end;
 
@@ -238,7 +242,7 @@ do_eval(Bin, #state{is_open = false} = St) ->
 %% @private
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Accummulates the evaluation in the case of strings.
+%% Accumulates the evaluation in the case of strings.
 %% @end
 %% -----------------------------------------------------------------------------
 acc(#state{acc = []} = St, Val) ->
@@ -267,10 +271,10 @@ acc(#state{acc = Acc} = St, Val) ->
 parse_expr(Bin, #state{context = Ctxt} = St) ->
     case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
-            get_value(trim(Val), Ctxt);
+            get_value(trim(Val, St), Ctxt);
         [Val | Ops] ->
             %% We evaluate the value and apply the ops in the pipe
-            apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt));
+            apply_ops([trim(P, St) || P <- Ops], get_value(trim(Val, St), Ctxt), Ctxt);
         _ ->
             error(badarg)
     end.
@@ -294,8 +298,6 @@ get_value(Key, Ctxt) ->
 
 
 %% @private
-
-
 get(Rem, '$mop_proxy') ->
     {ok, '$mop_proxy', Rem};
 
@@ -318,53 +320,189 @@ get([H|T], Ctxt) when is_map(Ctxt) ->
 
 
 %% @private
-apply_ops([H|T], Acc) ->
-    apply_ops(T, apply_op(H, Acc));
+apply_ops([H|T], Acc, Ctxt) ->
+    apply_ops(T, apply_op(H, Acc, Ctxt), Ctxt);
 
-apply_ops([], Acc) ->
+apply_ops([], Acc, _) ->
     Acc.
 
 
 %% @private
-apply_op(<<"integer">>, Val) when is_binary(Val) ->
+apply_op(Op, Val, _) 
+when is_function(Val, 1) andalso (
+    Op == <<"integer">> orelse 
+    Op == <<"float">> orelse
+    Op == <<"abs">> orelse
+    Op == <<"head">> orelse
+    Op == <<"tail">> orelse
+    Op == <<"last">> orelse
+    Op == <<"length">>
+    ) ->
+    fun(X) -> apply_op(Op, Val(X), X) end;
+
+apply_op(_, <<>>, _) ->
+    <<>>;
+
+apply_op(<<"abs">>, Val, _) when is_number(Val) ->
+    abs(Val);
+
+apply_op(<<"integer">>, Val, _) when is_binary(Val) ->
     binary_to_integer(Val);
 
-apply_op(<<"integer">>, Val) when is_list(Val) ->
+apply_op(<<"integer">>, Val, _) when is_list(Val) ->
     list_to_integer(Val);
 
-apply_op(<<"integer">>, Val) when is_integer(Val) ->
+apply_op(<<"integer">>, Val, _) when is_integer(Val) ->
     Val;
 
-apply_op(<<"integer">>, Val) when is_float(Val) ->
+apply_op(<<"integer">>, Val, _) when is_float(Val) ->
     trunc(Val);
 
-apply_op(<<"integer">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end;
-
-apply_op(<<"float">>, Val) when is_binary(Val) ->
+apply_op(<<"float">>, Val, _) when is_binary(Val) ->
     binary_to_float(Val);
 
-apply_op(<<"float">>, Val) when is_list(Val) ->
+apply_op(<<"float">>, Val, _) when is_list(Val) ->
     float(list_to_integer(Val));
 
-apply_op(<<"float">>, Val) when is_float(Val) ->
+apply_op(<<"float">>, Val, _) when is_float(Val) ->
     Val;
 
-apply_op(<<"float">>, Val) when is_integer(Val) ->
+apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
 
-apply_op(<<"float">> = Op, Val) when is_function(Val, 1) ->
-    fun(X) -> apply_op(Op, Val(X)) end;
+apply_op(<<"head">>, [], _) ->
+    <<>>;
 
-apply_op(Op, _) ->
-    error({unknown_pipe_operator, Op}).
+apply_op(<<"head">>, Val, _) when is_list(Val) ->
+    hd(Val);
 
+apply_op(<<"tail">>, [], _) ->
+    %% To avoid getting an exception at runtime we return []
+    [];
+
+apply_op(<<"tail">>, Val, _) when is_list(Val) ->
+    tl(Val);
+
+apply_op(<<"last">>, [], _) ->
+    <<>>;
+
+apply_op(<<"last">>, Val, _) when is_list(Val) ->
+    lists:last(Val);
+
+apply_op(<<"length">>, Val, _) when is_list(Val) ->
+    length(Val);
+
+%% Custom ops
+apply_op(Bin, Val, Ctxt) ->
+    apply_custom_op(Bin, Val, Ctxt).
 
 
 %% @private
-%% TODO Replace this as it id not efficient, it generates a new binary each time
-trim(Bin) ->
-    re:replace(Bin, "^\\s+|\\s+$", "", [{return, binary}, global]).
+apply_custom_op(<<"with", _/binary>> = Op, Val, _)
+when is_function(Val, 1) ->
+    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+
+apply_custom_op(<<"get", _/binary>> = Op, Val, _)
+when is_function(Val, 1) ->
+    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+
+apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    Fold = fun(K, {L, R}) ->
+        case maybe_eval(K, Ctxt) of
+            V when is_function(V, 1) ->
+                {L, [V|R]};
+            V ->
+                {[V|L], R}
+        end
+    end,
+    Args = get_arguments(Rest, Op, <<"])">>),
+    case lists:foldl(Fold, {[], []}, Args) of
+        {L, []} ->
+            maps:with(L, Val);
+        {L, R} ->
+            fun(X) -> 
+                Keys = lists:append(L, [F(X) || F <- R]),
+                maps:with(Keys, Val) 
+            end
+    end;
+
+apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    Fold = fun(K, {L, R}) ->
+        case maybe_eval(K, Ctxt) of
+            V when is_function(V, 1) ->
+                {L, [V|R]};
+            V ->
+                {[V|L], R}
+        end
+    end,
+    Args = get_arguments(Rest, Op, <<"])">>),
+    case lists:foldl(Fold, {[], []}, Args) of
+        {L, []} ->
+            maps:with(L, Val);
+        {L, R} ->
+            fun(X) -> 
+                Keys = lists:append(L, [F(X) || F <- R]),
+                maps:with(Keys, Val) 
+            end
+    end;
+
+apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+        [Key] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val) end;
+        [Key] ->
+            maps:get(Key, Val);
+        [Key, Default] when is_function(Key, 1), is_function(Default, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default(X)) end;
+        [Key, Default] when is_function(Default, 1) ->
+            fun(X) -> maps:get(Key, Val, Default(X)) end;
+        [Key, Default] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default) end;
+        [Key, Default] ->
+            maps:get(Key, Val, Default);
+        _ -> 
+            error({invalid_expression, Op})
+    end;
+
+apply_custom_op(Op, _, _) ->
+    error({invalid_expression, Op}).
+
+
+%% @private
+maybe_eval(Term, Ctxt) ->
+    case unquote(Term) of
+        {true, Key} ->
+            Key;
+        {false, Expr} ->
+            eval(Expr, Ctxt)
+    end.
+
+
+%% @private
+unquote(<<$', Rest/binary>>) ->
+    {true, binary:part(Rest, {0, byte_size(Rest) - 1})};
+    
+unquote(Bin) ->
+    {false, Bin}.    
+
+
+%% @private
+get_arguments(Rest, Op, Terminal) ->
+    Len = byte_size(Rest),
+    TLen = size(Terminal),
+    case binary:matches(Rest, Terminal) of
+        [{Pos, TLen}] when Len - TLen == Pos ->
+            Part = binary:part(Rest, 0, Len - TLen),
+            binary:split(Part, <<$,>>, [global, trim_all]);
+        _ ->
+            error({invalid_expression, Op})
+    end.
+
+
+%% @private
+%% TODO Replace this as it is not efficient, it generates a new binary each time
+trim(Bin, St) ->
+    re:replace(Bin, St#state.re, "", [{return, binary}, global]).
 
 
 %% @private
