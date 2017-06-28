@@ -1,9 +1,9 @@
--module(juno_cli_registry).
+-module(bondy_cli_registry).
 
 -define(MODS, [
-    juno_cluster_cli,
-    juno_security_cli,
-    juno_api_gateway_cli
+    bondy_cluster_cli,
+    bondy_security_cli,
+    bondy_api_gateway_cli
 ]).
 
 -export([register_node_finder/0]).
@@ -29,7 +29,7 @@ register_cli() ->
 
 -spec load_schema() -> ok.
 load_schema() ->
-    case application:get_env(juno, schema_dirs) of
+    case application:get_env(bondy, schema_dirs) of
         {ok, Directories} ->
             ok = clique_config:load_schema(Directories);
         _ ->
