@@ -55,7 +55,7 @@ load(FName) ->
             ok
     catch
         error:badarg ->
-            {error, {invalid_specification_format, FName}}
+            {error, invalid_specification_format}
     end.
 
 

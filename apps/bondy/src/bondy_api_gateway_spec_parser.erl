@@ -794,7 +794,7 @@ from_file(Filename) ->
         {ok, [Spec]} when is_map(Spec) ->
             {ok, parse(Spec, get_context_proxy())};
         _ ->
-            {error, {invalid_specification_format, Filename}}
+            {error, invalid_specification_format}
     end.
 
 
