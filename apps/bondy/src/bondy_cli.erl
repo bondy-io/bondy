@@ -1,4 +1,4 @@
--module(bondy_cli_registry).
+-module(bondy_cli).
 
 -define(MODS, [
     bondy_cluster_cli,
