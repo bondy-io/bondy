@@ -323,6 +323,9 @@ handle_inbound_messages(_, St, _) ->
 maybe_open_session({ok, St}) ->
     open_session(St);
 
+maybe_open_session({error, {Code, Term}, St}) when is_atom(Term) ->
+    maybe_open_session({error, {Code, ?CHARS2BIN(atom_to_list(Term))}, St});
+
 maybe_open_session({error, {realm_not_found, Uri}, St}) ->
     abort(
         ?WAMP_ERROR_NO_SUCH_REALM,
@@ -350,6 +353,8 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     St1 = St0#wamp_state{challenge_sent = {true, AuthMethod}},
     Bin = wamp_encoding:encode(M, St1#wamp_state.encoding),
     {reply, Bin, St1}.
+
+
 
 
 %% -----------------------------------------------------------------------------
