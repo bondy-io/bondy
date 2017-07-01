@@ -73,6 +73,7 @@
 
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -180,7 +181,7 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
 
 do_eval(Bin0, #state{acc = []} = St0) ->
     %% We start processing a binary
-    Bin1 = trim(Bin0, St0),
+    Bin1 = trim(Bin0),
     case binary:match(Bin1, St0#state.sp) of
         nomatch ->
             %% Not a mop expression, so we return and finish
@@ -271,10 +272,10 @@ acc(#state{acc = Acc} = St, Val) ->
 parse_expr(Bin, #state{context = Ctxt} = St) ->
     case binary:split(Bin, St#state.pop, [global]) of
         [Val] ->
-            get_value(trim(Val, St), Ctxt);
+            get_value(trim(Val), Ctxt);
         [Val | Ops] ->
             %% We evaluate the value and apply the ops in the pipe
-            apply_ops([trim(P, St) || P <- Ops], get_value(trim(Val, St), Ctxt), Ctxt);
+            apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
             error(badarg)
     end.
@@ -398,11 +399,52 @@ apply_op(Bin, Val, Ctxt) ->
 
 
 %% @private
-apply_custom_op(<<"with", _/binary>> = Op, Val, _)
+
+apply_custom_op(<<"get", _/binary>> = Op, Val, _)
 when is_function(Val, 1) ->
     fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
-apply_custom_op(<<"get", _/binary>> = Op, Val, _)
+apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+        [Key] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val) end;
+        [Key] ->
+            maps:get(Key, Val);
+        [Key, Default] when is_function(Key, 1), is_function(Default, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default(X)) end;
+        [Key, Default] when is_function(Default, 1) ->
+            fun(X) -> maps:get(Key, Val, Default(X)) end;
+        [Key, Default] when is_function(Key, 1) ->
+            fun(X) -> maps:get(Key(X), Val, Default) end;
+        [Key, Default] ->
+            maps:get(Key, Val, Default);
+        _ -> 
+            error({invalid_expression, Op})
+    end;
+
+apply_custom_op(<<"merge(", _/binary>> = Op, Val, _)
+when is_function(Val, 1) ->
+    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+
+apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+    case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
+        [Arg] when is_function(Arg, 1) ->
+            fun(X) -> maps:merge(Val, Arg(X)) end;
+        [Arg] when is_map(Arg) ->
+            maps:merge(Val, Arg);
+        [<<"_">>, R] when is_function(R, 1) ->
+            fun(X) -> maps:merge(Val, R(X)) end;
+        [<<"_">>, R] when is_map(R) ->
+            maps:merge(Val, R);
+        [L, <<"_">>] when is_function(L, 1) ->
+            fun(X) -> maps:merge(L(X), Val) end;
+        [L, <<"_">>] ->
+            maps:merge(L, Val);
+        _ -> 
+            error({invalid_expression, Op})
+    end;
+
+apply_custom_op(<<"with", _/binary>> = Op, Val, _)
 when is_function(Val, 1) ->
     fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
@@ -446,26 +488,8 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
             end
     end;
 
-apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
-        [Key] when is_function(Key, 1) ->
-            fun(X) -> maps:get(Key(X), Val) end;
-        [Key] ->
-            maps:get(Key, Val);
-        [Key, Default] when is_function(Key, 1), is_function(Default, 1) ->
-            fun(X) -> maps:get(Key(X), Val, Default(X)) end;
-        [Key, Default] when is_function(Default, 1) ->
-            fun(X) -> maps:get(Key, Val, Default(X)) end;
-        [Key, Default] when is_function(Key, 1) ->
-            fun(X) -> maps:get(Key(X), Val, Default) end;
-        [Key, Default] ->
-            maps:get(Key, Val, Default);
-        _ -> 
-            error({invalid_expression, Op})
-    end;
-
-apply_custom_op(Op, _, _) ->
-    error({invalid_expression, Op}).
+apply_custom_op(Op, Val, _) ->
+    error({invalid_expression, [Op, Val]}).
 
 
 %% @private
@@ -501,8 +525,8 @@ get_arguments(Rest, Op, Terminal) ->
 
 %% @private
 %% TODO Replace this as it is not efficient, it generates a new binary each time
-trim(Bin, St) ->
-    re:replace(Bin, St#state.re, "", [{return, binary}, global]).
+%% trim(Bin, St) ->
+%%     re:replace(Bin, St#state.re, "", [{return, binary}, global]).
 
 
 %% @private
@@ -514,3 +538,27 @@ term_to_iolist(Term) when is_list(Term) ->
     
 term_to_iolist(Term) ->
     io_lib:format("~p", [Term]).
+
+
+
+%% @private
+trim(Bin) ->
+    trimb(Bin, <<>>).
+
+%% @private
+trimb(<<>>, Acc) ->
+    Acc;
+
+trimb(<<C, Rest/binary>>, Acc) when C =:= $\s; C =:= $\t ->
+    trimb(Rest, Acc);
+
+trimb(Bin, Acc) ->
+    case binary:match(Bin, [<<$\s>>, <<$\t>>], []) of 
+        nomatch ->
+            <<Acc/binary, Bin/binary>>;
+        {Pos, 1} ->
+            Part = binary:part(Bin, 0, Pos),
+            trimb(
+                binary:part(Bin, Pos, byte_size(Bin) - Pos), 
+                <<Acc/binary, Part/binary>>)
+    end.

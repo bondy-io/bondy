@@ -162,3 +162,41 @@ maps_get_2_test(_) ->
 maps_get_string_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
     1 =:= mops:eval(<<"{{foo |> get('bar')}}">>, Ctxt).
+
+maps_get_string_2_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
+    1 =:= mops:eval(<<"{{foo |> get(bar)}}">>, Ctxt).
+
+maps_get_string_3_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    1 =:= mops:eval(<<"{{foo |> get(bar, 1) |> integer}}">>, Ctxt).
+
+maps_get_string_4_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    <<>> =:= mops:eval(<<"{{foo |> get(bar, '')}}">>, Ctxt).
+
+maps_get_string_5_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    <<>> =:= mops:eval(<<"{{foo |> get(bar, '' )}}">>, Ctxt).
+
+
+merge_left_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge({{bar}})}}">>, Ctxt).
+
+merge_left_2_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
+
+merge_right_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 1} =:= mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).
