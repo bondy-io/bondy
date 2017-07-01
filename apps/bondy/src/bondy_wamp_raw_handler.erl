@@ -89,7 +89,8 @@ init({Ref, Socket, Transport, _Opts}) ->
         socket = Socket,
         transport = Transport
     },
-    io:format("Init ~p~n", [self()]),
+    lager:info(
+        <<"Establishing raw socket connection with peer '~p'~n">>, [self()]),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
