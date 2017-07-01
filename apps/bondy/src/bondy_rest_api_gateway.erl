@@ -328,7 +328,8 @@ maybe_init_security(RealmUri) ->
             <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
         }
     ],
-    [maybe_init_group(RealmUri, G) || G <- Gs].
+    [maybe_init_group(RealmUri, G) || G <- Gs],
+    ok.
 
 
 %% @private
