@@ -67,7 +67,7 @@ maybe_start_router_services() ->
         true ->
             ok = start_tcp_handlers(),
             % {ok, _} = bondy_rest_admin_api:start_admin_http(),
-            bondy_rest_api_gateway:start_listeners();
+            bondy_api_gateway:start_listeners();
         false ->
             ok
     end.

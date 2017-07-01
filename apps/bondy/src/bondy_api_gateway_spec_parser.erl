@@ -2,11 +2,11 @@
 %% Copyright (C) Ngineo Limited 2017. All rights reserved.
 %% -----------------------------------------------------------------------------
 
--module(bondy_rest_api_gateway_spec_parser).
+-module(bondy_api_gateway_spec_parser).
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
--define(MOD_PREFIX, "bondy_rest_api_gateway_handler_").
+-define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
 -define(DEFAULT_TIMEOUT, 60000).
@@ -1236,8 +1236,8 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
     
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
-    Mod = bondy_rest_api_gateway_handler,
-    %% State informally defined in bondy_rest_api_gateway_handler
+    Mod = bondy_api_gateway_handler,
+    %% State informally defined in bondy_api_gateway_handler
     State = #{
         api_spec => Spec3,
         realm_uri => Realm, 

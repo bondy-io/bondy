@@ -7,7 +7,7 @@
 %%
 %% @end
 %% =============================================================================
--module(bondy_rest_api_gateway).
+-module(bondy_api_gateway).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -101,9 +101,9 @@ add_resource_owner(RealmUri, Username, Password, Info) ->
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    % Parsed = [bondy_rest_api_gateway_spec:parse(S) || S <- Specs],
-    % Compiled = bondy_rest_api_gateway_spec:compile(Parsed),
-    % SchemeRoutes = case bondy_rest_api_gateway_spec:load(Compiled) of
+    % Parsed = [bondy_api_gateway_spec:parse(S) || S <- Specs],
+    % Compiled = bondy_api_gateway_spec:compile(Parsed),
+    % SchemeRoutes = case bondy_api_gateway_spec:load(Compiled) of
     %     [] ->
     %         [{<<"http">>, []}];
     %     Val ->
@@ -157,7 +157,7 @@ start_http(Routes) ->
             },
             middlewares => [
                 cowboy_router, 
-                % bondy_rest_api_gateway,
+                % bondy_api_gateway,
                 % bondy_security_middleware, 
                 cowboy_handler
             ]
@@ -188,7 +188,7 @@ start_https(Routes) ->
             },
             middlewares => [
                 cowboy_router, 
-                % bondy_rest_api_gateway,
+                % bondy_api_gateway,
                 % bondy_security_middleware, 
                 cowboy_handler
             ]
@@ -300,11 +300,11 @@ specs(Path) ->
 
 %% @private
 parse_specs(Specs) ->
-    case [bondy_rest_api_gateway_spec_parser:parse(S) || S <- Specs] of
+    case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
             [{<<"http">>, []}, {<<"https">>, []}];
         Parsed ->
-            bondy_rest_api_gateway_spec_parser:dispatch_table(
+            bondy_api_gateway_spec_parser:dispatch_table(
                 Parsed, base_routes())
     end.
 
