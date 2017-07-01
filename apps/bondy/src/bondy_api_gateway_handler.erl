@@ -1,5 +1,5 @@
 %% 
-%%  bondy_rest_api_gateway_handler.erl -
+%%  bondy_api_gateway_handler.erl -
 %% 
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
 %% 
@@ -30,7 +30,7 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_rest_api_gateway_handler).
+-module(bondy_api_gateway_handler).
 -include("bondy.hrl").
 
 -type state() :: #{

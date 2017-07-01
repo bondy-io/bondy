@@ -2,11 +2,11 @@
 %% Copyright (C) Ngineo Limited 2017. All rights reserved.
 %% -----------------------------------------------------------------------------
 
--module(bondy_rest_api_gateway_spec).
+-module(bondy_api_gateway_spec).
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
--define(MOD_PREFIX, "bondy_rest_api_gateway_handler_").
+-define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
 -define(DEFAULT_TIMEOUT, 60000).
