@@ -96,7 +96,7 @@ init(Req0, _) ->
             end;
         {error, invalid_subprotocol} ->
             %% At the moment we only support WAMP, not plain WS
-            lager:info(
+            _ = lager:info(
                 <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
             %% Returning ok will cause the handler 
             %% to stop in websocket_handle
@@ -142,7 +142,7 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above, 
     %% review and eliminate.
-    lager:error(<<"Unsupported message ~p">>, [Data]),
+    _ = lager:error(<<"Unsupported message ~p">>, [Data]),
     {stop, St};
 
 websocket_handle({ping, _Msg}, St) ->
@@ -169,7 +169,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
 
 websocket_handle(Data, St) ->
     %% We ignore this message and carry on listening
-    lager:debug(<<"Unsupported message ~p">>, [Data]),
+    _ = lager:debug(<<"Unsupported message ~p">>, [Data]),
     {ok, St}.
 
 
@@ -194,7 +194,7 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
     {ok, St};
 
 websocket_info({stop, Reason}, St) ->
-    lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
     {stop, St};
 
 websocket_info(_, St0) ->
@@ -322,14 +322,14 @@ do_terminate(St) ->
 %% i.e. determined by the client
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_subprotocol(cowboy_req:req()) -> 
+-spec select_subprotocol(list() | undefined) -> 
     {ok, bondy_wamp_protocol:subprotocol(), binary()} 
     | {error, invalid_subprotocol}.
 
 select_subprotocol(undefined) ->
     {error, invalid_subprotocol};
 
-select_subprotocol(L) ->
+select_subprotocol(L) when is_list(L) ->
     try  
         Fun = fun(X, Acc) ->
             case bondy_wamp_protocol:validate_subprotocol(X) of
@@ -340,12 +340,14 @@ select_subprotocol(L) ->
             end
         end,
         case lists:foldl(Fun, [], L) of
-            [] -> {error, invalid_subprotocol};
-            L -> hd(L)
+            [] -> 
+                {error, invalid_subprotocol};
+            L -> 
+                hd(L)
         end
     catch
-         throw:{ok, SP, X} ->
-            {ok, SP, X}
+         {ok, _SP, _X} = OK ->
+            OK
     end.
 
 

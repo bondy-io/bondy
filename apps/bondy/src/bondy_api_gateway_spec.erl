@@ -714,7 +714,7 @@ end).
 %% (`cowboy_request:request()').
 %% @end
 %% -----------------------------------------------------------------------------
--spec update_context(cowboy_req:req() | map(), map()) -> map().
+-spec update_context(cowboy_req:req() | {atom(), map()}, map()) -> map().
 
 update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
     M = #{
@@ -740,7 +740,7 @@ update_context(Req0, Ctxt) ->
         <<"path">> => cowboy_req:path(Req1),
         <<"host">> => cowboy_req:host(Req1),
         <<"port">> => cowboy_req:port(Req1),
-        <<"headers">> => maps:from_list(cowboy_req:headers(Req1)),
+        <<"headers">> => cowboy_req:headers(Req1),
         <<"query_string">> => cowboy_req:qs(Req1),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req1)),
         <<"bindings">> => to_binary_keys(cowboy_req:bindings(Req1)),
@@ -977,7 +977,7 @@ parse_path_elements([H|T], P0, Ctxt) ->
             case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
                 {ok, Val} ->
                     maps:put(H, Val, P0);
-                false ->
+                error ->
                     error({
                         badarg, 
                         <<"The key ", H/binary, " does not exist in path.">>
@@ -1159,7 +1159,7 @@ do_compile(API) ->
 -spec compile_version(binary(), binary(), tuple()) ->
     [{mfb(), [scheme_rule()]}] | no_return().
 
-compile_version(_, _, #{<<"is_active">> := false}) ->
+compile_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
 
 compile_version(Host, Realm, {_Name, Spec}) ->

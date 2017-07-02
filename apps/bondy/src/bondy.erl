@@ -37,7 +37,8 @@ start() ->
 %% It calls `send/3' with a timeout option set to 5 secs.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message()) -> ok | no_return().
+-spec send(peer_id(), wamp_message()) -> ok.
+
 send(PeerId, M) ->
     send(PeerId, M, #{timeout => 5000}).
 
@@ -50,7 +51,7 @@ send(PeerId, M) ->
 %% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(peer_id(), wamp_message(), map()) -> ok.
 
 send({_, Pid}, M, _) when Pid =:= self() ->
     Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
@@ -102,6 +103,7 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec ack(pid(), reference()) -> ok.
+
 ack(Pid, Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
@@ -136,7 +138,12 @@ ack(Pid, Ref) ->
 %% A blocking call.
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(binary(), map(), list(), map(), bondy_context:context()) -> 
+-spec call(
+    binary(), 
+    map(), 
+    list() | undefined, 
+    map() | undefined, 
+    bondy_context:context()) -> 
     {ok, map(), bondy_context:context()} 
     | {error, map(), bondy_context:context()}.
 
@@ -172,7 +179,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
             {error, error_map(inconsistency_error), Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1}
+            {error, error_map(Error), Ctxt1};
+        {stop, _, Ctxt1} ->
+            %% A sync reply (should not ever happen with calls)
+            {error, error_map(inconsistency_error), Ctxt1}
     end.
 
 

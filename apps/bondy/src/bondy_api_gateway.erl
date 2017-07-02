@@ -40,7 +40,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec load(file:filename()) -> ok | {error, any()}.
+-spec load(file:filename()) -> 
+    ok | {error, {invalid_specification_format, any()}}.
 
 load(FName) ->
     try jsx:consult(FName, [return_maps]) of
@@ -66,7 +67,7 @@ load(FName) ->
 %% Creates a new user adding it to the `api_clients` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_client(uri(), binary(), binary(), map()) -> ok.
+-spec add_client(uri(), binary(), binary(), map()) -> ok | {error, term()}.
 
 add_client(RealmUri, ClientId, Password, Info) ->
     ok = maybe_init_security(RealmUri),
@@ -75,8 +76,7 @@ add_client(RealmUri, ClientId, Password, Info) ->
         {"password", binary_to_list(Password)},
         {"groups", "api_clients"}
     ],
-    _ = bondy_security:add_user(RealmUri, ClientId, Opts),
-    ok.
+    bondy_security:add_user(RealmUri, ClientId, Opts).
     
 
 %% -----------------------------------------------------------------------------
@@ -85,6 +85,9 @@ add_client(RealmUri, ClientId, Password, Info) ->
 %% Creates a new user adding it to the `resource_owners` group.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec add_resource_owner(uri(), binary(), binary(), map()) -> 
+    ok | {error, term()} | no_return().
+
 add_resource_owner(RealmUri, Username, Password, Info) ->
     ok = maybe_init_security(RealmUri),
     Opts = [
@@ -233,11 +236,13 @@ dispatch_table(https) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec update_dispatch_table(atom() | binary(), list()) -> ok.
+
 update_dispatch_table(http, Routes) ->
     update_dispatch_table(<<"http">>, Routes);
 
 update_dispatch_table(https, Routes) ->
-    update_dispatch_table(<<"http">>, Routes);
+    update_dispatch_table(<<"https">>, Routes);
 
 update_dispatch_table(<<"http">>, Routes) ->
     cowboy:set_env(?HTTP, dispatch, cowboy_router:compile(Routes));
