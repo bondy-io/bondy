@@ -100,7 +100,7 @@ create_metrics() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_stats() -> any().
+-spec get_stats() -> list().
 
 get_stats() ->
     exometer:get_values([bondy]) ++ expand_disk_stats(disk_stats()).
@@ -152,39 +152,39 @@ baddress(T) when is_binary(T) ->
 %% @private
 do_update({session_opened, Realm, _SessionId, IP}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, node, sessions], 1),
-    exometer:update([bondy, node, sessions, active], 1),
+    _ = exometer:update([bondy, node, sessions], 1),
+    _ = exometer:update([bondy, node, sessions, active], 1),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, sessions, Realm], 1, spiral, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, sessions, active, Realm], 1, counter, []),
     
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, sessions, BIP], 1, spiral, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, sessions, active, BIP], 1, counter, []);
 
 do_update({session_closed, SessionId, Realm, IP, Secs}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, node, sessions, active], -1),
-    exometer:update([bondy, node, sessions, duration], Secs),
+    _ = exometer:update([bondy, node, sessions, active], -1),
+    _ = exometer:update([bondy, node, sessions, duration], Secs),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, sessions, active, Realm], -1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, sessions, duration, Realm], Secs, histogram, []),
     
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, sessions, active, BIP], -1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, sessions, duration, BIP], Secs, histogram, []),
     
     %% Cleanup
-    exometer:delete([bondy, node, session, messages, SessionId]),
+    _ = exometer:delete([bondy, node, session, messages, SessionId]),
     lists:foreach(
         fun({Name, _, _}) ->
-            exometer:delete(Name)
+            _ = exometer:delete(Name)
         end,
         exometer:find_entries([bondy, node, session, messages, '_', SessionId])
     ), 
@@ -192,63 +192,63 @@ do_update({session_closed, SessionId, Realm, IP, Secs}) ->
 
 do_update({message, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, node, messages], 1),
-    exometer:update([bondy, node, messages, size], Sz),
-    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
+    _ = exometer:update([bondy, node, messages], 1),
+    _ = exometer:update([bondy, node, messages, size], Sz),
+    _ = exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, BIP], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, Type, BIP], 1, spiral, []);
 
 
 do_update({message, Realm, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, node, messages], 1),
-    exometer:update([bondy, node, messages, size], Sz),
-    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
+    _ = exometer:update([bondy, node, messages], 1),
+    _ = exometer:update([bondy, node, messages, size], Sz),
+    _ = exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, BIP], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, Type, BIP], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, Realm], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, size, Realm], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, Type, Realm], 1, spiral, []);
 
 do_update({message, Session, Realm, IP, Type, Sz}) ->
     BIP = baddress(IP),
-    exometer:update([bondy, node, messages], 1),
-    exometer:update([bondy, node, messages, size], Sz),
-    exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
+    _ = exometer:update([bondy, node, messages], 1),
+    _ = exometer:update([bondy, node, messages, size], Sz),
+    _ = exometer:update_or_create([bondy, node, messages, Type], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, BIP], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, size, BIP], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, ip, messages, Type, BIP], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, Realm], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, size, Realm], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, realm, messages, Type, Realm], 1, spiral, []),
 
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, session, messages, Session], 1, counter, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, session, messages, size, Session], Sz, histogram, []),
-    exometer:update_or_create(
+    _ = exometer:update_or_create(
         [bondy, node, session, messages, Type, Session], 1, spiral, []).
 
 

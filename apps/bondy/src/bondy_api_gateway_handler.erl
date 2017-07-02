@@ -348,10 +348,10 @@ decode_body_in_context(St) ->
 
 %% @private
 -spec perform_action(binary(), map(), state()) ->
-    {ok, Response :: map(), state()} 
-    | {ok, Code :: integer(), Response :: map(), state()} 
+    {ok, Response :: any(), state()} 
+    | {ok, Code :: integer(), Response :: any(), state()} 
     | {error, Response :: map(), state()} 
-    | {error, Code :: integer(), Response :: map(), state()}.
+    | {error, Code :: integer(), Response :: any(), state()}.
 
 perform_action(
     _, #{<<"action">> := #{<<"type">> := <<"static">>}} = Spec, St0) ->
@@ -401,7 +401,7 @@ perform_action(
     case hackney:request(
         method_to_atom(Method), Url, maps:to_list(Headers), Body, Opts) 
     of
-        {ok, StatusCode, RespHeaders} when Method =:= head ->
+        {ok, StatusCode, RespHeaders} when Method =:= <<"HEAD">> ->
             from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
         
         {ok, StatusCode, RespHeaders, ClientRef} ->

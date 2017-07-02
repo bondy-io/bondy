@@ -35,10 +35,11 @@ uuid() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_uuid(Term :: bitstring()) -> boolean().
+-spec is_uuid(any()) -> boolean().
 
 is_uuid(Term) when is_bitstring(Term) ->
     uuid:is_v4(uuid:string_to_uuid(bitstring_to_list(Term)));
+
 is_uuid(_) ->
     false.
 
@@ -98,6 +99,7 @@ encode(msgpack, Term) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_id(Scope :: global | {router, uri()} | {session, id()}) -> id().
+
 get_id(global) ->
     %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
     %% distribution_ over the complete range [0, 2^53]
@@ -106,7 +108,7 @@ get_id(global) ->
 get_id({router, _}) ->
     get_id(global);
 
-get_id({session, SessionId}) ->
+get_id({session, SessionId}) when is_integer(SessionId) ->
     %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)

@@ -126,7 +126,7 @@
 
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
 
--type peer_id() :: {pid(), integer()}.
+-type peer_id() :: {integer(), pid()}.
 
 
 

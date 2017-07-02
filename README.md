@@ -12,6 +12,24 @@ rebar3 release
 _build/default/rel/bondy/bin/bondy start
 ```
 
+```
+%% We make sure the magenta realm exists
+Realm = bondy_realm:get(<<"magenta">>).
+%% We disable security until we migrate to CHASKI as client
+%% as the current client does not support authentication
+%% this does not disable OAUTH2 at the Gateway level
+bondy_realm:disable_security(Realm).
+%% Each application that accesses the API needs require credentials.
+%% For simplicity we will allows connections from all users from any IP 
+%% using a Password
+bondy_rest_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
+bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
+bondy_rest_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
+%% We load the magenta api spec
+bondy_rest_api_gateway:load("/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json").
+```
+
+
 ## Using a WS Client
 
 ```

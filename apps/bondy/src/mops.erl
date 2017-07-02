@@ -16,13 +16,18 @@
 %%  limitations under the License.
 %% -----------------------------------------------------------------------------
 %% @doc
+%% This module enables the evaluation of a very simple mustache-inspired 
+%% Expression lnguage against a Context, where the latter is represented by a 
+%% map where all keys are binaries.
+%%
+%% The following are the key characteristics and features:
+%% * 
 %% @end
 %% -----------------------------------------------------------------------------
 -module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
 -define(PIPE_OP, <<$|,$>>>).
--define(GET_OP, <<$-,$>,$>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{
@@ -31,6 +36,7 @@
         required => true,
         default => binary,
         allow_null => false,
+        allow_undefined => false,
         datatype => {in, [binary, atom]}
     },
     %% Allows to register custom pipe operators (aka filters)
@@ -57,12 +63,12 @@
     sp = binary:compile_pattern(?START)                         ::  any(),
     dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
     pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
-    gop = binary:compile_pattern(?GET_OP)                       ::  any(),
     ep = binary:compile_pattern(?END)                           ::  any(),
     re = element(2, re:compile("^\\s+|\\s+$", ""))              ::  any()
 }).
--type state()       :: #state{}.
 
+-type state()       ::  #state{}.
+-type context()     ::  map().
 
 
 
@@ -84,11 +90,12 @@
 %% Calls eval/3.
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval(any(), Ctxt :: map()) -> any() | no_return().
+-spec eval(any(), context()) -> any().
+
 eval(<<>>, _) ->
     <<>>;
 
-eval(Val, Ctxt) when is_binary(Val) ->
+eval(Val, Ctxt) when is_binary(Val), is_map(Ctxt) ->
     eval(Val, Ctxt, #{});
 
 eval(Val, _) ->
@@ -96,9 +103,9 @@ eval(Val, _) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Evaluates **Term** ( `any()') using the context **Ctxt** (`map()').
+%% Evaluates **Term** using the context **Ctxt**
 %% Returns **Term** in case the term is not a binary and does not contain a 
-%% mops expression. Otherwise, it tries to resolve the expression using the
+%% mops expression. Otherwise, it tries to evaluate the expression using the
 %% **Ctxt**.
 %%
 %% The following are example mops expressions and their meanings:
@@ -127,9 +134,10 @@ eval(Val, _) ->
 %% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval(Term :: any(), Ctxt :: map(), Opts :: map()) -> any() | no_return().
+-spec eval(Term :: any(), Ctxt :: context(), Opts :: map()) -> 
+    any() | no_return().
 
-eval(<<>>, _, _) ->
+eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
     <<>>;
 
 eval(Val, Ctxt, Opts) when is_binary(Val), is_map(Ctxt), is_map(Opts) ->
@@ -139,7 +147,7 @@ eval(Val, Ctxt, Opts) when is_binary(Val), is_map(Ctxt), is_map(Opts) ->
         opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
     });
 
-eval(Val, _, _) ->
+eval(Val, _Ctxt, _Opts) ->
     Val.
 
 

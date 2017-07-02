@@ -783,7 +783,7 @@ auth_with_source(Source, UserData, M) ->
     RealmUri :: binary(), 
     Username :: string(), 
     Options :: [{string(), term()}]) ->
-    ok | {error, term()}.
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
 add_user(RealmUri, Username, Options) ->
     Uri = name2bin(RealmUri),
     FP = ?USERS_PREFIX(Uri),
@@ -796,13 +796,17 @@ add_user(RealmUri, Username, Options) ->
 %% -----------------------------------------------------------------------------
 -spec add_group(
     binary(), Groupname :: string(), Options :: [{string(), term()}]) ->
-    ok | {error, term()}.
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
 add_group(RealmUri, Groupname, Options) ->
     Uri = name2bin(RealmUri),
     add_role(Uri, name2bin(Groupname), Options, fun group_exists/2,
              ?GROUPS_PREFIX(Uri)).
 
+
 %% @private
+-spec add_role(uri(), binary(), list(), function(), binary()) ->
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
+
 add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
 add_role(_, <<"on">>, _Options, _Fun, _Prefix) ->
