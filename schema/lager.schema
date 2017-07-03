@@ -40,26 +40,6 @@
   {datatype, {enum, [on, off]}}
 ]}.
 
-%% @doc the log level of the watchdog log
-{mapping, "log.watchdog.level", "lager.handlers", [
-  {default, error},
-  {datatype, {enum, [debug, info, warning, error]}}]}.
-
-%% @doc the log level of the watchdog log
-{mapping, "log.watchdog.cluster", "lager.handlers", [
-  {default, "fifo"},
-  {datatype, string}]}.
-
-%% @doc the log level of the watchdog log
-{mapping, "log.watchdog.service", "lager.handlers", [
-  {default, "snarl"},
-  {datatype, string}]}.
-
-%% @doc The ip of the watchdog server
-{mapping, "log.watchdog.host.$name", "lager.handlers",
- [{commented, {"127.0.0.1", 4444 }},
-  {datatype, ip}]}.
-
 { translation,
   "lager.handlers",
   fun(Conf) ->
@@ -74,17 +54,6 @@
                                               {size, 10485760},
                                               {date, "$D0"},
                                               {count, 5}]}]
-    end,
-
-    WatchdogHandler = case cuttlefish_util:filter_by_variable_starts_with("log.watchdog.host", Conf) of
-      undefined -> [];
-      [] -> [];
-      WatchdogLogServers ->
-        Servers1 = [S || {_Name, S} <- WatchdogLogServers],
-        WatchdogLogLevel = cuttlefish:conf_get("log.watchdog.level", Conf),
-        WDCluster = cuttlefish:conf_get("log.watchdog.cluster", Conf),
-        WDService = cuttlefish:conf_get("log.watchdog.service", Conf),
-        [{lager_watchdog, [WDCluster, WDService, WatchdogLogLevel, Servers1]}]
     end,
 
     ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
@@ -113,7 +82,7 @@
                                               {count, 5}]}]
     end,
 
-    SyslogHandler ++ ConsoleHandlers ++ ErrorHandler ++ DebugHandler ++ WatchdogHandler
+    SyslogHandler ++ ConsoleHandlers ++ ErrorHandler ++ DebugHandler
   end
 }.
 
@@ -176,21 +145,3 @@ end}.
   {default, 100},
   {datatype, integer}
 ]}.
-
-%% SASL
-%% We should never care about this
-{mapping, "sasl", "sasl.sasl_error_logger", [
-  {default, off},
-  {datatype, {enum, [on, off]}},
-  {level, advanced}
-]}.
-
-{ translation,
-  "sasl.sasl_error_logger",
-  fun(Conf) ->
-    case cuttlefish:conf_get("sasl", Conf) of %%how to pull default?
-        on -> true;
-        _ -> false
-    end
-  end
-}.
