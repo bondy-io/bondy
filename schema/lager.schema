@@ -18,19 +18,19 @@
 
 %% @doc location of the console log
 {mapping, "log.console.file", "lager.handlers", [
-  {default, "{{log_path}}/console.log"}
+  {default, "{{platform_log_dir}}/console.log"}
 ]}.
 
 %% *gasp* notice the same @mapping!
 %% @doc location of the error log
 {mapping, "log.error.file", "lager.handlers", [
-  {default, "{{log_path}}/error.log"}
+  {default, "{{platform_log_dir}}/error.log"}
 ]}.
 
 %% *gasp* notice the same @mapping!
 %% @doc location of the debug log
 {mapping, "log.debug.file", "lager.handlers", [
-  {default, "{{log_path}}/debug.log"}
+  {default, "{{platform_log_dir}}/debug.log"}
 ]}.
 
 %% *gasp* notice the same @mapping!
@@ -44,7 +44,7 @@
   "lager.handlers",
   fun(Conf) ->
     SyslogHandler = case cuttlefish:conf_get("log.syslog", Conf) of
-      on ->  [{lager_syslog_backend, ["riak", daemon, info]}];
+      on ->  [{lager_syslog_backend, ["bondy", daemon, info]}];
       _ -> []
     end,
     ErrorHandler = case cuttlefish:conf_get("log.error.file", Conf) of
@@ -91,7 +91,7 @@
 %% @doc Whether to write a crash log, and where.
 %% Commented/omitted/undefined means no crash logger.
 {mapping, "log.crash.file", "lager.crash_log", [
-  {default, "{{log_path}}/crash.log"}
+  {default, "{{platform_log_dir}}/crash.log"}
 ]}.
 
 %% @doc Maximum size in bytes of events in the crash log - defaults to 65536
@@ -140,7 +140,7 @@
 end}.
 
 %% @doc maximum number of error_logger messages to handle in a second
-%% lager 2.0.0 shipped with a limit of 50, which is a little low for riak's startup
+%% lager 2.0.0 shipped with a limit of 50, which is a little low for our startup
 {mapping, "log.error.messages_per_second", "lager.error_logger_hwm", [
   {default, 100},
   {datatype, integer}
