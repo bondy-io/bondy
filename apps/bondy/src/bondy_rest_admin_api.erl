@@ -112,15 +112,15 @@ admin_dispatch_table() ->
                 bondy_rest_admin_handler, #{entity => node}},
             %% GATEWAY CAPABILITY
             {"/apis", 
-                bondy_rest_api_gateway_handler, 
+                bondy_api_gateway_handler, 
                 #{entity => api, is_collection => true}},
             {"/apis/:id", 
-                bondy_rest_api_gateway_handler, #{entity => api}},
+                bondy_api_gateway_handler, #{entity => api}},
             {"/apis/:id/procedures", 
-                bondy_rest_api_gateway_handler, 
+                bondy_api_gateway_handler, 
                 #{entity => api, is_collection => true}},
             {"/apis/:id/procedures/:uri", 
-                bondy_rest_api_gateway_handler, #{entity => api}}
+                bondy_api_gateway_handler, #{entity => api}}
         ]}
     ],
     cowboy_router:compile(Hosts).

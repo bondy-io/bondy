@@ -22,11 +22,11 @@ bondy_realm:disable_security(Realm).
 %% Each application that accesses the API needs require credentials.
 %% For simplicity we will allows connections from all users from any IP 
 %% using a Password
-bondy_rest_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
+bondy_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
 bondy_security:add_source(<<"magenta">>, all, {{0,0,0,0},0}, password, []).
-bondy_rest_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
+bondy_api_gateway:add_client(<<"magenta">>, <<"1234">>, <<"5678">>, #{}).
 %% We load the magenta api spec
-bondy_rest_api_gateway:load("/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json").
+bondy_api_gateway:load("/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json").
 ```
 
 
