@@ -122,18 +122,24 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_private_key(realm(), Kid :: integer()) -> map().
+-spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
 get_private_key(#realm{private_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_public_key(realm(), Kid :: integer()) -> map().
+-spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
 get_public_key(#realm{public_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------

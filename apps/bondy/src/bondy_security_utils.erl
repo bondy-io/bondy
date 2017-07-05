@@ -2,16 +2,14 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--type auth_error_reason()       ::  realm_not_found 
-                                    | {missing_param, binary()} 
-                                    | {user_not_found, binary()}
-                                    | {invalid_scheme, binary()}.
+-type auth_error_reason()           ::  bondy_oauth2:error() 
+                                        | invalid_scheme.
 
 -type auth_scheme()                 ::  wampcra | basic | bearer | digest.                              
 -type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}
-                                    | {basic, binary(), binary()}
-	                                | {bearer, binary()}
-	                                | {digest, [{binary(), binary()}]}.
+                                        | {basic, binary(), binary()}
+	                                    | {bearer, binary()}
+	                                    | {digest, [{binary(), binary()}]}.
 
 
 -export([authenticate/4]).
@@ -38,15 +36,7 @@ authenticate(?WAMPCRA_AUTH, {?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
         Realm, ?CHARS2LIST(AuthId), {hash, Signature}, conn_info(Peer));
 
 authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
-    %% TODO support OAUTH2
-    case bondy_oauth2:verify_jwt(Realm, Token) of
-        {true, Claims}  ->
-           {ok, Claims};
-        {expired, _} ->
-            {error, invalid_token};
-        {false, _Claims} ->
-            {error, invalid_scheme}
-    end;
+    bondy_oauth2:verify_jwt(Realm, Token);
 
 authenticate(basic, {basic, Username, Pass}, Realm, Peer) ->
     bondy_security:authenticate(

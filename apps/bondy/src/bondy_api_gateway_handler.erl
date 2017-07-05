@@ -412,7 +412,7 @@ perform_action(
             Error = #{
                 <<"status_code">> => 502,
                 <<"headers">> => #{},
-                <<"details">> => bondy_error:error_map(Reason)
+                <<"details">> => bondy_error:error_map(Reason, 502)
             },
             Ctxt1 = update_context({error, Error}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
@@ -535,7 +535,7 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
         <<"code">> := Code,
         <<"message">> := Msg,
         <<"description">> := Desc
-    } = Body = bondy_error:error_map({Error, 401}),
+    } = Body = bondy_error:error_map(Error, 401),
     Auth = <<
         Scheme/binary,
         " realm=", $", Realm/binary, $", $\,,
