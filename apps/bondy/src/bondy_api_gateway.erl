@@ -309,20 +309,21 @@ specs() ->
 specs(Path) ->
     %% @TODO this is loading erlang terms, we need to settle on JSON see load/1
     %% maybe *.bgs.json and *.bgs
-    case filelib:wildcard(filename:join([Path, "*.bgs"])) of
+    case filelib:wildcard(filename:join([Path, "*.json"])) of
         [] ->
             [];
         FNames ->
             Fold = fun(FName, Acc) ->
-                case file:consult(FName) of
-                    {ok, Terms} ->
-                        [Terms|Acc];
-                    {error, _} ->
+                try jsx:consult(FName, [return_maps]) of
+                    [Spec] ->
+                        [Spec|Acc]
+                catch
+                    error:badarg ->
                         lager:error("Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
                         Acc
                 end
             end,
-            lists:append(lists:foldl(Fold, [], FNames))
+            lists:foldl(Fold, [], FNames)
     end.
 
 
@@ -330,7 +331,7 @@ specs(Path) ->
 parse_specs(Specs) ->
     case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
-            [{<<"http">>, []}, {<<"https">>, []}];
+            [{<<"http">>, []}];
         Parsed ->
             bondy_api_gateway_spec_parser:dispatch_table(
                 Parsed, base_routes())
