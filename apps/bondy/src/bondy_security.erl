@@ -1370,9 +1370,12 @@ validate_groups_option(RealmUri, Options) ->
     end.
 
 %% Handle 'password' option if given
+validate_password_option(Pass, Options) when is_list(Pass) ->
+    validate_password_option(list_to_binary(Pass), Options);
+    
 validate_password_option(Pass, Options) ->
     {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
-        bondy_pw_auth:hash_password(list_to_binary(Pass)),
+        bondy_pw_auth:hash_password(Pass),
     NewOptions = stash("password", {"password",
                                     [{hash_pass, HashedPass},
                                      {auth_name, AuthName},
