@@ -17,7 +17,7 @@
 -define(HTTPS, bondy_gateway_https_listener).
 
 %% API
--export([add_client/4]).
+-export([add_client/2]).
 -export([add_resource_owner/4]).
 -export([dispatch_table/1]).
 -export([load/1]).
@@ -59,25 +59,48 @@ load(FName) ->
     end.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Adds an API client to realm RealmUri.
 %% Creates a new user adding it to the `api_clients` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_client(uri(), binary(), binary(), map()) -> ok | {error, term()}.
+-spec add_client(uri(), map()) -> ok | {error, term()}.
 
-add_client(RealmUri, ClientId, Password, Info) ->
-    ok = maybe_init_security(RealmUri),
-    Opts = [
-        {info, Info},
-        {"password", binary_to_list(Password)},
-        {"groups", "api_clients"}
-    ],
-    bondy_security:add_user(RealmUri, ClientId, Opts).
-    
+add_client(RealmUri, Info0) ->
+    try 
+        ok = maybe_init_security(RealmUri),
+        Info1 = maps_utils:validate(Info0, #{
+            <<"client_id">> => #{
+                required => true,
+                allow_null => false,
+                datatype => binary,
+                default => fun() -> bondy_oauth2:generate_fragment(48) end
+            },
+            <<"client_secret">> => #{
+                required => true,
+                allow_null => false,
+                datatype => binary,
+                default => fun() -> bondy_oauth2:generate_fragment(64) end
+            },
+            <<"description">> => #{
+                datatype => binary
+            }
+        }),
+        {Props, Info2} = maps_utils:split(
+            [<<"client_id">>, <<"client_secret">>], Info1),
+        Opts = [
+            {info, Info2},
+            {"password", maps:get(<<"client_secret">>, Props)},
+            {"groups", "api_clients"}
+        ],
+        bondy_security:add_user(
+            RealmUri, maps:get(<<"client_id">>, Props), Opts)
+    catch
+        error:Error when is_map(Error) ->
+            {error, Error}
+    end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
