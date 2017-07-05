@@ -296,7 +296,8 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     {ok, _Ctxt2} = dequeue_call(M#error.request_id, Fun, Ctxt0),
     ok;
 
-handle_message(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+handle_message(
+    #call{procedure_uri = <<"com.leapsight.bondy", _/binary>>} = M, Ctxt) ->
     bondy_dealer_meta:handle_call(M, Ctxt);
 
 handle_message(#call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->

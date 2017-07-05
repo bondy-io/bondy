@@ -32,10 +32,10 @@
 %% -----------------------------------------------------------------------------
 error_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
-    <<"com.bondy.error.", R/binary>>;
+    <<"com.leapsight.bondy.error.", R/binary>>;
 
 error_uri(Reason) when is_binary(Reason) ->
-    <<"com.bondy.error.", Reason/binary>>.
+    <<"com.leapsight.bondy.error.", Reason/binary>>.
 
 
 
