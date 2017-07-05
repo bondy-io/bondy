@@ -1,4 +1,4 @@
-# LEAPSIGHT BONDY
+# LEAPSIGHT BONDY RANDOM NOTES
 
 ## Running a single node
 
@@ -80,4 +80,20 @@ And in the other shells do:
 
 ```erlang
 plumtree_metadata:get({foo,bar}, <<"fede">>).
+```
+
+## Making a local call
+
+Open a bondy shell 
+
+```
+C = #{realm_uri => <<"magenta">>, awaiting_calls => sets:new(), peer => {{127,0,0,1}, 8080}, session => bondy_session:new({{127,0,0,1}, 8080}, <<"magenta">>, #{roles => #{caller => #{features => #{}}}}), timeout => 5000}.
+bondy:call(<<"com.example.add2">>, #{}, [1,1], #{}, C).
+
+bondy:call(<<"com.leapsight.bondy.security.users.add">>, #{}, [#{username => <<"chaski">>, password => <<"chaski">>, groups => []}], #{}, C).
+
+bondy:call(<<"com.leapsight.bondy.security.users.list">>, #{}, [], #{}, C).
+
+C1 = #{realm_uri => <<"com.leapsight.bondy">>, awaiting_calls => sets:new(), peer => {{127,0,0,1}, 8080}, session => bondy_session:new({{127,0,0,1}, 8080}, <<"magenta">>, #{roles => #{caller => #{features => #{}}}}), timeout => 5000}.
+bondy:call(<<"com.leapsight.bondy.api_gateway.add_client">>, #{}, [<<"magenta">>, #{<<"description">> => <<"a test client">>}], #{}, C1).
 ```
