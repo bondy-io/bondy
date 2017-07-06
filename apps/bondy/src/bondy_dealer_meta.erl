@@ -139,8 +139,26 @@ handle_call(#call{procedure_uri = ?BONDY_USER_DELETE} = M, Ctxt) ->
 
 handle_call(#call{procedure_uri = ?BONDY_USER_LIST} = M, Ctxt) ->
     ReqId = M#call.request_id,
-    Args = [bondy_security_user:list(maps:get(realm_uri, Ctxt))],
-    R = wamp_message:result(ReqId, #{}, Args, #{}),
+    R = case M#call.arguments of
+        [Uri] ->
+            case bondy_security_user:list(Uri) of
+                L when is_list(L) ->
+                    wamp_message:result(ReqId, #{}, [L], #{});
+                {error, Reason} ->
+                    #{<<"code">> := Code} = Map = bondy_error:error_map(Reason),
+                    wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        Map,
+                        bondy_error:error_uri(Code))
+            end;
+        _ ->
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_USER_LOOKUP} = M, Ctxt) ->
