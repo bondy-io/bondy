@@ -526,16 +526,11 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
     {ok, StatusCode, Response, St1}.
 
   
-
-
-
-
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    #{
-        <<"code">> := Code,
-        <<"message">> := Msg,
-        <<"description">> := Desc
-    } = Body = bondy_error:error_map(Error, 401),
+    Body = bondy_error:error_map(Error, 401),
+    Code = maps:get(<<"code">>, Body, <<>>),
+    Msg = maps:get(<<"message">>, Body, <<>>),
+    Desc = maps:get(<<"description">>, Body, <<>>),
     Auth = <<
         Scheme/binary,
         " realm=", $", Realm/binary, $", $\,,

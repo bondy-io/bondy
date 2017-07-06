@@ -158,7 +158,7 @@ error_map(oauth2_invalid_scope) ->
 
 error_map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
-    maps:put(<<"status_code">>, Msg, error_map(invalid_client));
+    maps:put(<<"status_code">>, Msg, error_map(oauth2_invalid_client));
 
 error_map({invalid_json, Data}) ->
     #{
@@ -170,7 +170,7 @@ error_map({invalid_json, Data}) ->
 
 error_map({invalid_msgpack, Data}) ->
     #{
-        <<"code">> => invalid_data,
+        <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid msgpack.">>,
         value => Data,
         <<"description">> => <<"The data provided is not a valid msgpack.">>
