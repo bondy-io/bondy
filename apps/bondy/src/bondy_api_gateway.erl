@@ -201,7 +201,7 @@ start_https(Routes) ->
     cowboy:start_tls(
         ?HTTPS,
         bondy_config:https_acceptors_pool_size(),
-        [{port, bondy_config:https_port()}],
+        [{port, bondy_config:https_port()} | bondy_config:ssl_files()],
         #{
             env => #{
                 bondy => #{
@@ -331,7 +331,7 @@ specs(Path) ->
 parse_specs(Specs) ->
     case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
-            [{<<"http">>, []}];
+            [{<<"http">>, []}, {<<"https">>, []}];
         Parsed ->
             bondy_api_gateway_spec_parser:dispatch_table(
                 Parsed, base_routes())
@@ -369,7 +369,3 @@ maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
         _ ->
             ok
     end.
-    
-
-
-

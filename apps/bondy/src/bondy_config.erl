@@ -39,6 +39,7 @@
 -export([tls_max_connections/0]).
 -export([tls_port/0]).
 -export([ws_compress_enabled/0]).
+-export([ssl_files/0]).
 
 
 
@@ -163,6 +164,10 @@ tls_max_connections() ->
 
 tls_port() ->
     application:get_env(?APP, tls_port, 10083).
+
+
+ssl_files() ->
+    application:get_env(?APP, ssl, []).
 
 
 %% =============================================================================
