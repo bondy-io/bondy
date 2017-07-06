@@ -847,9 +847,8 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
 
     %% We make sure all realms exists
     Realms = leap_relation:project(R0, [{var, realm}]),
-    _ = [bondy_realm:get(Realm) || {Realm} <- leap_relation:tuples(Realms)],
+    _ = [ensure_setup_realm(Realm) || {Realm} <- leap_relation:tuples(Realms)],
 
-    
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
     A0 = leap_relation:relation(?SCHEME_HEAD, [
@@ -1307,7 +1306,7 @@ content_types_accepted(L) when is_list(L) ->
 
 content_types_accepted(<<"application/json">>) ->
     % {<<"application/json">>, from_json};
-    {{<<"application">>, <<"json">>, '*'}, from_json};
+    {{<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]}, from_json};
 
 
 content_types_accepted(<<"application/msgpack">>) ->
@@ -1321,7 +1320,7 @@ content_types_provided(L) when is_list(L) ->
 
 content_types_provided(<<"application/json">>) ->
     % {<<"application/json">>, to_json};
-    {{<<"application">>, <<"json">>, '*'}, to_json};
+    {{<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]}, to_json};
 
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
@@ -1329,5 +1328,14 @@ content_types_provided(<<"application/msgpack">>) ->
 
 
 
+ensure_setup_realm(Uri) ->
+    case bondy_realm:lookup(Uri) of
+        not_found ->
+            ok = bondy_realm:put(Uri),
+            %% TODO get this from spec
+            bondy_security:add_source(Uri, all, {{0,0,0,0},0}, password, []);
+        _ ->
+            ok
+    end.
 
 
