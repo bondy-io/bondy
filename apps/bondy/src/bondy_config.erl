@@ -15,22 +15,13 @@
 -define(DEFAULT_POOL_TYPE, transient).
 
 -export([priv_dir/0]).
--export([admin_http_port/0]).
 -export([automatically_create_realms/0]).
 -export([connection_lifetime/0]).
 -export([coordinator_timeout/0]).
--export([http_acceptors_pool_size/0]).
--export([http_max_connections/0]).
--export([http_port/0]).
--export([https_acceptors_pool_size/0]).
--export([https_max_connections/0]).
--export([https_port/0]).
 -export([api_gateway/0]).
 -export([is_router/0]).
 -export([load_regulation_enabled/0]).
--export([pool_capacity/1]).
--export([pool_size/1]).
--export([pool_type/1]).
+-export([router_pool/0]).
 -export([request_timeout/0]).
 -export([tcp_acceptors_pool_size/0]).
 -export([tcp_max_connections/0]).
@@ -39,7 +30,7 @@
 -export([tls_max_connections/0]).
 -export([tls_port/0]).
 -export([ws_compress_enabled/0]).
--export([ssl_files/0]).
+-export([tls_files/0]).
 
 
 
@@ -79,33 +70,6 @@ priv_dir() ->
             Val
     end.
 
-http_acceptors_pool_size() ->
-    application:get_env(?APP, http_acceptors_pool_size, 200).
-
-http_max_connections() ->
-    application:get_env(?APP, http_max_connections, 1000).
-
-http_port() ->
-    Default = 18080,
-    try 
-        case application:get_env(?APP, http_port, Default) of
-            Int when is_integer(Int) -> Int;
-            Str -> list_to_integer(Str)
-        end
-    catch
-        _:_ -> Default
-    end.
-
-admin_http_port() ->
-    Default = 18081,
-    try 
-        case application:get_env(?APP, admin_http_port, Default) of
-            Int when is_integer(Int) -> Int;
-            Str -> list_to_integer(Str)
-        end
-    catch
-        _:_ -> Default
-    end.
 
 
 %% @doc
@@ -114,18 +78,6 @@ admin_http_port() ->
 %% @end
 ws_compress_enabled() -> true.
 
-%% =============================================================================
-%% HTTPS
-%% =============================================================================
-
-https_acceptors_pool_size() ->
-    application:get_env(?APP, https_acceptors_pool_size, 200).
-
-https_max_connections() ->
-    application:get_env(?APP, https_max_connections, 1000000).
-
-https_port() ->
-    application:get_env(?APP, https_port, 8443).
 
 
 %% =============================================================================
@@ -166,8 +118,8 @@ tls_port() ->
     application:get_env(?APP, tls_port, 10083).
 
 
-ssl_files() ->
-    application:get_env(?APP, ssl, []).
+tls_files() ->
+    application:get_env(?APP, tls_files, []).
 
 
 %% =============================================================================
@@ -202,69 +154,31 @@ coordinator_timeout() ->
     application:get_env(?APP, coordinator_timeout, 3000).
 
 
-%% @doc Returns the type of the pool with name PoolName. The type can be one of
-%% the following:
-%% * permanent - the pool contains a (size) number of permanent workers
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns a proplist containing the following keys:
+%% 
+%% * type - can be one of the following:
+%%     * permanent - the pool contains a (size) number of permanent workers
 %% under a supervision tree. This is the "events as messages" design pattern.
-%%  * transient - the pool contains a (size) number of supervisors each one
+%%      * transient - the pool contains a (size) number of supervisors each one
 %% supervision a transient process. This is the "events as messages" design
 %% pattern.
-%% @end
--spec pool_type(PoolName :: atom()) -> permanent | transient.
-pool_type(bondy_router_pool) ->
-    application:get_env(
-        ?APP, bondy_router_pool_type, permanent);
-
-pool_type(bondy_stats_pool) ->
-    application:get_env(
-        ?APP, bondy_stats_pool_type, permanent);
-
-pool_type(bondy_registry_manager_pool) ->
-    %% Should always be permanent
-    permanent.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% The number of workers used by the load regulation system 
+%% * size - The number of workers used by the load regulation system 
 %% for the provided pool
+%%% * capacity - The usage limit enforced by the load regulation system for the provided pool
 %% @end
 %% -----------------------------------------------------------------------------
--spec pool_size(Resource :: atom()) -> pos_integer().
-pool_size(bondy_router_pool) ->
-    application:get_env(
-        ?APP, bondy_router_pool_size, ?DEFAULT_RESOURCE_SIZE);
+-spec router_pool() -> list().
 
-pool_size(bondy_stats_pool) ->
-    application:get_env(
-        ?APP, bondy_stats_pool_size, ?DEFAULT_RESOURCE_SIZE);
+router_pool() ->
+    {ok, Pool} = application:get_env(?APP, router_pool),
+    Pool.
 
-pool_size(bondy_registry_manager_pool) ->
-    application:get_env(
-        ?APP, bondy_registry_manager_pool_size, ?DEFAULT_RESOURCE_SIZE).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% The usage limit enforced by the load regulation system for the provided pool
-%% @end
-%% -----------------------------------------------------------------------------
--spec pool_capacity(Resource :: atom()) -> pos_integer().
-pool_capacity(bondy_router_pool) ->
-    application:get_env(
-        ?APP, bondy_router_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
-
-pool_capacity(bondy_stats_pool) ->
-    application:get_env(
-        ?APP, bondy_stats_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY);
-
-pool_capacity(bondy_registry_manager_pool) ->
-    application:get_env(
-        ?APP, bondy_registry_manager_pool_capacity, ?DEFAULT_RESOURCE_CAPACITY).
 
 
 %% CALL
 
 request_timeout() ->
     application:get_env(
-        ?APP, request_timeout, infinity).
+        ?APP, request_timeout, 5*60*1000). % 5 mins

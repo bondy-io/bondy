@@ -79,7 +79,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(POOL_NAME, bondy_router_pool).
+-define(POOL_NAME, router_pool).
 -define(ROUTER_ROLES, #{
     broker => ?BROKER_FEATURES,
     dealer => ?DEALER_FEATURES
@@ -146,8 +146,8 @@ roles() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Starts a sidejob pool of workers according to the configured pool_type 
-%% {@link bondy_config:pool_type/1} for the pool named 'bondy_router_pool'.
+%% Starts a sidejob pool of workers according to the configuration
+%% for the entry named 'router_pool'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_pool() -> ok.
@@ -274,12 +274,13 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_start_pool() ->
-    Size = bondy_config:pool_size(?POOL_NAME),
-    Capacity = bondy_config:pool_capacity(?POOL_NAME),
-    case bondy_config:pool_type(?POOL_NAME) of
-        permanent ->
+    Opts = bondy_config:router_pool(),
+    {_, Size} = lists:keyfind(size, 1, Opts),
+    {_, Capacity} = lists:keyfind(capacity, 1, Opts),
+    case lists:keyfind(type, 1, Opts) of
+        {_, permanent} ->
             sidejob:new_resource(?POOL_NAME, ?MODULE, Capacity, Size);
-        transient ->
+        {_, transient} ->
             sidejob:new_resource(?POOL_NAME, sidejob_supervisor, Capacity, Size)
     end.
 

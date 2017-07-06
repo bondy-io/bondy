@@ -65,29 +65,15 @@ maybe_init_bondy_realm() ->
 maybe_start_router_services() ->
     case bondy_config:is_router() of
         true ->
-            ok = start_tcp_handlers(),
-            % {ok, _} = bondy_rest_admin_api:start_admin_http(),
-            bondy_api_gateway:start_listeners();
+            ok = bondy_wamp_raw_handler:start_listeners(),
+            _ = bondy_api_gateway:start_admin_listeners(),
+            _ = bondy_api_gateway:start_listeners();
         false ->
             ok
     end.
 
 
-%% @private
--spec start_tcp_handlers() -> ok.
-start_tcp_handlers() ->
-    ServiceName = bondy_wamp_raw_listener,
-    PoolSize = bondy_config:tcp_acceptors_pool_size(),
-    Port = bondy_config:tcp_port(),
-    MaxConnections = bondy_config:tcp_max_connections(),
-    {ok, _} = ranch:start_listener(
-        ServiceName,
-        PoolSize,
-        ranch_tcp,
-        [{port, Port}],
-        bondy_wamp_raw_handler, []),
-    ranch:set_max_connections(ServiceName, MaxConnections),
-    ok.
+
 
 %% A custom qdate parser for the ISO8601 dates where timezone == Z.
 date_parser() ->
