@@ -130,7 +130,7 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
                 {error, _} = Error ->
                     Error
             end;
-        not_found ->
+        undefined ->
             {error, oauth2_invalid_grant}
     end.
 
