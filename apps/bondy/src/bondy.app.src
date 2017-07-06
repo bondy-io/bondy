@@ -1,7 +1,7 @@
 {application, bondy,
  [
      {description, "BONDY is an open source networking platform for distributed and MicroServices and IoT applications written in Erlang, implementing primarily the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
-    {vsn, "0.2.0"},
+    {vsn, "0.5.0"},
     {registered, []},
     {mod, {bondy_app, []}},
     {applications,[
