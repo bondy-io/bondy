@@ -86,8 +86,7 @@ sys_monitor_count() ->
 -spec create_metrics() -> ok.
 
 create_metrics() ->
-
-    %% create_metrics(system_specs()).
+    % create_metrics(system_specs()),
     create_metrics(bc_specs()),
     create_metrics(static_specs()).
 
@@ -299,55 +298,55 @@ static_specs() ->
 
 
 %% borrowed from Riak Core
-system_specs() ->
-    [
-     {
-         cpu_stats, 
-         cpu, 
-         [{sample_interval, 5000}], 
-         [
-            {nprocs, cpu_nprocs},
-            {avg1  , cpu_avg1},
-            {avg5  , cpu_avg5},
-            {avg15 , cpu_avg15}
-        ]
-    },
-    {
-        mem_stats, 
-        {function, memsup, get_memory_data, [], match, {total, allocated, '_'}},
-        [], 
-        [
-            {total, mem_total},
-            {allocated, mem_allocated}
-        ]
-    },
-    {
-        memory_stats, 
-        {function, erlang, memory, [], proplist, [
-            total, 
-            processes, 
-            processes_used,
-            system, 
-            atom, 
-            atom_used, 
-            binary,
-            code, 
-            ets
-        ]},
-        [], 
-        [
-            {total         , memory_total},
-            {processes     , memory_processes},
-            {processes_used, memory_processes_used},
-            {system        , memory_system},
-            {atom          , memory_atom},
-            {atom_used     , memory_atom_used},
-            {binary        , memory_binary},
-            {code          , memory_code},
-            {ets           , memory_ets}
-        ]
-    }
-].
+% system_specs() ->
+%     [
+%      {
+%          cpu_stats, 
+%          cpu, 
+%          [{sample_interval, 5000}], 
+%          [
+%             {nprocs, cpu_nprocs},
+%             {avg1  , cpu_avg1},
+%             {avg5  , cpu_avg5},
+%             {avg15 , cpu_avg15}
+%         ]
+%     },
+%     {
+%         mem_stats, 
+%         {function, memsup, get_memory_data, [], match, {total, allocated, '_'}},
+%         [], 
+%         [
+%             {total, mem_total},
+%             {allocated, mem_allocated}
+%         ]
+%     },
+%     {
+%         memory_stats, 
+%         {function, erlang, memory, [], proplist, [
+%             total, 
+%             processes, 
+%             processes_used,
+%             system, 
+%             atom, 
+%             atom_used, 
+%             binary,
+%             code, 
+%             ets
+%         ]},
+%         [], 
+%         [
+%             {total         , memory_total},
+%             {processes     , memory_processes},
+%             {processes_used, memory_processes_used},
+%             {system        , memory_system},
+%             {atom          , memory_atom},
+%             {atom_used     , memory_atom_used},
+%             {binary        , memory_binary},
+%             {code          , memory_code},
+%             {ets           , memory_ets}
+%         ]
+%     }
+% ].
 
 
 
@@ -401,7 +400,7 @@ disk_stats() ->
 %% @end
 %% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
 %% -----------------------------------------------------------------------------
-app_stats() ->
-    [{list_to_atom(atom_to_list(A) ++ "_version"), list_to_binary(V)}
-     || {A,_,V} <- application:which_applications()].
+% app_stats() ->
+%     [{list_to_atom(atom_to_list(A) ++ "_version"), list_to_binary(V)}
+%      || {A,_,V} <- application:which_applications()].
     
