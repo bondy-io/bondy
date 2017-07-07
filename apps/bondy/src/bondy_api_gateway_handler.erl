@@ -226,10 +226,10 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
             {stop, Req1, St0};
         error:Reason ->
-            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
             {stop, Req1, St0}
     end.
 
@@ -265,10 +265,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
             {stop, Req1, St0};
         error:Reason ->
-            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
             {stop, Req1, St0}
     end.
 
