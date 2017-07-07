@@ -226,10 +226,19 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
+            Response = #{
+                <<"body">> => bondy_error:error_map(Reason),
+                <<"headers">> => #{}
+            },
+            Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
         error:Reason ->
-            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
+            lager:error("error=error, reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
+            Response = #{
+                <<"body">> => bondy_error:error_map(Reason),
+                <<"headers">> => #{}
+            },
+            Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
             {stop, Req1, St0}
     end.
 
@@ -265,10 +274,19 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
+            Response = #{
+                <<"body">> => bondy_error:error_map(Reason),
+                <<"headers">> => #{}
+            },
+            Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
         error:Reason ->
-            Req1 = reply(400, Enc, bondy_error:error_map(Reason), Req0),
+            lager:error("error=error, reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
+            Response = #{
+                <<"body">> => bondy_error:error_map(Reason),
+                <<"headers">> => #{}
+            },
+            Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
             {stop, Req1, St0}
     end.
 
@@ -280,16 +298,18 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 %% =============================================================================
 
 
+get_status_code(Term) ->
+    get_status_code(Term, 500).
 
 
 %% @private
-get_status_code(#{<<"status_code">> := Code}) ->
+get_status_code(#{<<"status_code">> := Code}, _) ->
     Code;
 
-get_status_code(#{<<"body">> := ErrorBody}) ->
+get_status_code(#{<<"body">> := ErrorBody}, _) ->
     get_status_code(ErrorBody);
     
-get_status_code(ErrorBody) ->
+get_status_code(ErrorBody, Default) ->
     case maps:find(<<"status_code">>, ErrorBody) of
         {ok, Val} -> 
             Val;
@@ -298,7 +318,7 @@ get_status_code(ErrorBody) ->
                 {ok, Val} ->
                     bondy_utils:error_http_code(Val);
                 _ ->
-                    500
+                    Default
             end
     end.
 
