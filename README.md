@@ -47,6 +47,13 @@ An example return will be the following JSON object:
 }
 ```
 
+## Disable Realm Security
+```bash
+curl -X "DELETE" "http://localhost:18081/realms/magenta/security_enabled" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8"
+```
+
 ## Add a Resource Owner (end-user)
 ```bash
 curl -X "POST" "http://localhost:18081/realms/magenta/resource_owners" \
