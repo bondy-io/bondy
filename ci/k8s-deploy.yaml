@@ -1,0 +1,59 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    app: bondy
+    tier: gateway
+  name: bondy
+  namespace: magenta
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  template:
+    metadata:
+      labels:
+        app: bondy
+        tier: gateway
+    spec:
+      imagePullSecrets:
+      - name: gitlab-registry
+      containers:
+      - image: registry.gitlab.com/leapsight/bondy:latest
+        name: bondy
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 18080
+          name: api_gw
+          protocol: TCP
+        - containerPort: 18081
+          name: admin
+          protocol: TCP
+        - containerPort: 18082
+          name: wamp
+          protocol: TCP
+        - containerPort: 18083
+          name: api_gw_sec
+          protocol: TCP
+        - containerPort: 18084
+          name: admin_sec
+          protocol: TCP
+        - containerPort: 18085
+          name: wamp_sec
+          protocol: TCP
+        # env:
+        #   - name: WAMP_PORT
+        #     value: 8080
+        readinessProbe:
+          exec:
+            command:
+            - /opt/app/bin/bondy
+            - ping
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        livenessProbe:
+          exec:
+            command:
+            - /opt/app/bin/bondy
+            - ping
+          initialDelaySeconds: 30
+          timeoutSeconds: 5

@@ -1,0 +1,16 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: bondy
+  namespace: magenta
+  labels:
+    app: bondy
+    tier: gateway
+spec:
+  ports:
+    - name: wamp
+      port: 8080
+      targetPort: 18082
+  type: ClusterIP
+  selector:
+    app: bondy    
