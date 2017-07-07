@@ -97,7 +97,6 @@ content_types_provided(Req, #{api_spec := Spec} = St) ->
 is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    Realm = maps:get(realm_uri, St0),
     Val = cowboy_req:parse_header(<<"authorization">>, Req0),
     Realm = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
@@ -121,7 +120,6 @@ is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
                 Reason, <<"Bearer">>, Realm, json, Req0),
             {stop, Req2, St0}
     end;
-
 
 is_authorized(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
