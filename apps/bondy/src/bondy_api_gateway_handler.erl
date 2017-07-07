@@ -204,7 +204,7 @@ from_msgpack(Req, St) ->
 %% -----------------------------------------------------------------------------
 provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  -> 
     Method = method(Req0),
-    case perform_action(Method, maps:get(Method, Spec), St0) of
+    try perform_action(Method, maps:get(Method, Spec), St0) of
         {ok, Response, St1} ->
             #{
                 <<"body">> := Body,
@@ -224,6 +224,13 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
         {error, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St1}
+    catch
+        throw:Reason ->
+            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            {stop, Req1, St0};
+        error:Reason ->
+            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            {stop, Req1, St0}
     end.
 
 
@@ -239,7 +246,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) -> 
     Method = method(Req0),
 
-    case perform_action(Method, maps:get(Method, Spec), St0) of
+    try perform_action(Method, maps:get(Method, Spec), St0) of
         {ok, Response, St1} ->
             Req1 = prepare_request(Enc, Response, Req0),
             {maybe_location(Method, Response), Req1, St1};
@@ -256,6 +263,13 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
         {error, HTTPCode, Response, St1} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
             {stop, Req1, St1}
+    catch
+        throw:Reason ->
+            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            {stop, Req1, St0};
+        error:Reason ->
+            Req1 = reply(400, Enc, bond_error:error_map(Reason), Req0),
+            {stop, Req1, St0}
     end.
 
 
@@ -329,7 +343,7 @@ update_context(Req0, Ctxt) ->
         <<"headers">> => cowboy_req:headers(Req1),
         <<"query_string">> => cowboy_req:qs(Req1),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req1)),
-        <<"bindings">> => to_binary_keys(cowboy_req:bindings(Req1)),
+        <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req1)),
         <<"body">> => Bin,
         <<"body_length">> => cowboy_req:body_length(Req1) 
     },
@@ -341,8 +355,18 @@ decode_body_in_context(St) ->
     Ctxt = maps:get(api_context, St),
     Path = [<<"request">>, <<"body">>],
     Bin = maps_utils:get_path(Path, Ctxt),
-    Body = bondy_utils:decode(maps:get(encoding, St), Bin),
-    maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St).
+    Enc = maps:get(encoding, St),
+    try
+        Body = bondy_utils:decode(Enc, Bin),
+        maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
+    catch
+        Class:Error ->
+            lager:info(
+                "Error while decoding HTTP body, error=~p, reason=~p", 
+                [Class, Error]
+            ),
+            throw({badarg, {decoding, Enc}})
+    end.
 
 
 
@@ -578,13 +602,6 @@ maybe_location(<<"post">>, #{<<"uri">> := Uri}) when Uri =/= <<>> ->
 maybe_location(_, _) ->
     true.
 
-
-%% @private
-to_binary_keys(Map) ->
-    F = fun(K, V, Acc) ->
-        maps:put(list_to_binary(atom_to_list(K)), V, Acc)
-    end,
-    maps:fold(F, #{}, Map).
 
 
 

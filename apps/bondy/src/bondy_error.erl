@@ -44,7 +44,7 @@ error_uri(Reason) when is_binary(Reason) ->
 %% @end
 %% -----------------------------------------------------------------------------
 error_map(#{code := _} = M) ->
-    M;
+    bondy_utils:to_binary_keys(M);
 
 
 error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
@@ -160,20 +160,18 @@ error_map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
     maps:put(<<"status_code">>, Msg, error_map(oauth2_invalid_client));
 
-error_map({invalid_json, Data}) ->
+error_map({badarg, {decoding, json}}) ->
     #{
-        <<"code">> => invalid_data,
+        <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid json.">>,
-        value => Data,
-        <<"description">> => <<"The data provided is not a valid json.">>
+        <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
     };
 
-error_map({invalid_msgpack, Data}) ->
+error_map({badarg, {decoding, msgpack}}) ->
     #{
         <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid msgpack.">>,
-        value => Data,
-        <<"description">> => <<"The data provided is not a valid msgpack.">>
+        <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
     };
 
 error_map({Code, Mssg}) ->
