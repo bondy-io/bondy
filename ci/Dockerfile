@@ -14,7 +14,8 @@ COPY app.tar.gz /tmp
 
 RUN groupadd -r app -g 1000 && \
 	useradd -u 1000 -r -g app -m -d /opt/app -s /bin/bash -c "App user" app && \
-	su - app -c "tar xf /tmp/app.tar.gz -C /opt/app" && \
+	tar xf /tmp/app.tar.gz -C /opt/app && \
+	chown -R app:app /opt/app && \
 	rm /tmp/app.tar.gz
 
 USER app
