@@ -87,11 +87,11 @@
 %% =============================================================================
 
 % USER
--define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.users.add">>).
--define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.users.delete">>).
--define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.users.list">>).
--define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.users.get">>).
--define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.users.update">>).
+-define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.add_user">>).
+-define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.delete_user">>).
+-define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.list_users">>).
+-define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.get_user">>).
+-define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
 -define(BONDY_USER_CHANGE_PASSWORD, <<"com.leapsight.bondy.security.users.change_password">>).
 
 -define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.users.on_add">>).

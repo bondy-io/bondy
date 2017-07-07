@@ -99,44 +99,57 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_LOAD_API_SPEC} = M, Ctxt) ->
 
 handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_ADD} = M, Ctxt) ->
     ReqId = M#call.request_id,
-    R = case bondy_context:realm_uri(Ctxt) of
-        ?BONDY_REALM_URI ->        
-            case M#call.arguments of
-                [RealmUri, Info] ->
-                    maybe_error(
-                        bondy_api_gateway:add_client(RealmUri, Info), ReqId);
-                _ ->
-                    wamp_message:error(
-                        ?CALL,
-                        ReqId,
-                        #{},
-                        ?WAMP_ERROR_INVALID_ARGUMENT)
-            end;
+    MyRealmUri = bondy_context:realm_uri(Ctxt),
+    R = case {MyRealmUri, M#call.arguments} of
+        {MyRealmUri, [Info]} ->
+            maybe_error(
+                bondy_api_gateway:add_client(MyRealmUri, Info),
+                ReqId
+            );
+        {MyRealmUri, [Uri, Info]} 
+        when MyRealmUri =:= Uri orelse MyRealmUri =:= ?BONDY_REALM_URI ->
+            maybe_error(
+                bondy_api_gateway:add_client(Uri, Info),
+                ReqId
+            );
+        {_, [_, _]} ->
+            unauthorized(ReqId, Ctxt);
         _ ->
-            unauthorized(ReqId, Ctxt)
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
+
 handle_call(#call{procedure_uri = ?BONDY_GATEWAY_RESOURCE_OWNER_ADD} = M, Ctxt) ->
     ReqId = M#call.request_id,
-    R = case bondy_context:realm_uri(Ctxt) of
-        ?BONDY_REALM_URI ->        
-            case M#call.arguments of
-                [RealmUri, Info] ->
-                    maybe_error(
-                        bondy_api_gateway:add_resource_owner(RealmUri, Info),
-                        ReqId);
-                _ ->
-                    wamp_message:error(
-                        ?CALL,
-                        ReqId,
-                        #{},
-                        ?WAMP_ERROR_INVALID_ARGUMENT)
-            end;
+    MyRealmUri = bondy_context:realm_uri(Ctxt),
+    R = case {MyRealmUri, M#call.arguments} of
+        {MyRealmUri, [Info]} ->
+            maybe_error(
+                bondy_api_gateway:add_resource_owner(MyRealmUri, Info),
+                ReqId
+            );
+        {MyRealmUri, [Uri, Info]} 
+        when MyRealmUri =:= Uri orelse MyRealmUri =:= ?BONDY_REALM_URI ->
+            maybe_error(
+                bondy_api_gateway:add_resource_owner(Uri, Info),
+                ReqId
+            );
+        {_, [_, _]} ->
+            unauthorized(ReqId, Ctxt);
         _ ->
-            unauthorized(ReqId, Ctxt)
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
+    
 
 
 handle_call(#call{procedure_uri = ?BONDY_USER_ADD} = M, Ctxt) ->
@@ -299,9 +312,8 @@ unauthorized(ReqId, Ctxt) ->
         ?WAMP_ERROR_NOT_AUTHORIZED,
         [
         iolist:to_binary([
-            <<"You need to be logged into the ">>, 
-            ?BONDY_REALM_URI, 
-            <<" realm to be able to call this procedure.">>
+            <<"The operation you've requested is a targeting a Realm that is not the one you are logged into, or the operation is only supported when you are logged into the Roote Realm (">>, 
+            ?BONDY_REALM_URI, <<$",$)>>
         ])
     ]),
     bondy:send(bondy_context:peer_id(Ctxt), R).
