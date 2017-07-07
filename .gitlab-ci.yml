@@ -1,14 +1,18 @@
 before_script:
-   - export LS_CI_TEMP=`pwd`/`mktemp -d ls-ci.XXXXXXXX`   
+   - export LS_CI_TEMP=`pwd`/`mktemp -d ls-ci.XXXXXXXX`
    - ssh-agent bash -c "ssh-add ~/build_keys/id_rsa; git clone git@gitlab.com:leapsight-lojack/magenta-env.git $LS_CI_TEMP"
    - export LS_SCRIPTS=$LS_CI_TEMP/erlang/ci
    - source $LS_SCRIPTS/before.sh
+
+cache:
+  paths:
+  - app.tar.gz
 
 build1:
  stage: build
  tags:
    - packet
- script:   
+ script:
    - $LS_SCRIPTS/build.sh
 # artifacts:
 #   name: "${CI_JOB_STAGE}-${CI_COMMIT_SHA}"
@@ -17,9 +21,6 @@ build1:
 
 publish1:
  stage: publish
- cache:
-   paths:
-   - app.tar.gz
  tags:
    - packet
  script:
