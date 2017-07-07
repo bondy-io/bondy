@@ -83,13 +83,13 @@ add_client(RealmUri, Info0) ->
                 required => true,
                 allow_null => false,
                 datatype => binary,
-                default => fun() -> bondy_oauth2:generate_fragment(48) end
+                default => fun() -> bondy_oauth2:generate_fragment(32) end
             },
             <<"client_secret">> => #{
                 required => true,
                 allow_null => false,
                 datatype => binary,
-                default => fun() -> bondy_oauth2:generate_fragment(64) end
+                default => fun() -> bondy_oauth2:generate_fragment(48) end
             },
             <<"description">> => #{
                 datatype => binary
