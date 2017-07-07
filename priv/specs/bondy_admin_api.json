@@ -147,14 +147,13 @@
                         }
                     }
                 },
-                "/services/load" : {
+                "/services/load_api_spec" : {
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.add_resource_owner",
+                            "procedure" : "com.leapsight.bondy.api_gateway.load_api_spec",
                             "options" : {},
                             "arguments" : [
-                                "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
