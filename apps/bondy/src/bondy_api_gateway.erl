@@ -73,7 +73,7 @@ load(FName) ->
 %% Creates a new user adding it to the `api_clients` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_client(uri(), map()) -> ok | {error, term()}.
+-spec add_client(uri(), map()) -> {ok, map()} | {error, term()}.
 
 add_client(RealmUri, Info0) ->
     try 
@@ -100,13 +100,18 @@ add_client(RealmUri, Info0) ->
         Opts = [
             {info, Info2},
             {"password", maps:get(<<"client_secret">>, Props)},
-            {"groups", "api_clients"}
+            {"groups", ["api_clients"]}
         ],
-        bondy_security:add_user(
-            RealmUri, maps:get(<<"client_id">>, Props), Opts)
+        Id = maps:get(<<"client_id">>, Props),
+        case bondy_security:add_user(RealmUri, Id, Opts) of
+            {error, _} = Error ->
+                Error;
+            ok ->
+                {ok, Info1}
+        end
     catch
-        error:Error when is_map(Error) ->
-            {error, Error}
+        error:Reason when is_map(Reason) ->
+            {error, Reason}
     end.
 
 

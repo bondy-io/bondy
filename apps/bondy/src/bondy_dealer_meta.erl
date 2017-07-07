@@ -239,8 +239,8 @@ handle_call(#call{procedure_uri = ?BONDY_SOURCE_LOOKUP} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R).
 
 
-maybe_error(ok, ReqId) ->
-    wamp_message:result(ReqId, #{}, [], #{});
+maybe_error({ok, Client}, ReqId) ->
+    wamp_message:result(ReqId, #{}, [Client], #{});
 
 maybe_error({error, Reason}, ReqId) ->
     #{<<"code">> := Code} = Map = bondy_error:error_map(Reason),

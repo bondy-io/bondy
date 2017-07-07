@@ -335,8 +335,10 @@ init(#realm{uri = Uri} = Realm) ->
     },
     ok = bondy_security_user:add(Uri, User),
     Opts = [],
-    _ = [bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) || 
-            CIDR <- ?LOCAL_CIDRS],
+    _ = [
+        bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
+        || CIDR <- ?LOCAL_CIDRS
+    ],
     enable_security(Realm).
 
 
