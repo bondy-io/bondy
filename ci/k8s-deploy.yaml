@@ -23,7 +23,7 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 18080
-          name: api_gw
+          name: api
           protocol: TCP
         - containerPort: 18081
           name: admin
@@ -32,13 +32,13 @@ spec:
           name: wamp
           protocol: TCP
         - containerPort: 18083
-          name: api_gw_sec
+          name: api-sec
           protocol: TCP
         - containerPort: 18084
-          name: admin_sec
+          name: admin-sec
           protocol: TCP
         - containerPort: 18085
-          name: wamp_sec
+          name: wamp-sec
           protocol: TCP
         # env:
         #   - name: WAMP_PORT
