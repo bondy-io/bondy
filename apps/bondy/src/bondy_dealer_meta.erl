@@ -77,6 +77,49 @@ handle_call(
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
+handle_call(#call{
+        procedure_uri = <<"com.leapsight.bondy.realms.enable_security">>} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    R = case bondy_context:realm_uri(Ctxt) of
+        ?BONDY_REALM_URI ->        
+            case M#call.arguments of
+                [Uri] ->
+                    maybe_error(
+                        bondy_realm:enable_security(bondy_realm:get(Uri)),
+                        ReqId);
+                _ ->
+                    wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        #{},
+                        ?WAMP_ERROR_INVALID_ARGUMENT)
+            end;
+        _ ->
+            unauthorized(ReqId, Ctxt)
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_call(#call{
+        procedure_uri = <<"com.leapsight.bondy.realms.disable_security">>} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    R = case bondy_context:realm_uri(Ctxt) of
+        ?BONDY_REALM_URI ->        
+            case M#call.arguments of
+                [Uri] ->
+                    maybe_error(
+                        bondy_realm:disable_security(bondy_realm:get(Uri)),
+                        ReqId);
+                _ ->
+                    wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        #{},
+                        ?WAMP_ERROR_INVALID_ARGUMENT)
+            end;
+        _ ->
+            unauthorized(ReqId, Ctxt)
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
 handle_call(#call{procedure_uri = ?BONDY_GATEWAY_LOAD_API_SPEC} = M, Ctxt) ->
     ReqId = M#call.request_id,
     R = case bondy_context:realm_uri(Ctxt) of

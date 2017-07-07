@@ -142,23 +142,24 @@ resource_existed(Req, St) ->
 delete_resource(Req0, #{api_spec := Spec} = St0) ->
     Method = method(Req0),
     Enc = json,
-    case perform_action(Method, maps:get(Method, Spec), St0) of
-        {ok, Response, St1} ->
+    St1 = St0#{encoding => Enc}, % TODO get this by parsing headers
+    case perform_action(Method, maps:get(Method, Spec), St1) of
+        {ok, Response, St2} ->
             Headers = maps:get(<<"headers">>, Response),
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-            {true, Req1, St1};
+            {true, Req1, St2};
         
-        {ok, HTTPCode, Response, St1} ->
+        {ok, HTTPCode, Response, St2} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
-            {stop, Req1, St1};
+            {stop, Req1, St2};
         
-        {error, Response, St1} ->
+        {error, Response, St2} ->
             Req1 = reply(get_status_code(Response), Enc, Response, Req0),
-            {stop, Req1, St1};
+            {stop, Req1, St2};
         
-        {error, HTTPCode, Response, St1} ->
+        {error, HTTPCode, Response, St2} ->
             Req1 = reply(HTTPCode, Enc, Response, Req0),
-            {stop, Req1, St1}
+            {stop, Req1, St2}
     end.
 
 
