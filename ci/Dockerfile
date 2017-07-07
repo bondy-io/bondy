@@ -1,16 +1,13 @@
 # run: docker run -it --rm bondy
-FROM erlang:19-slim
+FROM buildpack-deps:jessie
 
 MAINTAINER Javier Bucar <javier.bucar@leapsight.com>
 
 # Env
-ENV NODE_NAME=bondy@127.0.0.1 \
-	HTTP_PORT=18080 \
-	ADMIN_HTTP_PORT=18081 \
-	TCP_PORT=18082
+ENV NODE_NAME=bondy@127.0.0.1
 
 # Ports
-EXPOSE 18080 18081 18082
+EXPOSE 18080 18081 18082 18083 18084 18085
 
 # Copy source code
 COPY app.tar.gz /tmp
