@@ -84,14 +84,14 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
     erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            io:format("Process down ~p error=~p~n", [Pid, Reason]),
+            % io:format("Process down ~p error=~p~n", [Pid, Reason]),
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
     after 
         Timeout ->
-            io:format("Timeout~n"),
+            % io:format("Timeout~n"),
             demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.

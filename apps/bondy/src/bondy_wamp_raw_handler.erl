@@ -241,7 +241,7 @@ handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
 
 handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St) 
 when byte_size(Data) > Max->
-    io:format("Message length is ~p~n", [byte_size(Data)]), 
+    % io:format("Message length is ~p~n", [byte_size(Data)]), 
     send_frame(error_number(maximum_message_length_unacceptable), St),
     {stop, St};
 
