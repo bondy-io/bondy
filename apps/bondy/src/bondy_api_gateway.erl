@@ -25,7 +25,7 @@
 
 %% API
 -export([add_client/2]).
--export([add_resource_owner/4]).
+-export([add_resource_owner/2]).
 -export([dispatch_table/1]).
 -export([load/1]).
 
@@ -121,17 +121,42 @@ add_client(RealmUri, Info0) ->
 %% Creates a new user adding it to the `resource_owners` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_resource_owner(uri(), binary(), binary(), map()) -> 
-    ok | {error, term()} | no_return().
+-spec add_resource_owner(uri(), map()) -> 
+    {ok, map()} | {error, term()} | no_return().
 
-add_resource_owner(RealmUri, Username, Password, Info) ->
+add_resource_owner(RealmUri, Info0) ->
     ok = maybe_init_security(RealmUri),
+    {Props, Info1} = maps_utils:split(
+            [<<"username">>, <<"password">>], Info0),
+    Info2 = maps_utils:validate(Info1, #{
+        <<"username">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            default => fun() -> bondy_oauth2:generate_fragment(32) end
+        },
+        <<"password">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            default => fun() -> bondy_oauth2:generate_fragment(48) end
+        },
+        <<"description">> => #{
+            datatype => binary
+        }
+    }),
+    Username = maps:get(<<"username">>, Info2),
     Opts = [
-        {info, Info},
-        {"password", binary_to_list(Password)},
-        {"groups", "resource_owners"}
+        {info, Props},
+        {"password", maps:get(<<"password">>, Info2)},
+        {"groups", ["resource_owners"]}
     ],
-    bondy_security:add_user(RealmUri, Username, Opts).
+    case bondy_security:add_user(RealmUri, Username, Opts) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            {ok, maps:merge(Info1, Props)}
+    end.
 
 
 

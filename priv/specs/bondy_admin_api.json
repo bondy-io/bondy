@@ -90,34 +90,6 @@
                                 "headers" : "{{defaults.headers}}"
                             } 
                         }
-                    },
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.find",
-                            "options" : {},
-                            "arguments" : [
-                                "{{variables.query_match}}"
-                            ],
-                            "arguments_kw" : {
-                               "query_spec" : 
-                                    "{{variables.query_spec}}",
-                            //    "security" : "{{security}}"
-                               "security" : {}
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                               "body" : "{{action.error.details}}",
-                               "headers" : "{{variables.cors_headers |> merge({{action.error.headers}})}}"
-                            },
-                            "on_result" : {
-                               "body" : 
-                                    "{{action.result.arguments |> head}}",
-                               "headers" : "{{variables.cors_headers |> merge({{action.result.headers}})}}"
-                            } 
-                        }
                     }
                 },
                 "/realms/:realm_uri/resource_owners" : {
@@ -145,34 +117,6 @@
                                 "body" : 
                                     "{{action.result.arguments |> head}}",
                                 "headers" : "{{defaults.headers}}"
-                            } 
-                        }
-                    },
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.find",
-                            "options" : {},
-                            "arguments" : [
-                                "{{variables.query_match}}"
-                            ],
-                            "arguments_kw" : {
-                               "query_spec" : 
-                                    "{{variables.query_spec}}",
-                                "security" : {}
-                            //    "security" : "{{security}}"
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                               "body" : "{{action.error.details}}",
-                               "headers" : "{{variables.cors_headers |> merge({{action.error.headers}})}}"
-                            },
-                            "on_result" : {
-                               "body" : 
-                                    "{{action.result.arguments |> head}}",
-                               "headers" : "{{variables.cors_headers |> merge({{action.result.headers}})}}"
                             } 
                         }
                     }
@@ -203,39 +147,14 @@
                         }
                     }
                 },
-                "/realms/:realm_uri/users/:id" : {
-                    "get" : {
+                "/services/load" : {
+                    "post" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.security.users.list",
+                            "procedure" : "com.leapsight.bondy.api_gateway.add_resource_owner",
                             "options" : {},
                             "arguments" : [
                                 "{{request.bindings.realm_uri}}",
-                                "{{request.bindings.id}}"
-                            ],
-                            "arguments_kw" : {
-                                // "security" : "{{security}}"
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : {}
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
-                            } 
-                        }
-                    },
-                    "put" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.replace",
-                            "options" : {},
-                            "arguments" : [
-                                "{{request.bindings.id}}",
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
@@ -244,63 +163,14 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
+                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
                                 "body" : "{{action.error.details}}",
-                                "headers" : {}
+                                "headers" : "{{defaults.headers}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
-                            } 
-                        }
-                    },
-                    "patch" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.update",
-                            "options" : {},
-                            "arguments" : [
-                                "{{request.bindings.id}}",
-                                "{{request.body}}"
-                            ],
-                            "arguments_kw" : {
-                                // "security" : "{{security}}"
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : {}
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
-                            } 
-                        }
-                    },
-                    "delete" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.delete",
-                            "options" : {},
-                            "arguments" : [
-                                "{{request.bindings.id}}",
-                                "{{request.body}}"
-                            ],
-                            "arguments_kw" : {
-                                // "security" : "{{security}}"
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : {}
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
+                                "body" : 
+                                    "{{action.result.arguments |> head}}",
+                                "headers" : "{{defaults.headers}}"
                             } 
                         }
                     }
