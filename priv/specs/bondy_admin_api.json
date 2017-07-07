@@ -40,15 +40,10 @@
         "cors_headers" : {
             "access-control-allow-origin" : "*",
             "access-control-allow-credentials": "true",
-<<<<<<< HEAD
-            // "access-control-allow-methods" : "{{request.headers |> get(access-control-request-method, ALL)}}",
-            // "access-control-allow-headers" : "{{request.headers |> get(access-control-request-headers, '')}}",
-=======
             // "access-control-allow-methods" : "{{request.headers |> get(access-control-request-method, 'Origin, X-Requested-With, Content-Type, Accept')}}",
             // "access-control-allow-headers" : "{{request.headers |> get(access-control-request-headers, '')}}",
             "access-control-allow-methods" : "GET,HEAD,PUT,PATCH,POST,DELETE",
             "access-control-allow-headers" : "origin,x-requested-with,content-type,accept",
->>>>>>> feature/aramallo.146503761.shell_cli
             "access-control-max-age" : "86400"
         }
     },  
@@ -57,15 +52,6 @@
         "timeout" : 5000,
         "connect_timeout" : 5000,
         "schemes" : "{{variables.schemes}}",
-<<<<<<< HEAD
-        "security" : "{{variables.oauth2}}"
-    },
-    "versions" :  {
-        "1.0.0" : {
-            "base_path" : "/admin/[v1.0]",
-            "variables" : {
-            },
-=======
         "headers": "{{variables.cors_headers}}"
         // ,"security" : "{{variables.oauth2}}"
     },
@@ -73,14 +59,10 @@
         "1.0.0" : {
             "base_path" : "/[v1.0]",
             "variables" : {},
->>>>>>> feature/aramallo.146503761.shell_cli
             "defaults" : {
                 "timeout" : 20000
             },
             "paths" : {
-<<<<<<< HEAD
-                "/users" : {
-=======
                 "/realms/:realm_uri/clients" : {
                     "is_collection" : true,
                     "post" : {
@@ -139,20 +121,10 @@
                     }
                 },
                 "/realms/:realm_uri/resource_owners" : {
->>>>>>> feature/aramallo.146503761.shell_cli
                     "is_collection" : true,
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
-<<<<<<< HEAD
-                            "procedure" : "com.leapsight.bondy.accounts.add_user",
-                            "options" : {},
-                            "arguments" : [
-                                "{{request.body}}"
-                            ],
-                            "arguments_kw" : {
-                                "security" : "{{security}}"
-=======
                             "procedure" : "com.leapsight.bondy.api_gateway.add_resource_owner",
                             "options" : {},
                             "arguments" : [
@@ -161,7 +133,6 @@
                             ],
                             "arguments_kw" : {
                                 // "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
@@ -188,12 +159,8 @@
                             "arguments_kw" : {
                                "query_spec" : 
                                     "{{variables.query_spec}}",
-<<<<<<< HEAD
-                               "security" : "{{security}}"
-=======
                                 "security" : {}
                             //    "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
@@ -210,17 +177,6 @@
                         }
                     }
                 },
-<<<<<<< HEAD
-                "/users/:id" : {
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.users.fetch",
-                            "options" : {},
-                            "arguments" : ["{{request.bindings.id}}"],
-                            "arguments_kw" : {
-                                "security" : "{{security}}"
-=======
                 "/realms/:realm_uri/users" : {
                     "get" : {
                         "action" : {
@@ -259,7 +215,6 @@
                             ],
                             "arguments_kw" : {
                                 // "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
@@ -284,11 +239,7 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-<<<<<<< HEAD
-                                "security" : "{{security}}"
-=======
                                 // "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
@@ -313,11 +264,7 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-<<<<<<< HEAD
-                                "security" : "{{security}}"
-=======
                                 // "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
@@ -342,11 +289,7 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-<<<<<<< HEAD
-                                "security" : "{{security}}"
-=======
                                 // "security" : "{{security}}"
->>>>>>> feature/aramallo.146503761.shell_cli
                             }
                         },
                         "response" : {
