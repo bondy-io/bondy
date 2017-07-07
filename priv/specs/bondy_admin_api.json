@@ -125,7 +125,7 @@
                     "get" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.security.users.list",
+                            "procedure" : "com.leapsight.bondy.security.list_users",
                             "options" : {},
                             "arguments" : [
                                 "{{request.bindings.realm_uri}}"
