@@ -170,6 +170,9 @@
     <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>).
 
 
+-define(BONDY_GATEWAY_LOAD_API_SPEC,
+    <<"com.leapsight.bondy.api_gateway.load_api_spec">>).
+
 
 %% =============================================================================
 %% GENERAL

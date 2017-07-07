@@ -48,23 +48,27 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec load(file:filename()) -> 
+-spec load(file:filename() | map()) -> 
     ok | {error, {invalid_specification_format, any()}}.
+
+load(Spec) when is_map(Spec) ->
+    %% We append the new spec to the base ones
+    Specs = [Spec | specs()],
+    _ = [
+        update_dispatch_table(Scheme, Routes) 
+        || {Scheme, Routes} <- parse_specs(Specs)
+    ],
+    ok;
 
 load(FName) ->
     try jsx:consult(FName, [return_maps]) of
         [Spec] ->
-            %% We append the new spec to the base ones
-            Specs = [Spec | specs()],
-            _ = [
-                update_dispatch_table(Scheme, Routes) 
-                || {Scheme, Routes} <- parse_specs(Specs)
-            ],
-            ok
+            load(Spec)
     catch
         error:badarg ->
             {error, invalid_specification_format}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
