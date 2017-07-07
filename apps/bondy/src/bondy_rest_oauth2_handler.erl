@@ -197,13 +197,8 @@ is_authorized(Req0, St0) ->
             {true, Req0, St1};
         {error, Reason} ->
             lager:info("API Consumer login failed, error = ~p", [Reason]),
-            Req1 = cowboy_req:set_resp_header(
-                <<"www-authenticate">>, 
-                <<"Basic realm=", $", Realm/binary, $">>, 
-                Req0
-            ),
-            Req2 = cowboy_req:reply(401, Req1),
-            {stop, Req2, St0}
+            Req1 = reply(Reason, json, Req0),
+            {stop, Req1, St0}
     end.
 
 
@@ -240,8 +235,10 @@ accept(Req0, St) ->
     catch
         error:Reason ->
             %% reply error in body (check OAUTH)
-            io:format("Error ~p,~nTrace:~p~n", [Reason, erlang:get_stacktrace()]),
-            {false, Req0, St}
+            io:format(
+                "Error ~p,~nTrace:~p~n", [Reason, erlang:get_stacktrace()]),
+            Req2 = reply(Reason, json, Req0),
+            {false, Req2, St}
     end.
 
 
@@ -291,14 +288,14 @@ accept_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
 
 accept_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
     %% TODO
-    error({unsupported_grant_type, <<"authorization_code">>});
+    error({oauth2_unsupported_grant_type, <<"authorization_code">>});
 
 accept_flow(#{?GRANT_TYPE := <<"client_credentials">>} = _Map, _, _, _) ->
     %% TODO
-    error({unsupported_grant_type, <<"client_credentials">>});
+    error({oauth2_unsupported_grant_type, <<"client_credentials">>});
 
 accept_flow(Map, _, _, _) ->
-    error({invalid_request, Map}).
+    error({oauth2_invalid_request, Map}).
 
 
 
@@ -306,39 +303,37 @@ accept_flow(Map, _, _, _) ->
 -spec reply(integer(), atom(), cowboy_req:req()) -> 
     cowboy_req:req().
 
-reply(invalid_request, Enc, Req) ->
-    Error = bondy_error:error_map(invalid_request),
-    cowboy_req:reply(
-        400, prepare_request(Enc, Error, #{}, Req));
+reply(unknown_realm, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
 
-reply(invalid_client = Error, Enc, Req) ->
+reply(unknown_user, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(missing_password, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(bad_password, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(unknown_source, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(no_common_name, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(common_name_mismatch, Enc, Req) ->
+    reply(oauth2_invalid_client, Enc, Req);
+
+reply(oauth2_invalid_client = Error, Enc, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     cowboy_req:reply(
-        400, prepare_request(Enc, bondy_error:error_map(Error), Headers, Req));
-
-reply(unauthorized_client = Error, Enc, Req) ->
-    cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req));
-
-reply(unknown_user = Error, Enc, Req) ->
-    cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req));
-
-reply(missing_password = Error, Enc, Req) ->
-    cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req));
-
-reply(bad_password = Error, Enc, Req) ->
-    cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req));
-
-reply(unknown_source = Error, Enc, Req) ->
-    cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req));
+        401, prepare_request(Enc, bondy_error:error_map(Error), Headers, Req));
 
 reply(Error, Enc, Req) ->
+    Map =  bondy_error:error_map(Error),
+    Status = maps:get(<<"status_code">>, Map, 400),
     cowboy_req:reply(
-        400, prepare_request(Enc, bondy_error:error_map(Error), #{}, Req)).
+        Status, prepare_request(Enc, Map, #{}, Req)).
 
 
 

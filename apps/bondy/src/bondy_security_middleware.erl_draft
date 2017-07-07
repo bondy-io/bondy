@@ -28,7 +28,7 @@ execute(Req0, Env0) ->
                 %% The handler will check the Authorization header for a
                 %% Basic scheme with ClientId and Secret
                 {ok, Req0, Env0};
-            bondy_rest_api_gateway_handler ->
+            bondy_api_gateway_handler ->
                 %% A REST API handler
                 %% TODO
                 Ctxt1 = case get_realm_uri(Env0) of

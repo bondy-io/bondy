@@ -1,0 +1,401 @@
+
+
+
+
+
+%% Whether to create a new realm or not when a session wants to connect
+%% to a non existing realm
+{mapping, "automatically_create_realms", "bondy.automatically_create_realms", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% Whether to create a new realm or not when a session wants to connect
+%% to a non existing realm
+%% Not currently working, leave the value as 'session'
+{mapping, "connection_lifetime", "bondy.connection_lifetime", [
+  {default, session}, 
+  {datatype, {enum, [session, connection]}},
+  hidden
+]}.
+
+{mapping, "request_timeout", "bondy.request_timeout", [
+  {default, "5m"}, % Long enough but not infinity
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
+
+
+%% =============================================================================
+%% LOAD REGULATION
+%% =============================================================================
+
+
+
+
+{mapping, "load_regulation.enabled", "bondy.load_regulation_enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+
+{mapping, "load_regulation.coordinator_timeout", "bondy.coordinator_timeout", [
+  {default, "3s"},
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
+
+{mapping, "load_regulation.router.pool.type", "bondy.router_pool.type", [
+  {default, permanent}, 
+  {datatype, {enum, [permanent, transient]}},
+  hidden
+]}.
+
+%% The actual size will be the maximum between the configured value and 
+%% the result of evaluating `erlang:system_info(schedulers)`
+{mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
+  {default, 8}, 
+  {datatype, integer},
+  hidden
+]}.
+
+{mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
+  {default, 10000}, 
+  {datatype, integer},
+  hidden
+]}.
+
+%% It can only be permanent
+{mapping, "load_regulation.registry_manager.pool.type", "bondy.registry_manager_pool.type", [
+  {default, permanent}, 
+  {datatype, {enum, [permanent]}},
+  hidden
+]}.
+
+%% The actual size will be the maximum between the configured value and 
+%% the result of evaluating `erlang:system_info(schedulers)`
+{mapping, "load_regulation.registry_manager.pool.size", "bondy.registry_manager_pool.size", [
+  {default, 8}, 
+  {datatype, integer},
+  hidden
+]}.
+
+{mapping, "load_regulation.registry_manager.pool.capacity", "bondy.registry_manager_pool.capacity", [
+  {default, 1000}, 
+  {datatype, integer},
+  hidden
+]}.
+
+
+
+
+
+%% =============================================================================
+%% ADMIN REST API
+%% =============================================================================
+
+
+
+{mapping, "admin_api.http.enabled", "bondy.admin_api_http.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+
+%% @doc http.port is the TCP port that Bondy uses for
+%% exposing the Admin Rest APIs.
+{mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
+  {default, {{admin_api_http_port}} },
+  {datatype, integer},
+  hidden
+]}.
+
+%% The Cowboy acceptors_pool_size for the Admin API http listener
+{mapping, "admin_api.http.acceptors_pool_size", "bondy.admin_api_http.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 100}
+]}.
+
+%% The Cowboy max number of connections for the Admin API http listener
+{mapping, "admin_api.http.max_connections", "bondy.admin_api_http.max_connections", [
+  {datatype, integer},
+  {default, 1000}
+]}.
+
+
+{mapping, "admin_api.https.enabled", "bondy.admin_api_https.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc admin_api.https.port is the TCP port that Bondy uses for
+%% exposing the Admin API.
+{mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
+  {default, {{admin_api_https_port}} },
+  {datatype, integer},
+  hidden
+]}.
+
+%% The Cowboy acceptors_pool_size for the Admin API https listener
+{mapping, "api_gateway.https.acceptors_pool_size", "bondy.api_gateway_https.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 200}
+]}.
+
+%% The Cowboy max number of connections for the Admin API https listener
+{mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
+  {datatype, integer},
+  {default, 500000}
+]}.
+
+%% @doc Default cert location for https can be overridden
+%% with the api_gateway.ssl config variable, for example:
+{mapping, "admin_api.https.certfile", "bondy.admin_api_https.pki_files.certfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cert.pem"}
+]}.
+
+%% @doc Default key location for https can be overridden with the 
+%%admin_api.ssl config variable, for example:
+{mapping, "admin_api.https.keyfile", "bondy.admin_api_https.pki_files.keyfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/key.pem"}
+]}.
+
+%% @doc Default signing authority location for https can be overridden
+%% with the admin_api.ssl config variable, for example:
+{mapping, "admin_api.https.cacertfile", "bondy.admin_api_https.pki_files.cacertfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cacert.pem"}
+]}.
+
+
+
+
+%% =============================================================================
+%% API GATEWAY
+%% =============================================================================
+
+
+% {validator,
+%   "valid_ipaddr",
+%   "must be a valid IP address",
+%   fun(AddrString) ->
+%     case inet_parse:address(AddrString) of
+%       {ok, _} -> true;
+%       {error, _} -> false
+%     end
+%   end}.
+
+% {validator,
+%   "not_localhost",
+%   "can't be a local ip",
+%   fun(AddrString) ->
+%     case inet_parse:address(AddrString) of
+%       {ok, {127, _, _, _}} -> false;
+%       {ok, _} -> true;
+%       {error, _} -> false
+%     end
+%   end}.
+
+% %% @doc handoff.ip is the network address that Riak binds to for
+% %% intra-cluster data handoff.
+% {mapping, "handoff.ip", "riak_core.handoff_ip", [
+%   {default, "{{handoff_ip}}" },
+%   {datatype, string},
+%   {validators, ["valid_ipaddr", "not_localhost"]},
+%   hidden
+% ]}.
+
+
+%% @doc api_gateway.http.port is the TCP port that Bondy uses for
+%% exposing the API Gateway managed APIs.
+{mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
+  {default, {{api_gateway_http_port}}},
+  {datatype, integer},
+  hidden
+]}.
+
+
+%% The Cowboy acceptors_pool_size for the API Gateway's http listener
+{mapping, "api_gateway.http.acceptors_pool_size", "bondy.api_gateway_http.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 200}
+]}.
+
+
+%% The Cowboy max number of connections for the Admin API http listener
+{mapping, "api_gateway.http.max_connections", "bondy.api_gateway_http.max_connections", [
+  {datatype, integer},
+  {default, 500000}
+]}.
+
+%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
+%% exposing the API Gateway managed APIs.
+{mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
+  {default, {{api_gateway_https_port}} },
+  {datatype, integer},
+  hidden
+]}.
+
+%% The Cowboy acceptors_pool_size for the API Gateway's http listener
+{mapping, "api_gateway.https.acceptors_pool_size", "bondy.api_gateway_https.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 200}
+]}.
+
+%% The Cowboy max number of connections for the Admin API https listener
+{mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
+  {datatype, integer},
+  {default, 500000}
+]}.
+
+%% @doc Default cert location for https can be overridden
+%% with the api_gateway.ssl config variable, for example:
+{mapping, "api_gateway.https.certfile", "bondy.api_gateway_https.pki_files.certfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cert.pem"}
+]}.
+
+%% @doc Default key location for https can be overridden with the 
+%%api_gateway.ssl config variable, for example:
+{mapping, "api_gateway.https.keyfile", "bondy.api_gateway_https.pki_files.keyfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/key.pem"}
+]}.
+
+%% @doc Default signing authority location for https can be overridden
+%% with the api_gateway.ssl config variable, for example:
+{mapping, "api_gateway.https.cacertfile", "bondy.api_gateway_https.pki_files.cacertfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cacert.pem"}
+]}.
+
+
+
+
+
+%% =============================================================================
+%% WAMP RAW SOCKET
+%% =============================================================================
+
+{mapping, "wamp.tcp.enabled", "bondy.wamp_tcp.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
+%% exposing the WAMP raw socket transport
+{mapping, "wamp.tcp.port", "bondy.wamp_tcp.port", [
+  {default, {{wamp_tcp_port}}},
+  {datatype, integer}
+]}.
+
+%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
+{mapping, "wamp.tcp.acceptors_pool_size", "bondy.wamp_tcp.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 200}
+]}.
+
+%% The ranch max number of connections for the WAMP raw socket tcp listener
+{mapping, "wamp.tcp.max_connections", "bondy.wamp_tcp.max_connections", [
+  {datatype, integer},
+  {default, 100000}
+]}.
+
+
+{mapping, "wamp.tls.enabled", "bondy.wamp_tls.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+
+%% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
+%% exposing the WAMP raw socket transport
+{mapping, "wamp.tls.port", "bondy.wamp_tls.port", [
+  {default, {{wamp_tls_port}}},
+  {datatype, integer}
+]}.
+
+%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
+{mapping, "wamp.tls.acceptors_pool_size", "bondy.wamp_tls.acceptors_pool_size", [
+  {datatype, integer},
+  {default, 200}
+]}.
+
+%% The ranch max number of connections for the WAMP raw socket tcp listener
+{mapping, "wamp.tls.max_connections", "bondy.wamp_tls.max_connections", [
+  {datatype, integer},
+  {default, 100000}
+]}.
+
+
+%% @doc Default cert location for https can be overridden
+%% with the wamp.tls config variable, for example:
+{mapping, "wamp.tls.certfile", "bondy.wamp_tls.pki_files.certfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cert.pem"}
+]}.
+
+%% @doc Default key location for https can be overridden with the 
+%%wamp.tls config variable, for example:
+{mapping, "wamp.tls.keyfile", "bondy.wamp_tls.pki_files.keyfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/key.pem"}
+]}.
+
+%% @doc Default signing authority location for https can be overridden
+%% with the wamp.tls config variable, for example:
+{mapping, "wamp.tls.cacertfile", "bondy.wamp_tls.pki_files.cacertfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cacert.pem"}
+]}.
+
+
+
+
+%% =============================================================================
+%% DIRS
+%% =============================================================================
+
+
+
+%% @doc Platform-specific installation paths (substituted by rebar)
+{mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
+  {datatype, directory},
+  {default, "{{platform_bin_dir}}"}
+]}.
+
+%% @see platform_bin_dir
+{mapping, "platform_data_dir", "bondy.platform_data_dir", [
+  {datatype, directory},
+  {default, "{{platform_data_dir}}"}
+]}.
+
+%% @see platform_bin_dir
+{mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
+  {datatype, directory},
+  {default, "{{platform_etc_dir}}"}
+]}.
+
+%% @see platform_bin_dir
+{mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
+  {datatype, directory},
+  {default, "{{platform_lib_dir}}"}
+]}.
+
+%% @see platform_bin_dir
+{mapping, "platform_log_dir", "bondy.platform_log_dir", [
+  {datatype, directory},
+  {default, "{{platform_log_dir}}"}
+]}.
+
+
+% %% @doc Default location of cluster_meta state
+% {mapping, "cluster_meta.state_dir", "bondy.cluster_meta_state_dir", [
+%   {datatype, directory},
+%   {default, "$(platform_data_dir)/cluster_meta"},
+%   hidden
+% ]}.

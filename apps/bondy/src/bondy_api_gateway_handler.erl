@@ -33,6 +33,8 @@
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
 
+
+
 -type state() :: #{
     api_context => map(),
     session => any(),
@@ -412,7 +414,7 @@ perform_action(
             Error = #{
                 <<"status_code">> => 502,
                 <<"headers">> => #{},
-                <<"details">> => bondy_error:error_map(Reason)
+                <<"details">> => bondy_error:error_map(Reason, 502)
             },
             Ctxt1 = update_context({error, Error}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
@@ -493,13 +495,15 @@ perform_action(
 
 
 %% @private
-from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) 
+from_http_response(StatusCode, _RespHeaders, RespBody, Spec, St0) 
 when StatusCode >= 400 andalso StatusCode < 600->
     Ctxt0 = maps:get(api_context, St0),
+    % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Error = #{ 
         <<"status_code">> => StatusCode,
         <<"details">> => RespBody,
-        <<"headers">> => maps:from_list(RespHeaders)
+        % <<"headers">> => HeadersMap
+        <<"headers">> => #{}
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
     Response = bondy_utils:eval_term(maps:get(<<"on_error">>, Spec), Ctxt1),
@@ -508,14 +512,15 @@ when StatusCode >= 400 andalso StatusCode < 600->
 
 from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
-    HeadersMap = maps:from_list(RespHeaders),
+    % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Result0 = #{ 
         <<"status_code">> => StatusCode,
         <<"body">> => RespBody,
-        <<"headers">> => HeadersMap
+        % <<"headers">> => HeadersMap
+        <<"headers">> => #{}
     },
-    Result1 = case maps:find(<<"Location">>, HeadersMap) of
-        {ok, Uri} ->
+    Result1 = case lists:keyfind(<<"Location">>, 1, RespHeaders) of
+        {_, Uri} ->
             maps:put(<<"uri">>, Uri, Result0);
         _ ->
             maps:put(<<"uri">>, <<>>, Result0)
@@ -526,16 +531,11 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
     {ok, StatusCode, Response, St1}.
 
   
-
-
-
-
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    #{
-        <<"code">> := Code,
-        <<"message">> := Msg,
-        <<"description">> := Desc
-    } = Body = bondy_error:error_map({Error, 401}),
+    Body = bondy_error:error_map(Error, 401),
+    Code = maps:get(<<"code">>, Body, <<>>),
+    Msg = maps:get(<<"message">>, Body, <<>>),
+    Desc = maps:get(<<"description">>, Body, <<>>),
     Auth = <<
         Scheme/binary,
         " realm=", $", Realm/binary, $", $\,,

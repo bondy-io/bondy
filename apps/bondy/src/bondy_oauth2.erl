@@ -52,14 +52,18 @@
 -define(DEFAULT_REFRESH_TTL, 86400). % 1d
 -define(EXP_LEEWAY, 2*60). % 2m
 
+-type error()      ::   oauth2_invalid_grant | unknown_realm.
+
+-export_type([error/0]).
 
 -export([issue_token/4]).
 -export([refresh_token/3]).
 -export([revoke_token/3]).
-
 -export([decode_jwt/1]).
 -export([verify_jwt/2]).
 -export([verify_jwt/3]).
+
+-export([generate_fragment/1]).
 
 
 
@@ -114,7 +118,7 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
     Now = os:system_time(seconds) + ?EXP_LEEWAY,
     case plumtree_metadata:get(Prefix, RefreshToken) of
         #bondy_oauth2_token{expires_in = Exp} when Exp =< Now ->
-            {error, token_expired};
+            {error, oauth2_invalid_grant};
         #bondy_oauth2_token{} = Data0 ->
             %% Issue new tokens
             %% TODO Refresh grants by querying the User data
@@ -126,8 +130,8 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
                 {error, _} = Error ->
                     Error
             end;
-        not_found ->
-            {error, invalid_refresh_token}
+        undefined ->
+            {error, oauth2_invalid_grant}
     end.
 
 
@@ -162,7 +166,7 @@ decode_jwt(JWT) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec verify_jwt(binary(), binary()) -> 
-    {true, map()} | {expired, map()} | {false, map()}.
+    {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT) ->
     verify_jwt(RealmUri, JWT, #{}).
@@ -173,15 +177,15 @@ verify_jwt(RealmUri, JWT) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec verify_jwt(binary(), binary(), map()) -> 
-    {true, map()} | {expired, map()} | {false, map()}.
+    {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT, Match0) ->
     Match1 = Match0#{<<"aud">> => RealmUri},
     Now = os:system_time(seconds) + ?EXP_LEEWAY,
     case bondy_cache:get(RealmUri, JWT) of
-        {ok, #{<<"exp">> := Exp} = Claims} when Exp =< Now ->
+        {ok, #{<<"exp">> := Exp}} when Exp =< Now ->
             ok = bondy_cache:remove(JWT),
-            {expired, Claims};
+            {error, oauth2_invalid_grant};
         {ok, Claims} ->
             matches(Claims, Match1);
         not_found ->
@@ -242,7 +246,7 @@ sign(Key, Claims) ->
 
 %% @private
 -spec do_verify_jwt(binary(), map(), integer()) -> 
-    {true, map()} | {expired, map()} | {false, map()}.
+    {ok, map()} | {error, error()}.
 
 do_verify_jwt(JWT, Match, Now) ->     
     {jose_jwt, Map} = jose_jwt:peek(JWT),
@@ -250,14 +254,24 @@ do_verify_jwt(JWT, Match, Now) ->
         <<"aud">> := RealmUri,
         <<"kid">> := Kid
     } = Map,
-    Realm = bondy_realm:fetch(RealmUri),
-    JWK = bondy_realm:get_public_key(Realm, Kid),
-    case jose_jwt:verify(JWK, JWT) of
-        {true, {jose_jwt, #{<<"exp">> := Exp} = Claims}, _} when Exp =< Now ->         {expired, Claims};
-        {true, {jose_jwt, Claims}, _} -> 
-            matches(Claims, Match);
-        {false, {jose_jwt, Claims}, _} -> 
-            {false, Claims}
+    case bondy_realm:lookup(RealmUri) of
+        not_found ->
+            {error, unknown_realm};
+        Realm ->
+            case bondy_realm:get_public_key(Realm, Kid) of
+                undefined ->
+                    {error, oauth2_invalid_grant};
+                JWK ->
+                    case jose_jwt:verify(JWK, JWT) of
+                        {true, {jose_jwt, #{<<"exp">> := Exp}}, _} 
+                        when Exp =< Now ->         
+                            {error, oauth2_invalid_grant};
+                        {true, {jose_jwt, Claims}, _} -> 
+                            matches(Claims, Match);
+                        {false, {jose_jwt, _Claims}, _} -> 
+                            {error, oauth2_invalid_grant}
+                    end
+            end
     end.
 
 
@@ -265,8 +279,10 @@ do_verify_jwt(JWT, Match, Now) ->
 matches(Claims, Match) ->
     Keys = maps:keys(Match),
     case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Match) of
-        true -> {true, Claims};
-        false -> {false, Claims}
+        true -> 
+            {ok, Claims};
+        false -> 
+            {error, oauth2_invalid_grant}
     end.
 
 
@@ -287,8 +303,10 @@ grants_to_scope([{_K, _V}|_T], Scope) ->
 %% Borrowed from 
 %% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
 -spec generate_fragment(integer()) -> binary().
+
 generate_fragment(0) -> 
     <<>>;
+
 generate_fragment(N) ->
     Rand = base64:encode(crypto:strong_rand_bytes(N)),
     Frag = << <<C>> || <<C>> <= <<Rand:N/bytes>>, is_alphanum(C) >>,
@@ -297,6 +315,7 @@ generate_fragment(N) ->
 
 %% @doc Returns true for alphanumeric ASCII characters, false for all others.
 -spec is_alphanum(char()) -> boolean().
+
 is_alphanum(C) when C >= 16#30 andalso C =< 16#39 -> true;
 is_alphanum(C) when C >= 16#41 andalso C =< 16#5A -> true;
 is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;

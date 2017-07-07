@@ -122,18 +122,24 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_private_key(realm(), Kid :: integer()) -> map().
+-spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
 get_private_key(#realm{private_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_public_key(realm(), Kid :: integer()) -> map().
+-spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
 get_public_key(#realm{public_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -329,8 +335,10 @@ init(#realm{uri = Uri} = Realm) ->
     },
     ok = bondy_security_user:add(Uri, User),
     Opts = [],
-    _ = [bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) || 
-            CIDR <- ?LOCAL_CIDRS],
+    _ = [
+        bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
+        || CIDR <- ?LOCAL_CIDRS
+    ],
     enable_security(Realm).
 
 

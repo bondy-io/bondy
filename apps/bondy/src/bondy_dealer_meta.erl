@@ -77,6 +77,33 @@ handle_call(
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_ADD} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    case bondy_context:realm_uri(Ctxt) of
+        ?BONDY_REALM_URI ->        
+            R = case M#call.arguments of
+                [RealmUri, Info] ->
+                    maybe_error(
+                        bondy_api_gateway:add_client(RealmUri, Info), ReqId);
+                _ ->
+                    wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        #{},
+                        ?WAMP_ERROR_INVALID_ARGUMENT)
+            end,
+            bondy:send(bondy_context:peer_id(Ctxt), R);
+        _ ->
+            R = wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_NOT_AUTHORIZED,
+                [<<"You need to be logged in to root realm to be able to call this procedure.">>]),
+            bondy:send(bondy_context:peer_id(Ctxt), R)
+    end;
+
+
 handle_call(#call{procedure_uri = ?BONDY_USER_ADD} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
@@ -112,8 +139,26 @@ handle_call(#call{procedure_uri = ?BONDY_USER_DELETE} = M, Ctxt) ->
 
 handle_call(#call{procedure_uri = ?BONDY_USER_LIST} = M, Ctxt) ->
     ReqId = M#call.request_id,
-    Args = [bondy_security_user:list(maps:get(realm_uri, Ctxt))],
-    R = wamp_message:result(ReqId, #{}, Args, #{}),
+    R = case M#call.arguments of
+        [Uri] ->
+            case bondy_security_user:list(Uri) of
+                L when is_list(L) ->
+                    wamp_message:result(ReqId, #{}, [L], #{});
+                {error, Reason} ->
+                    #{<<"code">> := Code} = Map = bondy_error:error_map(Reason),
+                    wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        Map,
+                        bondy_error:error_uri(Code))
+            end;
+        _ ->
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_USER_LOOKUP} = M, Ctxt) ->
@@ -192,3 +237,15 @@ handle_call(#call{procedure_uri = ?BONDY_SOURCE_LOOKUP} = M, Ctxt) ->
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R).
+
+
+maybe_error({ok, Client}, ReqId) ->
+    wamp_message:result(ReqId, #{}, [Client], #{});
+
+maybe_error({error, Reason}, ReqId) ->
+    #{<<"code">> := Code} = Map = bondy_error:error_map(Reason),
+    wamp_message:error(
+        ?CALL,
+        ReqId,
+        Map,
+        bondy_error:error_uri(Code)).

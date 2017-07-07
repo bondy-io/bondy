@@ -27,6 +27,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
+-define(TCP, wamp_tcp).
+-define(TLS, wamp_tls).
 -define(TIMEOUT, 60000 * 60).
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
@@ -54,6 +56,8 @@
 -type state() :: #state{}.
 
 -export([start_link/4]).
+-export([start_listeners/0]).
+
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -70,6 +74,57 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Starts the tcp and tls raw socket listeners
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_listeners() -> ok.
+
+start_listeners() ->
+    start_listeners([?TCP, ?TLS]).
+
+
+%% @private
+start_listeners([]) ->
+    ok;
+
+start_listeners([H|T]) ->
+    {ok, Opts} = application:get_env(bondy, H),
+    case lists:keyfind(enabled, 1, Opts) of
+        {_, true} ->
+            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+            {_, Port} = lists:keyfind(port, 1, Opts),
+            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
+            TransportOpts = case H == ?TLS of
+                true ->
+                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
+                    Files;
+                false ->
+                    []
+            end,
+            {ok, _} = ranch:start_listener(
+                H,
+                PoolSize,
+                ranch_mod(H),
+                [{port, Port}],
+                bondy_wamp_raw_handler, 
+                TransportOpts
+            ),
+            _ = ranch:set_max_connections(H, MaxConns),
+            start_listeners(T);
+        {_, false} ->
+            start_listeners(T)
+    end.
+
+
+%% @private
+ranch_mod(?TCP) -> ranch_tcp;
+ranch_mod(?TLS) -> ranch_ssl.
+
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -79,6 +134,10 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 init({Ref, Socket, Transport, _Opts}) ->
     %% We must call ranch:accept_ack/1 before doing any socket operation. 
     %% This will ensure the connection process is the owner of the socket. 
