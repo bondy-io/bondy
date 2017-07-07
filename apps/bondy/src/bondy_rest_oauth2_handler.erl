@@ -234,9 +234,9 @@ accept(Req0, St) ->
         accept_flow(maps:from_list(PList), json, Req1, St)
     catch
         error:Reason ->
-            %% reply error in body (check OAUTH)
-            io:format(
-                "Error ~p,~nTrace:~p~n", [Reason, erlang:get_stacktrace()]),
+            lager:error(
+                "error=error, reason=~p, stacktrace:~p", 
+                [Reason, erlang:get_stacktrace()]),
             Req2 = reply(Reason, json, Req0),
             {false, Req2, St}
     end.
