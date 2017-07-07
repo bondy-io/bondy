@@ -27,7 +27,7 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
 }'
 ```
 
-Otherwise do
+To generate random `client_id` and `client_secret` do:
 ```bash
 curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
      -H "Content-Type: application/json; charset=utf-8" \
