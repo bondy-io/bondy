@@ -23,7 +23,7 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
      -d $'{
   "client_id": "1234",
   "client_secret": "4567",
-  "description": "A test client"
+  "info" : {"description": "A test client"}
 }'
 ```
 
@@ -62,16 +62,15 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
      -d $'{
   "username": "ale",
   "password": "1234",
-  "user_id": 2,
-  "account_id": 1
+  "info" :{
+    "user_id": 2,
+    "account_id": 1
+  }
 }'
 ```
 
 ## Adding an Api Spec
 ```bash
-
-
-
 curl -X "POST" "http://localhost:18081/services/load_api_spec" \
      -H "Content-Type: application/json; charset=utf-8" \
      -H "Accept: application/json; charset=utf-8" \
