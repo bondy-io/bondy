@@ -334,11 +334,13 @@ init(#realm{uri = Uri} = Realm) ->
         password => <<"bondy">>
     },
     ok = bondy_security_user:add(Uri, User),
-    Opts = [],
-    _ = [
-        bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
-        || CIDR <- ?LOCAL_CIDRS
-    ],
+    % Opts = [],
+    % _ = [
+    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
+    %     || CIDR <- ?LOCAL_CIDRS
+    % ],
+    %TODO remove this once we have the APIs to add sources
+    _ = bondy_security:add_source(Uri, all, {{0,0,0,0}, 0}, password, []),
     enable_security(Realm).
 
 

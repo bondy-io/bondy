@@ -115,6 +115,13 @@ is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             },
             %% TODO update context
             {true, Req0, St1};
+        {error, unknown_realm} ->
+            Response = #{
+                <<"body">> => bondy_error:error_map(unknown_realm, 401),
+                <<"headers">> => #{}
+            },
+            Req2 = reply(401, json, Response, Req0),
+            {stop, Req2, St0};
         {error, Reason} ->
             Req2 = reply_auth_error(
                 Reason, <<"Bearer">>, Realm, json, Req0),

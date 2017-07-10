@@ -178,7 +178,7 @@ error_map({Code, Mssg}) ->
     #{
         <<"code">> => Code,
         <<"message">> => Mssg,
-        <<"description">> => Mssg
+        <<"description">> => <<>>
     };
 
 error_map({Code, Mssg, Desc}) ->

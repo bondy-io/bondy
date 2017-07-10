@@ -49,14 +49,14 @@ An example return will be the following JSON object:
 
 ## Disable Realm Security
 ```bash
-curl -X "DELETE" "http://localhost:18081/realms/magenta/security_enabled" \
+curl -X "DELETE" "http://localhost:18081/realms/com.myapi/security_enabled" \
      -H "Content-Type: application/json; charset=utf-8" \
      -H "Accept: application/json; charset=utf-8"
 ```
 
 ## Add a Resource Owner (end-user)
 ```bash
-curl -X "POST" "http://localhost:18081/realms/magenta/resource_owners" \
+curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
      -H "Content-Type: application/json; charset=utf-8" \
      -H "Accept: application/json; charset=utf-8" \
      -d $'{
@@ -69,9 +69,12 @@ curl -X "POST" "http://localhost:18081/realms/magenta/resource_owners" \
 
 ## Adding an Api Spec
 ```bash
+
+
+
 curl -X "POST" "http://localhost:18081/services/load_api_spec" \
      -H "Content-Type: application/json; charset=utf-8" \
      -H "Accept: application/json; charset=utf-8" \
-     -d "@/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json"
+     --data-binary "@/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json"
 ```
 

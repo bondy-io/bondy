@@ -188,7 +188,7 @@ password(RealmUri, Username) ->
 
 %% @private
 to_map(RealmUri, {Username, PL}) ->
-    Map0 = proplists:get_value(info, PL, #{}),
+    Map0 = proplists:get_value(<<"info">>, PL, #{}),
     Map1 = Map0#{
         username => Username,
         has_password => has_password(PL),

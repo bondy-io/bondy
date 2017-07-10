@@ -95,18 +95,16 @@ add_client(RealmUri, Info0) ->
                 datatype => binary,
                 default => fun() -> bondy_oauth2:generate_fragment(48) end
             },
-            <<"description">> => #{
-                datatype => binary
+            <<"info">> => #{
+                datatype => map
             }
         }),
-        {Props, Info2} = maps_utils:split(
-            [<<"client_id">>, <<"client_secret">>], Info1),
         Opts = [
-            {info, Info2},
-            {"password", maps:get(<<"client_secret">>, Props)},
-            {"groups", ["api_clients"]}
+            {"password", maps:get(<<"client_secret">>, Info1)},
+            {"groups", ["api_clients"]} | 
+            maps:to_list(maps:with([<<"info">>], Info1))
         ],
-        Id = maps:get(<<"client_id">>, Props),
+        Id = maps:get(<<"client_id">>, Info1),
         case bondy_security:add_user(RealmUri, Id, Opts) of
             {error, _} = Error ->
                 Error;
@@ -130,9 +128,7 @@ add_client(RealmUri, Info0) ->
 
 add_resource_owner(RealmUri, Info0) ->
     ok = maybe_init_security(RealmUri),
-    {Props, Info1} = maps_utils:split(
-            [<<"username">>, <<"password">>], Info0),
-    Info2 = maps_utils:validate(Info1, #{
+    Info1 = maps_utils:validate(Info0, #{
         <<"username">> => #{
             required => true,
             allow_null => false,
@@ -145,21 +141,22 @@ add_resource_owner(RealmUri, Info0) ->
             datatype => binary,
             default => fun() -> bondy_oauth2:generate_fragment(48) end
         },
-        <<"description">> => #{
-            datatype => binary
+        <<"info">> => #{
+            datatype => map
         }
     }),
-    Username = maps:get(<<"username">>, Info2),
+    
     Opts = [
-        {info, Props},
-        {"password", maps:get(<<"password">>, Info2)},
-        {"groups", ["resource_owners"]}
+        {"password", maps:get(<<"password">>, Info1)},
+        {"groups", ["resource_owners"]} | 
+        maps:to_list(maps:with([<<"info">>], Info1))
     ],
+    Username = maps:get(<<"username">>, Info1),
     case bondy_security:add_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
         ok ->
-            {ok, maps:merge(Info1, Props)}
+            {ok, Info1}
     end.
 
 

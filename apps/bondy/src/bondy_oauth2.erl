@@ -99,8 +99,8 @@ issue_token(RealmUri, Issuer, Username, Grants) ->
     | {error, any()}.
 
 issue_token(RealmUri, Data0) ->
-   case bondy_realm:fetch(RealmUri) of
-       not_found ->
+   case bondy_realm:lookup(RealmUri) of
+        not_found ->
            {error, unknown_realm};
         Realm ->
             do_issue_token(Realm, Data0)

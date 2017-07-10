@@ -196,8 +196,8 @@ is_authorized(Req0, St0) ->
             },
             {true, Req0, St1};
         {error, Reason} ->
-            lager:info("API Consumer login failed, error = ~p", [Reason]),
-            Req1 = reply(Reason, json, Req0),
+            lager:info("API Client login failed, error=oauth2_invalid_client,reason=~p", [Reason]),
+            Req1 = reply(oauth2_invalid_client, json, Req0),
             {stop, Req1, St0}
     end.
 
@@ -267,7 +267,8 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
                     {stop, Req1, St0}
             end;
         {error, Error} ->
-            Req1 = reply(Error, Enc, Req0),
+            lager:info("Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
+            Req1 = reply(oauth2_invalid_grant, Enc, Req0),
             {stop, Req1, St0}
     end;
 
@@ -348,7 +349,7 @@ prepare_request(Enc, Body, Headers, Req0) ->
 
 token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
     Body = #{
-        <<"token_type">> => <<"jwt">>,
+        <<"token_type">> => <<"bearer">>,
         <<"access_token">> => JWT,
         <<"refresh_token">> => RefreshToken,
         <<"scope">> => maps:get(<<"scope">>, Claims),
