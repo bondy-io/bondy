@@ -316,12 +316,12 @@ acknowledge_message(_) ->
 %% -----------------------------------------------------------------------------
 -spec async_route_event(wamp_message(), bondy_context:context()) -> 
     ok | {error, overload}.
+    
 async_route_event(M, Ctxt) ->
-    PoolName = ?POOL_NAME,
     %% Todo either fix pool_type based on stats or use mochiweb to compile 
     %% bondy_config to avoid bottlenecks.
-    PoolType = bondy_config:pool_type(PoolName),
-    case async_route_event(PoolType, PoolName, M, Ctxt) of
+    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
+    case async_route_event(PoolType, router_pool, M, Ctxt) of
         ok ->
             ok;
         {ok, _} ->
