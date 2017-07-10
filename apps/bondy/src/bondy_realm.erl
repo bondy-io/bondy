@@ -215,7 +215,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         not_found ->
-            ok = put(Uri, Opts)
+            put(Uri, Opts)
     end.
 
 
