@@ -19,7 +19,7 @@
 %% -------------------------------------------------------------------
 
 % -module(riak_core_pw_auth).
--module(bondy_pw_auth).
+-module(bondy_security_pw).
 
 -export([hash_password/1]).
 -export([check_password/5]).

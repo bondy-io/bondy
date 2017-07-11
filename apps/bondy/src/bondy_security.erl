@@ -609,7 +609,7 @@ get_grants(#context{grants=Val}) ->
 %                                     HashFunction = lookup(hash_func, PasswordData),
 %                                     Salt = lookup(salt, PasswordData),
 %                                     Iterations = lookup(iterations, PasswordData),
-%                                     case bondy_pw_auth:check_password(Password,
+%                                     case bondy_security_pw:check_password(Password,
 %                                                                           HashedPass,
 %                                                                           HashFunction,
 %                                                                           Salt,
@@ -721,7 +721,7 @@ auth_with_source(password, UserData, M) ->
             Salt = lookup(salt, PasswordData),
             Iterations = lookup(iterations, PasswordData),
             case 
-                bondy_pw_auth:check_password(
+                bondy_security_pw:check_password(
                     maps:get(password, M),
                     HashedPass,
                     HashFunction,
@@ -1375,7 +1375,7 @@ validate_password_option(Pass, Options) when is_list(Pass) ->
     
 validate_password_option(Pass, Options) ->
     {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
-        bondy_pw_auth:hash_password(Pass),
+        bondy_security_pw:hash_password(Pass),
     NewOptions = stash("password", {"password",
                                     [{hash_pass, HashedPass},
                                      {auth_name, AuthName},

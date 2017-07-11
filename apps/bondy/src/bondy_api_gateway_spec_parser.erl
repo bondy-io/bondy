@@ -1283,7 +1283,7 @@ security_scheme_rules(
 
     St = #{realm_uri => Realm},
 
-    Mod = bondy_rest_oauth2_handler,
+    Mod = bondy_api_oauth2_handler,
     [
         {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, St},
         %% Revoke is secured

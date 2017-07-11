@@ -515,7 +515,7 @@ challenge(?WAMPCRA_AUTH, User, Details, St) ->
             } = Pass,
             Ch0#{
                 salt => Salt,
-                keylen => 16, % see bondy_pw_auth.erl
+                keylen => 16, % see bondy_security_pw.erl
                 iterations => Iter
             }
     end;

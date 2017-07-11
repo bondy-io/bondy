@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_rest_oauth2_handler.erl -
+%%  bondy_api_oauth2_handler.erl -
 %% 
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
 %% 
@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_rest_oauth2_handler).
+-module(bondy_api_oauth2_handler).
 -include("bondy.hrl").
 
 % -type state() :: #{
