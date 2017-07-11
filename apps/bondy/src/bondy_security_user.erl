@@ -43,7 +43,7 @@
             {ok, ?CHARS2LIST(X)}
         end
     },
-    <<"info">> => #{
+    <<"meta">> => #{
         alias => info,
         required => false,
         datatype => map
@@ -205,7 +205,7 @@ to_map(RealmUri, {Username, PL}) ->
         username => Username,
         has_password => has_password(PL),
         groups => proplists:get_value("groups", PL, []),
-        info => proplists:get_value(<<"info">>, PL, #{})
+        meta => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         not_found ->

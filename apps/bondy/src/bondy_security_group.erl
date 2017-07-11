@@ -47,7 +47,7 @@ add(RealmUri, Group) ->
     } = Group,
     Name = unicode:characters_to_list(BinName, utf8),
     Opts = [
-        {<<"info">>, Info}
+        {<<"meta">>, Info}
     ],
     bondy_security:add_group(RealmUri, Name, Opts).
 
@@ -121,7 +121,7 @@ list(RealmUri) ->
 to_map({Id, Opts}) ->
     #{
         <<"name">> => Id,
-        <<"info">> => proplists:get_value(<<"info">>, Opts, #{})
+        <<"meta">> => proplists:get_value(<<"meta">>, Opts, #{})
     }.
 
 

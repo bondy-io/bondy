@@ -356,7 +356,8 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
         <<"authrole">> => maps:get(<<"scope">>, Claims),
         <<"authscope">> => maps:get(<<"scope">>, Claims),
         <<"authmethod">> => <<"oauth2">>,
-        <<"authprovider">> => maps:get(<<"iss">>, Claims)
+        <<"authprovider">> => maps:get(<<"iss">>, Claims),
+        <<"authmeta">> => maps:get(<<"meta">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
 

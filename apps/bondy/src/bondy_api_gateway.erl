@@ -109,14 +109,14 @@ add_client(RealmUri, Info0) ->
                 datatype => binary,
                 default => fun() -> bondy_oauth2:generate_fragment(48) end
             },
-            <<"info">> => #{
+            <<"meta">> => #{
                 datatype => map
             }
         }),
         Opts = [
             {"password", maps:get(<<"client_secret">>, Info1)},
             {"groups", ["api_clients"]} | 
-            maps:to_list(maps:with([<<"info">>], Info1))
+            maps:to_list(maps:with([<<"meta">>], Info1))
         ],
         Id = maps:get(<<"client_id">>, Info1),
         case bondy_security:add_user(RealmUri, Id, Opts) of
@@ -155,7 +155,7 @@ add_resource_owner(RealmUri, Info0) ->
             datatype => binary,
             default => fun() -> bondy_oauth2:generate_fragment(48) end
         },
-        <<"info">> => #{
+        <<"meta">> => #{
             datatype => map
         }
     }),
@@ -163,7 +163,7 @@ add_resource_owner(RealmUri, Info0) ->
     Opts = [
         {"password", maps:get(<<"password">>, Info1)},
         {"groups", ["resource_owners"]} | 
-        maps:to_list(maps:with([<<"info">>], Info1))
+        maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Username = maps:get(<<"username">>, Info1),
     case bondy_security:add_user(RealmUri, Username, Opts) of
