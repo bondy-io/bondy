@@ -18,7 +18,7 @@
 
 
 
--define(BONDY_VERSION_STRING, <<"BONDY-0.0.2">>).
+-define(BONDY_VERSION_STRING, <<"LEAPSIGHT-BONDY-0.5.2">>).
 -define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
 
 -define(BONDY_PEER_CALL, '$bondy_call').
