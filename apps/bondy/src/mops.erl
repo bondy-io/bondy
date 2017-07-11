@@ -130,6 +130,8 @@ eval(Val, _) ->
 %% > foo
 %% > mops:eval(<<"foo">>, #{<<"foo">> => bar}).
 %% > <<"foo">>
+%% > mops:eval(1, #{<<"foo">> => bar}).
+%% > 1
 %% > mops:eval(<<"{{foo}}">>, #{<<"foo">> => bar}).
 %% > bar
 %% > mops:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => foobar}}).
