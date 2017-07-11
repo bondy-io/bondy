@@ -356,7 +356,8 @@ init(#realm{uri = Uri} = Realm) ->
     % ],
     %TODO remove this once we have the APIs to add sources
     _ = bondy_security:add_source(Uri, all, {{0,0,0,0}, 0}, password, []),
-    enable_security(Realm).
+    ok = enable_security(Realm),
+    Realm.
 
 
 %% @private
