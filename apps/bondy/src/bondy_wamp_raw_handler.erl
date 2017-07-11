@@ -148,8 +148,6 @@ init({Ref, Socket, Transport, _Opts}) ->
         socket = Socket,
         transport = Transport
     },
-    lager:info(
-        <<"Establishing raw socket connection with peer '~p'~n">>, [self()]),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
@@ -322,7 +320,9 @@ init_wamp(Len, Enc, St0) ->
         {ok, {_, _} = Peer} ->
             MaxLen = validate_max_len(Len),
             {FrameType, EncName} = validate_encoding(Enc),
-            case bondy_wamp_protocol:init({ws, FrameType, EncName}, Peer, #{}) of
+            
+            Proto = {raw, FrameType, EncName},
+            case bondy_wamp_protocol:init(Proto, Peer, #{}) of
                 {ok, CBState} ->
                     St1 = St0#state{
                         frame_type = FrameType,
@@ -330,6 +330,10 @@ init_wamp(Len, Enc, St0) ->
                         max_len = MaxLen
                     },
                     send_frame(<<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
+                    lager:info(
+                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>, 
+                        [FrameType, EncName, Peer]
+                    ),
                     {ok, St1};
                 {error, Reason} ->
                     {error, Reason, St0}
