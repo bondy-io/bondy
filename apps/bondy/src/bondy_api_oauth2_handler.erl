@@ -272,8 +272,9 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     {IP, _Port} = cowboy_req:peer(Req0),
     case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
-            #{<<"meta">> := Info} = bondy_security:fetch(
+            User = bondy_security_user:fetch(
                 RealmUri, bondy_security:get_username(AuthCtxt)),
+            Info = maps:get(<<"info">>, User, #{}),
             Issuer = maps:get(client_id, St0),
             G0 = bondy_security:get_grants(AuthCtxt),
             %% TODO Scope intersection
