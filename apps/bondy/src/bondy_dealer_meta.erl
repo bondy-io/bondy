@@ -169,7 +169,7 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_ADD} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 
-handle_call(#call{procedure_uri = ?BONDY_GATEWAY_RESOURCE_OWNER_ADD} = M, Ctxt) ->
+handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.add_resource_owner">>} = M, Ctxt) ->
     ReqId = M#call.request_id,
     MyRealmUri = bondy_context:realm_uri(Ctxt),
     R = case {MyRealmUri, M#call.arguments} of
@@ -194,8 +194,59 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_RESOURCE_OWNER_ADD} = M, Ctxt) 
                 ?WAMP_ERROR_INVALID_ARGUMENT)
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
-    
 
+
+handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.update_resource_owner">>} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    MyRealmUri = bondy_context:realm_uri(Ctxt),
+    R = case {MyRealmUri, M#call.arguments} of
+        {MyRealmUri, [Username, Info]} ->
+            maybe_error(
+                bondy_api_gateway:update_resource_owner(MyRealmUri, Username, Info),
+                ReqId
+            );
+        {MyRealmUri, [Uri, Username, Info]} 
+        when MyRealmUri =:= Uri orelse MyRealmUri =:= ?BONDY_REALM_URI ->
+            maybe_error(
+                bondy_api_gateway:update_resource_owner(Uri, Username, Info),
+                ReqId
+            );
+        {_, [_, _]} ->
+            unauthorized(ReqId, Ctxt);
+        _ ->
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.remove_resource_owner">>} = M, Ctxt) ->
+    ReqId = M#call.request_id,
+    MyRealmUri = bondy_context:realm_uri(Ctxt),
+    R = case {MyRealmUri, M#call.arguments} of
+        {MyRealmUri, [Username]} ->
+            maybe_error(
+                bondy_api_gateway:remove_resource_owner(MyRealmUri, Username),
+                ReqId
+            );
+        {MyRealmUri, [Uri, Username]} 
+        when MyRealmUri =:= Uri orelse MyRealmUri =:= ?BONDY_REALM_URI ->
+            maybe_error(
+                bondy_api_gateway:remove_resource_owner(Uri, Username),
+                ReqId
+            );
+        {_, [_, _]} ->
+            unauthorized(ReqId, Ctxt);
+        _ ->
+            wamp_message:error(
+                ?CALL,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_INVALID_ARGUMENT)
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_USER_ADD} = M, Ctxt) ->
     %% @TODO

@@ -272,11 +272,13 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     {IP, _Port} = cowboy_req:peer(Req0),
     case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
+            #{<<"meta">> := Info} = bondy_security:fetch(
+                RealmUri, bondy_security:get_username(AuthCtxt)),
             Issuer = maps:get(client_id, St0),
             G0 = bondy_security:get_grants(AuthCtxt),
             %% TODO Scope intersection
             G1 = G0,
-            case bondy_oauth2:issue_token(RealmUri, Issuer, U, G1) of
+            case bondy_oauth2:issue_token(RealmUri, Issuer, U, G1, Info) of
                 {ok, JWT, RefreshToken, Claims} ->
                     Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
                     {true, Req1, St0};

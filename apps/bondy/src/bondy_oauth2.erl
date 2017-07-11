@@ -59,6 +59,7 @@
 -record(bondy_oauth2_token, {
     issuer                  ::  binary(), %% aka client_id or consumer_id
     username                ::  binary(),
+    meta = #{}              ::  map(),
     requested_grants        ::  list(),
     expires_in              ::  pos_integer(),
     issued_at               ::  pos_integer(),
@@ -75,7 +76,7 @@
 
 -export_type([error/0]).
 
--export([issue_token/4]).
+-export([issue_token/5]).
 -export([refresh_token/3]).
 -export([revoke_token/3]).
 -export([decode_jwt/1]).
@@ -96,14 +97,16 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec issue_token(bondy_realm:uri(), binary(), binary(), [{any(), any()}]) -> 
+-spec issue_token(
+    bondy_realm:uri(), binary(), binary(), [{any(), any()}], map()) -> 
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
-issue_token(RealmUri, Issuer, Username, Grants) ->    
+issue_token(RealmUri, Issuer, Username, Grants, Info) ->    
     Data = #bondy_oauth2_token{
         issuer = Issuer,
         username = Username,
+        meta = Info,
         requested_grants = Grants
     },
     issue_token(RealmUri, Data).
@@ -226,6 +229,7 @@ do_issue_token(Realm, Data0) ->
     #bondy_oauth2_token{
         issuer = Issuer,
         username = Username,
+        meta = Info,
         requested_grants = Grants
     } = Data0,
     Kid = bondy_realm:get_random_kid(Realm),
@@ -242,7 +246,8 @@ do_issue_token(Realm, Data0) ->
         <<"sub">> => Username,
         <<"iss">> => Issuer,
         <<"aud">> => Uri,
-        <<"scope">> => Scope
+        <<"scope">> => Scope,
+        <<"meta">> => Info
     },
     JWT = sign(Key, Claims),
     %% We generate and store the refresh token

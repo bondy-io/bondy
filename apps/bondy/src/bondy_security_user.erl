@@ -22,14 +22,13 @@
 
 -type user() :: map().
 
--define(INFO_KEYS, [
-    external_id
-]).
 
 -define(USER_SPEC, #{
     <<"username">> => #{
         alias => username,
         required => true,
+        allow_null => false,
+        allow_undefined => false,
         datatype => binary,
         validator => fun(X) ->
             {ok, ?CHARS2LIST(X)}
@@ -43,8 +42,8 @@
             {ok, ?CHARS2LIST(X)}
         end
     },
-    <<"info">> => #{
-        alias => info,
+    <<"meta">> => #{
+        alias => meta,
         required => false,
         datatype => map
     },
@@ -119,7 +118,7 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), list() | binary()) -> ok.
-remove(RealmUri, Id) when is_binary(Id) ->
+remove(RealmUri, Id) when is_list(Id) ->
     remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
 remove(RealmUri, Id) ->
@@ -201,11 +200,11 @@ password(RealmUri, Username) ->
 
 %% @private
 to_map(RealmUri, {Username, PL}) ->
-    Map0 = proplists:get_value(<<"info">>, PL, #{}),
-    Map1 = Map0#{
+    Map1 = #{
         username => Username,
         has_password => has_password(PL),
-        groups => proplists:get_value("groups", PL, [])
+        groups => proplists:get_value("groups", PL, []),
+        meta => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         not_found ->

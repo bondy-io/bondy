@@ -23,7 +23,7 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
      -d $'{
   "client_id": "1234",
   "client_secret": "4567",
-  "info" : {"description": "A test client"}
+  "meta" : {"description": "A test client"}
 }'
 ```
 
@@ -62,7 +62,22 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
      -d $'{
   "username": "ale",
   "password": "1234",
-  "info" :{
+  "meta" :{
+    "user_id": 2,
+    "account_id": 1
+  }
+}'
+```
+
+## Update a Resource Owner (end-user)
+```bash
+curl -X "PUT" "http://localhost:18081/realms/com.myapi/resource_owners" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "username": "ale",
+  "password": "1234",
+  "meta" :{
     "user_id": 2,
     "account_id": 1
   }
