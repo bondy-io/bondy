@@ -442,15 +442,15 @@ when is_function(Val, 1) ->
 apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
         [Arg] when is_function(Arg, 1) ->
-            fun(X) -> maps:merge(Val, Arg(X)) end;
+            fun(X) -> apply_custom_op(Op, Val, X) end;
         [Arg] when is_map(Arg) ->
             maps:merge(Val, Arg);
         [<<"_">>, R] when is_function(R, 1) ->
-            fun(X) -> maps:merge(Val, R(X)) end;
+            fun(X) -> apply_custom_op(Op, Val, X) end;
         [<<"_">>, R] when is_map(R) ->
             maps:merge(Val, R);
         [L, <<"_">>] when is_function(L, 1) ->
-            fun(X) -> maps:merge(L(X), Val) end;
+            fun(X) -> apply_custom_op(Op, Val, X) end;
         [L, <<"_">>] ->
             maps:merge(L, Val);
         _ -> 

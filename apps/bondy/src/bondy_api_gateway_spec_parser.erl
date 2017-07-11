@@ -383,37 +383,37 @@
     <<"delete">> => #{
         alias => delete,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"get">> => #{
         alias => get,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"head">> => #{
         alias => head,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"options">> => #{
         alias => options,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"patch">> => #{
         alias => patch,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"post">> => #{
         alias => post,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     },
     <<"put">> => #{
         alias => put,
         required => false,
-        datatype => map
+        datatype => [binary, map] % To support mop expressions
     }
 }).
 
@@ -1023,6 +1023,9 @@ parse_path_elements([], Path, _) ->
 
     
 %% @private
+parse_request_method(Spec, Ctxt) when is_binary(Spec) ->
+    parse_request_method(bondy_utils:eval_term(Spec, Ctxt), Ctxt);
+    
 parse_request_method(Spec, Ctxt) ->
     #{
         % <<"accepts">> := Acc,
