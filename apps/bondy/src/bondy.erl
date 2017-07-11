@@ -11,7 +11,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--import(bondy_error, [error_uri/1, error_map/1]).
+-import(bondy_error, [error_map/1]).
 
 
 -export([ack/2]).
