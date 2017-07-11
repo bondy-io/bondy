@@ -69,6 +69,21 @@ curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
 }'
 ```
 
+## Update a Resource Owner (end-user)
+```bash
+curl -X "PUT" "http://localhost:18081/realms/com.myapi/resource_owners" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "username": "ale",
+  "password": "1234",
+  "meta" :{
+    "user_id": 2,
+    "account_id": 1
+  }
+}'
+```
+
 ## Adding an Api Spec
 ```bash
 curl -X "POST" "http://localhost:18081/services/load_api_spec" \

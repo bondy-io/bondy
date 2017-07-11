@@ -30,6 +30,17 @@
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).
 -define(ADMIN_HTTPS, admin_api_https).
+-define(VALIDATE_USERNAME, fun
+        (<<"all">>) ->
+            false;
+        ("all") ->
+            false;
+        (all) ->
+            false;
+        (_) ->
+            true
+    end
+).
 
 -type listener()  ::    api_gateway_http
                         | api_gateway_https
@@ -39,7 +50,11 @@
 
 %% API
 -export([add_client/2]).
+-export([update_client/3]).
+-export([remove_client/2]).
 -export([add_resource_owner/2]).
+-export([update_resource_owner/3]).
+-export([remove_resource_owner/2]).
 -export([dispatch_table/1]).
 -export([load/1]).
 
@@ -96,29 +111,7 @@ load(FName) ->
 add_client(RealmUri, Info0) ->
     try 
         ok = maybe_init_security(RealmUri),
-        Info1 = maps_utils:validate(Info0, #{
-            <<"client_id">> => #{
-                required => true,
-                allow_null => false,
-                datatype => binary,
-                default => fun() -> bondy_oauth2:generate_fragment(32) end
-            },
-            <<"client_secret">> => #{
-                required => true,
-                allow_null => false,
-                datatype => binary,
-                default => fun() -> bondy_oauth2:generate_fragment(48) end
-            },
-            <<"meta">> => #{
-                datatype => map
-            }
-        }),
-        Opts = [
-            {"password", maps:get(<<"client_secret">>, Info1)},
-            {"groups", ["api_clients"]} | 
-            maps:to_list(maps:with([<<"meta">>], Info1))
-        ],
-        Id = maps:get(<<"client_id">>, Info1),
+        {Id, Opts, Info1} = validate_client(Info0),
         case bondy_security:add_user(RealmUri, Id, Opts) of
             {error, _} = Error ->
                 Error;
@@ -129,6 +122,35 @@ add_client(RealmUri, Info0) ->
         error:Reason when is_map(Reason) ->
             {error, Reason}
     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_client(uri(), binary(), map()) -> 
+    {ok, map()} | {error, term()} | no_return().
+
+update_client(RealmUri, ClientId, Info0) ->
+    ok = maybe_init_security(RealmUri),
+    {ClientId, Opts, Info1} = validate_client(Info0),
+    case bondy_security:alter_user(RealmUri, ClientId, Opts) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            {ok, Info1}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_client(uri(), list() | binary()) -> ok.
+
+remove_client(RealmUri, Id) ->
+    bondy_security_user:remove(RealmUri, Id).
 
 
 %% -----------------------------------------------------------------------------
@@ -142,30 +164,7 @@ add_client(RealmUri, Info0) ->
 
 add_resource_owner(RealmUri, Info0) ->
     ok = maybe_init_security(RealmUri),
-    Info1 = maps_utils:validate(Info0, #{
-        <<"username">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            default => fun() -> bondy_oauth2:generate_fragment(32) end
-        },
-        <<"password">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            default => fun() -> bondy_oauth2:generate_fragment(48) end
-        },
-        <<"meta">> => #{
-            datatype => map
-        }
-    }),
-    
-    Opts = [
-        {"password", maps:get(<<"password">>, Info1)},
-        {"groups", ["resource_owners"]} | 
-        maps:to_list(maps:with([<<"meta">>], Info1))
-    ],
-    Username = maps:get(<<"username">>, Info1),
+    {Username, Opts, Info1} = validate_resource_owner(Info0),
     case bondy_security:add_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
@@ -173,6 +172,34 @@ add_resource_owner(RealmUri, Info0) ->
             {ok, Info1}
     end.
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update_resource_owner(uri(), binary(), map()) -> 
+    {ok, map()} | {error, term()} | no_return().
+
+update_resource_owner(RealmUri, Username, Info0) ->
+    ok = maybe_init_security(RealmUri),
+    {_, Opts, Info1} = validate_resource_owner(Info0),
+    case bondy_security:alter_user(RealmUri, Username, Opts) of
+        {error, _} = Error ->
+            Error;
+        ok ->
+            {ok, Info1}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_resource_owner(uri(), list() | binary()) -> ok.
+
+remove_resource_owner(RealmUri, Id) ->
+    bondy_security_user:remove(RealmUri, Id).
 
 
 %% -----------------------------------------------------------------------------
@@ -466,3 +493,60 @@ maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
         _ ->
             ok
     end.
+
+
+%% @private
+validate_resource_owner(Info0) ->
+    Info1 = maps_utils:validate(Info0, #{
+        <<"username">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            validator => ?VALIDATE_USERNAME,
+            default => fun() -> bondy_oauth2:generate_fragment(32) end
+        },
+        <<"password">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            default => fun() -> bondy_oauth2:generate_fragment(48) end
+        },
+        <<"meta">> => #{
+            datatype => map
+        }
+    }),
+    
+    Opts = [
+        {"password", maps:get(<<"password">>, Info1)},
+        {"groups", ["resource_owners"]} | 
+        maps:to_list(maps:with([<<"meta">>], Info1))
+    ],
+    Username = maps:get(<<"username">>, Info1),
+    {Username, Opts, Info1}.
+
+
+validate_client(Info0) ->
+    Info1 = maps_utils:validate(Info0, #{
+        <<"client_id">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            validator => ?VALIDATE_USERNAME,
+            default => fun() -> bondy_oauth2:generate_fragment(32) end
+        },
+        <<"client_secret">> => #{
+            required => true,
+            allow_null => false,
+            datatype => binary,
+            default => fun() -> bondy_oauth2:generate_fragment(48) end
+        },
+        <<"meta">> => #{
+            datatype => map
+        }
+    }),
+    Opts = [
+        {"password", maps:get(<<"client_secret">>, Info1)},
+        {"groups", ["api_clients"]} | 
+        maps:to_list(maps:with([<<"meta">>], Info1))
+    ],
+    {maps:get(<<"client_id">>, Info1), Opts, Info1}.

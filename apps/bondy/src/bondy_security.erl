@@ -843,6 +843,7 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     Username :: string(), 
     Options :: [{string(), term()}]) ->
     ok | {error, term()}.
+    
 alter_user(_, "all", _Options) ->
     {error, reserved_name};
 alter_user(RealmUri, Username, Options) ->

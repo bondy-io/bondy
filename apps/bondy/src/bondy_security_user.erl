@@ -22,14 +22,13 @@
 
 -type user() :: map().
 
--define(INFO_KEYS, [
-    external_id
-]).
 
 -define(USER_SPEC, #{
     <<"username">> => #{
         alias => username,
         required => true,
+        allow_null => false,
+        allow_undefined => false,
         datatype => binary,
         validator => fun(X) ->
             {ok, ?CHARS2LIST(X)}
@@ -44,7 +43,7 @@
         end
     },
     <<"meta">> => #{
-        alias => info,
+        alias => meta,
         required => false,
         datatype => map
     },
@@ -119,7 +118,7 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), list() | binary()) -> ok.
-remove(RealmUri, Id) when is_binary(Id) ->
+remove(RealmUri, Id) when is_list(Id) ->
     remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
 remove(RealmUri, Id) ->
