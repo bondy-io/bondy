@@ -201,11 +201,11 @@ password(RealmUri, Username) ->
 
 %% @private
 to_map(RealmUri, {Username, PL}) ->
-    Map0 = proplists:get_value(<<"info">>, PL, #{}),
-    Map1 = Map0#{
+    Map1 = #{
         username => Username,
         has_password => has_password(PL),
-        groups => proplists:get_value("groups", PL, [])
+        groups => proplists:get_value("groups", PL, []),
+        info => proplists:get_value(<<"info">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         not_found ->

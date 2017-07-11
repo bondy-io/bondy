@@ -119,9 +119,9 @@ list(RealmUri) ->
 
 %% @private
 to_map({Id, Opts}) ->
-    Map0 = proplists:get_value(<<"info">>, Opts, #{}),
-    Map0#{
-        <<"name">> => Id
+    #{
+        <<"name">> => Id,
+        <<"info">> => proplists:get_value(<<"info">>, Opts, #{})
     }.
 
 
