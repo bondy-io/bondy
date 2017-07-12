@@ -15,8 +15,6 @@ rebar3 as dev release
 _build/dev/rel/bondy/bin/bondy console
 ```
 
-This will generate an Erlang release at 
-
 ## Configuration
 On the first startup Bondy creates the root realm called "com.leapsight.bondy" and user with username `admin` and password `bondy` with local network access.
 
