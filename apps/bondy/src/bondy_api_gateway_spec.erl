@@ -1344,7 +1344,7 @@ gen_path_code(Name, PathSpec) ->
                             Json = maybe_encode(Enc, Body),
                             Req2 = cowboy_req:set_resp_body(Json, Req1),
                             Req3 = cowboy_req:reply(
-                                bondy_utils:error_http_code(Code), Req2),
+                                bondy_utils:error_uri_to_status_code(Code), Req2),
                             {stop, Req3, St1}
                     end;          
                 (<<"HEAD">>, Enc, Req0, St0) -> 
@@ -1364,7 +1364,7 @@ gen_path_code(Name, PathSpec) ->
                             Req2 = cowboy_req:set_resp_body(
                                 maybe_encode(Enc, Body), Req1),
                             Req3 = cowboy_req:reply(
-                                bondy_utils:error_http_code(Code), Req2),
+                                bondy_utils:error_uri_to_status_code(Code), Req2),
                             {stop, Req3, St1};
                         {error, HTTPCode, Body, Headers, St1} ->
                             Req1 = cowboy_req:set_resp_headers(Headers, Req0),

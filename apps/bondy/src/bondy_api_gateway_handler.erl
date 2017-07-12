@@ -327,7 +327,7 @@ get_status_code(ErrorBody, Default) ->
         _ -> 
             case maps:find(<<"code">>, ErrorBody) of
                 {ok, Val} ->
-                    bondy_utils:error_http_code(Val);
+                    bondy_utils:error_uri_to_status_code(Val);
                 _ ->
                     Default
             end

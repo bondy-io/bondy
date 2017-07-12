@@ -24,7 +24,7 @@
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([timeout/1]).
--export([error_http_code/1]).
+-export([error_uri_to_status_code/1]).
 -export([eval_term/2]).
 -export([maybe_encode/2]).
 -export([encode/2]).
@@ -173,28 +173,28 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
 
 
 %% @private
-error_http_code(timeout) ->                                     504;
-error_http_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
-error_http_code(?WAMP_ERROR_CANCELLED) ->                       500;
-error_http_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
-error_http_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         500;
-error_http_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
-error_http_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
-error_http_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
-error_http_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
-error_http_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
-error_http_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
-error_http_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
-error_http_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
-error_http_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
-error_http_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
-error_http_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
-error_http_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
-error_http_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
-error_http_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
-error_http_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
-error_http_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
-error_http_code(_) ->                                           500.
+error_uri_to_status_code(timeout) ->                                     504;
+error_uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
+error_uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
+error_uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
+error_uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         500;
+error_uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
+error_uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
+error_uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
+error_uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
+error_uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
+error_uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
+error_uri_to_status_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
+error_uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
+error_uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
+error_uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
+error_uri_to_status_code(_) ->                                           500.
 
 
 %% -----------------------------------------------------------------------------
