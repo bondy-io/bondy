@@ -36,7 +36,9 @@
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
 
-
+-define(POST, <<"POST">>).
+-define(PUT, <<"PUT">>).
+-define(PATCH, <<"PATCH">>).
 
 -type state() :: #{
     api_context => map(),
@@ -383,7 +385,8 @@ update_context(Req0, Ctxt) ->
 
 
 %% @private
-decode_body_in_context(St) ->
+decode_body_in_context(Method, St) 
+when Method =:= ?POST orelse Method =:= ?PATCH orelse Method =:= ?PUT ->
     Ctxt = maps:get(api_context, St),
     Path = [<<"request">>, <<"body">>],
     Bin = maps_utils:get_path(Path, Ctxt),
@@ -398,7 +401,11 @@ decode_body_in_context(St) ->
                 [Class, Error]
             ),
             throw({badarg, {decoding, Enc}})
-    end.
+    end;
+
+decode_body_in_context(_, #{api_context := Ctxt} = St) ->
+    Path = [<<"request">>, <<"body">>],
+    maps:update(api_context, maps_utils:put_path(Path, <<>>, Ctxt), St).
 
 
 
@@ -410,8 +417,8 @@ decode_body_in_context(St) ->
     | {error, Code :: integer(), Response :: any(), state()}.
 
 perform_action(
-    _, #{<<"action">> := #{<<"type">> := <<"static">>}} = Spec, St0) ->
-    St1 = decode_body_in_context(St0),
+    Method, #{<<"action">> := #{<<"type">> := <<"static">>}} = Spec, St0) ->
+    St1 = decode_body_in_context(Method, St0),
     Ctxt0 = maps:get(api_context, St1),
     %% We get the response directly as it should be statically defined
     Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
@@ -425,7 +432,7 @@ perform_action(
     St0) ->
     %% At the moment we just do not decode it and asume upstream accepts
     %% the same type
-    %% St1 = decode_body_in_context(St0),
+    %% St1 = decode_body_in_context(Method, St0),
     Ctxt0 = maps:get(api_context, St0),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
@@ -477,9 +484,9 @@ perform_action(
     end;
 
 perform_action(
-    _Method, 
+    Method, 
     #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec, St0) ->
-    St1 = decode_body_in_context(St0),
+    St1 = decode_body_in_context(Method, St0),
     Ctxt0 = maps:get(api_context, St1),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound

@@ -1333,15 +1333,22 @@ content_types_accepted(<<"application/msgpack">>) ->
 
 %% @private
 content_types_provided(L) when is_list(L) ->
-    [content_types_provided(T) || T <- L];
+    [X || {_, X} <- lists:ukeysort(1, [content_types_provided(T) || T <- L])];
 
 content_types_provided(<<"application/json">>) ->
     % {<<"application/json">>, to_json};
-    {{<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]}, to_json};
+    T = {
+        {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
+        to_json
+    },
+    %% We force JSON to have the prioirty as Cowboy chooses based on the order
+    %% when no content-type was requested by the user
+    {1, T};
 
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
-    {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}.
+    T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
+    {2, T}.
 
 
 
