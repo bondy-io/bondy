@@ -36,9 +36,7 @@
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
 
--define(POST, <<"POST">>).
--define(PUT, <<"PUT">>).
--define(PATCH, <<"PATCH">>).
+
 
 -type state() :: #{
     api_context => map(),
@@ -386,7 +384,9 @@ update_context(Req0, Ctxt) ->
 
 %% @private
 decode_body_in_context(Method, St) 
-when Method =:= ?POST orelse Method =:= ?PATCH orelse Method =:= ?PUT ->
+when Method =:= <<"post">> 
+orelse Method =:= <<"patch">> 
+orelse Method =:= <<"put">> ->
     Ctxt = maps:get(api_context, St),
     Path = [<<"request">>, <<"body">>],
     Bin = maps_utils:get_path(Path, Ctxt),
