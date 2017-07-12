@@ -2,10 +2,17 @@
 
 BONDY is an open source networking platform for distributed and MicroServices and IoT applications written in Erlang, implementing primarily the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC).
 
-## Installing from source
+## Compailing Bondy
 
 ```bash
-make rel
+cd bondy
+rebar3 as dev release
+```
+
+## Running Bondy
+
+```bash
+_build/dev/rel/bondy/bin/bondy console
 ```
 
 This will generate an Erlang release at 
