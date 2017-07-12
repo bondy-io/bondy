@@ -53,6 +53,8 @@ An example return will be the following JSON object:
 ```
 
 ## Disable Realm Security
+Do this if your wamp client does not support TICKET based or WAMPCRA authentication methods.
+
 ```bash
 curl -X "DELETE" "http://localhost:18081/realms/com.myapi/security_enabled" \
      -H "Content-Type: application/json; charset=utf-8" \
