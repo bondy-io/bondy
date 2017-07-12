@@ -92,7 +92,7 @@ maybe_encode(json, Term) ->
 
  maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
-     msgpack:encode(Term).
+     msgpack:pack(Term).
 
 
 
