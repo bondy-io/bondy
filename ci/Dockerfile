@@ -6,6 +6,11 @@ MAINTAINER Javier Bucar <javier.bucar@leapsight.com>
 # Env
 ENV NODE_NAME=bondy@127.0.0.1
 
+# Install dependencies
+RUN apt-get update \
+	&& apt-get install -y libssl1.0.0 \
+	&& rm -rf /var/lib/apt/lists/*
+
 # Ports
 EXPOSE 18080 18081 18082 18083 18084 18085
 
