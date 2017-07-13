@@ -1,4 +1,4 @@
-kind: Service
+kind: Service # Servicio interno, para los microservicios
 apiVersion: v1
 metadata:
   name: bondy
@@ -13,4 +13,4 @@ spec:
       targetPort: 18082
   type: ClusterIP
   selector:
-    app: bondy    
+    app: bondy

@@ -1,5 +1,5 @@
 # run: docker run -it --rm bondy
-FROM buildpack-deps:jessie
+FROM debian:jessie-slim
 
 MAINTAINER Javier Bucar <javier.bucar@leapsight.com>
 
