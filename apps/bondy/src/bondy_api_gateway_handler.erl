@@ -54,7 +54,7 @@
 -export([content_types_provided/2]).
 -export([is_authorized/2]).
 -export([resource_exists/2]).
--export([resource_existed/2]).
+-export([previously_existed/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
 -export([from_json/2]).
@@ -140,12 +140,27 @@ is_authorized(Req, #{security := _} = St)  ->
     {true, Req, St}.
 
 
-resource_exists(Req, St) ->
-    %% TODO
-    {true, Req, St}.
+resource_exists(Req, #{api_spec := Spec} = St) ->
+    Flag = maps:get(<<"is_collection">>, Spec, false),
+    Method = cowboy_req:method(Req),
+    Resp = case {Flag, Method} of
+        {true, <<"POST">>} ->
+            %% A collection resource always exists. 
+            %% However, during a POST the check should be considered to 
+            %% refer to the resource that is about to be created and added 
+            %% to the collection, and not the collection itself.
+            %% This allows Cowboy to return `201 Created` instead of `200 OK`.
+            false;
+        {true, _} ->
+            true;
+        {false, _} ->
+            %% TODO We should check for real here!
+            false
+    end,
+    {Resp, Req, St}.
 
 
-resource_existed(Req, St) ->
+previously_existed(Req, St) ->
     %% TODO
     {false, Req, St}.
 
