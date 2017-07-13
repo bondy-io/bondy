@@ -347,7 +347,7 @@ get_status_code(ErrorBody, Default) ->
         _ -> 
             case maps:find(<<"code">>, ErrorBody) of
                 {ok, Val} ->
-                    bondy_utils:error_uri_to_status_code(Val);
+                    bondy_error:error_uri_to_status_code(Val);
                 _ ->
                     Default
             end
@@ -375,6 +375,7 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
         <<"authmethod">> => <<"oauth2">>,
         <<"client_id">> => maps:get(<<"iss">>, Claims),
         <<"username">> => maps:get(<<"sub">>, Claims),
+        <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
         <<"groups">> => maps:get(<<"groups">>, Claims),
         <<"meta">> => maps:get(<<"meta">>, Claims)
     },

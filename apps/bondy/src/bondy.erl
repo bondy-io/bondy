@@ -28,6 +28,11 @@
 
 -import(bondy_error, [error_map/1]).
 
+-type error_map() :: #{
+    details => map(),
+    arguments => list(),
+    arguments_kw => map()
+}.
 
 -export([ack/2]).
 -export([call/5]).
@@ -166,7 +171,7 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     map() | undefined, 
     bondy_context:context()) -> 
     {ok, map(), bondy_context:context()} 
-    | {error, map(), bondy_context:context()}.
+    | {error, error_map(), bondy_context:context()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
@@ -194,13 +199,13 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
             end;
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1};
+            {error, to_map(Error), Ctxt1};
         {reply, _, Ctxt1} -> 
             %% A sync reply (should not ever happen with calls)
             {error, error_map(inconsistency_error), Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1};
+            {error, to_map(Error), Ctxt1};
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, error_map(inconsistency_error), Ctxt1}
@@ -246,7 +251,16 @@ to_map(#result{} = M) ->
     };
 
 to_map(#error{} = M) ->
-    error_map(M).
+    #error{
+        details = Details,
+        arguments = Args,
+        arguments_kw = ArgsKw
+    } = M,
+    #{
+        details => Details,
+        arguments => args(Args),
+        arguments_kw => args_kw(ArgsKw)
+    }.
 
 
 %% @private

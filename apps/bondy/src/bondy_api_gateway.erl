@@ -168,13 +168,13 @@
 
 %% API
 -export([add_client/2]).
--export([update_client/3]).
--export([remove_client/2]).
 -export([add_resource_owner/2]).
--export([update_resource_owner/3]).
--export([remove_resource_owner/2]).
 -export([dispatch_table/1]).
 -export([load/1]).
+-export([remove_client/2]).
+-export([remove_resource_owner/2]).
+-export([update_client/3]).
+-export([update_resource_owner/3]).
 
 -export([start_listeners/0]).
 -export([start_admin_listeners/0]).
@@ -470,7 +470,6 @@ start_https(Routes, Name) ->
 dispatch_table(Listener) ->
     Map = ranch:get_protocol_options(Listener),
     maps_utils:get_path([env, dispatch], Map).
-
 
 
 
