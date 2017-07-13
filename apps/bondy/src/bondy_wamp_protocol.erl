@@ -97,6 +97,8 @@ terminate(St) ->
 validate_subprotocol(T) when is_binary(T) ->
     {ok, subprotocol(T)};
 
+validate_subprotocol({ws, text, json} = S) ->          
+    {ok, S};
 validate_subprotocol({ws, text, json_batched} = S) ->  
     {ok, S};
 validate_subprotocol({ws, binary, msgpack_batched} = S) ->
@@ -105,13 +107,13 @@ validate_subprotocol({ws, binary, bert_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, erl_batched} = S) -> 
     {ok, S};
-validate_subprotocol({T, text, json} = S) when ?IS_TRANSPORT(T) ->          
+validate_subprotocol({raw, binary, json} = S) ->          
+    {ok, S};
+validate_subprotocol({raw, binary, erl} = S) ->         
     {ok, S};
 validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->     
     {ok, S};
 validate_subprotocol({T, binary, bert} = S) when ?IS_TRANSPORT(T) ->        
-    {ok, S};
-validate_subprotocol({T, binary, erl} = S) when ?IS_TRANSPORT(T) ->         
     {ok, S};
 validate_subprotocol(_) ->                             
     {error, invalid_subprotocol}.
