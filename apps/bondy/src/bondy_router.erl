@@ -224,11 +224,9 @@ init([Event]) ->
     {ok, State, 0}.
 
 
-handle_call(Event, _From, State) ->
-    error_logger:error_report([
-        {reason, unsupported_event},
-        {event, Event}
-    ]),
+handle_call(Event, From, State) ->
+    lager:error(
+        "Error handling cast, reason=unsupported_event, event=~p, from=~p", [Event, From]),
     {noreply, State}.
 
 
@@ -237,15 +235,11 @@ handle_cast(Event, State) ->
         ok = route_event(Event),
         {noreply, State}
     catch
-        throw:abort ->
+        Error:Reason ->
             %% TODO publish metaevent
-            {noreply, State};
-        _:Reason ->
-            %% TODO publish metaevent
-            error_logger:error_report([
-                {reason, Reason},
-                {stacktrace, erlang:get_stacktrace()}
-            ]),
+            lager:error(
+                "Error handling cast, error=~p, reason=~p, stacktrace=~p",    
+                [Error, Reason, erlang:get_stacktrace()]),
             {noreply, State}
     end.
 
@@ -375,10 +369,9 @@ do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
 
 do_forward(#goodbye{} = M, Ctxt) ->
     %% Goodbye initiated by client, we reply with goodbye() and stop.
-    error_logger:info_report(
-        "Session ~p closed as per client request. Reason: ~p~n",
-        [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]
-    ),
+    lager:error(
+        "Session closed per client request, session=~p, reason=~p",
+        [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 

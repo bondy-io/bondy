@@ -261,8 +261,10 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             },
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
-        error:Reason ->
-            lager:error("error=error, reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
+        Class:Reason ->
+            lager:error(
+                "error=~p, reason=~p, stacktrace=~p", 
+                [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
                 <<"body">> => bondy_error:error_map(Reason),
                 <<"headers">> => #{}
