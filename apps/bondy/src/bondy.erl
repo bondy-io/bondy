@@ -119,6 +119,9 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
 %% -----------------------------------------------------------------------------
 -spec ack(pid(), reference()) -> ok.
 
+ack(Pid, _) when Pid =:= self()  ->
+    ok;
+
 ack(Pid, Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.

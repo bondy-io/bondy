@@ -199,7 +199,8 @@ handle_cast(_Msg, State) ->
 	{noreply, State}.
 
 
-terminate(_Reason, St) ->
+terminate(Reason, St) ->
+    lager:info("TCP Connection closing, reason=~p", [Reason]),
 	bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
@@ -312,7 +313,7 @@ handle_handshake(Len, Enc, St) ->
     catch
         throw:Reason ->
             send_frame(error_number(Reason), St),
-            lager:info("TCP Connection closing, error=~p", [Reason]),
+            lager:info("TCP Connection closing, reason=~p", [Reason]),
             {stop, St}
     end.
 
