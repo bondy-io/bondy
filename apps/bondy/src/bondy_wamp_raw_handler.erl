@@ -268,7 +268,7 @@ handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
     send_frame(error_number(use_of_reserved_bits), St),
     {stop, St};
 
-handle_data(<<0:5, 0:3, _Len:24, _Rest/binary>> = Data, St) ->
+handle_data(Data, St) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
             {ok, St#state{protocol_state = PSt}}; 

@@ -28,9 +28,7 @@
 -define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
 
 -record(wamp_state, {
-    transport               ::  transport(),
-    frame_type              ::  frame_type(),
-    encoding                ::  encoding(),
+    subprotocol             ::  subprotocol(),
     buffer = <<>>           ::  binary(),
     challenge_sent          ::  {true, AuthMethod :: any()} | false,
     goodbye_initiated       ::  boolean(),
@@ -132,10 +130,10 @@ validate_subprotocol(_) ->
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
 
-handle_inbound(Data0, #wamp_state{frame_type = T, encoding = E} = St) ->
+handle_inbound(Data0, St) ->
     Data1 = <<(St#wamp_state.buffer)/binary, Data0/binary>>,
-    {Messages, Buffer} = wamp_encoding:decode(Data1, T, E),
-    handle_inbound_messages(Messages, St#wamp_state{buffer = Buffer}, []).
+    {Messages, Buffer} = wamp_encoding:decode(St#wamp_state.subprotocol, Data1),
+    handle_inbound_messages(Messages, St#wamp_state{buffer = Buffer}).
 
 
 
@@ -154,7 +152,7 @@ handle_outbound(#result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
     St1 = update_context(bondy_context:reset(Ctxt1), St0),
-    Bin = wamp_encoding:encode(M, St1#wamp_state.encoding),
+    Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
@@ -163,14 +161,14 @@ handle_outbound(#error{request_type = ?CALL} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
     St1 = update_context(bondy_context:reset(Ctxt1), St0),
-    Bin = wamp_encoding:encode(M, St1#wamp_state.encoding),
+    Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(M, St) ->
     case wamp_message:is_message(M) of
         true ->
             ok = bondy_stats:update(M, St#wamp_state.context),
-            Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
+            Bin = wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
         false ->
             {stop, St}
@@ -183,6 +181,16 @@ handle_outbound(M, St) ->
 %% PRIVATE: HANDLING INBOUND MESSAGES
 %% =============================================================================
 
+
+
+-spec handle_inbound_messages([wamp_message()], state()) ->
+    {ok, state()} 
+    | {stop, state()}
+    | {stop, [binary()], state()}
+    | {reply, [binary()], state()}.
+
+handle_inbound_messages(Messages, St) ->
+    handle_inbound_messages(Messages, St, []).
 
 
 
@@ -214,7 +222,7 @@ handle_inbound_messages([#goodbye{} = M|_], St, Acc) ->
         {stop, Ctxt} ->
             {stop, lists:reverse(Acc), update_context(Ctxt, St)};
         {stop, Reply, Ctxt} ->
-            Bin = wamp_encoding:encode(Reply, St#wamp_state.encoding),
+            Bin = wamp_encoding:encode(Reply, encoding(St)),
             {stop, lists:reverse([Bin|Acc]), update_context(Ctxt, St)}
     end;
 
@@ -299,10 +307,10 @@ handle_inbound_messages(
         {ok, Ctxt} ->
             handle_inbound_messages(T, update_context(Ctxt, St), Acc);
         {reply, M, Ctxt} ->
-            Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
+            Bin = wamp_encoding:encode(M, encoding(St)),
             handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
         {stop, M, Ctxt} ->
-            Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
+            Bin = wamp_encoding:encode(M, encoding(St)),
             {stop, [Bin], update_context(Ctxt, St)}
     end;
 
@@ -355,7 +363,7 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     ok = bondy_stats:update(M, St0#wamp_state.context),
     St1 = St0#wamp_state{challenge_sent = {true, AuthMethod}},
-    Bin = wamp_encoding:encode(M, St1#wamp_state.encoding),
+    Bin = wamp_encoding:encode(M, encoding(St1)),
     {reply, Bin, St1}.
 
 
@@ -393,7 +401,7 @@ open_session(St0) ->
             }
         ),
         ok = bondy_stats:update(Welcome, Ctxt1),
-        Bin = wamp_encoding:encode(Welcome, St1#wamp_state.encoding),
+        Bin = wamp_encoding:encode(Welcome, encoding(St1)),
         {reply, Bin, St1}
     catch
         error:{invalid_options, missing_client_role} ->
@@ -453,7 +461,7 @@ abort(Type, Reason, St) ->
     },
     M = wamp_message:abort(Details, Type),
     ok = bondy_stats:update(M, St#wamp_state.context),
-    Bin = wamp_encoding:encode(M, St#wamp_state.encoding),
+    Bin = wamp_encoding:encode(M, encoding(St)),
     {stop, Bin, St}.
 
 
@@ -545,11 +553,21 @@ get_realm(St) ->
 
 
 %% @private
-do_init({T, FrameType, Enc}, Peer, _Opts) ->
+% transport(#wamp_state{subprotocol = {T, _, _}}) -> T.
+
+
+% %% @private
+% frame_type(#wamp_state{subprotocol = {_, T, _}}) -> T.
+
+
+%% @private
+encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
+
+
+%% @private
+do_init(Subprotocol, Peer, _Opts) ->
     State = #wamp_state{
-        transport = T,
-        frame_type = FrameType,
-        encoding = Enc,
+        subprotocol = Subprotocol,
         context = bondy_context:new(Peer)
     },
     {ok, State}.
@@ -576,5 +594,6 @@ subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
 subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
 subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
 subprotocol(_) ->                           {error, invalid_subprotocol}. 
+
 
 
