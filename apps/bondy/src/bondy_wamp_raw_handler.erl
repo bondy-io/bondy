@@ -375,7 +375,7 @@ validate_max_len(_) ->
 %% 1: JSON
 %% 2: MessagePack
 %% 3 - 15: reserved for future serializers
-validate_encoding(1) -> {text, json};
+validate_encoding(1) -> {binary, json};
 validate_encoding(2) -> {binary, msgpack};
 % validate_encoding(3) -> cbor;
 validate_encoding(4) -> {binary, bert};
