@@ -141,9 +141,9 @@ is_authorized(Req, #{security := _} = St)  ->
 
 
 resource_exists(Req, #{api_spec := Spec} = St) ->
-    Flag = maps:get(<<"is_collection">>, Spec, false),
+    IsCollection = maps:get(<<"is_collection">>, Spec, false),
     Method = cowboy_req:method(Req),
-    Resp = case {Flag, Method} of
+    Resp = case {IsCollection, Method} of
         {true, <<"POST">>} ->
             %% A collection resource always exists. 
             %% However, during a POST the check should be considered to 
@@ -154,8 +154,9 @@ resource_exists(Req, #{api_spec := Spec} = St) ->
         {true, _} ->
             true;
         {false, _} ->
-            %% TODO We should check for real here!
-            false
+            %% TODO We should check for real here, but we carry on and let
+            %% the underlying action to actually reply with a 404
+            true
     end,
     {Resp, Req, St}.
 
