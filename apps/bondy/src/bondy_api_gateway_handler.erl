@@ -21,16 +21,18 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% This module implements a generic Cowboy rest handler that handles a resource
-%% specified using the Bondy API Gateway Specification (JAGS) Description 
-%% Language which is a specification for describing, producing and consuming 
-%% RESTful Web Services from and by Bondy.
+%% specified using the Bondy API Gateway Specification Format (BAGS), 
+%% a JSON-based format for describing, producing and consuming 
+%% RESTful Web Services using Bondy.
 %%
-%% For every path defined in a JAGS file, Bondy will configure and install a 
+%% For every path defined in a BAGS file, Bondy will configure and install a 
 %% Cowboy route using this module. The initial state of the module responds to 
 %% a contract between this module and the {@link bondy_api_gateway_spec_parser} 
 %% and contains the parsed and preprocessed definition of the paths 
 %% specification which this module uses to dynamically implement its behaviour.
 %%
+%% See {@link bondy_api_gateway} for a detail description of the 
+%% Bondy API Gateway Specification Format.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
