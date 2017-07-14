@@ -36,6 +36,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_session).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SESSION_TABLE_NAME, bondy_session).
@@ -148,6 +149,7 @@
 -export([new/4]).
 -export([open/3]).
 -export([open/4]).
+-export([peer_id/1]).
 -export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
@@ -280,6 +282,16 @@ realm_uri(#session{realm_uri = Uri}) ->
 realm_uri(Id) ->
     #session{realm_uri = Uri} = fetch(Id),
     Uri.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(session()) -> peer_id().
+
+peer_id(#session{id = Id, pid = Pid}) ->
+    {Id, Pid}.
 
 
 %% -----------------------------------------------------------------------------

@@ -321,9 +321,10 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     Fun = fun
         (Entry) ->
             SubsId = bondy_registry:entry_id(Entry),
-            Session = bondy_session:fetch(bondy_registry:session_id(Entry)),
-            Pid = bondy_session:pid(Session),
-            Pid ! wamp_message:event(SubsId, PubId, Details, Args, Payload)
+            ASession = bondy_session:fetch(bondy_registry:session_id(Entry)),
+            bondy:send(
+                bondy_session:peer_id(ASession), 
+                wamp_message:event(SubsId, PubId, Details, Args, Payload))
     end,
     ok = publish(Subs, Fun),
     {ok, PubId}.
