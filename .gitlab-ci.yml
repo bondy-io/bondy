@@ -35,6 +35,9 @@ test1:
 
 deploy1:
  stage: deploy
+ only:
+   - master
+   - develop
  tags:
    - packet
  script:
