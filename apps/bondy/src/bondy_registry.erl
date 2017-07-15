@@ -848,8 +848,8 @@ decr_counter(Tab, Key, N) ->
             %% so we do a match delete
             true = ets:match_delete(Tab, Default),
             0;
-        N -> 
-            N
+        Val -> 
+            Val
     end.
 
 
