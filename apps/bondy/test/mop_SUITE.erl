@@ -1,3 +1,21 @@
+%% =============================================================================
+%%  mop_SUITE.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 -module(mop_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
@@ -97,3 +115,106 @@ funny_2_test(_) ->
         }
     },
     200 =:= mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
+
+
+with_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt).
+
+
+without_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([y,z])}}">>, Ctxt).
+
+without_2_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"key">> => <<"y">>,
+            <<"bar">> => #{
+                <<"x">> => 1,
+                <<"y">> => 2,
+                <<"z">> => 3
+            }
+        }
+    },
+    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([{{foo.key}},z])}}">>, Ctxt).
+
+lists_1_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    1 =:= mops:eval(<<"{{foo |> head}}">>, Ctxt).
+
+lists_2_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [2,3] =:= mops:eval(<<"{{foo |> tail}}">>, Ctxt).
+
+lists_3_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    [3] =:= mops:eval(<<"{{foo |> last}}">>, Ctxt).
+
+maps_get_1_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
+
+
+maps_get_2_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"key">> => <<"bar">>}},
+    1 =:= mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
+
+
+maps_get_string_1_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
+    1 =:= mops:eval(<<"{{foo |> get('bar')}}">>, Ctxt).
+
+maps_get_string_2_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
+    1 =:= mops:eval(<<"{{foo |> get(bar)}}">>, Ctxt).
+
+maps_get_string_3_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    1 =:= mops:eval(<<"{{foo |> get(bar, 1) |> integer}}">>, Ctxt).
+
+maps_get_string_4_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    <<>> =:= mops:eval(<<"{{foo |> get(bar, '')}}">>, Ctxt).
+
+maps_get_string_5_test(_) ->
+    Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
+    <<>> =:= mops:eval(<<"{{foo |> get(bar, '' )}}">>, Ctxt).
+
+
+merge_left_1_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge({{bar}})}}">>, Ctxt).
+
+merge_left_2_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
+
+merge_right_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{<<"a">> => 1},
+        <<"bar">> => #{<<"a">> => 10}
+    },
+    #{<<"a">> => 1} =:= mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).

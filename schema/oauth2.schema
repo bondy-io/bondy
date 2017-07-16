@@ -1,0 +1,31 @@
+%%-*- mode: erlang -*-
+
+{mapping, "oauth2.expiry_time", "oauth2.expiry_time",
+ [
+  {default, "1h"},
+  {datatype, {duration, s}}
+ ]}.
+
+{mapping, "oauth2.password_credentials.expiry_time", "oauth2.password_credentials.expiry_time",
+ [
+  {commented, "2h"},
+  {datatype, {duration, s}}
+ ]}.
+
+{mapping, "oauth2.client_credentials.expiry_time", "oauth2.client_credentials.expiry_time",
+ [
+  {commented, "1d"},
+  {datatype, {duration, s}}
+ ]}.
+
+{mapping, "oauth2.refresh_token.expiry_time", "oauth2.refresh_token.expiry_time",
+ [
+  {commented, "30d"},
+  {datatype, {duration, s}}
+ ]}.
+
+{mapping, "oauth2.code_grant.expiry_time", "oauth2.code_grant.expiry_time",
+ [
+  {commented, "10m"},
+  {datatype, {duration, s}}
+ ]}.

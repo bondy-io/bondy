@@ -1,6 +1,21 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy_broker.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 
 %% =============================================================================
 %% @doc
@@ -126,8 +141,8 @@ handle_message(#publish{} = M, Ctxt) ->
     Opts = M#publish.options,
     TopicUri = M#publish.topic_uri,
     Args = M#publish.arguments,
-    Payload = M#publish.payload,
-    Acknowledge = maps:get(<<"acknowledge">>, Opts, false),
+    Payload = M#publish.arguments_kw,
+    Acknowledge = maps:get(acknowledge, Opts, false),
     %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
@@ -175,9 +190,9 @@ handle_message(#publish{} = M, Ctxt) ->
 handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
     %% TODO, BUT This call might be too big, dos not make any sense as it is a dump of the whole database
     Res = #{
-        <<"exact">> => [],
-        <<"prefix">> => [],
-        <<"wildcard">> => []
+        ?EXACT_MATCH => [],
+        ?PREFIX_MATCH=> [],
+        ?WILDCARD_MATCH => []
     },
     M = wamp_message:result(M#call.request_id, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), M);
@@ -236,10 +251,10 @@ subscribe(M, Ctxt) ->
     %% TODO check authorization and reply with wamp.error.not_authorized if not
 
     case bondy_registry:add(subscription, Topic, Opts, Ctxt) of
-        {ok, #{<<"id">> := Id} = Details, true} ->
+        {ok, #{id := Id} = Details, true} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_create(Details, Ctxt);
-        {ok, #{<<"id">> := Id}, false} ->
+        {ok, #{id := Id}, false} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Id, Ctxt);
         {error, {already_exists, #{id := Id}}} -> 
@@ -306,9 +321,10 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     Fun = fun
         (Entry) ->
             SubsId = bondy_registry:entry_id(Entry),
-            Session = bondy_session:fetch(bondy_registry:session_id(Entry)),
-            Pid = bondy_session:pid(Session),
-            Pid ! wamp_message:event(SubsId, PubId, Details, Args, Payload)
+            ASession = bondy_session:fetch(bondy_registry:session_id(Entry)),
+            bondy:send(
+                bondy_session:peer_id(ASession), 
+                wamp_message:event(SubsId, PubId, Details, Args, Payload))
     end,
     ok = publish(Subs, Fun),
     {ok, PubId}.
@@ -441,7 +457,7 @@ publish({L, Cont}, Fun ) ->
 on_create(Details, Ctxt) ->
     Map = #{
         <<"session">> => bondy_context:session_id(Ctxt), 
-        <<"SubscriptionDetails">> => Details
+        <<"subscriptionDetails">> => Details
     },
     % TODO Records stats
     {ok, _} = publish(

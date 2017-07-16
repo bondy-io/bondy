@@ -1,6 +1,20 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy_session.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
 
 %% =============================================================================
 %% @doc
@@ -22,6 +36,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_session).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SESSION_TABLE_NAME, bondy_session).
@@ -130,8 +145,11 @@
 -export([id/1]).
 -export([incr_seq/1]).
 -export([lookup/1]).
+-export([new/3]).
+-export([new/4]).
 -export([open/3]).
 -export([open/4]).
+-export([peer_id/1]).
 -export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
@@ -148,6 +166,33 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+-spec new(peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+    session() | no_return().
+
+new(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    new(bondy_utils:get_id(global), Peer, bondy_realm:fetch(RealmUri), Opts);
+
+new(Peer, Realm, Opts) when is_map(Opts) ->
+    new(bondy_utils:get_id(global), Peer, Realm, Opts).
+
+
+-spec new(id(), peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+    session() | no_return().
+    
+new(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
+    new(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
+
+new(Id, Peer, Realm, Opts) when is_map(Opts) ->
+    RealmUri = bondy_realm:uri(Realm),
+    S0 = #session{
+        id = Id,
+        peer = Peer,
+        realm_uri = RealmUri,
+        created = calendar:local_time()
+    },
+    parse_details(Opts, S0).
 
 
 %% -----------------------------------------------------------------------------
@@ -181,18 +226,11 @@ open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
 
 open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
-    S0 = #session{
-        id = Id,
-        peer = Peer,
-        realm_uri = RealmUri,
-        created = calendar:local_time()
-    },
-    S1 = parse_details(Opts, S0),
+    S1 = new(Id, Peer, Realm, Opts),
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = bondy_stats:update(
-                {session_opened, RealmUri, Id, IP}),
+            ok = bondy_stats:update({session_opened, RealmUri, Id, IP}),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -219,7 +257,7 @@ close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
     Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created), 
     ok = bondy_stats:update(
-        {session_closed, Realm, IP, Id, Secs}),
+        {session_closed, Id, Realm, IP, Secs}),
     true = ets:delete(table(Id), Id),
     ok.
 
@@ -244,6 +282,16 @@ realm_uri(#session{realm_uri = Uri}) ->
 realm_uri(Id) ->
     #session{realm_uri = Uri} = fetch(Id),
     Uri.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(session()) -> peer_id().
+
+peer_id(#session{id = Id, pid = Pid}) ->
+    {Id, Pid}.
 
 
 %% -----------------------------------------------------------------------------
@@ -361,19 +409,19 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 
 %% @private
 
-parse_details(<<"roles">>, Roles, Session) when is_map(Roles) ->
+parse_details(roles, Roles, Session) when is_map(Roles) ->
     parse_details(Roles, Session);
-parse_details(<<"caller">>, V, Session) when is_map(V) ->
+parse_details(caller, V, Session) when is_map(V) ->
     Session#session{caller = V};
-parse_details(<<"calle">>, V, Session) when is_map(V) ->
+parse_details(callee, V, Session) when is_map(V) ->
     Session#session{callee = V};
-parse_details(<<"subscriber">>, V, Session) when is_map(V) ->
+parse_details(subscriber, V, Session) when is_map(V) ->
     Session#session{subscriber = V};
-parse_details(<<"publisher">>, V, Session) when is_map(V) ->
+parse_details(publisher, V, Session) when is_map(V) ->
     Session#session{publisher = V};
-parse_details(<<"authid">>, V, Session) when is_binary(V) ->
+parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
-parse_details(<<"agent">>, V, Session) when is_binary(V) ->
+parse_details(agent, V, Session) when is_binary(V) ->
     Session#session{agent = V};
 parse_details(_, _, Session) ->
     Session.

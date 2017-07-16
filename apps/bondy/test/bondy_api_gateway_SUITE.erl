@@ -1,3 +1,21 @@
+%% =============================================================================
+%%  bondy_api_gateway_SUITE.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 -module(bondy_api_gateway_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
@@ -49,8 +67,10 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.magenta.things.list">>,
-                                <<"details">> => #{},
-                                <<"arguments">> => [<<"{{request.query_params}}">>],
+                                <<"options">> => #{},
+                                <<"arguments">> => [
+                                    <<"{{request.query_params}}">>
+                                ],
                                 <<"arguments_kw">> => #{}
                             },
                             <<"response">> => #{
@@ -69,7 +89,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.myapi.foo">>,
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"arguments">> => [<<"{{variables.foo}}">>],
                                 <<"arguments_kw">> => #{}
                             },
@@ -104,7 +124,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"arguments">> => [200],
                                 <<"arguments_kw">> => #{},
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"retries">> => 0,
                                 <<"timeout">> => 20000,
@@ -124,7 +144,7 @@ simple_1_test(_) ->
                             <<"action">> => #{
                                 <<"arguments">> => [300],
                                 <<"arguments_kw">> => #{},
-                                <<"details">> => #{},
+                                <<"options">> => #{},
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"retries">> => 0,
                                 <<"timeout">> => 30000,
@@ -156,7 +176,7 @@ simple_1_test(_) ->
             }
         }
     },
-    Expected = bondy_rest_api_gateway_spec:parse(Spec),
-    Result = bondy_rest_api_gateway_spec:compile([Expected]),
-    Final = bondy_rest_api_gateway_spec:load(Result),
+    Expected = bondy_api_gateway_spec:parse(Spec),
+    Result = bondy_api_gateway_spec:compile([Expected]),
+    Final = bondy_api_gateway_spec:load(Result),
     io:format("Result ~p~n", [Final]).

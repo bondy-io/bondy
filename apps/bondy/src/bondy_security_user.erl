@@ -1,7 +1,20 @@
 %% =============================================================================
-%% Copyright (C) NGINEO LIMITED 2011 - 2016. All rights reserved.
+%%  bondy_security_user.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
 %% =============================================================================
-
 
 -module(bondy_security_user).
 -include("bondy.hrl").
@@ -9,12 +22,37 @@
 
 -type user() :: map().
 
--define(INFO_KEYS, [
-    first_name, 
-    last_name,
-    email, 
-    enternal_id
-]).
+
+-define(USER_SPEC, #{
+    <<"username">> => #{
+        alias => username,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
+    },
+    <<"password">> => #{
+        alias => password,
+        required => false,
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        datatype => map
+    },
+    <<"groups">> => #{
+        alias => groups,
+        required => false,
+        datatype => {list, binary}
+    }
+}).
 
 -export([add/2]).
 -export([fetch/2]).
@@ -30,16 +68,23 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri(), user()) -> ok.
-add(RealmUri, User) ->
-    Info = maps:with(?INFO_KEYS, User),
-    #{username := BinName, password := Pass} = User,
-    Username = unicode:characters_to_list(BinName, utf8),
-    Opts = [
-        {info, Info},
-        {"password", binary_to_list(Pass)}
-    ],
-    bondy_security:add_user(RealmUri, Username, Opts).
+-spec add(uri(), user()) -> ok | {error, map()}.
+
+add(RealmUri, User0) ->
+    try 
+        User1 = maps_utils:validate(User0, ?USER_SPEC),
+        Username = maps:get(<<"username">>, User1),
+        Opts = maps:fold(
+            fun(K, V, Acc) -> 
+                maps:put(?CHARS2LIST(K), V, Acc) end,
+            #{}, 
+            User1
+        ),
+        bondy_security:add_user(RealmUri, Username, maps:to_list(Opts))
+    catch
+        error:Reason ->
+            {error, Reason}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -73,7 +118,7 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), list() | binary()) -> ok.
-remove(RealmUri, Id) when is_binary(Id) ->
+remove(RealmUri, Id) when is_list(Id) ->
     remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
 remove(RealmUri, Id) ->
@@ -154,12 +199,12 @@ password(RealmUri, Username) ->
 
 
 %% @private
-to_map(RealmUri, {Username, Opts} = User) ->
-    Map0 = proplists:get_value(info, Opts, #{}),
-    Map1 = Map0#{
+to_map(RealmUri, {Username, PL}) ->
+    Map1 = #{
         username => Username,
-        <<"has_password">> => has_password(Opts),
-        <<"groups">> => bondy_security:user_groups(RealmUri, User)
+        has_password => has_password(PL),
+        groups => proplists:get_value("groups", PL, []),
+        meta => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         not_found ->
@@ -167,7 +212,7 @@ to_map(RealmUri, {Username, Opts} = User) ->
         Sources ->
             [maps:without([username], S) || S <- Sources]
     end,
-    Map1#{<<"sources">> => L}.
+    Map1#{sources => L}.
 
 
 %% @private

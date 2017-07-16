@@ -1,6 +1,21 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy_context.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 
 %% =============================================================================
 %% @doc
@@ -30,7 +45,7 @@
     %% Protocol State
     goodbye_initiated => boolean(),
     challenge_sent => {true, AuthMethod :: any()} | false,
-    awaiting_call_ids => sets:set(),
+    awaiting_calls => sets:set(),
     request_id => id(),
     request_timeout => non_neg_integer(),
     request_details => map(),
@@ -46,8 +61,8 @@
 -export([new/0]).
 -export([new/1]).
 -export([peer/1]).
--export([add_awaiting_call_id/2]).
--export([awaiting_call_ids/1]).
+-export([add_awaiting_call/2]).
+-export([awaiting_calls/1]).
 -export([realm_uri/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
@@ -57,7 +72,7 @@
 -export([session_id/1]).
 -export([peer_id/1]).
 -export([set_peer/2]).
--export([remove_awaiting_call_id/2]).
+-export([remove_awaiting_call/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
@@ -76,7 +91,7 @@ new() ->
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => bondy_config:request_timeout(),
-        awaiting_call_ids => sets:new()
+        awaiting_calls => sets:new()
     },
     set_roles(Ctxt, #{}).
 
@@ -272,8 +287,9 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_feature_enabled(context(), atom(), binary()) -> boolean().
-is_feature_enabled(#{roles := Roles}, Role, Feature) when is_binary(Feature) ->
-    maps:get(Feature, maps:get(Role, Roles, #{}), false).
+
+is_feature_enabled(#{roles := Roles}, Role, Feature) ->
+    maps_utils:get_path([Role, Feature], Roles, false).
 
 
 %% -----------------------------------------------------------------------------
@@ -283,8 +299,8 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) when is_binary(Feature) ->
 %% mechanism which is based on promises.
 %% @end
 %% -----------------------------------------------------------------------------
--spec awaiting_call_ids(context()) -> [id()].
-awaiting_call_ids(#{awaiting_call_ids := S}) ->
+-spec awaiting_calls(context()) -> [id()].
+awaiting_calls(#{awaiting_calls := S}) ->
     sets:to_list(S).
 
 
@@ -292,15 +308,15 @@ awaiting_call_ids(#{awaiting_call_ids := S}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_awaiting_call_id(context(), id()) -> ok.
-add_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
-    C#{awaiting_call_ids => sets:add_element(Id, S)}.
+-spec add_awaiting_call(context(), id()) -> ok.
+add_awaiting_call(#{awaiting_calls := S} = C, Id) ->
+    C#{awaiting_calls => sets:add_element(Id, S)}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_awaiting_call_id(context(), id()) -> ok.
-remove_awaiting_call_id(#{awaiting_call_ids := S} = C, Id) ->
-    C#{awaiting_call_ids => sets:del_element(Id, S)}.
+-spec remove_awaiting_call(context(), id()) -> ok.
+remove_awaiting_call(#{awaiting_calls := S} = C, Id) ->
+    C#{awaiting_calls => sets:del_element(Id, S)}.

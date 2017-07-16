@@ -1,8 +1,23 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
-
 %% =============================================================================
+%%  bondy_realm.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% An implementation of a WAMP realm. 
 %% A Realm is a routing and administrative domain, optionally
@@ -12,7 +27,7 @@
 %% Realms are persisted to disk and replicated across the cluster using the 
 %% plumtree_metadata subsystem.
 %% @end
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 -module(bondy_realm).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
@@ -122,18 +137,24 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_private_key(realm(), Kid :: integer()) -> map().
+-spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
 get_private_key(#realm{private_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_public_key(realm(), Kid :: integer()) -> map().
+-spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
 get_public_key(#realm{public_keys = Keys}, Kid) ->
-    jose_jwk:to_map(maps:get(Kid, Keys)).
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -209,7 +230,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         not_found ->
-            ok = put(Uri, Opts)
+            put(Uri, Opts)
     end.
 
 
@@ -328,10 +349,15 @@ init(#realm{uri = Uri} = Realm) ->
         password => <<"bondy">>
     },
     ok = bondy_security_user:add(Uri, User),
-    Opts = [],
-    _ = [bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) || 
-            CIDR <- ?LOCAL_CIDRS],
-    enable_security(Realm).
+    % Opts = [],
+    % _ = [
+    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
+    %     || CIDR <- ?LOCAL_CIDRS
+    % ],
+    %TODO remove this once we have the APIs to add sources
+    _ = bondy_security:add_source(Uri, all, {{0,0,0,0}, 0}, password, []),
+    ok = enable_security(Realm),
+    Realm.
 
 
 %% @private

@@ -1,5 +1,19 @@
 %% =============================================================================
-%% Copyright (C) NGINEO LIMITED 2011 - 2016. All rights reserved.
+%%  bondy_security_source.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
 %% =============================================================================
 
 
@@ -26,7 +40,7 @@
     CIDR :: bondy_security:cidr(), 
     Source :: atom(),
     Options :: list()) -> ok.
-add(RealmUri, Usernames, CIDR, Source, Opts ) ->
+add(RealmUri, Usernames, CIDR, Source, Opts) ->
     bondy_security:add_source(RealmUri, Usernames, CIDR, Source, Opts).
 
 
@@ -78,15 +92,15 @@ list(RealmUri) ->
 
 %% @private
 to_map({Username, CIDR, Source, Opts} = _Obj) ->
-    Map0 = proplists:get_value(<<"info">>, Opts, #{}),
+    Map0 = proplists:get_value(<<"meta">>, Opts, #{}),
     {Addr, Mask} = CIDR,
     CIDRStr = list_to_binary(
         io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])),
     Map0#{
-        <<"username">> => Username,
-        <<"cidr">> => CIDRStr,
-        <<"source">> => list_to_binary(atom_to_list(Source)),
-        <<"options">> => <<"TBD">> %%TODO
+        username => Username,
+        cidr => CIDRStr,
+        source => list_to_binary(atom_to_list(Source)),
+        options => maps:from_list(Opts)
     }.
 
 

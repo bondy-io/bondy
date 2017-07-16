@@ -1,6 +1,22 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy_wamp_raw_handler.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
 
 %% =============================================================================
 %% @doc
@@ -14,7 +30,9 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
--define(TIMEOUT, 60000*10).
+-define(TCP, wamp_tcp).
+-define(TLS, wamp_tls).
+-define(TIMEOUT, 60000 * 60).
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -26,7 +44,7 @@
 %% 3: use of reserved bits (unsupported feature)
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
--define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:4, 0:8, 0:8>>).
+-define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:20>>).
 -define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
@@ -41,6 +59,8 @@
 -type state() :: #state{}.
 
 -export([start_link/4]).
+-export([start_listeners/0]).
+
 
 -export([init/1]).
 -export([handle_call/3]).
@@ -57,6 +77,57 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Starts the tcp and tls raw socket listeners
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_listeners() -> ok.
+
+start_listeners() ->
+    start_listeners([?TCP, ?TLS]).
+
+
+%% @private
+start_listeners([]) ->
+    ok;
+
+start_listeners([H|T]) ->
+    {ok, Opts} = application:get_env(bondy, H),
+    case lists:keyfind(enabled, 1, Opts) of
+        {_, true} ->
+            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+            {_, Port} = lists:keyfind(port, 1, Opts),
+            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
+            TransportOpts = case H == ?TLS of
+                true ->
+                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
+                    Files;
+                false ->
+                    []
+            end,
+            {ok, _} = ranch:start_listener(
+                H,
+                PoolSize,
+                ranch_mod(H),
+                [{port, Port}],
+                bondy_wamp_raw_handler, 
+                TransportOpts
+            ),
+            _ = ranch:set_max_connections(H, MaxConns),
+            start_listeners(T);
+        {_, false} ->
+            start_listeners(T)
+    end.
+
+
+%% @private
+ranch_mod(?TCP) -> ranch_tcp;
+ranch_mod(?TLS) -> ranch_ssl.
+
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -66,6 +137,10 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 init({Ref, Socket, Transport, _Opts}) ->
     %% We must call ranch:accept_ack/1 before doing any socket operation. 
     %% This will ensure the connection process is the owner of the socket. 
@@ -76,7 +151,6 @@ init({Ref, Socket, Transport, _Opts}) ->
         socket = Socket,
         transport = Transport
     },
-    io:format("Init ~p~n", [self()]),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
@@ -125,7 +199,8 @@ handle_cast(_Msg, State) ->
 	{noreply, State}.
 
 
-terminate(_Reason, St) ->
+terminate(Reason, St) ->
+    lager:info("TCP Connection closing, reason=~p", [Reason]),
 	bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
@@ -163,35 +238,38 @@ handle_data(_Data, #state{protocol_state = undefined} = St) ->
     %% _Router_ MUST *fail the connection*.
     {error, invalid_wamp_data, St};
 
+handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
+    {error, error_reason(Error), St};
+
 handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St) 
 when byte_size(Data) > Max->
-    io:format("Message length is ~p~n", [byte_size(Data)]), 
-    send_frame(error_response(maximum_message_length_unacceptable), St),
+    % io:format("Message length is ~p~n", [byte_size(Data)]), 
+    send_frame(error_number(maximum_message_length_unacceptable), St),
     {stop, St};
 
-handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
     %% We received a PING, send a PONG
-    send_frame(<<0:5, 2:3, Len, Data>>, St),
+    send_frame(<<0:5, 2:3, Rest>>, St),
     {ok, St};
 
-handle_data(<<0:5, 2:3, _Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
     %% We received a PONG
     case St#state.ping_sent of
         undefined ->
             %% We never sent this ping
             {ok, St};
-        Data ->
+        Rest ->
             {ok, St#state{ping_sent = undefined}};
         _ ->
             %% Wrong answer
-            {error, wrong_ping_answer, St}
+            {error, invalid_response, St}
     end;
 
 handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
-    send_frame(error_response(use_of_reserved_bits), St),
+    send_frame(error_number(use_of_reserved_bits), St),
     {stop, St};
 
-handle_data(<<0:5, 0:3, _Len:24, Data/binary>>, St) ->
+handle_data(Data, St) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
             {ok, St#state{protocol_state = PSt}}; 
@@ -234,8 +312,8 @@ handle_handshake(Len, Enc, St) ->
         init_wamp(Len, Enc, St)
     catch
         throw:Reason ->
-            send_frame(error_response(Reason), St),
-            lager:info("TCP Connection closing, error=~p", [Reason]),
+            send_frame(error_number(Reason), St),
+            lager:info("TCP Connection closing, reason=~p", [Reason]),
             {stop, St}
     end.
 
@@ -246,7 +324,9 @@ init_wamp(Len, Enc, St0) ->
         {ok, {_, _} = Peer} ->
             MaxLen = validate_max_len(Len),
             {FrameType, EncName} = validate_encoding(Enc),
-            case bondy_wamp_protocol:init({ws, FrameType, EncName}, Peer, #{}) of
+            
+            Proto = {raw, FrameType, EncName},
+            case bondy_wamp_protocol:init(Proto, Peer, #{}) of
                 {ok, CBState} ->
                     St1 = St0#state{
                         frame_type = FrameType,
@@ -254,6 +334,10 @@ init_wamp(Len, Enc, St0) ->
                         max_len = MaxLen
                     },
                     send_frame(<<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
+                    lager:info(
+                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>, 
+                        [FrameType, EncName, Peer]
+                    ),
                     {ok, St1};
                 {error, Reason} ->
                     {error, Reason, St0}
@@ -291,7 +375,7 @@ validate_max_len(_) ->
 %% 1: JSON
 %% 2: MessagePack
 %% 3 - 15: reserved for future serializers
-validate_encoding(1) -> {text, json};
+validate_encoding(1) -> {binary, json};
 validate_encoding(2) -> {binary, msgpack};
 % validate_encoding(3) -> cbor;
 validate_encoding(4) -> {binary, bert};
@@ -307,11 +391,16 @@ validate_encoding(_) ->
 %% 3: use of reserved bits (unsupported feature)
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
-error_response(serializer_unsupported) ->?RAW_ERROR(1);
-error_response(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
-error_response(use_of_reserved_bits) ->?RAW_ERROR(3);
-error_response(maximum_connection_count_reached) ->?RAW_ERROR(4).
+error_number(serializer_unsupported) ->?RAW_ERROR(1);
+error_number(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
+error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
+error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
+
+error_reason(1) -> serializer_unsupported;
+error_reason(2) -> maximum_message_length_unacceptable;
+error_reason(3) -> use_of_reserved_bits;
+error_reason(4) -> maximum_connection_count_reached.
 
 %% @private
 send(L, St) when is_list(L) ->

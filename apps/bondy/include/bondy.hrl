@@ -1,9 +1,28 @@
+%% =============================================================================
+%%  bondy.hrl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
 
--define(BONDY_VERSION_STRING, <<"BONDY-0.0.2">>).
--define(BONDY_REALM_URI, <<"bondy">>).
 
--define(BONDY_PEER_CALL, <<"$bondy_call">>).
--define(BONDY_PEER_ACK, <<"$bondy_ack">>).
+
+-define(BONDY_VERSION_STRING, <<"LEAPSIGHT-BONDY-0.5.2">>).
+-define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
+
+-define(BONDY_PEER_CALL, '$bondy_call').
+-define(BONDY_PEER_ACK, '$bondy_ack').
 
 
 %% =============================================================================
@@ -14,68 +33,68 @@
 
 
 -define(DEALER_FEATURES, #{
-    <<"progressive_call_results">> => false,
-    <<"progressive_calls">> => false,
-    <<"call_timeout">> => true,
-    <<"call_canceling">> => false,
-    <<"caller_identification">> => false,
-    <<"call_trustlevels">> => false,
-    <<"registration_meta_api">> => false,
-    <<"registration_revocation">> => false,
-    <<"session_meta_api">> => false,
-    <<"pattern_based_registration">> => true,
-    <<"procedure_reflection">> => false,
-    <<"shared_registration">> => true,
-    <<"sharded_registration">> => false
+    progressive_call_results => false,
+    progressive_calls => false,
+    call_timeout => true,
+    call_canceling => false,
+    caller_identification => false,
+    call_trustlevels => false,
+    registration_meta_api => false,
+    registration_revocation => false,
+    session_meta_api => false,
+    pattern_based_registration => true,
+    procedure_reflection => false,
+    shared_registration => true,
+    sharded_registration => false
 }).
 
 -define(CALLEE_FEATURES, #{
-    <<"progressive_call_results">> => false,
-    <<"progressive_calls">> => false,
-    <<"call_timeout">> => true,
-    <<"call_canceling">> => false,
-    <<"caller_identification">> => false,
-    <<"call_trustlevels">> => false,
-    <<"registration_revocation">> => false,
-    <<"session_meta_api">> => false,
-    <<"pattern_based_registration">> => true,
-    <<"shared_registration">> => true,
-    <<"sharded_registration">> => false
+    progressive_call_results => false,
+    progressive_calls => false,
+    call_timeout => true,
+    call_canceling => false,
+    caller_identification => false,
+    call_trustlevels => false,
+    registration_revocation => false,
+    session_meta_api => false,
+    pattern_based_registration => true,
+    shared_registration => true,
+    sharded_registration => false
 }).
 
 -define(CALLER_FEATURES, #{
-    <<"progressive_call_results">> => false,
-    <<"progressive_calls">> => false,
-    <<"call_timeout">> => false,
-    <<"call_canceling">> => false,
-    <<"caller_identification">> => false
+    progressive_call_results => false,
+    progressive_calls => false,
+    call_timeout => false,
+    call_canceling => false,
+    caller_identification => false
 }).
 
 -define(BROKER_FEATURES, #{
-    <<"event_history">> => false,
-    <<"pattern_based_subscription">> => true,
-    <<"publication_trustlevels">> => false,
-    <<"publisher_exclusion">> => false,
-    <<"publisher_identification">> => false,
-    <<"session_meta_api">> => false,
-    <<"sharded_subscription">> => false,
-    <<"subscriber_blackwhite_listing">> => false,
-    <<"subscription_meta_api">> => false,
-    <<"topic_reflection">> => false
+    event_history => false,
+    pattern_based_subscription => true,
+    publication_trustlevels => false,
+    publisher_exclusion => false,
+    publisher_identification => false,
+    session_meta_api => false,
+    sharded_subscription => false,
+    subscriber_blackwhite_listing => false,
+    subscription_meta_api => false,
+    topic_reflection => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
-    <<"event_history">> => false,
-    <<"pattern_based_subscription">> => true,
-    <<"publication_trustlevels">> => false,
-    <<"publisher_identification">> => false,
-    <<"sharded_subscription">> => false
+    event_history => false,
+    pattern_based_subscription => true,
+    publication_trustlevels => false,
+    publisher_identification => false,
+    sharded_subscription => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
-    <<"publisher_exclusion">> => false,
-    <<"publisher_identification">> => false,
-    <<"subscriber_blackwhite_listing">> => false
+    publisher_exclusion => false,
+    publisher_identification => false,
+    subscriber_blackwhite_listing => false
 }).
 
 
@@ -87,45 +106,105 @@
 %% =============================================================================
 
 % USER
--define(BONDY_USER_ADD, <<"bondy.security.user.add">>).
--define(BONDY_USER_DELETE, <<"bondy.security.user.delete">>).
--define(BONDY_USER_LIST, <<"bondy.security.user.list">>).
--define(BONDY_USER_LOOKUP, <<"bondy.security.user.get">>).
--define(BONDY_USER_UPDATE, <<"bondy.security.user.update">>).
+-define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.add_user">>).
+-define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.delete_user">>).
+-define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.list_users">>).
+-define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.get_user">>).
+-define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
+-define(BONDY_USER_CHANGE_PASSWORD, <<"com.leapsight.bondy.security.users.change_password">>).
 
--define(BONDY_USER_ON_ADD, <<"bondy.security.user.on_add">>).
--define(BONDY_USER_ON_DELETE, <<"bondy.security.user.on_delete">>).
--define(BONDY_USER_ON_UPDATE, <<"bondy.security.user.on_update">>).
+-define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.users.on_add">>).
+-define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.users.on_delete">>).
+-define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.users.on_update">>).
 
 
 % GROUP
--define(BONDY_GROUP_ADD, <<"bondy.security.group.add">>).
--define(BONDY_GROUP_DELETE, <<"bondy.security.group.delete">>).
--define(BONDY_GROUP_LIST, <<"bondy.security.group.list">>).
--define(BONDY_GROUP_LOOKUP, <<"bondy.security.group.get">>).
--define(BONDY_GROUP_UPDATE, <<"bondy.security.group.update">>).
+-define(BONDY_GROUP_ADD, <<"com.leapsight.bondy.security.groups.add">>).
+-define(BONDY_GROUP_DELETE, <<"com.leapsight.bondy.security.groups.delete">>).
+-define(BONDY_GROUP_LIST, <<"com.leapsight.bondy.security.groups.list">>).
+-define(BONDY_GROUP_LOOKUP, <<"com.leapsight.bondy.security.groups.get">>).
+-define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.groups.update">>).
 
--define(BONDY_GROUP_ON_ADD, <<"bondy.security.group.on_add">>).
--define(BONDY_GROUP_ON_DELETE, <<"bondy.security.group.on_delete">>).
--define(BONDY_GROUP_ON_UPDATE, <<"bondy.security.group.on_update">>).
+-define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.groups.on_add">>).
+-define(BONDY_GROUP_ON_DELETE, <<"com.leapsight.bondy.security.groups.on_delete">>).
+-define(BONDY_GROUP_ON_UPDATE, <<"com.leapsight.bondy.security.groups.on_update">>).
 
 
 % SOURCE
--define(BONDY_SOURCE_ADD, <<"bondy.security.source.add">>).
--define(BONDY_SOURCE_DELETE, <<"bondy.security.source.delete">>).
--define(BONDY_SOURCE_LIST, <<"bondy.security.source.list">>).
--define(BONDY_SOURCE_LOOKUP, <<"bondy.security.source.get">>).
+-define(BONDY_SOURCE_ADD, <<"com.leapsight.bondy.security.sources.add">>).
+-define(BONDY_SOURCE_DELETE, <<"com.leapsight.bondy.security.sources.delete">>).
+-define(BONDY_SOURCE_LIST, <<"com.leapsight.bondy.security.sources.list">>).
+-define(BONDY_SOURCE_LOOKUP, <<"com.leapsight.bondy.security.sources.get">>).
 
--define(BONDY_SOURCE_ON_ADD, <<"bondy.security.source.on_add">>).
--define(BONDY_SOURCE_ON_DELETE, <<"bondy.security.source.on_delete">>).
+-define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.sources.on_add">>).
+-define(BONDY_SOURCE_ON_DELETE, <<"com.leapsight.bondy.security.sources.on_delete">>).
 
 
--define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
--define(BONDY_SESSION_ALREADY_EXISTS, <<"bondy.error.session_already_exists">>).
 
--define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
 
--type peer_id() :: {pid(), integer()}.
+%% =============================================================================
+%% API GATEWAY
+%% =============================================================================
+
+
+
+-define(BONDY_GATEWAY_CLIENT_CHANGE_PASSWORD,
+    <<"com.leapsight.bondy.api_gateway.change_password">>).
+
+-define(BONDY_GATEWAY_CLIENT_ADD,
+    <<"com.leapsight.bondy.api_gateway.add_client">>).
+-define(BONDY_GATEWAY_CLIENT_DELETE,
+    <<"com.leapsight.bondy.api_gateway.delete_client">>).
+-define(BONDY_GATEWAY_CLIENT_LIST,
+    <<"com.leapsight.bondy.api_gateway.list_clients">>).
+-define(BONDY_GATEWAY_CLIENT_LOOKUP,
+    <<"com.leapsight.bondy.api_gateway.get_client">>).
+-define(BONDY_GATEWAY_CLIENT_UPDATE,
+    <<"com.leapsight.bondy.api_gateway.update_client">>).
+
+-define(BONDY_GATEWAY_CLIENT_ON_ADD,
+    <<"com.leapsight.bondy.api_gateway.client_added">>).
+-define(BONDY_GATEWAY_CLIENT_ON_DELETE,
+    <<"com.leapsight.bondy.api_gateway.clients.client_deleted">>).
+-define(BONDY_GATEWAY_CLIENT_ON_UPDATE,
+    <<"com.leapsight.bondy.api_gateway.clients.client_updated">>).
+
+
+-define(BONDY_GATEWAY_RESOURCE_OWNER_ADD,
+    <<"com.leapsight.bondy.api_gateway.add_resource_owner">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_DELETE,
+    <<"com.leapsight.bondy.api_gateway.delete_resource_owner">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_LIST,
+    <<"com.leapsight.bondy.api_gateway.list_resource_owners">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_LOOKUP,
+    <<"com.leapsight.bondy.api_gateway.get_resource_owner">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_UPDATE,
+    <<"com.leapsight.bondy.api_gateway.update_resource_owner">>).
+
+-define(BONDY_GATEWAY_RESOURCE_OWNER_ON_ADD,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_ON_DELETE,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_ON_UPDATE,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>).
+
+
+-define(BONDY_GATEWAY_LOAD_API_SPEC,
+    <<"com.leapsight.bondy.api_gateway.load_api_spec">>).
+
+
+%% =============================================================================
+%% GENERAL
+%% =============================================================================
+
+
+
+-define(BONDY_ERROR_NOT_IN_SESSION, <<"com.leapsight.bondy.error.not_in_session">>).
+-define(BONDY_SESSION_ALREADY_EXISTS, <<"com.leapsight.bondy.error.session_already_exists">>).
+
+-define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
+
+-type peer_id() :: {integer(), pid()}.
 
 
 

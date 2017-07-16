@@ -609,7 +609,7 @@ get_grants(#context{grants=Val}) ->
 %                                     HashFunction = lookup(hash_func, PasswordData),
 %                                     Salt = lookup(salt, PasswordData),
 %                                     Iterations = lookup(iterations, PasswordData),
-%                                     case bondy_pw_auth:check_password(Password,
+%                                     case bondy_security_pw:check_password(Password,
 %                                                                           HashedPass,
 %                                                                           HashFunction,
 %                                                                           Salt,
@@ -721,7 +721,7 @@ auth_with_source(password, UserData, M) ->
             Salt = lookup(salt, PasswordData),
             Iterations = lookup(iterations, PasswordData),
             case 
-                bondy_pw_auth:check_password(
+                bondy_security_pw:check_password(
                     maps:get(password, M),
                     HashedPass,
                     HashFunction,
@@ -783,7 +783,7 @@ auth_with_source(Source, UserData, M) ->
     RealmUri :: binary(), 
     Username :: string(), 
     Options :: [{string(), term()}]) ->
-    ok | {error, term()}.
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
 add_user(RealmUri, Username, Options) ->
     Uri = name2bin(RealmUri),
     FP = ?USERS_PREFIX(Uri),
@@ -796,13 +796,17 @@ add_user(RealmUri, Username, Options) ->
 %% -----------------------------------------------------------------------------
 -spec add_group(
     binary(), Groupname :: string(), Options :: [{string(), term()}]) ->
-    ok | {error, term()}.
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
 add_group(RealmUri, Groupname, Options) ->
     Uri = name2bin(RealmUri),
     add_role(Uri, name2bin(Groupname), Options, fun group_exists/2,
              ?GROUPS_PREFIX(Uri)).
 
+
 %% @private
+-spec add_role(uri(), binary(), list(), function(), binary()) ->
+    ok | {error, reserved_name | role_exists | illegal_name_char}.
+
 add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
 add_role(_, <<"on">>, _Options, _Fun, _Prefix) ->
@@ -839,6 +843,7 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     Username :: string(), 
     Options :: [{string(), term()}]) ->
     ok | {error, term()}.
+    
 alter_user(_, "all", _Options) ->
     {error, reserved_name};
 alter_user(RealmUri, Username, Options) ->
@@ -1366,9 +1371,12 @@ validate_groups_option(RealmUri, Options) ->
     end.
 
 %% Handle 'password' option if given
+validate_password_option(Pass, Options) when is_list(Pass) ->
+    validate_password_option(list_to_binary(Pass), Options);
+    
 validate_password_option(Pass, Options) ->
     {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
-        bondy_pw_auth:hash_password(list_to_binary(Pass)),
+        bondy_security_pw:hash_password(Pass),
     NewOptions = stash("password", {"password",
                                     [{hash_pass, HashedPass},
                                      {auth_name, AuthName},
@@ -1731,7 +1739,7 @@ list(RealmUri, user) when is_binary(RealmUri) ->
         fun
             ({_Username, [?TOMBSTONE]}, Acc) ->
                 Acc;
-            ({Username, Options}, Acc) ->
+            ({Username, [Options]}, Acc) ->
                 [{Username, Options}|Acc]
         end, 
         [], 
@@ -1743,8 +1751,8 @@ list(RealmUri, group) when is_binary(RealmUri) ->
         fun
             ({_Groupname, [?TOMBSTONE]}, Acc) ->
                 Acc;
-            ({Groupname, Options}, Acc) ->
-            [{Groupname, Options}|Acc]
+            ({Groupname, [Options]}, Acc) ->
+                [{Groupname, Options}|Acc]
         end, 
         [], 
         ?GROUPS_PREFIX(RealmUri)

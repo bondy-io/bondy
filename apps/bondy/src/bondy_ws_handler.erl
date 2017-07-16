@@ -1,6 +1,21 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy_ws_handler.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 
 %% =============================================================================
 %% @doc
@@ -20,7 +35,7 @@
 %% *  "wamp.2.msgpack"
 %%
 %% With "wamp.2.json", _all_ WebSocket messages MUST BE of type *text*
-%% (UTF8 encoded payload) and use the JSON message serialization.
+%% (UTF8 encoded arguments_kw) and use the JSON message serialization.
 %%
 %% With "wamp.2.msgpack", _all_ WebSocket messages MUST BE of type
 %% *binary* and use the MsgPack message serialization.
@@ -96,7 +111,7 @@ init(Req0, _) ->
             end;
         {error, invalid_subprotocol} ->
             %% At the moment we only support WAMP, not plain WS
-            lager:info(
+            _ = lager:info(
                 <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
             %% Returning ok will cause the handler 
             %% to stop in websocket_handle
@@ -142,7 +157,7 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above, 
     %% review and eliminate.
-    lager:error(<<"Unsupported message ~p">>, [Data]),
+    _ = lager:error(<<"Unsupported message ~p">>, [Data]),
     {stop, St};
 
 websocket_handle({ping, _Msg}, St) ->
@@ -169,7 +184,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
 
 websocket_handle(Data, St) ->
     %% We ignore this message and carry on listening
-    lager:debug(<<"Unsupported message ~p">>, [Data]),
+    _ = lager:debug(<<"Unsupported message ~p">>, [Data]),
     {ok, St}.
 
 
@@ -194,7 +209,7 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
     {ok, St};
 
 websocket_info({stop, Reason}, St) ->
-    lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
     {stop, St};
 
 websocket_info(_, St0) ->
@@ -237,26 +252,26 @@ terminate({error, _Other}, _Req, St) ->
 
 terminate({crash, error, Reason}, _Req, St) ->
     %% TODO use lager
-    error_logger:error_report([
-        {reason, Reason},
-        {stacktrace, erlang:get_stacktrace()}
-    ]),
+    lager:error(
+        "Process crashed, error=error, reason=~p, stacktrace=~p",
+        [Reason, erlang:get_stacktrace()]
+    ),
     do_terminate(St);
 
 terminate({crash, exit, Reason}, _Req, St) ->
     %% TODO use lager
-    error_logger:error_report([
-        {reason, Reason},
-        {stacktrace, erlang:get_stacktrace()}
-    ]),
+    lager:error(
+        "Process crashed, error=exit, reason=~p, stacktrace=~p",
+        [Reason, erlang:get_stacktrace()]
+    ),
     do_terminate(St);
 
 terminate({crash, throw, Reason}, _Req, St) ->
     %% TODO use lager
-    error_logger:error_report([
-        {reason, Reason},
-        {stacktrace, erlang:get_stacktrace()}
-    ]),
+    lager:error(
+        "Process crashed, error=throw, reason=~p, stacktrace=~p",
+        [Reason, erlang:get_stacktrace()]
+    ),
     do_terminate(St);
 
 terminate({remote, _Code, _Binary}, _Req, St) ->
@@ -322,14 +337,14 @@ do_terminate(St) ->
 %% i.e. determined by the client
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_subprotocol(cowboy_req:req()) -> 
+-spec select_subprotocol(list() | undefined) -> 
     {ok, bondy_wamp_protocol:subprotocol(), binary()} 
     | {error, invalid_subprotocol}.
 
 select_subprotocol(undefined) ->
     {error, invalid_subprotocol};
 
-select_subprotocol(L) ->
+select_subprotocol(L) when is_list(L) ->
     try  
         Fun = fun(X, Acc) ->
             case bondy_wamp_protocol:validate_subprotocol(X) of
@@ -340,12 +355,14 @@ select_subprotocol(L) ->
             end
         end,
         case lists:foldl(Fun, [], L) of
-            [] -> {error, invalid_subprotocol};
-            L -> hd(L)
+            [] -> 
+                {error, invalid_subprotocol};
+            L -> 
+                hd(L)
         end
     catch
-         throw:{ok, SP, X} ->
-            {ok, SP, X}
+         {ok, _SP, _X} = OK ->
+            OK
     end.
 
 

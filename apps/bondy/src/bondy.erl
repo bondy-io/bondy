@@ -1,6 +1,21 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%%  bondy.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 
 %% =============================================================================
 %% @doc
@@ -11,7 +26,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--import(bondy_error, [error_uri/1, error_map/1]).
+-import(bondy_error, [error_map/1]).
 
 
 -export([ack/2]).
@@ -37,7 +52,8 @@ start() ->
 %% It calls `send/3' with a timeout option set to 5 secs.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message()) -> ok | no_return().
+-spec send(peer_id(), wamp_message()) -> ok.
+
 send(PeerId, M) ->
     send(PeerId, M, #{timeout => 5000}).
 
@@ -50,10 +66,10 @@ send(PeerId, M) ->
 %% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(peer_id(), wamp_message(), map()) -> ok.
 
 send({_, Pid}, M, _) when Pid =:= self() ->
-    Pid ! {?BONDY_PEER_CALL, Pid, M},
+    Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
     ok;
 
 send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
@@ -83,14 +99,14 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
     erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            io:format("Process down ~p error=~p~n", [Pid, Reason]),
+            % io:format("Process down ~p error=~p~n", [Pid, Reason]),
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
     after 
         Timeout ->
-            io:format("Timeout~n"),
+            % io:format("Timeout~n"),
             demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
@@ -102,6 +118,10 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec ack(pid(), reference()) -> ok.
+
+ack(Pid, _) when Pid =:= self()  ->
+    ok;
+
 ack(Pid, Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
@@ -136,23 +156,34 @@ ack(Pid, Ref) ->
 %% A blocking call.
 %% @end
 %% -----------------------------------------------------------------------------
--spec call(map(), binary(), list(), map(), bondy_context:context()) -> 
+-spec call(
+    binary(), 
+    map(), 
+    list() | undefined, 
+    map() | undefined, 
+    bondy_context:context()) -> 
     {ok, map(), bondy_context:context()} 
     | {error, map(), bondy_context:context()}.
 
-call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
+call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
+    %% @TODO ID should be session scoped and not global
     ReqId = bondy_utils:get_id(global),
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, Payload),
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
-            Timeout = bondy_utils:timeout(Opts),
+            %% Timeout = bondy_utils:timeout(Opts),
+            Timeout = 5000,
             receive
-                {?BONDY_PEER_CALL, Pid, Ref, #result{} = M} ->
+                {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    {ok, to_map(M), Ctxt1};
-                {?BONDY_PEER_CALL, Pid, Ref, #error{} = M} ->
+                    Ctxt2 = bondy_context:remove_awaiting_call(
+                        Ctxt1, R#result.request_id),
+                    {ok, to_map(R), Ctxt2};
+                {?BONDY_PEER_CALL, Pid, Ref, #error{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    {error, to_map(M), Ctxt1}
+                    Ctxt2 = bondy_context:remove_awaiting_call(
+                        Ctxt1, R#error.request_id),
+                    {error, to_map(R), Ctxt2}
             after 
                 Timeout ->
                     Error = {timeout, <<"The operation could not be completed in the time specified.">>},
@@ -166,7 +197,10 @@ call(Opts, ProcedureUri, Args, Payload, Ctxt0) ->
             {error, error_map(inconsistency_error), Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1}
+            {error, error_map(Error), Ctxt1};
+        {stop, _, Ctxt1} ->
+            %% A sync reply (should not ever happen with calls)
+            {error, error_map(inconsistency_error), Ctxt1}
     end.
 
 
@@ -200,12 +234,12 @@ to_map(#result{} = M) ->
     #result{
         details = Details,
         arguments = Args,
-        payload = ArgsKw
+        arguments_kw = ArgsKw
     } = M,
     #{
-        <<"details">> => Details,
-        <<"arguments">> => args(Args),
-        <<"arguments_kw">> => args_kw(ArgsKw)
+        details => Details,
+        arguments => args(Args),
+        arguments_kw => args_kw(ArgsKw)
     };
 
 to_map(#error{} = M) ->

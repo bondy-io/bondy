@@ -1,57 +1,101 @@
-# LEAPSIGHT BONDY
+# API GATEWAY & NETWORKING PLATFORM FOR DISTRIBUTED AND MICROSERVICES APPLICATIONS
 
-## Running a single node
-```bash
-rebar3 shell
-```
-## Using a WS Client
+BONDY is an open source networking platform for distributed and MicroServices and IoT applications written in Erlang, implementing primarily the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC).
 
-```
-/connect ws://localhost:18080/ws wamp.2.json
-/send \[1,"realm1",{"authid":"admin", "roles":{"caller":{}, "subscriber":{}, "publisher":{}, "callee":{"shared_registration":true}}}]
-/send \[5,"foo",{}]
-```
-
-
-## Bulding a cluster of 3 nodes
+## Compailing Bondy
 
 ```bash
-make gen_nodes
+cd bondy
+rebar3 as dev release
 ```
 
-Then in three separate shells run 
-```bash
-make node1
-```
+## Running Bondy
 
 ```bash
-make node2
+_build/dev/rel/bondy/bin/bondy console
 ```
+
+## Configuration
+On the first startup Bondy creates the root realm called "com.leapsight.bondy" and user with username `admin` and password `bondy` with local network access.
+
+## Add an API Client
+
+If you want to define your own `client_id` and `client_secret` for a realm called `com.myapi` do:
+```bash
+curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "client_id": "1234",
+  "client_secret": "4567",
+  "meta" : {"description": "A test client"}
+}'
+```
+
+To generate random `client_id` and `client_secret` do:
+```bash
+curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "description": "A test client"
+}'
+```
+
+An example return will be the following JSON object:
+
+```json
+{
+    "client_id": "6aoztZ9SUM65RZhBiNQXmEWbCJgWCdoBeYVPB4KSwgE8eEK3",
+    "client_secret": "RdfuJNEEhS6eUSxDMcdIrLZcUz4NMgg49ImZ6XWwNDyId0LCADQkjsNiGh0nm8r2",
+    "description": "A test client"
+}
+```
+
+## Disable Realm Security
+Do this if your wamp client does not support TICKET based or WAMPCRA authentication methods.
 
 ```bash
-make node3
-```
-These will leave you in the bondy console (Erlang Shell)
-
-At the moment joining the nodes in a cluster is done manually through the Erlang Shell.
-
-In any the shell of node1 run:
-```erlang
-plumtree_service:join('bondy_2@127.0.0.1').
-plumtree_service:join('bondy_3@127.0.0.1').
-plumtree_metadata:put({foo,bar}, <<"fede">>, #{name => fede}).
+curl -X "DELETE" "http://localhost:18081/realms/com.myapi/security_enabled" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8"
 ```
 
-Test data replication
-
-In any one shell type:
-
-```erlang
-plumtree_metadata:put({foo,bar}, <<"fede">>, #{name => fede}).
+## Add a Resource Owner (end-user)
+```bash
+curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "username": "ale",
+  "password": "1234",
+  "meta" :{
+    "user_id": 2,
+    "account_id": 1
+  }
+}'
 ```
 
-And in the other shells do:
-
-```erlang
-plumtree_metadata:get({foo,bar}, <<"fede">>).
+## Update a Resource Owner (end-user)
+```bash
+curl -X "PUT" "http://localhost:18081/realms/com.myapi/resource_owners" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "username": "ale",
+  "password": "1234",
+  "meta" :{
+    "user_id": 2,
+    "account_id": 1
+  }
+}'
 ```
+
+## Adding an Api Spec
+```bash
+curl -X "POST" "http://localhost:18081/services/load_api_spec" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     --data-binary "@/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json"
+```
+

@@ -1,3 +1,21 @@
+%% =============================================================================
+%%  bondy_utils.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 -module(bondy_utils).
 -include_lib("wamp/include/wamp.hrl").
 
@@ -6,11 +24,14 @@
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([timeout/1]).
--export([error_http_code/1]).
+-export([error_uri_to_status_code/1]).
 -export([eval_term/2]).
 -export([maybe_encode/2]).
+-export([encode/2]).
+-export([decode/2]).
 -export([uuid/0]).
 -export([is_uuid/1]).
+-export([to_binary_keys/1]).
 
 
 %% =============================================================================
@@ -18,6 +39,18 @@
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_binary_keys(Map) when is_map(Map) ->
+    F = fun
+        (K, V, Acc) when is_binary(K) ->
+            maps:put(K, V, Acc);
+        (K, V, Acc) when is_atom(K) ->
+            maps:put(list_to_binary(atom_to_list(K)), V, Acc)
+    end,
+    maps:fold(F, #{}, Map).
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -33,10 +66,11 @@ uuid() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_uuid(Term :: bitstring()) -> boolean().
+-spec is_uuid(any()) -> boolean().
 
 is_uuid(Term) when is_bitstring(Term) ->
     uuid:is_v4(uuid:string_to_uuid(bitstring_to_list(Term)));
+
 is_uuid(_) ->
     false.
 
@@ -58,9 +92,36 @@ maybe_encode(json, Term) ->
 
  maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
-     msgpack:encode(Term).
+     msgpack:pack(Term).
 
 
+
+%% @private
+decode(json, <<>>) ->
+    <<>>;
+
+decode(json, Term) ->
+    jsx:decode(Term, [return_maps]);
+
+decode(msgpack, Term) ->
+    Opts = [
+        {map_format, map}, 
+        {unpack_str, as_binary}
+    ],
+    {ok, Bin} = msgpack:unpack(Term, Opts),
+    Bin.
+
+
+%% @private
+encode(json, Term) ->
+    jsx:encode(Term);
+
+encode(msgpack, Term) ->
+    Opts = [
+        {map_format, map},
+        {pack_str, from_binary}
+    ],
+    msgpack:pack(Term, Opts).
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -69,6 +130,7 @@ maybe_encode(json, Term) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_id(Scope :: global | {router, uri()} | {session, id()}) -> id().
+
 get_id(global) ->
     %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
     %% distribution_ over the complete range [0, 2^53]
@@ -77,7 +139,7 @@ get_id(global) ->
 get_id({router, _}) ->
     get_id(global);
 
-get_id({session, SessionId}) ->
+get_id({session, SessionId}) when is_integer(SessionId) ->
     %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)
@@ -90,9 +152,9 @@ get_id({session, SessionId}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 
-timeout(#{<<"timeout">> := T}) when is_integer(T), T > 0 ->
+timeout(#{timeout := T}) when is_integer(T), T > 0 ->
     T;
-timeout(#{<<"timeout">> := 0}) ->
+timeout(#{timeout := 0}) ->
     infinity;
 timeout(_) ->
     bondy_config:request_timeout().
@@ -111,28 +173,28 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
 
 
 %% @private
-error_http_code(timeout) ->                                     504;
-error_http_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
-error_http_code(?WAMP_ERROR_CANCELLED) ->                       500;
-error_http_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
-error_http_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         500;
-error_http_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
-error_http_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
-error_http_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
-error_http_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
-error_http_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
-error_http_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
-error_http_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
-error_http_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
-error_http_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
-error_http_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
-error_http_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
-error_http_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
-error_http_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
-error_http_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
-error_http_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
-error_http_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
-error_http_code(_) ->                                           400.
+error_uri_to_status_code(timeout) ->                                     504;
+error_uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
+error_uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
+error_uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
+error_uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         500;
+error_uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
+error_uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
+error_uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
+error_uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
+error_uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
+error_uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
+error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
+error_uri_to_status_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
+error_uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
+error_uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
+error_uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
+error_uri_to_status_code(_) ->                                           500.
 
 
 %% -----------------------------------------------------------------------------

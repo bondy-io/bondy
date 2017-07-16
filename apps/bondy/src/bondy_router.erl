@@ -1,8 +1,23 @@
-%% -----------------------------------------------------------------------------
-%% Copyright (C) Ngineo Limited 2015 - 2017. All rights reserved.
-%% -----------------------------------------------------------------------------
-
 %% =============================================================================
+%%  bondy_router.erl -
+%% 
+%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%% 
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%% 
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%% 
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% bondy_router provides the routing logic for all interactions.
 %%
@@ -73,16 +88,16 @@
 %% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 -module(bondy_router).
 -behaviour(gen_server).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(POOL_NAME, bondy_router_pool).
+-define(POOL_NAME, router_pool).
 -define(ROUTER_ROLES, #{
-    <<"broker">> => ?BROKER_FEATURES,
-    <<"dealer">> => ?DEALER_FEATURES
+    broker => ?BROKER_FEATURES,
+    dealer => ?DEALER_FEATURES
 }).
 
 -type event()                   ::  {wamp_message(), bondy_context:context()}.
@@ -146,8 +161,8 @@ roles() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Starts a sidejob pool of workers according to the configured pool_type 
-%% {@link bondy_config:pool_type/1} for the pool named 'bondy_router_pool'.
+%% Starts a sidejob pool of workers according to the configuration
+%% for the entry named 'router_pool'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_pool() -> ok.
@@ -209,11 +224,9 @@ init([Event]) ->
     {ok, State, 0}.
 
 
-handle_call(Event, _From, State) ->
-    error_logger:error_report([
-        {reason, unsupported_event},
-        {event, Event}
-    ]),
+handle_call(Event, From, State) ->
+    lager:error(
+        "Error handling cast, reason=unsupported_event, event=~p, from=~p", [Event, From]),
     {noreply, State}.
 
 
@@ -222,15 +235,11 @@ handle_cast(Event, State) ->
         ok = route_event(Event),
         {noreply, State}
     catch
-        throw:abort ->
+        Error:Reason ->
             %% TODO publish metaevent
-            {noreply, State};
-        _:Reason ->
-            %% TODO publish metaevent
-            error_logger:error_report([
-                {reason, Reason},
-                {stacktrace, erlang:get_stacktrace()}
-            ]),
+            lager:error(
+                "Error handling cast, error=~p, reason=~p, stacktrace=~p",    
+                [Error, Reason, erlang:get_stacktrace()]),
             {noreply, State}
     end.
 
@@ -274,12 +283,13 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_start_pool() ->
-    Size = bondy_config:pool_size(?POOL_NAME),
-    Capacity = bondy_config:pool_capacity(?POOL_NAME),
-    case bondy_config:pool_type(?POOL_NAME) of
-        permanent ->
+    Opts = bondy_config:router_pool(),
+    {_, Size} = lists:keyfind(size, 1, Opts),
+    {_, Capacity} = lists:keyfind(capacity, 1, Opts),
+    case lists:keyfind(type, 1, Opts) of
+        {_, permanent} ->
             sidejob:new_resource(?POOL_NAME, ?MODULE, Capacity, Size);
-        transient ->
+        {_, transient} ->
             sidejob:new_resource(?POOL_NAME, sidejob_supervisor, Capacity, Size)
     end.
 
@@ -292,7 +302,7 @@ do_start_pool() ->
 %% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
 acknowledge_message(#publish{options = Opts}) ->
-    maps:get(<<"acknowledge">>, Opts, false);
+    maps:get(acknowledge, Opts, false);
 
 acknowledge_message(_) ->
     false.
@@ -315,12 +325,12 @@ acknowledge_message(_) ->
 %% -----------------------------------------------------------------------------
 -spec async_route_event(wamp_message(), bondy_context:context()) -> 
     ok | {error, overload}.
+
 async_route_event(M, Ctxt) ->
-    PoolName = ?POOL_NAME,
     %% Todo either fix pool_type based on stats or use mochiweb to compile 
     %% bondy_config to avoid bottlenecks.
-    PoolType = bondy_config:pool_type(PoolName),
-    case async_route_event(PoolType, PoolName, M, Ctxt) of
+    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
+    case async_route_event(PoolType, router_pool, M, Ctxt) of
         ok ->
             ok;
         {ok, _} ->
@@ -359,10 +369,9 @@ do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
 
 do_forward(#goodbye{} = M, Ctxt) ->
     %% Goodbye initiated by client, we reply with goodbye() and stop.
-    error_logger:info_report(
-        "Session ~p closed as per client request. Reason: ~p~n",
-        [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]
-    ),
+    lager:error(
+        "Session closed per client request, session=~p, reason=~p",
+        [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 
@@ -384,7 +393,7 @@ do_forward(#register{} = M, Ctxt) ->
 
     Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
         {ok, Map} ->
-            RegId = maps:get(<<"id">>, Map),
+            RegId = maps:get(id, Map),
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->
             wamp_message:error(
@@ -403,7 +412,7 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% distributed Erlang).
     ok = route_event({M, Ctxt0}),
     %% The Call response will be delivered asynchronously by the dealer
-    {ok, bondy_context:add_awaiting_call_id(Ctxt0, ReqId)};
+    {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
 
 do_forward(M, Ctxt0) ->
     %% Client already has a session.
