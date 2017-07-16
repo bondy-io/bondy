@@ -232,9 +232,9 @@ handle_message(
     Reply = case register(Uri, Opts, Ctxt) of
         {ok, Map} ->
             wamp_message:registered(ReqId, maps:get(id, Map));
-        {error, not_authorized} ->
+        {error, {not_authorized, Mssg}} ->
             wamp_message:error(
-                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED);
+                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED, [Mssg]);
         {error, procedure_already_exists} ->
             wamp_message:error(
                 ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
@@ -245,12 +245,13 @@ handle_message(#unregister{} = M, Ctxt) ->
     Reply  = case unregister(M#unregister.registration_id, Ctxt) of
         ok ->
             wamp_message:unregistered(M#unregister.request_id);
-        {error, not_authorized} ->
+        {error, {not_authorized, Mssg}} ->
             wamp_message:error(
                 ?UNREGISTER,
                 M#unregister.request_id,
                 #{},
-                ?WAMP_ERROR_NOT_AUTHORIZED);
+                ?WAMP_ERROR_NOT_AUTHORIZED,
+                [Mssg]);
         {error, not_found} ->
             wamp_message:error(
                 ?UNREGISTER,
@@ -367,19 +368,21 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% @doc
 %% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
-%% 'procedure_already_exists', 'not_authorized' error.
+%% 'procedure_already_exists', '{not_authorized, binary()}' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), bondy_context:context()) -> 
-    {ok, map()} | {error, not_authorized | procedure_already_exists}.
+    {ok, map()} 
+    | {error, {not_authorized, binary()} 
+    | procedure_already_exists}.
 
-register(<<"bondy.", _/binary>>, _, _) ->
-    %% Reserved namespace
-    {error, not_authorized};
+register(<<"com.leapsight.bondy.", _/binary>>, _, _) ->
+    {error, 
+        {not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>}
+    };
 
 register(<<"wamp.", _/binary>>, _, _) ->
-    %% Reserved namespace
-    {error, not_authorized};
+    {error, {not_authorized, <<"Use of reserved namespace 'wamp'.">>}};
 
 register(ProcUri, Options, Ctxt) ->
     case bondy_registry:add(registration, ProcUri, Options, Ctxt) of
@@ -395,19 +398,19 @@ register(ProcUri, Options, Ctxt) ->
 %% @doc
 %% Unregisters an RPC endpoint.
 %% If the registration does not exist, it fails with a 'no_such_registration' or
-%% 'not_authorized' error.
+%% '{not_authorized, binary()}' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unregister(id(), bondy_context:context()) -> 
-    ok | {error, not_authorized | not_found}.
+    ok | {error, {not_authorized, binary()} | not_found}.
 
-unregister(<<"bondy.", _/binary>>, _) ->
-    %% Reserved namespace
-    {error, not_authorized};
+unregister(<<"com.leapsight.bondy.", _/binary>>, _) ->
+    {error, 
+        {not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>}
+    };
 
 unregister(<<"wamp.", _/binary>>, _) ->
-    %% Reserved namespace
-    {error, not_authorized};
+    {error, {not_authorized, <<"Use of reserved namespace 'wamp'.">>}};
 
 unregister(RegId, Ctxt) ->
     %% TODO Shouldn't we restrict this operation to the peer who registered it?
@@ -532,7 +535,7 @@ match_registrations({registration, _} = Cont) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Throws not_authorized
+%% Throws {not_authorized, binary()}
 %% @end
 %% -----------------------------------------------------------------------------
 -spec invoke(id(), uri(), function(), map(), bondy_context:context()) -> ok.
@@ -551,33 +554,35 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
             bondy:send(bondy_context:peer_id(Ctxt0), Error);
         Regs ->
             %%  A promise is used to implement a capability and a feature:
-            %% - the capability to match wamp_yield() or wamp_error() messages
-            %%   to the originating wamp_call() and the Caller
-            %% - call_timeout feature at the dealer level
-            
-            %% TODO SHould we invoke all matching invocations?
-
-            Caller = bondy_session:pid(S),
-            Timeout = bondy_utils:timeout(Opts),
+            %% - the capability to match the callee response 
+            %% (wamp_yield() or wamp_error()) back to the originating 
+            %% wamp_call() and Caller
+            %% - the call_timeout feature at the dealer level
             Template = #promise{
                 procedure_uri = ProcUri, 
                 call_request_id = CallId,
-                caller_pid = Caller,
+                caller_pid = bondy_session:pid(S),
                 caller_session_id = SId
             },
+
+            %% TODO Should we invoke all matching invocations?
+
+            %% We invoke Fun for each entry
             Fun = fun(Entry, Ctxt1) ->
                 CalleeSessionId = bondy_registry:session_id(Entry),
-                Session = bondy_session:fetch(bondy_registry:session_id(Entry)),
+                Session = bondy_session:fetch(CalleeSessionId),
                 Callee = bondy_session:pid(Session),
                 {ok, Id, Ctxt2} = UserFun(
                     Entry, {CalleeSessionId, Callee}, Ctxt1),
+                %% We complete the promise with the Callee data    
                 Promise = Template#promise{
                     invocation_request_id = Id,
                     callee_session_id = CalleeSessionId,
                     callee_pid = Callee
                 }, 
                 %% We enqueue the promise with a timeout
-                ok = enqueue_promise(Id, Promise, Timeout, Ctxt2),
+                ok = enqueue_promise(
+                    Id, Promise, bondy_utils:timeout(Opts), Ctxt2),
                 {ok, Ctxt2}
             end,
             do_invoke(Regs, Fun, Ctxt0)
@@ -709,13 +714,13 @@ do_invoke(
     do_invoke(T, Last, Fun, Ctxt);
 
 do_invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
-    %% We do not apply the invocation yet as is not single, so we need
+    %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
 
 do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
-    %% We do not apply the invocation yet as is not single, so we need
+    %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
@@ -732,7 +737,7 @@ do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
 do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
     %% We found another Uri so we invoke the previous one
     {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
-    %% We do not apply the invocation yet as is not single, so we need
+    %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
@@ -859,7 +864,7 @@ rpc_state_table(RealmUri, Uri) ->
 
 %% @private
 -spec enqueue_promise(
-id(), promise(), pos_integer(), bondy_context:context()) -> ok.
+    id(), promise(), pos_integer(), bondy_context:context()) -> ok.
 
 enqueue_promise(Id, Promise, Timeout, #{realm_uri := Uri}) ->
     #promise{call_request_id = CallId} = Promise,

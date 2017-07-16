@@ -28,6 +28,8 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+
+
 -define(ANY, <<"*">>).
 
 %% -define(DEFAULT_LIMIT, 1000).
@@ -70,11 +72,21 @@
 -type eot()                 ::  ?EOT.
 -type continuation()        ::  {entry_type(), etc:continuation()}.
 
+
+-type details_map() :: #{
+    id => id(),
+    created => calendar:date(),
+    uri => uri(),
+    match => binary()
+}.
+
+
 -export_type([entry/0]).
 -export_type([entry_key/0]).
 -export_type([entry_type/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
+-export_type([details_map/0]).
 
 
 -export([add/4]).
@@ -138,6 +150,7 @@ entry_id(#entry{key = {_, _, Val}}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Returns the type of the entry, the atom 'registration' or 'subscription'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec type(entry()) -> entry_type().
@@ -183,6 +196,7 @@ created(#entry{created = Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Returns the value of the 'options' property of the entry.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec options(entry()) -> map().
@@ -191,10 +205,11 @@ options(#entry{options = Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Converts the entry into a map according to the WAMP protocol Details format.
+%% Converts the entry into a map according to the WAMP protocol Details 
+%% dictionary format.
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_details_map(entry()) -> any().
+-spec to_details_map(entry()) -> details_map().
 
 to_details_map(#entry{key = {_, _, Id}} = E) ->
     #{
@@ -210,16 +225,16 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 %% @doc
 %% Adds an entry to the registry.
 %%
-%% Adding an already existing entry is treated differently based whether the 
-%% entry is a registration or a subscriotion.
+%% Adding an already existing entry is treated differently based on whether the 
+%% entry is a registration or a subscription.
 %% 
 %% According to the WAMP specifictation, in the case of a subscription that was 
 %% already added before by the same _Subscriber_, the _Broker_ should not fail 
 %% and answer with a "SUBSCRIBED" message, containing the existing
 %% "Subscription|id". So in this case this function returns 
-%% {ok, map(), boolean()}.
+%% {ok, details_map(), boolean()}.
 %%
-%% In the case of a registration, as a default, only a single Callee may 
+%% In case of a registration, as a default, only a single Callee may 
 %% register a procedure for an URI. However, when shared registrations are 
 %% supported, then the first Callee to register a procedure for a particular URI
 %% MAY determine that additional registrations for this URI are allowed, and 
@@ -234,7 +249,7 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(entry_type(), uri(), map(), bondy_context:context()) -> 
-    {ok, map(), IsFirstEntry :: boolean()}
+    {ok, details_map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, id()}}.
 
 add(Type, Uri, Options, Ctxt) ->
@@ -613,7 +628,7 @@ validate_match_policy(Options) when is_map(Options) ->
     P == ?EXACT_MATCH 
     orelse P == ?PREFIX_MATCH 
     orelse P == ?WILDCARD_MATCH
-    orelse error({invalid_pattern_match_policy, P}),
+    orelse error({invalid_match_policy, P}),
     P.
 
 
@@ -679,9 +694,13 @@ do_add(Type, Entry, Ctxt) ->
     {ok, to_details_map(Entry), incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1}.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
--spec index_entry(
-    id(), uri(), binary(), bondy_context:context()) -> #index{}.
+%% @doc
+%% Creates an index entry.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec index_entry(id(), uri(), binary(), bondy_context:context()) -> #index{}.
 
 index_entry(EntryId, Uri, Policy, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -810,9 +829,9 @@ uri_components(<<"wamp.", Rest/binary>>) ->
     L = binary:split(Rest, <<".">>, [global]),
     [<<"wamp">> | L];
 
-uri_components(<<"bondy.", Rest/binary>>) ->
+uri_components(<<"com.leapsight.bondy.", Rest/binary>>) ->
     L = binary:split(Rest, <<".">>, [global]),
-    [<<"bondy">> | L];
+    [<<"com.leapsight.bondy">> | L];
 
 uri_components(Uri) ->
     case binary:split(Uri, <<".">>, [global]) of
@@ -820,7 +839,6 @@ uri_components(Uri) ->
             Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
             [Domain | Rest];
         _Other ->
-            %% Invalid Uri
             error({badarg, Uri})
     end.
 
