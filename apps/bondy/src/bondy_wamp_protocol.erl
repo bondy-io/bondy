@@ -466,7 +466,7 @@ abort(Type, Reason, St) ->
 
 
 %% @private
-maybe_auth_challenge(_, not_found, St) ->
+maybe_auth_challenge(_, {error, not_found}, St) ->
     #{realm_uri := Uri} = St#wamp_state.context,
     {error, {realm_not_found, Uri}, St};
 
@@ -481,7 +481,7 @@ maybe_auth_challenge(Details, Realm, St0) ->
             % TODO Get User for Realm (change security module) and if not exist
             % return error else challenge
             case bondy_security_user:lookup(bondy_realm:uri(Realm), UserId) of
-                not_found ->
+                {error, not_found} ->
                     {error, {user_not_found, UserId}, St1};
                 User ->
                     Ch = challenge(AuthMethod, User, Details, St1),

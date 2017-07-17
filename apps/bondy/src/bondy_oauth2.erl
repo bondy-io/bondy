@@ -122,7 +122,7 @@ issue_token(RealmUri, Issuer, Username, Grants, Info) ->
 
 issue_token(RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
-        not_found ->
+        {error, not_found} ->
            {error, unknown_realm};
         Realm ->
             do_issue_token(Realm, Data0)
@@ -210,7 +210,7 @@ verify_jwt(RealmUri, JWT, Match0) ->
             {error, oauth2_invalid_grant};
         {ok, Claims} ->
             matches(Claims, Match1);
-        not_found ->
+        {error, not_found} ->
             do_verify_jwt(JWT, Match1, Now)
     end.
 
@@ -279,7 +279,7 @@ do_verify_jwt(JWT, Match, Now) ->
         <<"kid">> := Kid
     } = Map,
     case bondy_realm:lookup(RealmUri) of
-        not_found ->
+        {error, not_found} ->
             {error, unknown_realm};
         Realm ->
             case bondy_realm:get_public_key(Realm, Kid) of

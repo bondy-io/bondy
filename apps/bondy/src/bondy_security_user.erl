@@ -134,14 +134,17 @@ remove(RealmUri, Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri(), list() | binary()) -> user() | not_found.
+-spec lookup(uri(), list() | binary()) -> user() | {error, not_found}.
+
 lookup(RealmUri, Id) when is_list(Id) ->
     lookup(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 
 lookup(RealmUri, Id) ->
     case bondy_security:lookup_user(RealmUri, Id) of
-        not_found -> not_found;
-        User -> to_map(RealmUri, User)
+        {error, _} = Error -> 
+            Error;
+        User -> 
+            to_map(RealmUri, User)
     end.
 
 
@@ -155,7 +158,7 @@ fetch(RealmUri, Id) when is_list(Id) ->
     
 fetch(RealmUri, Id) ->
     case lookup(RealmUri, Id) of
-        not_found -> error(not_found);
+        {error, _} = Error -> Error;
         User -> User
     end.
 
@@ -179,8 +182,8 @@ password(RealmUri, #{username := Username}) ->
 
 password(RealmUri, Username) ->
     case bondy_security:lookup_user(RealmUri, Username) of
-        not_found -> 
-            error(not_found);
+        {error, Reason} ->
+            error(Reason);
         {Username, Opts} ->
             case proplists:get_value("password", Opts) of
                 undefined -> undefined;
@@ -207,7 +210,7 @@ to_map(RealmUri, {Username, PL}) ->
         meta => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
-        not_found ->
+        {error, not_found} ->
             #{};
         Sources ->
             [maps:without([username], S) || S <- Sources]
