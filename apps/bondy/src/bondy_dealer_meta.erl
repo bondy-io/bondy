@@ -318,20 +318,21 @@ validate_admin_call_args(Call, Ctxt, MinArity) ->
         {ok, Args :: list()} | {error, wamp_error()}.
         
 validate_call_args(#call{arguments = L} = M, _, N, _) when length(L) + 1 < N ->
-    wamp_message:error(
+    E = wamp_message:error(
         ?CALL,
         M#call.request_id,
         #{},
         ?WAMP_ERROR_INVALID_ARGUMENT,
-        [<<"At least one argument is missing">>]);
+        [<<"At least one argument is missing">>]),
+    {error, E};
 
 validate_call_args(#call{arguments = []} = M, Ctxt, _, AdminOnly) ->
     %% We default to the session's Realm
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            [Uri];
+            {ok, [Uri]};
         {_, ?BONDY_REALM_URI} ->
-            [?BONDY_REALM_URI];
+            {ok, [?BONDY_REALM_URI]};
         {_, _} ->
             {error, unauthorized(M)}
     end;
@@ -342,9 +343,9 @@ validate_call_args(#call{arguments = [Uri|_] = L} = M, Ctxt, _, AdminOnly) ->
     %% case any Realm can be modified
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            L;
+            {ok, L};
         {_, ?BONDY_REALM_URI} ->
-            L;
+            {ok, L};
         {_, _} ->
             {error, unauthorized(M)}
     end.
