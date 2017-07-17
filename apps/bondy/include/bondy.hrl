@@ -107,37 +107,38 @@
 
 % USER
 -define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.add_user">>).
+-define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
+-define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.find_user">>).
 -define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.delete_user">>).
 -define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.list_users">>).
--define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.get_user">>).
--define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
+
 -define(BONDY_USER_CHANGE_PASSWORD, <<"com.leapsight.bondy.security.users.change_password">>).
 
--define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.users.on_add">>).
--define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.users.on_delete">>).
--define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.users.on_update">>).
+-define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.user_added">>).
+-define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.user_deleted">>).
+-define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.user_updated">>).
 
 
 % GROUP
--define(BONDY_GROUP_ADD, <<"com.leapsight.bondy.security.groups.add">>).
--define(BONDY_GROUP_DELETE, <<"com.leapsight.bondy.security.groups.delete">>).
--define(BONDY_GROUP_LIST, <<"com.leapsight.bondy.security.groups.list">>).
--define(BONDY_GROUP_LOOKUP, <<"com.leapsight.bondy.security.groups.get">>).
--define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.groups.update">>).
+-define(BONDY_GROUP_ADD, <<"com.leapsight.bondy.security.add_group">>).
+-define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.update_group">>).
+-define(BONDY_GROUP_LOOKUP, <<"com.leapsight.bondy.security.find_group">>).
+-define(BONDY_GROUP_DELETE, <<"com.leapsight.bondy.security.delete_group">>).
+-define(BONDY_GROUP_LIST, <<"com.leapsight.bondy.security.list_groups">>).
 
--define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.groups.on_add">>).
--define(BONDY_GROUP_ON_DELETE, <<"com.leapsight.bondy.security.groups.on_delete">>).
--define(BONDY_GROUP_ON_UPDATE, <<"com.leapsight.bondy.security.groups.on_update">>).
+-define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.group_added">>).
+-define(BONDY_GROUP_ON_DELETE, <<"com.leapsight.bondy.security.group_deleted">>).
+-define(BONDY_GROUP_ON_UPDATE, <<"com.leapsight.bondy.security.group_updated">>).
 
 
 % SOURCE
--define(BONDY_SOURCE_ADD, <<"com.leapsight.bondy.security.sources.add">>).
--define(BONDY_SOURCE_DELETE, <<"com.leapsight.bondy.security.sources.delete">>).
--define(BONDY_SOURCE_LIST, <<"com.leapsight.bondy.security.sources.list">>).
--define(BONDY_SOURCE_LOOKUP, <<"com.leapsight.bondy.security.sources.get">>).
+-define(BONDY_SOURCE_ADD, <<"com.leapsight.bondy.security.add_source">>).
+-define(BONDY_SOURCE_DELETE, <<"com.leapsight.bondy.security.delete_source">>).
+-define(BONDY_SOURCE_LOOKUP, <<"com.leapsight.bondy.security.find_source">>).
+-define(BONDY_SOURCE_LIST, <<"com.leapsight.bondy.security.list_sources">>).
 
--define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.sources.on_add">>).
--define(BONDY_SOURCE_ON_DELETE, <<"com.leapsight.bondy.security.sources.on_delete">>).
+-define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.source_added">>).
+-define(BONDY_SOURCE_ON_DELETE, <<"com.leapsight.bondy.security.source_deleted">>).
 
 
 
