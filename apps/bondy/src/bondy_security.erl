@@ -1356,10 +1356,9 @@ validate_groups_option(RealmUri, Options) ->
     case lookup("groups", Options) of
         undefined ->
             {ok, Options};
-        GroupStr ->
+        L ->
             %% Don't let the admin assign "all" as a container
-            Groups= [name2bin(G) ||
-                        G <- string:tokens(GroupStr, ","), G /= "all"],
+            Groups = [name2bin(G) || G <- L, G /= "all"],
 
             case unknown_roles(RealmUri, Groups, group) of
                 [] ->
@@ -1572,9 +1571,15 @@ unknown_roles(RealmUri, RoleList, group) ->
 unknown_roles(RealmUri, RoleList, RoleType) ->
     Uri = name2bin(RealmUri),
     FP = ?FULL_PREFIX(Uri, <<"security">>, RoleType),
-    plumtree_metadata:fold(fun({Rolename, _}, Acc) ->
-                                    Acc -- [Rolename]
-                            end, RoleList, FP).
+    plumtree_metadata:fold(
+        fun
+            ({_, ['$deleted']}, Acc) ->
+                Acc;
+            ({Rolename, _}, Acc) ->
+                Acc -- [Rolename]
+        end, 
+        RoleList, 
+        FP).
 
 user_details(RealmUri, U) ->
     role_details(RealmUri, U, user).
