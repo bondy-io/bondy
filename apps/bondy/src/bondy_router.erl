@@ -251,7 +251,8 @@ when Event /= undefined ->
     ok = route_event(Event),
     {stop, normal, State};
 
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
 
 
