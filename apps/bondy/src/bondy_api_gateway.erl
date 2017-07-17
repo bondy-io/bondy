@@ -65,17 +65,14 @@
         allow_null => false,
         allow_undefined => false,
         datatype => {list, binary},
-        default => [],
-        validator => fun(L) when is_list(L) ->
-            {ok,  [?CHARS2LIST(X) || X <- L]}
-        end
+        default => []
     },
     <<"meta">> => #{
         alias => meta,
         required => true,
         allow_null => false,
         allow_undefined => false,
-    datatype => map,
+        datatype => map,
         default => #{}
     }
 }).
@@ -100,10 +97,7 @@
         required => true,
         allow_null => false,
         datatype => {list, binary},
-        default => [],
-        validator => fun(L) when is_list(L) ->
-            {ok,  [?CHARS2LIST(X) || X <- L]}
-        end
+        default => []
     },
     <<"meta">> => #{
         alias => meta,

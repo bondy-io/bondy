@@ -46,10 +46,7 @@
         allow_undefined => false,
         required => true,
         datatype => {list, binary},
-        default => [],
-        validator => fun(L) when is_list(L) ->
-            {ok,  [?CHARS2LIST(X) || X <- L]}
-        end
+        default => []
     },
     <<"meta">> => #{
         alias => meta,
