@@ -22,8 +22,42 @@
 
 -type user() :: map().
 
+-define(UPDATE_SPEC, #{
+    <<"password">> => #{
+        alias => password,
+        required => false,
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => "groups", %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => {list, binary},
+        default => [],
+        validator => fun
+            (B) when is_binary(B) ->
+                L = [?CHARS2LIST(X) || X <- binary:split(B, <<$,>>, [global])],
+                {ok,  L};
+            (L) when is_list(L) ->
+                {ok,  [?CHARS2LIST(X) || X <- L]}
+        end
+    },
+    <<"meta">> => #{
+        alias => meta,
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => map,
+        default => #{}
+    }
+}).
 
--define(USER_SPEC, #{
+-define(SPEC, ?UPDATE_SPEC#{
     <<"username">> => #{
         alias => username,
         required => true,
@@ -33,28 +67,11 @@
         validator => fun(X) ->
             {ok, ?CHARS2LIST(X)}
         end
-    },
-    <<"password">> => #{
-        alias => password,
-        required => false,
-        datatype => binary,
-        validator => fun(X) ->
-            {ok, ?CHARS2LIST(X)}
-        end
-    },
-    <<"meta">> => #{
-        alias => meta,
-        required => false,
-        datatype => map
-    },
-    <<"groups">> => #{
-        alias => groups,
-        required => false,
-        datatype => {list, binary}
     }
 }).
 
 -export([add/2]).
+-export([update/3]).
 -export([fetch/2]).
 -export([list/1]).
 -export([lookup/2]).
@@ -72,19 +89,35 @@
 
 add(RealmUri, User0) ->
     try 
-        User1 = maps_utils:validate(User0, ?USER_SPEC),
-        Username = maps:get(<<"username">>, User1),
-        Opts = maps:fold(
-            fun(K, V, Acc) -> 
-                maps:put(?CHARS2LIST(K), V, Acc) end,
-            #{}, 
-            User1
-        ),
+        User1 = maps_utils:validate(User0, ?SPEC),
+        {#{<<"username">> := Username}, Opts} = maps_utils:split(
+            [<<"username">>], User1),
         bondy_security:add_user(RealmUri, Username, maps:to_list(Opts))
     catch
-        error:Reason ->
+        error:Reason when is_map(Reason) ->
             {error, Reason}
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(uri(), binary(), user()) -> ok.
+
+update(RealmUri, Username, User0) when is_binary(Username) ->
+    update(RealmUri, ?CHARS2LIST(Username), User0);
+
+update(RealmUri, Username, User0) ->
+    try 
+        User1 = maps_utils:validate(User0, ?UPDATE_SPEC),
+        bondy_security:alter_user(RealmUri, Username, maps:to_list(User1))
+    catch
+        %% Todo change to throw when upgrade to new utils
+        error:Reason when is_map(Reason) ->
+            {error, Reason}
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -153,6 +186,7 @@ lookup(RealmUri, Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec fetch(uri(), list() | binary()) -> user() | no_return().
+
 fetch(RealmUri, Id) when is_list(Id) ->
     fetch(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
     

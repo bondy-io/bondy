@@ -22,14 +22,50 @@
 
 
 -module(bondy_security_group).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(SPEC, ?UPDATE_SPEC#{
+    <<"name">> => #{
+        alias => name,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        validator => fun(X) ->
+            {ok, ?CHARS2LIST(X)}
+        end
+    }
+}).
+
+-define(UPDATE_SPEC, #{
+    <<"groups">> => #{
+        alias => groups,
+        key => "groups", %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => {list, binary},
+        default => [],
+        validator => fun(L) when is_list(L) ->
+            {ok,  [?CHARS2LIST(X) || X <- L]}
+        end
+    },
+    <<"meta">> => #{
+        alias => meta,
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => map,
+        default => #{}
+    }
+}).
 
 -type group() :: map().
 
--define(INFO_KEYS, [<<"description">>]).
 
 -export([add/2]).
+-export([update/3]).
 -export([fetch/2]).
 -export([list/1]).
 -export([lookup/2]).
@@ -42,17 +78,34 @@
 %% -----------------------------------------------------------------------------
 -spec add(uri(), group()) -> ok.
 
-add(RealmUri, Group) ->
-    Info = maps:with(?INFO_KEYS, Group),
-    #{
-        <<"name">> := BinName
-    } = Group,
-    Name = unicode:characters_to_list(BinName, utf8),
-    Opts = [
-        {<<"meta">>, Info}
-    ],
-    bondy_security:add_group(RealmUri, Name, Opts).
+add(RealmUri, Group0) ->
+    try 
+        Group1 = maps_utils:validate(Group0, ?SPEC),
+        {#{<<"name">> := Name}, Opts} = maps_utils:split([<<"name">>], Group1),
+        bondy_security:add_group(RealmUri, Name, maps:to_list(Opts))
+    catch
+        error:Reason ->
+            {error, Reason}
+    end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(uri(), binary(), group()) -> ok.
+
+update(RealmUri, Name, Group0) when is_binary(Name) ->
+    update(RealmUri, ?CHARS2LIST(Name), Group0);
+
+update(RealmUri, Name, Group0) ->
+    try 
+        Group1 = maps_utils:validate(Group0, ?UPDATE_SPEC),
+        bondy_security:alter_user(RealmUri, Name, maps:to_list(Group1))
+    catch
+        error:Reason ->
+            {error, Reason}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc

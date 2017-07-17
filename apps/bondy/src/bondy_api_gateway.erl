@@ -65,14 +65,17 @@
         allow_null => false,
         allow_undefined => false,
         datatype => {list, binary},
-        default => []
+        default => [],
+        validator => fun(L) when is_list(L) ->
+            {ok,  [?CHARS2LIST(X) || X <- L]}
+        end
     },
     <<"meta">> => #{
         alias => meta,
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => map,
+    datatype => map,
         default => #{}
     }
 }).
@@ -97,7 +100,10 @@
         required => true,
         allow_null => false,
         datatype => {list, binary},
-        default => []
+        default => [],
+        validator => fun(L) when is_list(L) ->
+            {ok,  [?CHARS2LIST(X) || X <- L]}
+        end
     },
     <<"meta">> => #{
         alias => meta,
@@ -544,11 +550,11 @@ maybe_init_security(RealmUri) ->
     Gs = [
         #{
             <<"name">> => <<"api_clients">>,
-            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>
+            <<"meta">> => #{<<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>}
         },
         #{
             <<"name">> => <<"resource_owners">>,
-            <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
+            <<"meta">> => #{<<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>}
         }
     ],
     [maybe_init_group(RealmUri, G) || G <- Gs],
@@ -568,9 +574,7 @@ maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
 %% @private
 validate_resource_owner(Info0) ->
     Info1 = maps_utils:validate(Info0, ?USER_SPEC),
-    Groups = lists:append(
-        [?CHARS2LIST(X) || X <- maps:get(<<"groups">>, Info1, [])], ["resource_owners"]
-    ),
+    Groups = ["resource_owners" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"password">>, Info1)},
         {"groups", Groups} | 
@@ -582,9 +586,7 @@ validate_resource_owner(Info0) ->
 
 validate_client(Info0) ->
     Info1 = maps_utils:validate(Info0, ?CLIENT_SPEC),
-    Groups = lists:append(
-        [?CHARS2LIST(X) || X <- maps:get(<<"groups">>, Info1, [])], ["api_clients"]
-    ),
+    Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"client_secret">>, Info1)},
         {"groups", Groups} | 
