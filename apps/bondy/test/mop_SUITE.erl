@@ -127,7 +127,8 @@ with_1_test(_) ->
             }
         }
     },
-    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt).
+    [<<"x">>] =:= maps:keys(
+        mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt)).
 
 
 without_1_test(_) ->
@@ -135,12 +136,13 @@ without_1_test(_) ->
         <<"foo">> => #{
             <<"bar">> => #{
                 <<"x">> => 1,
-                <<"y">> => 2,
+                <<"_y">> => 2,
                 <<"z">> => 3
             }
         }
     },
-    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([y,z])}}">>, Ctxt).
+    [<<"x">>] =:= maps:keys(
+        mops:eval(<<"{{foo.bar |> without([_y,z])}}">>, Ctxt)).
 
 without_2_test(_) ->
     Ctxt = #{
