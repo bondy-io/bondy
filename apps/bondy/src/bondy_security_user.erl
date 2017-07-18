@@ -64,6 +64,7 @@
 }).
 
 -export([add/2]).
+-export([groups/1]).
 -export([update/3]).
 -export([fetch/2]).
 -export([list/1]).
@@ -112,6 +113,11 @@ update(RealmUri, Username, User0) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+groups(#{<<"groups">> := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -231,10 +237,10 @@ password(RealmUri, Username) ->
 %% @private
 to_map(RealmUri, {Username, PL}) ->
     Map1 = #{
-        username => Username,
-        has_password => has_password(PL),
-        groups => proplists:get_value("groups", PL, []),
-        meta => proplists:get_value(<<"meta">>, PL, #{})
+        <<"username">> => Username,
+        <<"has_password">> => has_password(PL),
+        <<"groups">> => proplists:get_value("groups", PL, []),
+        <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         {error, not_found} ->

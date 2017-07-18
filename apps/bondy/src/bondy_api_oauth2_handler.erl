@@ -84,7 +84,8 @@
     <<"scope">> => #{
         required => true,
         allow_null => false,
-        datatype => binary
+        datatype => binary,
+        default => <<"all">>
     }
 }).
 
@@ -113,7 +114,8 @@
     <<"scope">> => #{
         required => true,
         allow_null => false,
-        datatype => binary
+        datatype => binary,
+        default => <<"all">>
     }
 }).
 
@@ -276,10 +278,8 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
                 RealmUri, bondy_security:get_username(AuthCtxt)),
             Info = maps:get(<<"info">>, User, #{}),
             Issuer = maps:get(client_id, St0),
-            G0 = bondy_security:get_grants(AuthCtxt),
-            %% TODO Scope intersection
-            G1 = G0,
-            case bondy_oauth2:issue_token(RealmUri, Issuer, U, G1, Info) of
+            Gs = bondy_security_user:groups(User),
+            case bondy_oauth2:issue_token(RealmUri, Issuer, U, Gs, Info) of
                 {ok, JWT, RefreshToken, Claims} ->
                     Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
                     {true, Req1, St0};
@@ -373,7 +373,7 @@ token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
         <<"token_type">> => <<"bearer">>,
         <<"access_token">> => JWT,
         <<"refresh_token">> => RefreshToken,
-        <<"scope">> => maps:get(<<"scope">>, Claims),
+        <<"scope">> => maps:get(<<"groups">>, Claims),
         <<"expires_in">> => maps:get(<<"exp">>, Claims)
     },
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req0).
