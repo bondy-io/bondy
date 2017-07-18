@@ -251,24 +251,21 @@ terminate({error, _Other}, _Req, St) ->
     do_terminate(St);
 
 terminate({crash, error, Reason}, _Req, St) ->
-    %% TODO use lager
-    lager:error(
+    _ = lager:error(
         "Process crashed, error=error, reason=~p, stacktrace=~p",
         [Reason, erlang:get_stacktrace()]
     ),
     do_terminate(St);
 
 terminate({crash, exit, Reason}, _Req, St) ->
-    %% TODO use lager
-    lager:error(
+    _ = lager:error(
         "Process crashed, error=exit, reason=~p, stacktrace=~p",
         [Reason, erlang:get_stacktrace()]
     ),
     do_terminate(St);
 
 terminate({crash, throw, Reason}, _Req, St) ->
-    %% TODO use lager
-    lager:error(
+    _ = lager:error(
         "Process crashed, error=throw, reason=~p, stacktrace=~p",
         [Reason, erlang:get_stacktrace()]
     ),
@@ -333,11 +330,10 @@ do_terminate(St) ->
 %% -----------------------------------------------------------------------------
 %% @private 
 %% @doc
-%% The priority is determined by the order of the header contents
-%% i.e. determined by the client
+%% The order is undefined
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_subprotocol(list() | undefined) -> 
+-spec select_subprotocol(list(binary()) | undefined) -> 
     {ok, bondy_wamp_protocol:subprotocol(), binary()} 
     | {error, invalid_subprotocol}.
 
@@ -346,22 +342,18 @@ select_subprotocol(undefined) ->
 
 select_subprotocol(L) when is_list(L) ->
     try  
-        Fun = fun(X, Acc) ->
+        Fun = fun(X) ->
             case bondy_wamp_protocol:validate_subprotocol(X) of
                 {ok, SP} ->
                     throw({ok, SP, X});
                 {error, invalid_subprotocol} ->
-                    Acc
+                    ok
             end
         end,
-        case lists:foldl(Fun, [], L) of
-            [] -> 
-                {error, invalid_subprotocol};
-            L -> 
-                hd(L)
-        end
+        ok = lists:foreach(Fun, L),
+        {error, invalid_subprotocol}
     catch
-         {ok, _SP, _X} = OK ->
+         throw:{ok, _SP, _X} = OK ->
             OK
     end.
 

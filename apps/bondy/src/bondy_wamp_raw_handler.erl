@@ -58,6 +58,14 @@
 }).
 -type state() :: #state{}.
 
+-type raw_error()           :: invalid_response 
+                                | invalid_socket 
+                                | invalid_wamp_data 
+                                | maximum_connection_count_reached 
+                                | maximum_message_length_unacceptable 
+                                | serializer_unsupported 
+                                | use_of_reserved_bits.
+
 -export([start_link/4]).
 -export([start_listeners/0]).
 
@@ -165,7 +173,7 @@ handle_info(
         {stop, St1} ->
             {stop, normal, St1};
         {error, Reason, St1} ->
-            lager:info("TCP Connection closing, error=~p", [Reason]),
+            _ = lager:info("TCP Connection closing, error=~p", [Reason]),
             {stop, reason, St1}
     end;
 
@@ -200,7 +208,7 @@ handle_cast(_Msg, State) ->
 
 
 terminate(Reason, St) ->
-    lager:info("TCP Connection closing, reason=~p", [Reason]),
+    _ = lager:info("TCP Connection closing, reason=~p", [Reason]),
 	bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
@@ -222,7 +230,7 @@ code_change(_OldVsn, State, _Extra) ->
 -spec handle_data(Data :: binary(), State :: state()) ->
     {ok, state()} 
     | {stop, state()}
-    | {error, any(), state()}.
+    | {error, raw_error(), state()}.
 
 handle_data(
     <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>, 
@@ -249,7 +257,7 @@ when byte_size(Data) > Max->
 
 handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
     %% We received a PING, send a PONG
-    send_frame(<<0:5, 2:3, Rest>>, St),
+    send_frame(<<0:5, 2:3, Rest/binary>>, St),
     {ok, St};
 
 handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
@@ -269,7 +277,7 @@ handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
     send_frame(error_number(use_of_reserved_bits), St),
     {stop, St};
 
-handle_data(Data, St) ->
+handle_data(Data, St) when is_binary(Data) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
             {ok, St#state{protocol_state = PSt}}; 
@@ -313,7 +321,7 @@ handle_handshake(Len, Enc, St) ->
     catch
         throw:Reason ->
             send_frame(error_number(Reason), St),
-            lager:info("TCP Connection closing, reason=~p", [Reason]),
+            _ = lager:info("TCP Connection closing, reason=~p", [Reason]),
             {stop, St}
     end.
 
@@ -334,7 +342,7 @@ init_wamp(Len, Enc, St0) ->
                         max_len = MaxLen
                     },
                     send_frame(<<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
-                    lager:info(
+                    _ = lager:info(
                         <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>, 
                         [FrameType, EncName, Peer]
                     ),
@@ -343,10 +351,10 @@ init_wamp(Len, Enc, St0) ->
                     {error, Reason, St0}
             end;
         {ok, Peer} ->
-            lager:info("Unexpected peername, result=~p", [Peer]),
+            _ = lager:info("Unexpected peername, result=~p", [Peer]),
             {error, invalid_socket, St0};
         {error, Reason} ->
-            lager:info("Invalid peername, error=~p", [Reason]),
+            _ = lager:info("Invalid peername, error=~p", [Reason]),
             {error, invalid_socket, St0}
     end.
 

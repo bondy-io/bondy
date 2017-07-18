@@ -95,13 +95,13 @@
 %% -----------------------------------------------------------------------------
 -spec eval(any(), context()) -> any().
 
-eval(<<>>, _) ->
+eval(<<>>, Ctxt) when is_map(Ctxt) ->
     <<>>;
 
 eval(Val, Ctxt) when is_binary(Val), is_map(Ctxt) ->
     eval(Val, Ctxt, #{});
 
-eval(Val, _) ->
+eval(Val, Ctxt) when is_map(Ctxt) ->
     Val.
 
 %% -----------------------------------------------------------------------------
@@ -139,8 +139,9 @@ eval(Val, _) ->
 %% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval(Term :: any(), Ctxt :: context(), Opts :: map()) -> 
-    any() | no_return().
+-spec eval
+    (Term :: any(), Ctxt :: context(), Opts :: map()) -> any(); 
+    (Term :: any(), any(), any()) -> any().
 
 eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
     <<>>;

@@ -90,7 +90,8 @@ terminate(St) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec validate_subprotocol(subprotocol()) -> ok | {error, invalid_subprotocol}.
+-spec validate_subprotocol(binary() | subprotocol()) -> 
+    {ok, subprotocol()} | {error, invalid_subprotocol}.
 
 validate_subprotocol(T) when is_binary(T) ->
     {ok, subprotocol(T)};
@@ -583,7 +584,8 @@ update_context(Ctxt, St) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subprotocol(binary()) -> bondy_wamp_protocol:subprotocol().
+-spec subprotocol(binary()) -> 
+    bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
 
 subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
 subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
