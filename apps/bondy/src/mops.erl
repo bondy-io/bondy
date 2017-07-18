@@ -494,11 +494,11 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Args = get_arguments(Rest, Op, <<"])">>),
     case lists:foldl(Fold, {[], []}, Args) of
         {L, []} ->
-            maps:with(L, Val);
+            maps:without(L, Val);
         {L, R} ->
             fun(X) -> 
                 Keys = lists:append(L, [F(X) || F <- R]),
-                maps:with(Keys, Val) 
+                maps:without(Keys, Val) 
             end
     end;
 
