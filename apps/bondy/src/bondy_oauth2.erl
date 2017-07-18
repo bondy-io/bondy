@@ -102,12 +102,12 @@
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
-issue_token(RealmUri, Issuer, Username, Groups, Info) ->    
+issue_token(RealmUri, Issuer, Username, Groups, Meta) ->    
     Data = #bondy_oauth2_token{
         issuer = Issuer,
         username = Username,
         groups = Groups,
-        meta = Info
+        meta = Meta
     },
     issue_token(RealmUri, Data).
 

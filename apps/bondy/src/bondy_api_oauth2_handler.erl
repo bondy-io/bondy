@@ -276,10 +276,10 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
         {ok, AuthCtxt} ->
             User = bondy_security_user:fetch(
                 RealmUri, bondy_security:get_username(AuthCtxt)),
-            Info = maps:get(<<"info">>, User, #{}),
+            Meta = maps:get(<<"meta">>, User, #{}),
             Issuer = maps:get(client_id, St0),
             Gs = bondy_security_user:groups(User),
-            case bondy_oauth2:issue_token(RealmUri, Issuer, U, Gs, Info) of
+            case bondy_oauth2:issue_token(RealmUri, Issuer, U, Gs, Meta) of
                 {ok, JWT, RefreshToken, Claims} ->
                     Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
                     {true, Req1, St0};
