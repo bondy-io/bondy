@@ -145,6 +145,8 @@
 -export([id/1]).
 -export([incr_seq/1]).
 -export([lookup/1]).
+-export([list/0]).
+-export([list_peers/0]).
 -export([new/3]).
 -export([new/4]).
 -export([open/3]).
@@ -385,6 +387,45 @@ fetch(Id) ->
             Session
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% @TODO provide a limit and itereate on each table providing a custom
+%% continuation
+list() ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    lists:append([ets:tab2list(T) || T <- Tabs]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% @TODO provide a limit and itereate on each table providing a custom
+%% continuation
+list_peers() ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Head = #session{
+        id = '$1',
+        realm_uri = '$2',
+        pid = '$3',
+        peer = '$4',
+        agent = '_',
+        seq = '_',
+        caller = '_',
+        callee = '_',
+        subscriber = '_',
+        publisher = '_',
+        authid = '_',
+        created = '_',
+        expires_in = '_',
+        rate = '_',
+        quota = '_'
+    },
+    MS = [{ Head, [], [{{'$1', '$2', '$3', '$4'}}] }],
+    lists:append([ets:select(T, MS) || T <- Tabs]).
 
 
 %% =============================================================================
