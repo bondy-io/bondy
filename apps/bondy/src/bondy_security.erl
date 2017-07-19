@@ -600,7 +600,7 @@ get_grants(#context{grants=Val}) ->
 %                             %% pull the password out of the userdata
 %                             case lookup("password", UserData) of
 %                                 undefined ->
-%                                     lager:warning("User ~p is configured for "
+%                                     _ = lager:warning("User ~p is configured for "
 %                                                   "password authentication, but has "
 %                                                   "no password", [Username]),
 %                                     {error, missing_password};
@@ -640,7 +640,7 @@ get_grants(#context{grants=Val}) ->
 %                                                           auth_mods, []),
 %                             case proplists:get_value(Source, AuthMods) of
 %                                 undefined ->
-%                                     lager:warning("User ~p is configured with unknown "
+%                                     _ = lager:warning("User ~p is configured with unknown "
 %                                                   "authentication source ~p",
 %                                                   [Username, Source]),
 %                                     {error, unknown_source};
@@ -711,7 +711,7 @@ auth_with_source(password, UserData, M) ->
     % pull the password out of the userdata
     case lookup("password", UserData) of
         undefined ->
-            lager:warning("User ~p is configured for "
+            _ = lager:warning("User ~p is configured for "
                             "password authentication, but has "
                             "no password", [maps:get(username, M)]),
             {error, missing_password};
@@ -757,7 +757,7 @@ auth_with_source(Source, UserData, M) ->
     Username = maps:get(username, M),
     case proplists:get_value(Source, AuthMods) of
         undefined ->
-            lager:warning(
+            _ = lager:warning(
                 "User ~p is configured with unknown "
                 "authentication source ~p",
                 [Username, Source]),
