@@ -305,10 +305,12 @@ handle_call(#call{procedure_uri = ?BONDY_GROUP_DELETE} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_LIST} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = case validate_call_args(M, Ctxt, 1) of
+        {ok, [Uri]} ->
+            maybe_error(bondy_security_group:list(Uri), M);
+        {error, WampError} ->
+            WampError     
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_LOOKUP} = M, Ctxt) ->
