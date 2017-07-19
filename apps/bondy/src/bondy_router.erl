@@ -166,7 +166,7 @@ roles() ->
 %% @end
 %% -----------------------------------------------------------------------------
 agent() ->
-    Vsn = ?CHARS2BIN(bondy_app:vsn()),
+    Vsn = list_to_binary(bondy_app:vsn()),
     <<"LEAPSIGHT-BONDY-", Vsn/binary>>.
 
 
