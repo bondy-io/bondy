@@ -28,10 +28,12 @@
 
 -export([start/2]).
 -export([stop/1]).
+-export([vsn/0]).
 
-start(_Type, _Args) ->
+start(_Type, Args) ->
     case bondy_sup:start_link() of
         {ok, Pid} ->
+            ok = setup(Args),
             ok = bondy_router:start_pool(),
             ok = bondy_stats:create_metrics(),
             ok = maybe_init_bondy_realm(),
@@ -46,6 +48,11 @@ stop(_State) ->
     ok.
 
 
+-spec vsn() -> list().
+
+vsn() ->
+    application:get_env(bondy, vsn, "undefined").
+    
 
 %% =============================================================================
 %% PRIVATE
@@ -67,6 +74,16 @@ maybe_start_router_services() ->
             ok = bondy_wamp_raw_handler:start_listeners(),
             _ = bondy_api_gateway:start_admin_listeners(),
             _ = bondy_api_gateway:start_listeners();
+        false ->
+            ok
+    end.
+
+
+%% @private
+setup(Args) ->
+    case lists:keyfind(vsn, 1, Args) of
+        {vsn, Vsn} ->
+            application:set_env(bondy, vsn, Vsn);
         false ->
             ok
     end.

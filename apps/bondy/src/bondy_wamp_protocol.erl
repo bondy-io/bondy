@@ -397,7 +397,7 @@ open_session(St0) ->
         Welcome = wamp_message:welcome(
             Id,
             #{
-                agent => ?BONDY_VERSION_STRING,
+                agent => bondy_router:agent(),
                 roles => bondy_router:roles()
             }
         ),

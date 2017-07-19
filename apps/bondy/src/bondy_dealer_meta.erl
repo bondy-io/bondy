@@ -21,6 +21,95 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+
+%% REALM
+-define(BONDY_ENABLE_SECURITY, 
+    <<"com.leapsight.bondy.realms.enable_security">>).
+-define(BONDY_DISABLE_SECURITY, 
+    <<"com.leapsight.bondy.realms.disable_security">>).
+
+% USER
+-define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.add_user">>).
+-define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
+-define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.find_user">>).
+-define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.delete_user">>).
+-define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.list_users">>).
+-define(BONDY_USER_CHANGE_PASSWORD, <<"com.leapsight.bondy.security.change_password">>).
+
+-define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.user_added">>).
+-define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.user_deleted">>).
+-define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.user_updated">>).
+
+% GROUP
+-define(BONDY_GROUP_ADD, <<"com.leapsight.bondy.security.add_group">>).
+-define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.update_group">>).
+-define(BONDY_GROUP_LOOKUP, <<"com.leapsight.bondy.security.find_group">>).
+-define(BONDY_GROUP_DELETE, <<"com.leapsight.bondy.security.delete_group">>).
+-define(BONDY_GROUP_LIST, <<"com.leapsight.bondy.security.list_groups">>).
+
+-define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.group_added">>).
+-define(BONDY_GROUP_ON_DELETE, <<"com.leapsight.bondy.security.group_deleted">>).
+-define(BONDY_GROUP_ON_UPDATE, <<"com.leapsight.bondy.security.group_updated">>).
+
+% SOURCE
+-define(BONDY_SOURCE_ADD, <<"com.leapsight.bondy.security.add_source">>).
+-define(BONDY_SOURCE_DELETE, <<"com.leapsight.bondy.security.delete_source">>).
+-define(BONDY_SOURCE_LOOKUP, <<"com.leapsight.bondy.security.find_source">>).
+-define(BONDY_SOURCE_LIST, <<"com.leapsight.bondy.security.list_sources">>).
+
+-define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.source_added">>).
+-define(BONDY_SOURCE_ON_DELETE, <<"com.leapsight.bondy.security.source_deleted">>).
+
+
+
+
+%% API GATEWAY
+
+-define(BONDY_GATEWAY_LOAD_API_SPEC,
+    <<"com.leapsight.bondy.api_gateway.load_api_spec">>).
+
+
+-define(BONDY_GATEWAY_CLIENT_CHANGE_PASSWORD,
+    <<"com.leapsight.bondy.api_gateway.change_password">>).
+
+-define(BONDY_GATEWAY_CLIENT_ADD,
+    <<"com.leapsight.bondy.api_gateway.add_client">>).
+-define(BONDY_GATEWAY_CLIENT_DELETE,
+    <<"com.leapsight.bondy.api_gateway.delete_client">>).
+-define(BONDY_GATEWAY_CLIENT_LIST,
+    <<"com.leapsight.bondy.api_gateway.list_clients">>).
+-define(BONDY_GATEWAY_CLIENT_LOOKUP,
+    <<"com.leapsight.bondy.api_gateway.fetch_client">>).
+-define(BONDY_GATEWAY_CLIENT_UPDATE,
+    <<"com.leapsight.bondy.api_gateway.update_client">>).
+
+-define(BONDY_GATEWAY_CLIENT_ADDED,
+    <<"com.leapsight.bondy.api_gateway.client_added">>).
+-define(BONDY_GATEWAY_CLIENT_DELETED,
+    <<"com.leapsight.bondy.api_gateway.client_deleted">>).
+-define(BONDY_GATEWAY_CLIENT_UPDATED,
+    <<"com.leapsight.bondy.api_gateway.client_updated">>).
+
+
+-define(BONDY_GATEWAY_ADD_RESOURCE_OWNER,
+    <<"com.leapsight.bondy.api_gateway.add_resource_owner">>).
+-define(BONDY_GATEWAY_DELETE_RESOURCE_OWNER,
+    <<"com.leapsight.bondy.api_gateway.delete_resource_owner">>).
+-define(BONDY_GATEWAY_LIST_RESOURCE_OWNERS,
+    <<"com.leapsight.bondy.api_gateway.list_resource_owners">>).
+-define(BONDY_GATEWAY_FETCH_RESOURCE_OWNER,
+    <<"com.leapsight.bondy.api_gateway.fetch_resource_owner">>).
+-define(BONDY_GATEWAY_UPDATE_RESOURCE_OWNER,
+    <<"com.leapsight.bondy.api_gateway.update_resource_owner">>).
+
+-define(BONDY_GATEWAY_RESOURCE_OWNER_ADDED,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_DELETED,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>).
+-define(BONDY_GATEWAY_RESOURCE_OWNER_UPDATED,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>).
+
+
 -export([handle_call/2]).
 
 
@@ -81,8 +170,7 @@ handle_call(
 
 %% =============================================================================
 %% BONDY META PROCEDURES
-handle_call(#call{
-        procedure_uri = <<"com.leapsight.bondy.realms.enable_security">>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?BONDY_ENABLE_SECURITY} = M, Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Uri]} ->
             maybe_error(bondy_realm:enable_security(bondy_realm:get(Uri)), M);
@@ -91,8 +179,7 @@ handle_call(#call{
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{
-        procedure_uri = <<"com.leapsight.bondy.realms.disable_security">>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?BONDY_DISABLE_SECURITY} = M, Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Uri]} ->
             maybe_error(bondy_realm:disable_security(bondy_realm:get(Uri)), M);
@@ -120,7 +207,7 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_ADD} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 
-handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.add_resource_owner">>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_ADD_RESOURCE_OWNER} = M, Ctxt) ->
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
             maybe_error(bondy_api_gateway:add_resource_owner(Uri, Info), M);
@@ -130,7 +217,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.add_resourc
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 
-handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.update_resource_owner">>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
     R = case validate_call_args(M, Ctxt, 3) of
         {ok, [Uri, Username, Info]} ->
             maybe_error(
@@ -142,7 +229,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.update_reso
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.remove_resource_owner">>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_DELETE_RESOURCE_OWNER} = M, Ctxt) ->
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Username]} ->
             maybe_error(
