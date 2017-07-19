@@ -263,6 +263,12 @@ accept(Req0, St) ->
 
 
 %% @private
+
+accept_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Enc, Req, St) ->
+    RealmUri = maps:get(realm_uri, St),
+    Username = maps:get(client_id, St),
+    issue_token(RealmUri, Username, Enc, Req, St);
+
 accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     RealmUri = maps:get(realm_uri, St0),
     #{
@@ -274,19 +280,8 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     {IP, _Port} = cowboy_req:peer(Req0),
     case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
-            User = bondy_security_user:fetch(
-                RealmUri, bondy_security:get_username(AuthCtxt)),
-            Meta = maps:get(<<"meta">>, User, #{}),
-            Issuer = maps:get(client_id, St0),
-            Gs = bondy_security_user:groups(User),
-            case bondy_oauth2:issue_token(RealmUri, Issuer, U, Gs, Meta) of
-                {ok, JWT, RefreshToken, Claims} ->
-                    Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
-                    {true, Req1, St0};
-                {error, Error} ->
-                    Req1 = reply(Error, Enc, Req0),
-                    {stop, Req1, St0}
-            end;
+            Username = bondy_security:get_username(AuthCtxt),
+            issue_token(RealmUri, Username, Enc, Req0, St0);
         {error, Error} ->
             lager:info("Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
             Req1 = reply(oauth2_invalid_grant, Enc, Req0),
@@ -312,12 +307,25 @@ accept_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
     %% TODO
     error({oauth2_unsupported_grant_type, <<"authorization_code">>});
 
-accept_flow(#{?GRANT_TYPE := <<"client_credentials">>} = _Map, _, _, _) ->
-    %% TODO
-    error({oauth2_unsupported_grant_type, <<"client_credentials">>});
-
 accept_flow(Map, _, _, _) ->
     error({oauth2_invalid_request, Map}).
+
+
+%% @private
+issue_token(RealmUri, Username, Enc, Req0, St0) ->
+    Issuer = maps:get(client_id, St0),
+    User = bondy_security_user:fetch(RealmUri, Username),
+    Meta = maps:get(<<"meta">>, User, #{}),
+    Gs = bondy_security_user:groups(User),
+
+    case bondy_oauth2:issue_token(RealmUri, Issuer, Username, Gs, Meta) of
+        {ok, JWT, RefreshToken, Claims} ->
+            Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
+            {true, Req1, St0};
+        {error, Error} ->
+            Req1 = reply(Error, Enc, Req0),
+            {stop, Req1, St0}
+    end.
 
 
 
@@ -373,7 +381,8 @@ token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
         <<"token_type">> => <<"bearer">>,
         <<"access_token">> => JWT,
         <<"refresh_token">> => RefreshToken,
-        <<"scope">> => maps:get(<<"groups">>, Claims),
+        <<"scope">> => iolist_to_binary(
+            lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
         <<"expires_in">> => maps:get(<<"exp">>, Claims)
     },
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req0).
