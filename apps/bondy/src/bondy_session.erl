@@ -145,6 +145,8 @@
 -export([id/1]).
 -export([incr_seq/1]).
 -export([lookup/1]).
+-export([list/0]).
+-export([list_peers/0]).
 -export([new/3]).
 -export([new/4]).
 -export([open/3]).
@@ -358,14 +360,14 @@ size() ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(id()) -> session() | not_found.
+-spec lookup(id()) -> session() | {error, not_found}.
 
 lookup(Id) ->
     case do_lookup(Id) of
         #session{} = Session ->
             Session;
-        not_found ->
-            not_found
+        Error ->
+            Error
     end.
 
 
@@ -379,12 +381,51 @@ lookup(Id) ->
 
 fetch(Id) ->
     case lookup(Id) of
-        not_found ->
+        {error, not_found} ->
             error({badarg, Id});
         Session ->
             Session
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% @TODO provide a limit and itereate on each table providing a custom
+%% continuation
+list() ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    lists:append([ets:tab2list(T) || T <- Tabs]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% @TODO provide a limit and itereate on each table providing a custom
+%% continuation
+list_peers() ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Head = #session{
+        id = '$1',
+        realm_uri = '$2',
+        pid = '$3',
+        peer = '$4',
+        agent = '_',
+        seq = '_',
+        caller = '_',
+        callee = '_',
+        subscriber = '_',
+        publisher = '_',
+        authid = '_',
+        created = '_',
+        expires_in = '_',
+        rate = '_',
+        quota = '_'
+    },
+    MS = [{ Head, [], [{{'$1', '$2', '$3', '$4'}}] }],
+    lists:append([ets:select(T, MS) || T <- Tabs]).
 
 
 %% =============================================================================
@@ -433,7 +474,7 @@ table(Id) ->
 
 
 %% @private
--spec do_lookup(id()) -> session() | not_found.
+-spec do_lookup(id()) -> session() | {error, not_found}.
 
 do_lookup(Id) ->
     Tab = table(Id),
@@ -441,6 +482,6 @@ do_lookup(Id) ->
         [#session{} = Session] ->
             Session;
         [] ->
-            not_found
+            {error, not_found}
     end.
 

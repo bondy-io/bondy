@@ -26,10 +26,10 @@
 -export([remove/2]).
 
 
--spec get(RealmUri :: binary(), any()) -> {ok, any()} | not_found.
+-spec get(RealmUri :: binary(), any()) -> {ok, any()} | {error, not_found}.
 get(_, _) ->
     %%TODO
-    not_found.
+    {error, not_found}.
 
 put(RealmUri, K, V) ->
     bondy_cache:put(RealmUri, K, V, #{}).

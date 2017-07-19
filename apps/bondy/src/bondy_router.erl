@@ -112,6 +112,7 @@
 -export([close_context/1]).
 -export([forward/2]).
 -export([roles/0]).
+-export([agent/0]).
 -export([start_pool/0]).
 %% -export([has_role/2]). ur, ctxt
 %% -export([add_role/2]). uri, ctxt
@@ -157,6 +158,16 @@ close_context(Ctxt) ->
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
 roles() ->
     ?ROUTER_ROLES.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the Bondy agent identification string
+%% @end
+%% -----------------------------------------------------------------------------
+agent() ->
+    Vsn = list_to_binary(bondy_app:vsn()),
+    <<"LEAPSIGHT-BONDY-", Vsn/binary>>.
 
 
 %% -----------------------------------------------------------------------------
@@ -251,7 +262,8 @@ when Event /= undefined ->
     ok = route_event(Event),
     {stop, normal, State};
 
-handle_info(_Info, State) ->
+handle_info(Info, State) ->
+    lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
 
 
@@ -411,7 +423,8 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% between two processes even when in different nodes (when using 
     %% distributed Erlang).
     ok = route_event({M, Ctxt0}),
-    %% The Call response will be delivered asynchronously by the dealer
+    %% The invocation is always async, 
+    %% so the response will be delivered asynchronously by the dealer
     {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
 
 do_forward(M, Ctxt0) ->

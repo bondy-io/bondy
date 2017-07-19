@@ -32,4 +32,5 @@ hello_json_test(_) ->
     M = wamp_message:hello(<<"realm1">>, #{roles => #{
         caller => #{}
     }}),
-    {[M], <<>>} = wamp_encoding:decode({ws, text, json}, wamp_encoding:encode(M, json)).
+    {[M], <<>>} = wamp_encoding:decode(
+        {ws, text, json}, wamp_encoding:encode(M, json)).

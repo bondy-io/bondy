@@ -761,7 +761,7 @@ apply_invocation_strategy({?INVOKE_LAST, L}, Fun, Ctxt) ->
     apply_first_available(lists:reverse(L), Fun, Ctxt);
 
 apply_invocation_strategy({?INVOKE_RANDOM, L}, Fun, Ctxt) ->
-    apply_first_available(shuffle(L), Fun, Ctxt);
+    apply_first_available(lists_utils:shuffle(L), Fun, Ctxt);
 
 apply_invocation_strategy({?INVOKE_ROUND_ROBIN, L}, Fun, Ctxt) ->
     apply_round_robin(L, Fun, Ctxt);
@@ -911,37 +911,3 @@ cleanup_queue(#{realm_uri := Uri, awaiting_calls := Set} = Ctxt) ->
     
 cleanup_queue(Ctxt) ->
     Ctxt.
-
-
-
-
-%% =============================================================================
-%% PRIVATE: UTILS
-%% =============================================================================
-
-
-
-
-
-%% From https://erlangcentral.org/wiki/index.php/RandomShuffle
-shuffle(List) ->
-    %% Determine the log n portion then randomize the list.
-    randomize(round(math:log(length(List)) + 0.5), List).
-
-
-%% @private
-randomize(1, List) ->
-    randomize(List);
-
-randomize(T, List) ->
-    lists:foldl(
-        fun(_E, Acc) -> randomize(Acc) end, 
-        randomize(List), 
-        lists:seq(1, (T - 1))).
-
-
-%% @private
-randomize(List) ->
-    D = lists:map(fun(A) -> {rand:uniform(), A} end, List),
-    {_, D1} = lists:unzip(lists:keysort(1, D)),
-    D1.

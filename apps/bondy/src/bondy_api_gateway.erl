@@ -41,6 +41,73 @@
             true
     end
 ).
+-define(CLIENT_SPEC, #{
+    <<"client_id">> => #{
+        alias => client_id,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        validator => ?VALIDATE_USERNAME,
+        default => fun() -> bondy_oauth2:generate_fragment(32) end
+    },
+    <<"client_secret">> => #{
+        alias => client_secret,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        default => fun() -> bondy_oauth2:generate_fragment(48) end
+    },
+    <<"groups">> => #{
+        alias => groups,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary},
+        default => []
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
+    }
+}).
+-define(USER_SPEC,#{
+    <<"username">> => #{
+        alias => username,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        validator => ?VALIDATE_USERNAME
+    },
+    <<"password">> => #{
+        alias => password,
+        required => true,
+        allow_null => false,
+        datatype => binary,
+        default => fun() -> bondy_oauth2:generate_fragment(48) end
+    },
+    <<"groups">> => #{
+        alias => groups,
+        required => true,
+        allow_null => false,
+        datatype => {list, binary},
+        default => []
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
+    }
+}).
 
 -type listener()  ::    api_gateway_http
                         | api_gateway_https
@@ -477,11 +544,11 @@ maybe_init_security(RealmUri) ->
     Gs = [
         #{
             <<"name">> => <<"api_clients">>,
-            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>
+            <<"meta">> => #{<<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>}
         },
         #{
             <<"name">> => <<"resource_owners">>,
-            <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
+            <<"meta">> => #{<<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>}
         }
     ],
     [maybe_init_group(RealmUri, G) || G <- Gs],
@@ -491,7 +558,7 @@ maybe_init_security(RealmUri) ->
 %% @private
 maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
     case bondy_security_group:lookup(RealmUri, Name) of
-        not_found -> 
+        {error, not_found} -> 
             bondy_security_group:add(RealmUri, G);
         _ ->
             ok
@@ -500,28 +567,11 @@ maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
 
 %% @private
 validate_resource_owner(Info0) ->
-    Info1 = maps_utils:validate(Info0, #{
-        <<"username">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            validator => ?VALIDATE_USERNAME,
-            default => fun() -> bondy_oauth2:generate_fragment(32) end
-        },
-        <<"password">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            default => fun() -> bondy_oauth2:generate_fragment(48) end
-        },
-        <<"meta">> => #{
-            datatype => map
-        }
-    }),
-    
+    Info1 = maps_utils:validate(Info0, ?USER_SPEC),
+    Groups = ["resource_owners" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"password">>, Info1)},
-        {"groups", ["resource_owners"]} | 
+        {"groups", Groups} | 
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Username = maps:get(<<"username">>, Info1),
@@ -529,27 +579,11 @@ validate_resource_owner(Info0) ->
 
 
 validate_client(Info0) ->
-    Info1 = maps_utils:validate(Info0, #{
-        <<"client_id">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            validator => ?VALIDATE_USERNAME,
-            default => fun() -> bondy_oauth2:generate_fragment(32) end
-        },
-        <<"client_secret">> => #{
-            required => true,
-            allow_null => false,
-            datatype => binary,
-            default => fun() -> bondy_oauth2:generate_fragment(48) end
-        },
-        <<"meta">> => #{
-            datatype => map
-        }
-    }),
+    Info1 = maps_utils:validate(Info0, ?CLIENT_SPEC),
+    Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"client_secret">>, Info1)},
-        {"groups", ["api_clients"]} | 
+        {"groups", Groups} | 
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     {maps:get(<<"client_id">>, Info1), Opts, Info1}.

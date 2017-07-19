@@ -178,17 +178,18 @@ uri(#realm{uri = Uri}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Retrieves the realm identified by Uri from the tuplespace or 'not_found'
+%% Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}'
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri()) -> realm() | not_found.
+-spec lookup(uri()) -> realm() | {error, not_found}.
+
 lookup(Uri) ->
     case do_lookup(Uri)  of
         #realm{} = Realm ->
             Realm;
-        not_found ->
-            not_found
+        Error ->
+            Error
     end.
 
 
@@ -201,10 +202,10 @@ lookup(Uri) ->
 -spec fetch(uri()) -> realm().
 fetch(Uri) ->
     case lookup(Uri) of
-        not_found ->
-            error({not_found, Uri});
-        Realm ->
-            Realm
+        #realm{} = Realm ->
+            Realm;
+        {error, not_found} ->
+            error({not_found, Uri})
     end.
 
 %% -----------------------------------------------------------------------------
@@ -229,7 +230,7 @@ get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Realm;
-        not_found ->
+        {error, not_found} ->
             put(Uri, Opts)
     end.
 
@@ -274,7 +275,7 @@ put(Uri, Opts) ->
     },
 
     case lookup(Uri) of
-        not_found ->
+        {error, not_found} ->
             ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
             init(Realm);
         _ ->
@@ -369,13 +370,13 @@ select_first_available([H|T], I) ->
 
 
 %% @private
--spec do_lookup(uri()) -> realm() | not_found.
+-spec do_lookup(uri()) -> realm() | {error, not_found}.
 do_lookup(Uri) ->
     case plumtree_metadata:get(?PREFIX, Uri)  of
         #realm{} = Realm ->
             Realm;
         undefined ->
-            not_found
+            {error, not_found}
     end.
 
 

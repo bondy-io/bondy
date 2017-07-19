@@ -60,14 +60,17 @@ remove(RealmUri, Usernames, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list(uri(), list() | binary()) -> source() | not_found.
+-spec list(uri(), list() | binary()) -> source() | {error, not_found}.
+
 list(RealmUri, Username) when is_binary(Username) ->
     list(RealmUri, unicode:characters_to_list(Username, utf8));
 
 list(RealmUri, Username) ->
     case bondy_security:lookup_user_sources(RealmUri, Username) of
-        not_found -> not_found;
-        Sources -> [to_map(S) || S <- Sources]
+        {error, _} = Error ->
+            Error;
+        Sources -> 
+            [to_map(S) || S <- Sources]
     end.
 
 

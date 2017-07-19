@@ -1356,10 +1356,9 @@ validate_groups_option(RealmUri, Options) ->
     case lookup("groups", Options) of
         undefined ->
             {ok, Options};
-        GroupStr ->
+        L ->
             %% Don't let the admin assign "all" as a container
-            Groups= [name2bin(G) ||
-                        G <- string:tokens(GroupStr, ","), G /= "all"],
+            Groups = [name2bin(G) || G <- L, G /= "all"],
 
             case unknown_roles(RealmUri, Groups, group) of
                 [] ->
@@ -1572,9 +1571,15 @@ unknown_roles(RealmUri, RoleList, group) ->
 unknown_roles(RealmUri, RoleList, RoleType) ->
     Uri = name2bin(RealmUri),
     FP = ?FULL_PREFIX(Uri, <<"security">>, RoleType),
-    plumtree_metadata:fold(fun({Rolename, _}, Acc) ->
-                                    Acc -- [Rolename]
-                            end, RoleList, FP).
+    plumtree_metadata:fold(
+        fun
+            ({_, ['$deleted']}, Acc) ->
+                Acc;
+            ({Rolename, _}, Acc) ->
+                Acc -- [Rolename]
+        end, 
+        RoleList, 
+        FP).
 
 user_details(RealmUri, U) ->
     role_details(RealmUri, U, user).
@@ -1718,17 +1723,17 @@ do_print_ciphers(CipherList) ->
 %% ADDED BY US
 %% =============================================================================
 
--spec lookup_user(binary(), binary()) -> tuple() | not_found.
+-spec lookup_user(binary(), binary()) -> tuple() | {error, not_found}.
 lookup_user(RealmUri, Username) when is_binary(RealmUri), is_binary(Username) ->
     case plumtree_metadata:get(?USERS_PREFIX(RealmUri), Username) of
-        undefined -> not_found;
+        undefined -> {error, not_found};
         Val -> {Username, Val}
     end.
 
--spec lookup_group(binary(), binary()) -> tuple() | not_found.
+-spec lookup_group(binary(), binary()) -> tuple() | {error, not_found}.
 lookup_group(RealmUri, Name) when is_binary(Name) ->
     case plumtree_metadata:get(?GROUPS_PREFIX(RealmUri), Name) of
-        undefined -> not_found;
+        undefined -> {error, not_found};
         Val -> {Name, Val}
     end.
 
@@ -1780,7 +1785,7 @@ lookup_user_sources(RealmUri, Username) when is_binary(RealmUri) ->
             [{BinName, CIDR, Source, Options} || 
                 {{BinName, CIDR}, [{Source, Options}]} <- L];
         [] -> 
-            not_found
+            {error, not_found}
     end.
 
 %% @private
