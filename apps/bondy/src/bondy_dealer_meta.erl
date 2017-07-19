@@ -30,7 +30,7 @@
 
 % USER
 -define(BONDY_USER_ADD, <<"com.leapsight.bondy.security.add_user">>).
--define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.update_user">>).
+-define(BONDY_USER_UPDATE, <<"com.leapsight.bondy.security.replace_user">>).
 -define(BONDY_USER_LOOKUP, <<"com.leapsight.bondy.security.find_user">>).
 -define(BONDY_USER_DELETE, <<"com.leapsight.bondy.security.delete_user">>).
 -define(BONDY_USER_LIST, <<"com.leapsight.bondy.security.list_users">>).
@@ -42,7 +42,7 @@
 
 % GROUP
 -define(BONDY_GROUP_ADD, <<"com.leapsight.bondy.security.add_group">>).
--define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.update_group">>).
+-define(BONDY_GROUP_UPDATE, <<"com.leapsight.bondy.security.replace_group">>).
 -define(BONDY_GROUP_LOOKUP, <<"com.leapsight.bondy.security.find_group">>).
 -define(BONDY_GROUP_DELETE, <<"com.leapsight.bondy.security.delete_group">>).
 -define(BONDY_GROUP_LIST, <<"com.leapsight.bondy.security.list_groups">>).
@@ -287,7 +287,6 @@ handle_call(#call{procedure_uri = ?BONDY_USER_LOOKUP} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_ADD} = M, Ctxt) ->
-    %% @TODO
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
             maybe_error(bondy_security_group:add(Uri, Info), M);
@@ -297,10 +296,12 @@ handle_call(#call{procedure_uri = ?BONDY_GROUP_ADD} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_DELETE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = case validate_call_args(M, Ctxt, 2) of
+        {ok, [Uri, Name]} ->
+            maybe_error(bondy_security_group:remove(Uri, Name), M);
+        {error, WampError} ->
+            WampError     
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_LIST} = M, Ctxt) ->
@@ -311,17 +312,21 @@ handle_call(#call{procedure_uri = ?BONDY_GROUP_LIST} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_LOOKUP} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = case validate_call_args(M, Ctxt, 2) of
+        {ok, [Uri, Name]} ->
+            maybe_error(bondy_security_group:lookup(Uri, Name), M);
+        {error, WampError} ->
+            WampError     
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GROUP_UPDATE} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = case validate_call_args(M, Ctxt, 3) of
+        {ok, [Uri, Name, Info]} ->
+            maybe_error(bondy_security_group:update(Uri, Name, Info), M);
+        {error, WampError} ->
+            WampError     
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_SOURCE_ADD} = M, Ctxt) ->
