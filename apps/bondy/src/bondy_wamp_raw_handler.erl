@@ -283,13 +283,13 @@ handle_data(Data, St) when is_binary(Data) ->
             {ok, St#state{protocol_state = PSt}}; 
         {reply, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
-            send(L, St1),
+            ok = send(L, St1),
             {ok, St1};
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
-            send(L, St1),
+            ok = send(L, St1),
             {stop, St1}
     end.
 
@@ -299,12 +299,12 @@ handle_outbound(M, St0) ->
     case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
         {ok, Bin, PSt} ->
             St1 = St0#state{protocol_state = PSt},
-            send(Bin, St1),
+            ok = send(Bin, St1),
             {noreply, St1, ?TIMEOUT};
         {stop, PSt} ->
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
-            send(Bin, St0#state{protocol_state = PSt}),
+            ok = send(Bin, St0#state{protocol_state = PSt}),
             {stop, normal, St0#state{protocol_state = PSt}}
     end.
 
@@ -411,6 +411,8 @@ error_reason(3) -> use_of_reserved_bits;
 error_reason(4) -> maximum_connection_count_reached.
 
 %% @private
+-spec send(binary() | list(), state()) -> ok | {error, any()}.
+
 send(L, St) when is_list(L) ->
     lists:foreach(fun(Bin) -> send(Bin, St) end, L);
 
@@ -422,5 +424,7 @@ send(Bin, St) ->
 
 
 %% @private
+-spec send_frame(binary(), state()) -> ok | {error, any()}.
+
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
