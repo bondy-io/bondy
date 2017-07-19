@@ -237,7 +237,7 @@ init([Event]) ->
 
 handle_call(Event, From, State) ->
     _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
     {noreply, State}.
 
 
