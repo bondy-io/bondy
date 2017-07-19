@@ -1623,7 +1623,7 @@ from_http_response(StatusCode, RespBody, RespHeaders, Spec, St0)
 when StatusCode >= 400 andalso StatusCode < 600->
     Ctxt0 = maps:get(api_context, St0),
     Error = #{ 
-        <<"http_code">> => StatusCode,
+        <<"status_code">> => StatusCode,
         <<"body">> => RespBody,
         <<"headers">> => maps:from_list(RespHeaders)
     },
@@ -1638,7 +1638,7 @@ when StatusCode >= 400 andalso StatusCode < 600->
 from_http_response(StatusCode, RespBody, RespHeaders, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
     Result = #{ 
-        <<"http_code">> => StatusCode,
+        <<"status_code">> => StatusCode,
         <<"body">> => RespBody,
         <<"headers">> => maps:from_list(RespHeaders)
     },

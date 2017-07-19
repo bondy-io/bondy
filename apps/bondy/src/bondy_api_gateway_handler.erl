@@ -372,12 +372,11 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
     Map = #{
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
-        <<"authid">> => maps:get(<<"sub">>, Claims),
-        <<"authrole">> => maps:get(<<"scope">>, Claims),
-        <<"authscope">> => maps:get(<<"scope">>, Claims),
         <<"authmethod">> => <<"oauth2">>,
-        <<"authprovider">> => maps:get(<<"iss">>, Claims),
-        <<"authmeta">> => maps:get(<<"meta">>, Claims)
+        <<"client_id">> => maps:get(<<"iss">>, Claims),
+        <<"username">> => maps:get(<<"sub">>, Claims),
+        <<"groups">> => maps:get(<<"groups">>, Claims),
+        <<"meta">> => maps:get(<<"meta">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
 

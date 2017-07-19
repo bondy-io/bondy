@@ -95,13 +95,13 @@
 %% -----------------------------------------------------------------------------
 -spec eval(any(), context()) -> any().
 
-eval(<<>>, _) ->
+eval(<<>>, Ctxt) when is_map(Ctxt) ->
     <<>>;
 
 eval(Val, Ctxt) when is_binary(Val), is_map(Ctxt) ->
     eval(Val, Ctxt, #{});
 
-eval(Val, _) ->
+eval(Val, Ctxt) when is_map(Ctxt) ->
     Val.
 
 %% -----------------------------------------------------------------------------
@@ -139,8 +139,9 @@ eval(Val, _) ->
 %% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval(Term :: any(), Ctxt :: context(), Opts :: map()) -> 
-    any() | no_return().
+-spec eval
+    (Term :: any(), Ctxt :: context(), Opts :: map()) -> any(); 
+    (Term :: any(), any(), any()) -> any().
 
 eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
     <<>>;
@@ -493,11 +494,11 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Args = get_arguments(Rest, Op, <<"])">>),
     case lists:foldl(Fold, {[], []}, Args) of
         {L, []} ->
-            maps:with(L, Val);
+            maps:without(L, Val);
         {L, R} ->
             fun(X) -> 
                 Keys = lists:append(L, [F(X) || F <- R]),
-                maps:with(Keys, Val) 
+                maps:without(Keys, Val) 
             end
     end;
 

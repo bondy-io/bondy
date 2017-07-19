@@ -57,10 +57,10 @@
 % ).
 
 -record(bondy_oauth2_token, {
-    issuer                  ::  binary(), %% aka client_id or consumer_id
+    issuer                  ::  binary(), %% aka client_id
     username                ::  binary(),
+    groups = []             ::  [binary()],
     meta = #{}              ::  map(),
-    requested_grants        ::  list(),
     expires_in              ::  pos_integer(),
     issued_at               ::  pos_integer(),
     is_active = true        ::  boolean
@@ -98,16 +98,16 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue_token(
-    bondy_realm:uri(), binary(), binary(), [{any(), any()}], map()) -> 
+    bondy_realm:uri(), binary(), binary(), [binary()], map()) -> 
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
-issue_token(RealmUri, Issuer, Username, Grants, Info) ->    
+issue_token(RealmUri, Issuer, Username, Groups, Meta) ->    
     Data = #bondy_oauth2_token{
         issuer = Issuer,
         username = Username,
-        meta = Info,
-        requested_grants = Grants
+        groups = Groups,
+        meta = Meta
     },
     issue_token(RealmUri, Data).
 
@@ -122,7 +122,7 @@ issue_token(RealmUri, Issuer, Username, Grants, Info) ->
 
 issue_token(RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
-        not_found ->
+        {error, not_found} ->
            {error, unknown_realm};
         Realm ->
             do_issue_token(Realm, Data0)
@@ -210,7 +210,7 @@ verify_jwt(RealmUri, JWT, Match0) ->
             {error, oauth2_invalid_grant};
         {ok, Claims} ->
             matches(Claims, Match1);
-        not_found ->
+        {error, not_found} ->
             do_verify_jwt(JWT, Match1, Now)
     end.
 
@@ -226,28 +226,22 @@ verify_jwt(RealmUri, JWT, Match0) ->
 %% @private
 do_issue_token(Realm, Data0) ->
     Uri = bondy_realm:uri(Realm),
-    #bondy_oauth2_token{
-        issuer = Issuer,
-        username = Username,
-        meta = Info,
-        requested_grants = Grants
-    } = Data0,
     Kid = bondy_realm:get_random_kid(Realm),
     Key = bondy_realm:get_private_key(Realm, Kid),
     Now = os:system_time(seconds),
     Exp = Now + ?DEFAULT_TTL,
+    Iss = Data0#bondy_oauth2_token.issuer,
     %% We generate and sign the JWT
-    Scope = grants_to_scope(Grants),
     Claims = #{
         <<"id">> => wamp_utils:rand_uniform(),
         <<"exp">> => Exp,
         <<"iat">> => Now,
         <<"kid">> => Kid,
-        <<"sub">> => Username,
-        <<"iss">> => Issuer,
+        <<"sub">> => Data0#bondy_oauth2_token.username,
+        <<"iss">> => Iss,
         <<"aud">> => Uri,
-        <<"scope">> => Scope,
-        <<"meta">> => Info
+        <<"groups">> => Data0#bondy_oauth2_token.groups,
+        <<"meta">> => Data0#bondy_oauth2_token.meta
     },
     JWT = sign(Key, Claims),
     %% We generate and store the refresh token
@@ -257,7 +251,7 @@ do_issue_token(Realm, Data0) ->
         issued_at = Now
     },
     ok = plumtree_metadata:put(
-        ?REFRESH_TOKEN_PREFIX(Uri, Issuer), RefreshToken, Data1),
+        ?REFRESH_TOKEN_PREFIX(Uri, Iss), RefreshToken, Data1),
     ok = bondy_cache:put(Uri, JWT, Claims ,#{exp => Exp}),
     {ok, JWT, RefreshToken, Claims}.
 
@@ -279,7 +273,7 @@ do_verify_jwt(JWT, Match, Now) ->
         <<"kid">> := Kid
     } = Map,
     case bondy_realm:lookup(RealmUri) of
-        not_found ->
+        {error, not_found} ->
             {error, unknown_realm};
         Realm ->
             case bondy_realm:get_public_key(Realm, Kid) of
@@ -308,20 +302,6 @@ matches(Claims, Match) ->
         false -> 
             {error, oauth2_invalid_grant}
     end.
-
-
-%% @private
-grants_to_scope(L) ->
-    grants_to_scope(L, []).
-
-
-%% @private
-grants_to_scope([], Scope) ->
-    Scope;
-
-grants_to_scope([{_K, _V}|_T], Scope) ->
-    % TODO
-    Scope.
 
 
 %% Borrowed from 
