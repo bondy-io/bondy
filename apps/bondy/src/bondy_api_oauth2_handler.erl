@@ -216,7 +216,7 @@ is_authorized(Req0, St0) ->
             },
             {true, Req0, St1};
         {error, Reason} ->
-            lager:info("API Client login failed, error=oauth2_invalid_client,reason=~p", [Reason]),
+            _ = lager:info("API Client login failed, error=oauth2_invalid_client,reason=~p", [Reason]),
             Req1 = reply(oauth2_invalid_client, json, Req0),
             {stop, Req1, St0}
     end.
@@ -254,7 +254,7 @@ accept(Req0, St) ->
         accept_flow(maps:from_list(PList), json, Req1, St)
     catch
         error:Reason ->
-            lager:error(
+            _ = lager:error(
                 "error=error, reason=~p, stacktrace:~p", 
                 [Reason, erlang:get_stacktrace()]),
             Req2 = reply(Reason, json, Req0),
@@ -283,7 +283,7 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
             Username = bondy_security:get_username(AuthCtxt),
             issue_token(RealmUri, Username, Enc, Req0, St0);
         {error, Error} ->
-            lager:info("Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
+            _ = lager:info("Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
             Req1 = reply(oauth2_invalid_grant, Enc, Req0),
             {stop, Req1, St0}
     end;

@@ -252,12 +252,12 @@ handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
 handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St) 
 when byte_size(Data) > Max->
     % io:format("Message length is ~p~n", [byte_size(Data)]), 
-    send_frame(error_number(maximum_message_length_unacceptable), St),
+    ok = send_frame(error_number(maximum_message_length_unacceptable), St),
     {stop, St};
 
 handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
     %% We received a PING, send a PONG
-    send_frame(<<0:5, 2:3, Rest/binary>>, St),
+    ok = send_frame(<<0:5, 2:3, Rest/binary>>, St),
     {ok, St};
 
 handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
@@ -274,7 +274,7 @@ handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
     end;
 
 handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
-    send_frame(error_number(use_of_reserved_bits), St),
+    ok = send_frame(error_number(use_of_reserved_bits), St),
     {stop, St};
 
 handle_data(Data, St) when is_binary(Data) ->
@@ -320,7 +320,7 @@ handle_handshake(Len, Enc, St) ->
         init_wamp(Len, Enc, St)
     catch
         throw:Reason ->
-            send_frame(error_number(Reason), St),
+            ok = send_frame(error_number(Reason), St),
             _ = lager:info("TCP Connection closing, reason=~p", [Reason]),
             {stop, St}
     end.
@@ -341,7 +341,8 @@ init_wamp(Len, Enc, St0) ->
                         protocol_state = CBState,
                         max_len = MaxLen
                     },
-                    send_frame(<<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
+                    ok = send_frame(
+                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
                         <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>, 
                         [FrameType, EncName, Peer]

@@ -236,7 +236,7 @@ init([Event]) ->
 
 
 handle_call(Event, From, State) ->
-    lager:error(
+    _ = lager:error(
         "Error handling cast, reason=unsupported_event, event=~p, from=~p", [Event, From]),
     {noreply, State}.
 
@@ -248,7 +248,7 @@ handle_cast(Event, State) ->
     catch
         Error:Reason ->
             %% TODO publish metaevent
-            lager:error(
+            _ = lager:error(
                 "Error handling cast, error=~p, reason=~p, stacktrace=~p",    
                 [Error, Reason, erlang:get_stacktrace()]),
             {noreply, State}
@@ -263,7 +263,7 @@ when Event /= undefined ->
     {stop, normal, State};
 
 handle_info(Info, State) ->
-    lager:debug("Unexpected message, message=~p", [Info]),
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
 
 
@@ -381,7 +381,7 @@ do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
 
 do_forward(#goodbye{} = M, Ctxt) ->
     %% Goodbye initiated by client, we reply with goodbye() and stop.
-    lager:error(
+    _ = lager:error(
         "Session closed per client request, session=~p, reason=~p",
         [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
@@ -439,7 +439,7 @@ do_forward(M, Ctxt0) ->
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            lager:info("Pool ~p is overloaded.", [?POOL_NAME]),
+            _ = lager:info("Pool ~p is overloaded.", [?POOL_NAME]),
             %% TODO publish metaevent and stats
             %% TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
