@@ -41,6 +41,32 @@
             true
     end
 ).
+
+
+-define(CLIENT_UPDATE_SPEC, #{
+    <<"client_secret">> => #{
+        alias => client_secret,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        required => false,
+        allow_null => true,
+        allow_undefined => true,
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        allow_null => true,
+        allow_undefined => true,
+        datatype => map
+    }
+}).
+
 -define(CLIENT_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
@@ -76,6 +102,7 @@
         default => #{}
     }
 }).
+
 -define(USER_SPEC,#{
     <<"username">> => #{
         alias => username,
@@ -106,6 +133,30 @@
         allow_undefined => false,
         datatype => map,
         default => #{}
+    }
+}).
+
+-define(USER_UPDATE_SPEC,#{
+    <<"password">> => #{
+        alias => password,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        required => false,
+        allow_null => true,
+        allow_undefined => true,
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map
     }
 }).
 
@@ -178,7 +229,7 @@ load(FName) ->
 add_client(RealmUri, Info0) ->
     try 
         ok = maybe_init_security(RealmUri),
-        {Id, Opts, Info1} = validate_client(Info0),
+        {Id, Opts, Info1} = validate_client(Info0, ?CLIENT_SPEC),
         case bondy_security:add_user(RealmUri, Id, Opts) of
             {error, _} = Error ->
                 Error;
@@ -201,7 +252,7 @@ add_client(RealmUri, Info0) ->
 
 update_client(RealmUri, ClientId, Info0) ->
     ok = maybe_init_security(RealmUri),
-    {ClientId, Opts, Info1} = validate_client(Info0),
+    {undefined, Opts, Info1} = validate_client(Info0, ?CLIENT_UPDATE_SPEC),
     case bondy_security:alter_user(RealmUri, ClientId, Opts) of
         {error, _} = Error ->
             Error;
@@ -231,7 +282,7 @@ remove_client(RealmUri, Id) ->
 
 add_resource_owner(RealmUri, Info0) ->
     ok = maybe_init_security(RealmUri),
-    {Username, Opts, Info1} = validate_resource_owner(Info0),
+    {Username, Opts, Info1} = validate_resource_owner(Info0, ?USER_SPEC),
     case bondy_security:add_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
@@ -250,7 +301,8 @@ add_resource_owner(RealmUri, Info0) ->
 
 update_resource_owner(RealmUri, Username, Info0) ->
     ok = maybe_init_security(RealmUri),
-    {_, Opts, Info1} = validate_resource_owner(Info0),
+    {undefined, Opts, Info1} = validate_resource_owner(
+        Info0, ?USER_UPDATE_SPEC),
     case bondy_security:alter_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
@@ -566,24 +618,25 @@ maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
 
 
 %% @private
-validate_resource_owner(Info0) ->
-    Info1 = maps_utils:validate(Info0, ?USER_SPEC),
+validate_resource_owner(Info0, Spec) ->
+    Info1 = maps_utils:validate(Info0, Spec),
     Groups = ["resource_owners" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"password">>, Info1)},
         {"groups", Groups} | 
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
-    Username = maps:get(<<"username">>, Info1),
+    Username = maps:get(<<"username">>, Info1, undefined),
     {Username, Opts, Info1}.
 
 
-validate_client(Info0) ->
-    Info1 = maps_utils:validate(Info0, ?CLIENT_SPEC),
+validate_client(Info0, Spec) ->
+    Info1 = maps_utils:validate(Info0, Spec),
     Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"client_secret">>, Info1)},
         {"groups", Groups} | 
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
-    {maps:get(<<"client_id">>, Info1), Opts, Info1}.
+    Id = maps:get(<<"client_id">>, Info1, undefined),
+    {Id, Opts, Info1}.
