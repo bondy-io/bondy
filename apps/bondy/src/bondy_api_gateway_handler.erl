@@ -37,6 +37,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 
 
@@ -347,7 +348,7 @@ get_status_code(ErrorBody, Default) ->
         _ -> 
             case maps:find(<<"code">>, ErrorBody) of
                 {ok, Val} ->
-                    bondy_error:error_uri_to_status_code(Val);
+                    uri_to_status_code(Val);
                 _ ->
                     Default
             end
@@ -686,10 +687,12 @@ method_to_lowercase(<<"PATCH">>) -> <<"patch">>;
 method_to_lowercase(<<"POST">>) -> <<"post">>;
 method_to_lowercase(<<"PUT">>) -> <<"put">>.
 
-%% @private
+
+
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
-%% The Hackney uses atoms
+%% This function exists just becuase becuase hackney (http client) uses atoms
 %% @end
 %% -----------------------------------------------------------------------------
 method_to_atom(<<"delete">>) -> delete;
@@ -712,3 +715,28 @@ maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
 
 maybe_encode(Enc, Body, _) ->
     bondy_utils:maybe_encode(Enc, Body).
+
+
+%% @private
+uri_to_status_code(timeout) ->                                     504;
+uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
+uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
+uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
+uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         400;
+uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
+uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
+uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
+uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
+uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
+uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
+uri_to_status_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
+uri_to_status_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   400;
+uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
+uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
+uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
+uri_to_status_code(_) ->                                           500.
