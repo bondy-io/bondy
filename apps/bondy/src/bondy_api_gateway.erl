@@ -196,7 +196,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec load(file:filename() | map()) -> 
-    ok | {error, {invalid_specification_format, any()}}.
+    ok | {error, invalid_specification_format}.
 
 load(Spec) when is_map(Spec) ->
     %% We append the new spec to the base ones
@@ -224,7 +224,7 @@ load(FName) ->
 %% Creates a new user adding it to the `api_clients` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_client(uri(), map()) -> {ok, map()} | {error, term()}.
+-spec add_client(uri(), map()) -> {ok, map()} | {error, atom() | map()}.
 
 add_client(RealmUri, Info0) ->
     try 
@@ -237,6 +237,7 @@ add_client(RealmUri, Info0) ->
                 {ok, Info1}
         end
     catch
+        %% @TODO change for throw when maps_validate is upgraded
         error:Reason when is_map(Reason) ->
             {error, Reason}
     end.
@@ -265,7 +266,7 @@ update_client(RealmUri, ClientId, Info0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_client(uri(), list() | binary()) -> ok.
+-spec remove_client(uri(), list() | binary()) -> ok | {error, unknown_user}.
 
 remove_client(RealmUri, Id) ->
     bondy_security_user:remove(RealmUri, Id).
@@ -603,7 +604,7 @@ maybe_init_security(RealmUri) ->
             <<"meta">> => #{<<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>}
         }
     ],
-    [maybe_init_group(RealmUri, G) || G <- Gs],
+    _ = [maybe_init_group(RealmUri, G) || G <- Gs],
     ok.
 
 

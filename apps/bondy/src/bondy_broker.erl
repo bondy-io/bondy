@@ -101,8 +101,9 @@ features() ->
 
 
 -spec is_feature_enabled(binary()) -> boolean().
+
 is_feature_enabled(F) when is_binary(F) ->
-    maps:get(F, ?BROKER_FEATURES).
+    maps:get(F, ?BROKER_FEATURES, false).
 
 
 

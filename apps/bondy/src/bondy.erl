@@ -66,13 +66,16 @@ send(PeerId, M) ->
 %% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok.
+-spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({_, Pid}, M, _) when Pid =:= self() ->
+send({SessionId, Pid} = P, M, Opts) 
+when is_integer(SessionId), Pid =:= self() ->
+    wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
     Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
     ok;
 
-send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
+send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
+    wamp_message:is_message(M) orelse error({badarg, [P, M, Opts0]}),
     Opts1 = maps_utils:validate(Opts0, #{
         timeout => #{
             required => true,
@@ -122,7 +125,7 @@ send({SessionId, Pid}, M, Opts0) when is_pid(Pid) ->
 ack(Pid, _) when Pid =:= self()  ->
     ok;
 
-ack(Pid, Ref) ->
+ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
 
