@@ -331,14 +331,6 @@ remove_resource_owner(RealmUri, Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    % Parsed = [bondy_api_gateway_spec:parse(S) || S <- Specs],
-    % Compiled = bondy_api_gateway_spec:compile(Parsed),
-    % SchemeRoutes = case bondy_api_gateway_spec:load(Compiled) of
-    %     [] ->
-    %         [{<<"http">>, []}];
-    %     Val ->
-    %         Val
-    % end,
     _ = [
         start_listener({Scheme, Routes}) 
         || {Scheme, Routes} <- parse_specs(specs())],
