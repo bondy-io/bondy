@@ -449,11 +449,14 @@ do_forward(M, Ctxt0) ->
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
+            ErrorMap = bondy_error:error_map(Reason),
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
-                bondy_error:error_map(Reason),
-                ?WAMP_ERROR_CANCELLED
+                #{},
+                ?WAMP_ERROR_CANCELLED,
+                [maps:get(<<"message">>, ErrorMap)],
+                ErrorMap
             ),
             ok = bondy_stats:update(Reply, Ctxt0),
             {reply, Reply, Ctxt0};

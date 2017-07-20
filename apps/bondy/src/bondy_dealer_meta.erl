@@ -376,9 +376,10 @@ maybe_error({error, Reason}, M) ->
     wamp_message:error(
         ?CALL,
         M#call.request_id,
-        Map,
-        bondy_error:error_uri(Code),
-        Message
+        #{},
+        bondy_error:code_to_uri(Code),
+        [Message],
+        Map
     );
 
 maybe_error(Val, M) ->
