@@ -1,5 +1,5 @@
 %% 
-%%  bondy_api_gateway_spec_parser.erl -
+%%  bondy_api_gateway_spec_parser.erl - parses the Bondy API Specification file
 %% 
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
 %% 
@@ -15,7 +15,20 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This module implements a parser for the Bondy API Specification Format which
+%% is used to dynamically define one or more RESTful APIs.
+%% == API Specification Format
+%% === Host Spec
+%% === API Spec
+%% === Version Spec
+%% === Path Spec
+%% === Method Spec
+%% === Action Spec
+%% === Action Spec
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
 
 -define(VARS_KEY, <<"variables">>).
@@ -1351,7 +1364,7 @@ content_types_provided(<<"application/msgpack">>) ->
     {2, T}.
 
 
-
+% @TODO Avoid doing this and require the user to setup the environment first!
 ensure_setup_realm(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
