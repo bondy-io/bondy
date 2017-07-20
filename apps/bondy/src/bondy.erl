@@ -253,11 +253,13 @@ to_map(#result{} = M) ->
 to_map(#error{} = M) ->
     #error{
         details = Details,
+        error_uri = Uri,
         arguments = Args,
         arguments_kw = ArgsKw
     } = M,
     #{
         details => Details,
+        error_uri => Uri, 
         arguments => args(Args),
         arguments_kw => args_kw(ArgsKw)
     }.
