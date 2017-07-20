@@ -173,7 +173,7 @@ handle_info(
         {stop, St1} ->
             {stop, normal, St1};
         {error, Reason, St1} ->
-            _ = lager:info("TCP Connection closing, error=~p", [Reason]),
+            _ = lager:error("TCP Connection closing, error=~p", [Reason]),
             {stop, reason, St1}
     end;
 
@@ -186,13 +186,24 @@ handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
     ok = bondy:ack(Pid, Ref),
     handle_outbound(M, St);
 
-handle_info({tcp_closed, _Socket}, State) ->
-	{stop, normal, State};
+handle_info({tcp_closed, Socket}, St) ->
+    _ = lager:info(
+        <<"TCP Connection closed by peer, socket=~p, pid=~p">>, 
+        [Socket, self()]
+    ),	
+    {stop, normal, St};
 
-handle_info({tcp_error, _, Reason}, State) ->
+handle_info({tcp_error, Socket, Reason}, State) ->
+    _ = lager:error(
+        "TCP Connection closing, error=tcp_error, reason=~p, socket=~p, pid=~p", 
+        [Reason, Socket, self()]),
 	{stop, Reason, State};
 
 handle_info(timeout, State) ->
+    _ = lager:error(
+        "TCP Connection closing, error=timeout, pid='~p'", 
+        [self()]
+    ),
 	{stop, normal, State};
 
 handle_info(_Info, State) ->
@@ -270,6 +281,7 @@ handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
             {ok, St#state{ping_sent = undefined}};
         _ ->
             %% Wrong answer
+            _ = lager:error("Invalid ping response from peer"),
             {error, invalid_response, St}
     end;
 
@@ -352,10 +364,10 @@ init_wamp(Len, Enc, St0) ->
                     {error, Reason, St0}
             end;
         {ok, Peer} ->
-            _ = lager:info("Unexpected peername, result=~p", [Peer]),
+            _ = lager:error("Unexpected peername, result=~p", [Peer]),
             {error, invalid_socket, St0};
         {error, Reason} ->
-            _ = lager:info("Invalid peername, error=~p", [Reason]),
+            _ = lager:error("Invalid peername, error=~p", [Reason]),
             {error, invalid_socket, St0}
     end.
 
@@ -429,3 +441,4 @@ send(Bin, St) ->
 
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
+
