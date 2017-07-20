@@ -141,6 +141,7 @@ add_source(RealmUri, Username, CIDR, Source, Opts) ->
     RealmUri :: uri(),
     Usernames :: [binary()] | all,
     CIDR :: bondy_security:cidr()) -> ok.
+
 remove_source(RealmUri, Username, CIDR) ->
     bondy_security:del_source(RealmUri, [Username], CIDR).
 
@@ -149,7 +150,8 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), list() | binary()) -> ok.
+-spec remove(uri(), list() | binary()) -> ok | {error, unknown_user}.
+
 remove(RealmUri, Id) when is_list(Id) ->
     remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
 

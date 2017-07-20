@@ -306,7 +306,7 @@ matches(Claims, Match) ->
 
 %% Borrowed from 
 %% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
--spec generate_fragment(integer()) -> binary().
+-spec generate_fragment(non_neg_integer()) -> binary().
 
 generate_fragment(0) -> 
     <<>>;
