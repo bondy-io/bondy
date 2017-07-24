@@ -230,17 +230,25 @@ is_feature_enabled(F) when is_binary(F) ->
 handle_message(
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
     %% Check if it has callee role?
-    Reply = case register(Uri, Opts, Ctxt) of
-        {ok, Map} ->
-            wamp_message:registered(ReqId, maps:get(id, Map));
+    case register(Uri, Opts, Ctxt) of
+        {ok, Map, IsFirst} ->
+            R = wamp_message:registered(ReqId, maps:get(id, Map)),
+            ok = bondy:send(bondy_context:peer_id(Ctxt), R),
+            on_register(IsFirst, Map, Ctxt);
         {error, {not_authorized, Mssg}} ->
-            wamp_message:error(
-                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED, [Mssg]);
-        {error, procedure_already_exists} ->
-            wamp_message:error(
-                ?REGISTER,ReqId, #{}, ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS)
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            R = wamp_message:error(
+                ?REGISTER, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED, [Mssg]),
+            bondy:send(bondy_context:peer_id(Ctxt), R);
+        {error, {procedure_already_exists, Mssg}} ->
+            R = wamp_message:error(
+                ?REGISTER, 
+                ReqId, 
+                #{}, 
+                ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS, 
+                [Mssg]
+            ),
+            bondy:send(bondy_context:peer_id(Ctxt), R)
+    end;
 
 handle_message(#unregister{} = M, Ctxt) ->
     Reply  = case unregister(M#unregister.registration_id, Ctxt) of
@@ -325,7 +333,8 @@ handle_message(#call{} = M, Ctxt0) ->
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-    Fun = fun(Entry, Callee, Ctxt1) ->
+    Fun = fun(Entry, {SId, Pid} = CalleeId, Ctxt1) 
+        when is_integer(SId), is_pid(Pid) ->
         ReqId = bondy_utils:get_id(global),
         Args = M#call.arguments,
         Payload = M#call.arguments_kw,
@@ -336,7 +345,7 @@ handle_message(#call{} = M, Ctxt0) ->
         %% TODO check if authorized and if not throw wamp.error.not_authorized
         Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
         R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
-        ok = bondy:send(Callee, R, Ctxt1),
+        ok = bondy:send(CalleeId, R, Ctxt1),
         {ok, ReqId, Ctxt1}
     end,
 
@@ -373,9 +382,8 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), bondy_context:context()) -> 
-    {ok, map()} 
-    | {error, {not_authorized, binary()} 
-    | procedure_already_exists}.
+    {ok, map(), boolean()} 
+    | {error, {not_authorized | procedure_already_exists, binary()}}.
 
 register(<<"com.leapsight.bondy.", _/binary>>, _, _) ->
     {error, 
@@ -387,10 +395,14 @@ register(<<"wamp.", _/binary>>, _, _) ->
 
 register(ProcUri, Options, Ctxt) ->
     case bondy_registry:add(registration, ProcUri, Options, Ctxt) of
-        {ok, Map, _IsFirst} -> 
-            {ok, Map};
-        {error, {already_exists, _}} -> 
-            {error, procedure_already_exists}
+        {ok, _Details, _IsFirst} = OK -> 
+            OK;
+        {error, {already_exists, #{match := Policy}}} -> 
+            {error, {
+                procedure_already_exists, 
+                <<"The procedure is already registered by another peer with policy ", $', Policy/binary, $', $.>>
+                }
+            }
     end.
 
 
@@ -542,13 +554,13 @@ match_registrations({registration, _} = Cont) ->
 -spec invoke(id(), uri(), function(), map(), bondy_context:context()) -> ok.
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-    S = bondy_context:session(Ctxt0),
-    SId = bondy_session:id(S),
+    CallerS = bondy_context:session(Ctxt0),
+    CallerSId = bondy_session:id(CallerS),
 
     %% We asume that as with pubsub, the _Caller_ should not receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    case match_registrations(ProcUri, Ctxt0, #{exclude => [SId]}) of
+    case match_registrations(ProcUri, Ctxt0, #{exclude => [CallerSId]}) of
         {[], ?EOT} ->
             Error = wamp_message:error(
                 ?CALL, CallId, #{}, ?WAMP_ERROR_NO_SUCH_PROCEDURE),
@@ -562,23 +574,22 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
             Template = #promise{
                 procedure_uri = ProcUri, 
                 call_request_id = CallId,
-                caller_pid = bondy_session:pid(S),
-                caller_session_id = SId
+                caller_pid = bondy_session:pid(CallerS),
+                caller_session_id = CallerSId
             },
 
             %% TODO Should we invoke all matching invocations?
 
             %% We invoke Fun for each entry
             Fun = fun(Entry, Ctxt1) ->
-                CalleeSessionId = bondy_registry:session_id(Entry),
-                Session = bondy_session:fetch(CalleeSessionId),
-                Callee = bondy_session:pid(Session),
+                CalleeSId = bondy_registry:session_id(Entry),
+                Callee = bondy_session:pid(bondy_session:fetch(CalleeSId)),
                 {ok, Id, Ctxt2} = UserFun(
-                    Entry, {CalleeSessionId, Callee}, Ctxt1),
+                    Entry, {CalleeSId, Callee}, Ctxt1),
                 %% We complete the promise with the Callee data    
                 Promise = Template#promise{
                     invocation_request_id = Id,
-                    callee_session_id = CalleeSessionId,
+                    callee_session_id = CalleeSId,
                     callee_pid = Callee
                 }, 
                 %% We enqueue the promise with a timeout
@@ -912,3 +923,15 @@ cleanup_queue(#{realm_uri := Uri, awaiting_calls := Set} = Ctxt) ->
     
 cleanup_queue(Ctxt) ->
     Ctxt.
+
+
+%% @private
+on_register(true, Map, Ctxt) ->
+    Uri = <<"wamp.registration.on_create">>,
+    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    ok;
+
+on_register(false, Map, Ctxt) ->
+    Uri = <<"wamp.registration.on_register">>,
+    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    ok.
