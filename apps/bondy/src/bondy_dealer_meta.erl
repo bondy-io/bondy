@@ -368,17 +368,14 @@ maybe_error({ok, Val}, M) ->
     wamp_message:result(M#call.request_id, #{}, [Val], #{});
 
 maybe_error({error, Reason}, M) ->
-    #{<<"code">> := Code} = Map = bondy_error:error_map(Reason),
-    Message = case maps:find(<<"message">>, Map) of
-        {ok, Val} -> [Val];
-        error -> undefined
-    end,
+    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    Mssg = maps:find(<<"message">>, Map, <<>>),
     wamp_message:error(
         ?CALL,
         M#call.request_id,
         #{},
         bondy_error:code_to_uri(Code),
-        [Message],
+        [Mssg],
         Map
     );
 

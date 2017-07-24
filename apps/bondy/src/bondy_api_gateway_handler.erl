@@ -123,7 +123,8 @@ is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             {true, Req0, St1};
         {error, unknown_realm} ->
             Response = #{
-                <<"body">> => bondy_error:error_map(unknown_realm, 401),
+                <<"body">> => maps:put(
+                    <<"status_code">>, 401, bondy_error:map(unknown_realm)),
                 <<"headers">> => #{}
             },
             Req2 = reply(401, json, Response, Req0),
@@ -257,7 +258,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
     catch
         throw:Reason ->
             Response = #{
-                <<"body">> => bondy_error:error_map(Reason),
+                <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
@@ -267,7 +268,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 "error=~p, reason=~p, stacktrace=~p", 
                 [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
-                <<"body">> => bondy_error:error_map(Reason),
+                <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
             Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
@@ -307,7 +308,7 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         throw:Reason ->
             Response = #{
-                <<"body">> => bondy_error:error_map(Reason),
+                <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
@@ -315,7 +316,7 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
         error:Reason ->
             _ = lager:error("error=error, reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
             Response = #{
-                <<"body">> => bondy_error:error_map(Reason),
+                <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
             Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
@@ -373,7 +374,6 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
     Map = #{
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
-        <<"authmethod">> => <<"oauth2">>,
         <<"client_id">> => maps:get(<<"iss">>, Claims),
         <<"username">> => maps:get(<<"sub">>, Claims),
         <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
@@ -496,7 +496,8 @@ perform_action(
             Error = #{
                 <<"status_code">> => 502,
                 <<"headers">> => #{},
-                <<"details">> => bondy_error:error_map(Reason, 502)
+                <<"details">> => maps:put(
+                    <<"status_code">>, 502, bondy_error:map(Reason))
             },
             Ctxt1 = update_context({error, Error}, Ctxt0),
             Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
@@ -530,7 +531,7 @@ perform_action(
         peer => Peer, 
         realm_uri => RealmUri,
         awaiting_calls => sets:new(),
-        timeout => 5000,
+        timeout => 20000,
         session => bondy_session:new(Peer, RealmUri, #{
             roles => #{
                 caller => #{
@@ -549,24 +550,22 @@ perform_action(
     case bondy:call(P, Opts, A, Akw, WampCtxt0) of
         {ok, Result0, _WampCtxt1} ->
             %% mops uses binary keys
-            Result1 = #{
-                <<"details">> => maps:get(details, Result0),
-                <<"arguments">> => maps:get(arguments, Result0),
-                <<"arguments_kw">> => maps:get(arguments_kw, Result0)
-            },
+            Result1 = bondy_utils:to_binary_keys(Result0),
             Ctxt1 = update_context({result, Result1}, Ctxt0),
             Response = bondy_utils:eval_term(
                 maps:get(<<"on_result">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             {ok, Response, St2};
-        {error, Reason, _WampCtxt1} ->
-            %% @REVIEW At the moment all error maps use binary keys, if we 
-            %% move to atoms we need to turn them into binaries 
-            Error = #{
-                <<"headers">> => #{},
-                <<"details">> => Reason
-            },
-            Ctxt1 = update_context({error, Error}, Ctxt0),
+        {error, Error0, _WampCtxt1} ->
+            StatusCode = uri_to_status_code(maps:get(error_uri, Error0)),
+            Error1 = bondy_utils:to_binary_keys(Error0),
+            Error2 = maps:put(<<"status_code">>, StatusCode, Error1),
+        
+            % Error = #{
+            %     <<"headers">> => #{},
+            %     <<"details">> => Reason
+            % },
+            Ctxt1 = update_context({error, Error2}, Ctxt0),
             Response = bondy_utils:eval_term(
                 maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
@@ -614,7 +613,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
 
   
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    Body = bondy_error:error_map(Error, 401),
+    Body = maps:put(<<"status_code">>, 401, bondy_error:map(Error)),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
     Desc = maps:get(<<"description">>, Body, <<>>),
@@ -719,6 +718,7 @@ maybe_encode(Enc, Body, _) ->
 
 %% @private
 uri_to_status_code(timeout) ->                                     504;
+uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                        504;
 uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
 uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
 uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
