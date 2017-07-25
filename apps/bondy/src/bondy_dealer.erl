@@ -299,10 +299,14 @@ handle_message(#yield{} = M, Ctxt0) ->
 
 handle_message(#error{request_type = Type} = M, Ctxt0)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
-    Fun = fun(CallId, Caller, Ctxt1) ->
+    NewType = case Type of
+        ?INVOCATION -> ?CALL;
+        ?INTERRUPT -> ?CANCEL
+    end,
+    Fun = fun(ReqId, Caller, Ctxt1) ->
         R = wamp_message:error(
-            Type, 
-            CallId, 
+            NewType, 
+            ReqId, 
             M#error.details, 
             M#error.error_uri, 
             M#error.arguments, 

@@ -493,7 +493,8 @@ route_event({#cancel{} = M, Ctxt}) ->
 route_event({#yield{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#error{request_type = ?INVOCATION} = M, Ctxt}) ->
+route_event({#error{request_type = Type} = M, Ctxt})
+when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     bondy_dealer:handle_message(M, Ctxt);
 
 route_event({M, _Ctxt}) ->
