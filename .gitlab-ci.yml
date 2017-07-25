@@ -42,6 +42,7 @@ deploy1:
    - packet
  script:
    - $LS_SCRIPTS/deploy.sh
+   - curl -X POST -F "variables[USE_LATEST_BONDY]=true" -F "token=$CI_JOB_TOKEN" -F ref=develop https://gitlab.com/api/v4/projects/3513336/trigger/pipeline
 
 stages:
   - build
