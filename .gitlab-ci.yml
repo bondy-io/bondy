@@ -21,6 +21,9 @@ build1:
 
 publish1:
  stage: publish
+ only:
+   - master
+   - develop
  tags:
    - packet
  script:
@@ -28,11 +31,13 @@ publish1:
 
 test1:
  stage: test
+ only:
+   - master
+   - develop
  tags:
    - packet
  script:
    - $LS_SCRIPTS/test.sh
-   - curl -X POST -F "token=$CI_JOB_TOKEN" -F ref=develop https://gitlab.com/api/v4/projects/3513336/trigger/pipeline
 
 deploy1:
  stage: deploy
