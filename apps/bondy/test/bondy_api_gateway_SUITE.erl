@@ -107,4 +107,4 @@ simple_1_test(_) ->
             }
         }
     },
-    Expected = bondy_api_gateway_spec_parser:parse(Spec).
+    bondy_api_gateway_spec_parser:parse(Spec).
