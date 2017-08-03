@@ -27,11 +27,15 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
--type error_map() :: #{
+-type wamp_error_map() :: #{
+    error_uri => uri(),
     details => map(),
     arguments => list(),
     arguments_kw => map()
 }.
+
+-export_type([wamp_error_map/0]).
+
 
 -export([ack/2]).
 -export([call/5]).
@@ -170,7 +174,7 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     map() | undefined, 
     bondy_context:context()) -> 
     {ok, map(), bondy_context:context()} 
-    | {error, error_map(), bondy_context:context()}.
+    | {error, wamp_error_map(), bondy_context:context()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global

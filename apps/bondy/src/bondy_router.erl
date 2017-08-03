@@ -456,7 +456,7 @@ do_forward(M, Ctxt0) ->
                 #{},
                 ?WAMP_ERROR_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],
-                ErrorMap
+                #{error => ErrorMap}
             ),
             ok = bondy_stats:update(Reply, Ctxt0),
             {reply, Reply, Ctxt0};

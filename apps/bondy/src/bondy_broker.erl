@@ -162,12 +162,14 @@ handle_message(#publish{} = M, Ctxt) ->
                 ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, Reason} when Acknowledge == true ->
+            ErrorMap = bondy_error:map(?WAMP_ERROR_CANCELLED, Reason),
             Reply = wamp_message:error(
                 ?PUBLISH,
                 ReqId,
                 #{},
                 ?WAMP_ERROR_CANCELLED,
-                [bondy_error:map(?WAMP_ERROR_CANCELLED, Reason)]
+                [maps:get(<<"message">>, ErrorMap)],
+                ErrorMap
             ),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, _} ->

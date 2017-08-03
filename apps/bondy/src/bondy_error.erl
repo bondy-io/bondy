@@ -21,52 +21,30 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+
+
+%% -type error_map() :: #{
+%%     code => binary(),
+%%     message => binary(),
+%%     description => binary(),
+%%     errors => [#{
+%%         code => binary(),
+%%         message => binary(),
+%%         description => binary(),
+%%         key => any(),
+%%         value => any()
+%%     }]
+%% }.
+
 -export([map/1]).
 -export([map/2]).
 -export([code_to_uri/1]).
--export([message/4]).
--export([message/5]).
--export([message/6]).
-
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-message(
-    Type, ReqId, Details, #{code := C, message := _, description := _} = Map) ->
-        wamp_message:error(Type, ReqId, Details, code_to_uri(C), [Map]);
-
-message(Type, ReqId, Details, Uri) when is_binary(Uri) ->
-        wamp_message:error(Type, ReqId, Details, Uri);
-
-message(Type, ReqId, Details, Other) ->
-        wamp_message:error(Type, ReqId, Details, map(Other)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-message(
-    Type, ReqId, Details, Uri, Args) ->
-        wamp_message:error(Type, ReqId, Details, Uri, Args).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-message(
-    Type, ReqId, Details, Uri, Args, ArgsKw) ->
-        wamp_message:error(Type, ReqId, Details, Uri, Args, ArgsKw).
 
 
 %% -----------------------------------------------------------------------------
@@ -86,60 +64,26 @@ code_to_uri(Reason) when is_binary(Reason) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+map(#error{} = Err) ->
+    map(#{
+        error_uri => Err#error.error_uri,
+        details => Err#error.details,
+        arguments => Err#error.arguments,
+        arguments_kw => Err#error.arguments_kw
+    });
+
+map(#{error_uri := Uri} = M) ->
+    Error = get_error(M),
+    Error#{
+        <<"code">> => Uri,
+        <<"message">> => get_message(M)
+    };
+
 map(#{code := _} = M) ->
     bondy_utils:to_binary_keys(M);
 
-
-map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
-    #error{error_uri = Uri} = Err,
-    #{
-        <<"code">> => Uri,
-        <<"message">> => <<>>,
-        <<"description">> => <<>>
-    };
-
-
-
-map(#error{arguments = L, arguments_kw = undefined} = Err)
-when is_list(L) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = case L of
-        [] ->
-            [];
-        _ ->
-            hd(L)
-    end,
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Mssg
-    };
-
-map(#error{arguments = undefined, arguments_kw = M} = Err)
-when is_map(M) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = maps:get(<<"message">>, M),
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-map(#error{arguments = L, arguments_kw = M} = Err) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = case L of
-        [] ->
-            [];
-        _ ->
-            hd(L)
-    end,
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
+map(#{<<"code">> := _} = M) ->
+    M;
 
 map(oauth2_invalid_request) ->
     #{
@@ -233,10 +177,59 @@ map({Code, Mssg, Desc}) ->
 
 map(Code) ->
     #{
-        <<"code">> => Code
+        <<"code">> => Code,
+        <<"message">> => <<>>,
+        <<"description">> => <<>>
     }.
 
 
-map(Uri, Term) when is_binary(Uri) ->
-    maps:put(code, Uri, map(Term)).
+map(Code, Term) when is_binary(Code) ->
+    maps:put(code, Code, map(Term)).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+get_error(#{arguments_kw := #{<<"error">> := Map}}) ->
+    Map;
+
+get_error(_) ->
+    #{}.
+
+    
+%% @private
+get_message(#{arguments := undefined}) -> 
+    <<>>;
+
+get_message(#{arguments := []}) -> 
+    <<>>;
+
+get_message(#{arguments := L}) when is_list(L) -> 
+    hd(L);
+
+get_message(#{arguments_kw := undefined}) -> 
+    <<>>;
+
+get_message(#{arguments_kw := #{}}) -> 
+    <<>>;
+
+get_message(#{arguments_kw := #{<<"error">> := Map}}) when is_map(Map) ->
+    case maps:find(<<"message">>, Map) of
+        {ok, Val} -> Val;
+        error -> <<>>
+    end;
+
+get_message(_) ->
+    <<>>.
+
+
+
+
 

@@ -1027,7 +1027,7 @@ parse_path_elements([H|T], P0, Ctxt) ->
                     })
             end
     end,    
-    Eval = fun(V) -> bondy_utils:eval_term(V, Ctxt) end,    
+    Eval = fun(V) -> mops:eval(V, Ctxt) end,    
     P2 = maps:update_with(H, Eval, P1),
     parse_path_elements(T, P2, Ctxt);
 
@@ -1037,7 +1037,7 @@ parse_path_elements([], Path, _) ->
     
 %% @private
 parse_request_method(Spec, Ctxt) when is_binary(Spec) ->
-    parse_request_method(bondy_utils:eval_term(Spec, Ctxt), Ctxt);
+    parse_request_method(mops:eval(Spec, Ctxt), Ctxt);
     
 parse_request_method(Spec, Ctxt) ->
     #{
@@ -1047,8 +1047,8 @@ parse_request_method(Spec, Ctxt) ->
         <<"response">> := Resp
     } = Spec,
     Spec#{
-        % <<"accepts">> := bondy_utils:eval_term(Acc, Ctxt),
-        % <<"provides">> := bondy_utils:eval_term(Prov, Ctxt),
+        % <<"accepts">> := mops:eval(Acc, Ctxt),
+        % <<"provides">> := mops:eval(Prov, Ctxt),
         
         <<"action">> => parse_action(Act, Ctxt),
         %% TODO we should be doing parser_response() here!
@@ -1070,19 +1070,19 @@ parse_request_method(Spec, Ctxt) ->
 -spec parse_action(map(), map()) -> map().
 parse_action(#{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
     maps_utils:validate(
-        bondy_utils:eval_term(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt), 
         ?WAMP_ACTION_SPEC
     );
 
 parse_action(#{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        bondy_utils:eval_term(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt), 
         ?FWD_ACTION_SPEC
     );
 
 parse_action(#{<<"type">> := <<"static">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        bondy_utils:eval_term(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt), 
         ?STATIC_ACTION_SPEC
     );
 
@@ -1100,7 +1100,7 @@ parse_response(Spec0, Ctxt) ->
 
     [OR1, OE1] = [
         maps_utils:validate(
-            bondy_utils:eval_term(maps:merge(?DEFAULT_RESPONSE, X), Ctxt), 
+            mops:eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt), 
             ?RESPONSE_SPEC
         ) || X <- [OR0, OE0]
     ],
@@ -1136,7 +1136,7 @@ eval(S0, Ctxt0) ->
     %% amongst them
     VFun = fun(Var, Val, ICtxt) ->
         IVars1 = maps:update(
-            Var, bondy_utils:eval_term(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
+            Var, mops:eval(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
         maps:update(?VARS_KEY, IVars1, ICtxt)
     end,
     Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
@@ -1144,7 +1144,7 @@ eval(S0, Ctxt0) ->
     %% We evaluate defaults
     DFun = fun(Var, Val, ICtxt) ->
         IDefs1 = maps:update(
-            Var, bondy_utils:eval_term(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
+            Var, mops:eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
         maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
     end,
     maps:fold(DFun, Ctxt1, Defs).

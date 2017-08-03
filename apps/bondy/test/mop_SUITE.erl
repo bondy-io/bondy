@@ -221,3 +221,34 @@ merge_right_test(_) ->
         <<"bar">> => #{<<"a">> => 10}
     },
     #{<<"a">> => 1} =:= mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).
+
+merge_right_2_test(_) ->
+    Ctxt0 = #{
+        <<"map1">> => #{
+            <<"a">> => <<"{{map2.c}}">>,
+            <<"b">> => 2
+        },
+        <<"map2">> => '$mop_proxy',
+        <<"map3">> => #{}
+    },
+    Ctxt1 = #{
+        <<"map2">> => #{<<"c">> => 1}
+    },
+    Map = mops:eval(<<"{{map3 |> merge({{map1}})}}">>, Ctxt0),
+    #{<<"a">> := 1, <<"b">> := 2} = mops:eval(Map, Ctxt1).
+
+
+merge_right_3_test(_) ->
+    Ctxt0 = #{
+        <<"wamp_error_override">> => #{
+            <<"code">> => <<"{{action.error.error_uri}}">>,
+            <<"message">> => <<"{{action.error.arguments |> head}}">>
+        },
+        <<"action">> => '$mop_proxy',
+        <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
+    },
+    Ctxt1 = #{
+        <<"action">> => #{<<"error">> => #{<<"error_uri">> => <<"com.foo">>, <<"arguments">> => [<<"foobar">>], <<"arguments_kw">> =>#{}}}
+    },
+    Map = mops:eval(<<"{{wamp_error_body}}">>, Ctxt0),
+    #{<<"code">> := <<"com.foo">>, <<"message">> := <<"foobar">>} = mops:eval(Map, Ctxt1).

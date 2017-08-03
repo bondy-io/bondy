@@ -370,7 +370,9 @@ update_context({error, Map}, #{<<"request">> := _} = Ctxt) when is_map(Map) ->
 update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
     maps_utils:put_path([<<"action">>, <<"result">>], Result, Ctxt);
 
-update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
+update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
+    Lang = maps_utils:get_path(
+        [<<"headers">>, <<"accept-language">>], Req, <<"en">>),
     Map = #{
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
@@ -378,6 +380,7 @@ update_context({security, Claims}, #{<<"request">> := _} = Ctxt) ->
         <<"username">> => maps:get(<<"sub">>, Claims),
         <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
         <<"groups">> => maps:get(<<"groups">>, Claims),
+        <<"locale">> => Lang,
         <<"meta">> => maps:get(<<"meta">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
@@ -443,7 +446,7 @@ perform_action(
     Ctxt0 = maps:get(api_context, St1),
     %% We get the response directly as it should be statically defined
     Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
-    Response = bondy_utils:eval_term(Result, Ctxt0),
+    Response = mops:eval(Result, Ctxt0),
     St2 = maps:update(api_context, Ctxt0, St1),
     {ok, Response, St2};
 
@@ -469,7 +472,7 @@ perform_action(
         % <<"retries">> := R,
         % <<"retry_timeout">> := RT,
         <<"body">> := Body
-    } = bondy_utils:eval_term(Act, Ctxt0),
+    } = mops:eval(Act, Ctxt0),
 
     Opts = [
         {connect_timeout, CT},
@@ -494,15 +497,12 @@ perform_action(
         
         {error, Reason} ->
             Error = #{
+                <<"code">> => <<"com.leapsight.bondy.bad_gateway">>,
                 <<"status_code">> => 502,
-                <<"headers">> => #{},
-                <<"details">> => maps:put(
-                    <<"status_code">>, 502, bondy_error:map(Reason))
+                <<"message">> => <<"Error while connecting with upstream URL">>,
+                <<"description">> => Reason %% TODO convert to string
             },
-            Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response = bondy_utils:eval_term(maps:get(<<"on_error">>, RSpec), Ctxt1),
-            St1 = maps:update(api_context, Ctxt1, St0),
-            {error, 502, Response, St1}
+            throw(Error)
     end;
 
 perform_action(
@@ -512,16 +512,15 @@ perform_action(
     Ctxt0 = maps:get(api_context, St1),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
-    %% so we need to evaluate them passing the
-    %% context
+    %% so we need to evaluate them passing the context
     #{
         <<"procedure">> := P,
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
         <<"options">> := Opts,
         <<"retries">> := _R,
-        <<"timeout">> := _T
-    } = bondy_utils:eval_term(Act, Ctxt0),
+        <<"timeout">> := T
+    } = mops:eval(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
@@ -531,7 +530,7 @@ perform_action(
         peer => Peer, 
         realm_uri => RealmUri,
         awaiting_calls => sets:new(),
-        timeout => 20000,
+        timeout => T,
         session => bondy_session:new(Peer, RealmUri, #{
             roles => #{
                 caller => #{
@@ -552,22 +551,17 @@ perform_action(
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             Ctxt1 = update_context({result, Result1}, Ctxt0),
-            Response = bondy_utils:eval_term(
+            Response = mops:eval(
                 maps:get(<<"on_result">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             {ok, Response, St2};
-        {error, Error0, _WampCtxt1} ->
-            StatusCode = uri_to_status_code(maps:get(error_uri, Error0)),
-            Error1 = bondy_utils:to_binary_keys(Error0),
-            Error2 = maps:put(<<"status_code">>, StatusCode, Error1),
-        
-            % Error = #{
-            %     <<"headers">> => #{},
-            %     <<"details">> => Reason
-            % },
-            Ctxt1 = update_context({error, Error2}, Ctxt0),
-            Response = bondy_utils:eval_term(
-                maps:get(<<"on_error">>, RSpec), Ctxt1),
+        {error, WampError0, _WampCtxt1} ->
+            StatusCode = uri_to_status_code(maps:get(error_uri, WampError0)),
+            WampError1 = bondy_utils:to_binary_keys(WampError0),
+            %% Error0 = bondy_error:map(WampError0),
+            Error = maps:put(<<"status_code">>, StatusCode, WampError1),
+            Ctxt1 = update_context({error, Error}, Ctxt0),
+            Response = mops:eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             Code = maps:get(<<"status_code">>, Response, 500),
             {error, Code, Response, St2}
@@ -576,18 +570,16 @@ perform_action(
 
 
 %% @private
-from_http_response(StatusCode, _RespHeaders, RespBody, Spec, St0) 
+from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) 
 when StatusCode >= 400 andalso StatusCode < 600->
     Ctxt0 = maps:get(api_context, St0),
-    % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Error = #{ 
         <<"status_code">> => StatusCode,
-        <<"details">> => RespBody,
-        % <<"headers">> => HeadersMap
-        <<"headers">> => #{}
+        <<"body">> => RespBody,
+        <<"headers">> => RespHeaders
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
-    Response = bondy_utils:eval_term(maps:get(<<"on_error">>, Spec), Ctxt1),
+    Response = mops:eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {error, StatusCode, Response, St1};
 
@@ -597,8 +589,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
     Result0 = #{ 
         <<"status_code">> => StatusCode,
         <<"body">> => RespBody,
-        % <<"headers">> => HeadersMap
-        <<"headers">> => #{}
+        <<"headers">> => RespHeaders
     },
     Result1 = case lists:keyfind(<<"Location">>, 1, RespHeaders) of
         {_, Uri} ->
@@ -607,7 +598,7 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
             maps:put(<<"uri">>, <<>>, Result0)
     end,
     Ctxt1 = update_context({result, Result1}, Ctxt0),
-    Response = bondy_utils:eval_term(maps:get(<<"on_result">>, Spec), Ctxt1),
+    Response = mops:eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {ok, StatusCode, Response, St1}.
 

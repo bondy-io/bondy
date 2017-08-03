@@ -567,7 +567,13 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     case match_registrations(ProcUri, Ctxt0, #{exclude => [CallerSId]}) of
         {[], ?EOT} ->
             Error = wamp_message:error(
-                ?CALL, CallId, #{}, ?WAMP_ERROR_NO_SUCH_PROCEDURE),
+                ?CALL, 
+                CallId, 
+                #{}, 
+                ?WAMP_ERROR_NO_SUCH_PROCEDURE,
+                [iolist_to_binary(<<"There are no registered procedures matching the uri ", $', ProcUri/binary, $'>>)],
+                #{}
+            ),
             bondy:send(bondy_context:peer_id(Ctxt0), Error);
         Regs ->
             %%  A promise is used to implement a capability and a feature:

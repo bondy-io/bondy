@@ -88,21 +88,6 @@
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Calls eval/3.
-%% @end
-%% -----------------------------------------------------------------------------
--spec eval(any(), context()) -> any().
-
-eval(<<>>, Ctxt) when is_map(Ctxt) ->
-    <<>>;
-
-eval(Val, Ctxt) when is_binary(Val), is_map(Ctxt) ->
-    eval(Val, Ctxt, #{});
-
-eval(Val, Ctxt) when is_map(Ctxt) ->
-    Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -139,22 +124,46 @@ eval(Val, Ctxt) when is_map(Ctxt) ->
 %% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval
-    (Term :: any(), Ctxt :: context(), Opts :: map()) -> any(); 
-    (Term :: any(), any(), any()) -> any().
+-spec eval(any(), context()) -> any().
+
+eval(T, Ctxt) ->
+    eval(T, Ctxt, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec eval(any(), context(), map()) -> any().
+
+eval(T, Ctxt, _) when is_function(T, 1), is_map(Ctxt) ->
+    T(Ctxt);
+
+eval(T, Ctxt, Opts) when is_map(T), is_map(Ctxt), is_map(Opts) ->
+    F = fun
+        (_, V) ->
+            eval(V, Ctxt, Opts)
+    end,
+    maps:map(F, T);
+
+eval(T, Ctxt, Opts) when is_list(T), is_map(Ctxt), is_map(Opts) ->
+    [eval(X, Ctxt) || X <- T];
+
+eval(T, Ctxt, Opts) when is_tuple(T), is_map(Ctxt), is_map(Opts) ->
+    list_to_tuple([eval(X, Ctxt, Opts) || X <- tuple_to_list(T)]);
 
 eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
     <<>>;
 
-eval(Val, Ctxt, Opts) when is_binary(Val), is_map(Ctxt), is_map(Opts) ->
-    do_eval(Val, #state{
+eval(T, Ctxt, Opts) when is_binary(T), is_map(Ctxt), is_map(Opts) ->
+    %% eval(T, Ctxt);
+    do_eval(T, #state{
         context = Ctxt, 
-        %% TODO Opts not being used 
         opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
     });
 
-eval(Val, _Ctxt, _Opts) ->
-    Val.
+eval(T, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
+    T.
 
 
 
@@ -193,14 +202,15 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
             lists:foldl(Eval, [], [?DOUBLE_QUOTES | St#state.acc]))
     end;
 
-do_eval(Bin0, #state{acc = []} = St0) ->
+do_eval(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
     %% We start processing a binary
-    Bin1 = trim(Bin0),
-    case binary:match(Bin1, St0#state.sp) of
+    
+    case binary:match(Bin0, St0#state.sp) of
         nomatch ->
             %% Not a mop expression, so we return and finish
-            Bin1;         
+            Bin0;         
         {Pos, 2}  ->
+            Bin1 = trim(Bin0),
             %% Maybe a mop expression as we found the left moustache
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
@@ -226,7 +236,7 @@ do_eval(Bin0, #state{acc = []} = St0) ->
             end
     end;
 
-do_eval(Bin, #state{is_open = true} = St0) ->
+do_eval(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
@@ -240,7 +250,7 @@ do_eval(Bin, #state{is_open = true} = St0) ->
             error(badarg)
     end;
 
-do_eval(Bin, #state{is_open = false} = St) ->
+do_eval(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
@@ -312,6 +322,8 @@ get_value(Key, Ctxt) ->
     end.
 
 
+
+
 %% @private
 get(Rem, '$mop_proxy') ->
     {ok, '$mop_proxy', Rem};
@@ -335,11 +347,11 @@ get([H|T], Ctxt) when is_map(Ctxt) ->
 
 
 %% @private
-apply_ops([H|T], Acc, Ctxt) ->
-    apply_ops(T, apply_op(H, Acc, Ctxt), Ctxt);
+apply_ops([H|T], Val, Ctxt) ->
+    apply_ops(T, apply_op(H, Val, Ctxt), Ctxt);
 
-apply_ops([], Acc, _) ->
-    Acc.
+apply_ops([], Val, _) ->
+    Val.
 
 
 %% @private
@@ -436,24 +448,64 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
             error({invalid_expression, Op})
     end;
 
-apply_custom_op(<<"merge(", _/binary>> = Op, Val, _)
-when is_function(Val, 1) ->
-    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+%% apply_custom_op(<<"merge(", _/binary>> = Op, Val, _) when is_function(Val, 1) ->
+%%     fun(X) -> apply_custom_op(Op, Val(X), X) end;
 
-apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+%% apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+%%     case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
+%%         [R] when is_function(R, 1) ->
+%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
+%%             fun(X) -> maps:merge(R(X), Val) end;
+%%         [R] when is_map(R) ->
+%%             maps:merge(Val, R);
+%%         [<<"_">>, R] when is_function(R, 1) ->
+%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
+%%             fun(X) -> maps:merge(R(X), Val) end;
+%%         [<<"_">>, R] when is_map(R) ->
+%%             maps:merge(Val, R);
+%%         [L, <<"_">>] when is_function(L, 1) ->
+%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
+%%             fun(X) -> maps:merge(Val, L(X)) end;
+%%         [L, <<"_">>] ->
+%%             maps:merge(L, Val);
+%%         _ -> 
+%%             error({invalid_expression, Op})
+%%     end;
+
+
+apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) ->
+    
     case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
-        [Arg] when is_function(Arg, 1) ->
-            fun(X) -> apply_custom_op(Op, Val, X) end;
-        [Arg] when is_map(Arg) ->
-            maps:merge(Val, Arg);
+        [R] when is_function(R, 1), is_function(Val, 1) ->
+            fun(X) -> maybe_merge(R(X), Val(X)) end;
+        [R] when is_function(R, 1) ->
+            fun(X) -> maybe_merge(R(X), maybe_eval(Val, X)) end;
+        
+        [R] when is_map(R), is_function(Val) ->
+            fun(X) -> maybe_merge(Val(X), maybe_eval(R, X)) end;
+        [R] when is_map(R) ->
+            maps:merge(Val, R);
+
+        [<<"_">>, R] when is_function(R, 1), is_function(Val) ->
+            fun(X) -> maybe_merge(R(X), Val(X)) end;
         [<<"_">>, R] when is_function(R, 1) ->
-            fun(X) -> apply_custom_op(Op, Val, X) end;
+            fun(X) -> maybe_merge(R(X), maybe_eval(Val, X)) end;
+
+        [<<"_">>, R] when is_map(R), is_function(Val) ->
+            fun(X) -> maybe_merge(Val(X), maybe_eval(R, X)) end;
         [<<"_">>, R] when is_map(R) ->
             maps:merge(Val, R);
+
+        [L, <<"_">>] when is_function(L, 1), is_function(Val) ->
+            fun(X) -> maybe_merge(Val(X), L(X)) end;
         [L, <<"_">>] when is_function(L, 1) ->
-            fun(X) -> apply_custom_op(Op, Val, X) end;
+            fun(X) -> maybe_merge(maybe_eval(Val, X), L(X)) end;
+
+        [L, <<"_">>] when is_function(Val)->
+            fun(X) -> maybe_merge(maybe_eval(L, X), Val(X)) end;
         [L, <<"_">>] ->
             maps:merge(L, Val);
+
         _ -> 
             error({invalid_expression, Op})
     end;
@@ -507,21 +559,38 @@ apply_custom_op(Op, Val, _) ->
 
 
 %% @private
-maybe_eval(Term, Ctxt) ->
+maybe_merge(L, R) when is_function(L, 1), is_function(R, 1) ->
+    fun(X) -> maybe_merge(L(X), R(X)) end;
+
+maybe_merge(L, R) when is_function(L, 1) ->
+    fun(X) -> maybe_merge(L(X), maybe_eval(R, X)) end;
+
+maybe_merge(L, R) when is_function(R, 1) ->
+    fun(X) -> maybe_merge(maybe_eval(L, X), R(X)) end;
+
+maybe_merge(L, R) ->
+    maps:merge(L, R).
+
+
+%% @private
+maybe_eval(Term, Ctxt) when is_binary(Term) ->
     case unquote(Term) of
         {true, Key} ->
             Key;
         {false, Expr} ->
             eval(Expr, Ctxt)
-    end.
+    end;
+
+maybe_eval(Term, Ctxt) ->
+    eval(Term, Ctxt).
 
 
 %% @private
 unquote(<<$', Rest/binary>>) ->
     {true, binary:part(Rest, {0, byte_size(Rest) - 1})};
     
-unquote(Bin) ->
-    {false, Bin}.    
+unquote(Other) ->
+    {false, Other}.    
 
 
 %% @private
