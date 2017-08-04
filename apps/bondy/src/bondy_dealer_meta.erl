@@ -369,7 +369,7 @@ maybe_error({ok, Val}, M) ->
 
 maybe_error({error, Reason}, M) ->
     #{<<"code">> := Code} = Map = bondy_error:map(Reason),
-    Mssg = maps:find(<<"message">>, Map, <<>>),
+    Mssg = maps:get(<<"message">>, Map, <<>>),
     wamp_message:error(
         ?CALL,
         M#call.request_id,
