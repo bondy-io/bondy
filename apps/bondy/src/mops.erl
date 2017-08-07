@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  mops.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,13 +19,13 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% This module implements Mops, a very simple mustache-inspired expression 
+%% This module implements Mops, a very simple mustache-inspired expression
 %% language.
-%% All expressions in Mops are evaluated against a Context, an erlang `map()` 
+%% All expressions in Mops are evaluated against a Context, an erlang `map()`
 %% where all keys are of type `binary()`.
 %%
 %% The following are the key characteristics and features:
-%% * 
+%% *
 %% @end
 %% -----------------------------------------------------------------------------
 -module(mops).
@@ -50,8 +50,8 @@
         required => false,
         allow_null => false,
         validator => fun
-            ({Name, Fun} = Op) when (is_atom(Name) 
-            orelse is_binary(Name)) 
+            ({Name, Fun} = Op) when (is_atom(Name)
+            orelse is_binary(Name))
             andalso is_function(Fun, 1) ->
                 {ok, Op};
             (_) ->
@@ -95,21 +95,21 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Evaluates **Term** using the context **Ctxt**
-%% Returns **Term** in case the term is not a binary and does not contain a 
+%% Returns **Term** in case the term is not a binary and does not contain a
 %% mops expression. Otherwise, it tries to evaluate the expression using the
 %% **Ctxt**.
 %%
 %% The following are example mops expressions and their meanings:
-%% - `<<"{{foo}}">>' - resolve the value for key `<<"foo">>` in the context. 
+%% - `<<"{{foo}}">>' - resolve the value for key `<<"foo">>` in the context.
 %% It fails if the context does not have a key named `<<"foo">>'.
-%% - `<<"\"{{foo}}\">>' - return a string by resolving the value for key 
-%% `<<"foo">>' in the context. It fails if the context does not have a key 
+%% - `<<"\"{{foo}}\">>' - return a string by resolving the value for key
+%% `<<"foo">>' in the context. It fails if the context does not have a key
 %% named `<<"foo">>'.
 %% - `<<"{{foo.bar}}">>' - resolve the value for key path in the context.
 %% It fails if the context does not have a key named `<<"foo">>' which has a value that is either a `function()` or a `map()` with a key named `<<"bar">>'.
-%% - `<<"{{foo |> integer}}">>' - resolves the value for key `<<"foo">>' in the 
-%% context and converts the result to an integer. If the result was a 
-%% `function()', it returns a function composition. 
+%% - `<<"{{foo |> integer}}">>' - resolves the value for key `<<"foo">>' in the
+%% context and converts the result to an integer. If the result was a
+%% `function()', it returns a function composition.
 %% It fails if the context does not have a key named `<<"foo">>'
 %%
 %% Examples:
@@ -180,8 +180,8 @@ do_eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
 do_eval(T, Ctxt, Opts) when is_binary(T), is_map(Ctxt), is_map(Opts) ->
     maybe_unwrap(
         eval_expr(T, #state{
-            context = Ctxt, 
-            opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
+            context = Ctxt,
+            opts = maps_utils:validate(Opts, ?OPTS_SPEC)
         }),
         Opts
     );
@@ -227,11 +227,11 @@ eval_list(List, Ctxt, Opts) ->
 
 
 %% @private
-maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts) 
+maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts)
 when is_map(Val) ->
     maps:map(fun(_K, V) -> maybe_unwrap(V, Opts) end, Val);
 
-maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts) 
+maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts)
 when is_list(Val) ->
     [maybe_unwrap(X, Opts) || X <- Val];
 
@@ -245,20 +245,20 @@ maybe_unwrap(Val, _) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Parses the provided binary to determine if it represents a mops expression, 
-%% and if it does, evaluates it against the context, otherwise returns it 
+%% Parses the provided binary to determine if it represents a mops expression,
+%% and if it does, evaluates it against the context, otherwise returns it
 %% untouched.
 %% @end
 %% -----------------------------------------------------------------------------
--spec eval_expr(binary(), state()) -> 
+-spec eval_expr(binary(), state()) ->
     {'$mops_proxy', any()} | any() | no_return().
 
 eval_expr(<<>>, #state{is_ground = true} = St) ->
     %% The end of a string (quoted) expression
     %% We reverse the list of terms and turn them into iolist()
     Fun = fun
-        (X, Acc) -> 
-            [term_to_iolist(X)|Acc] 
+        (X, Acc) ->
+            [term_to_iolist(X)|Acc]
     end,
     iolist_to_binary(
         lists:foldl(Fun, [], [?DOUBLE_QUOTES | St#state.acc]));
@@ -283,9 +283,9 @@ eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
     %% We start parsing a binary
     case binary:match(Bin0, St0#state.sp) of
         nomatch ->
-            %% No mustaches found so this is not a mop expression, 
+            %% No mustaches found so this is not a mop expression,
             %% we return and finish
-            Bin0;         
+            Bin0;
         {Pos, 2}  ->
             %% Maybe a mop expression as we found the left moustache
             Bin1 = trim(Bin0),
@@ -293,7 +293,7 @@ eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
             Len = byte_size(Bin1),
             case binary:matches(Bin1, St0#state.dqp) of
                 [] when Pos =:= 0 ->
-                    %% Not a string so we should have a single 
+                    %% Not a string so we should have a single
                     %% mustache expression
                     parse_expr(binary:part(Bin1, 2, Len - 4), St1);
                 [{0, 1}, {QPos, 1}] when QPos =:= Len - 1 ->
@@ -306,7 +306,7 @@ eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
                     %% An invalid expression as:
                     %% - we found quotes that are in the middle of the string
                     %% - or we have no closing quote
-                    %% - or this is not a string and we have no quotes but 
+                    %% - or this is not a string and we have no quotes but
                     %% chars before opening mustache
                     error(badarg)
             end
@@ -314,9 +314,9 @@ eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
 
 eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
     %% We continue evaluating a string (quoted) expression
-    %% Split produces a list of binaries that are all referencing Bin. 
-    %% This means that the data in Bin is not copied to new binaries, 
-    %% and that Bin cannot be garbage collected until the results of the split 
+    %% Split produces a list of binaries that are all referencing Bin.
+    %% This means that the data in Bin is not copied to new binaries,
+    %% and that Bin cannot be garbage collected until the results of the split
     %% are no longer referenced.
     case binary:split(Bin, St0#state.ep) of
         [Expr, Rest] ->
@@ -329,9 +329,9 @@ eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
 
 eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
     %% We continue evaluating a string (quoted) expression
-    %% Split produces a list of binaries that are all referencing Bin. 
-    %% This means that the data in Bin is not copied to new binaries, 
-    %% and that Bin cannot be garbage collected until the results of the split 
+    %% Split produces a list of binaries that are all referencing Bin.
+    %% This means that the data in Bin is not copied to new binaries,
+    %% and that Bin cannot be garbage collected until the results of the split
     %% are no longer referenced.
     case binary:split(Bin, St#state.sp) of
         [Pre, Rest]->
@@ -340,7 +340,7 @@ eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
             %% No more mustaches so we finish
             eval_expr(<<>>, acc(St, Bin))
     end.
-    
+
 
 
 %% -----------------------------------------------------------------------------
@@ -388,7 +388,7 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
 
 %% @private
 get_value(Key, Ctxt) ->
-    try  
+    try
         PathElems = binary:split(Key, <<$.>>, [global]),
         case get(PathElems, Ctxt) of
             {ok, '$mops_proxy', _Rem} ->
@@ -414,7 +414,7 @@ get([], Term) ->
 
 get(Key, {'$mops_proxy', F}) when is_function(F, 1) ->
     Fun = fun(X) ->
-        try 
+        try
             get_value(Key, F(X))
         catch
             error:{badkey, _} ->
@@ -436,9 +436,9 @@ apply_ops([], Val, _) ->
 
 
 %% @private
-apply_op(Op, {'$mops_proxy', Val}, _) 
-when is_function(Val, 1) andalso (
-    Op == <<"integer">> orelse 
+apply_op(Op, {'$mops_proxy', Val}, _)
+when (
+    Op == <<"integer">> orelse
     Op == <<"float">> orelse
     Op == <<"abs">> orelse
     Op == <<"head">> orelse
@@ -514,26 +514,41 @@ apply_custom_op(<<"get", _/binary>> = Op, {'$mops_proxy', _} = Val, _) ->
 
 apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
-        [Key] when is_function(Key, 1) ->
-            fun(X) -> maps:get(Key(X), Val) end;
+
+        [{'$mops_proxy', _} = Key] ->
+            {'$mops_proxy', fun(X) -> maps:get(maybe_eval(Key, X), Val) end};
+
         [Key] ->
             maps:get(Key, Val);
-        [Key, Default] when is_function(Key, 1), is_function(Default, 1) ->
-            fun(X) -> maps:get(Key(X), Val, Default(X)) end;
-        [Key, Default] when is_function(Default, 1) ->
-            fun(X) -> maps:get(Key, Val, Default(X)) end;
-        [Key, Default] when is_function(Key, 1) ->
-            fun(X) -> maps:get(Key(X), Val, Default) end;
+
+        [{'$mops_proxy', _} = Key, {'$mops_proxy', _} = Default]  ->
+            {'$mops_proxy',
+                fun(X) ->
+                    maps:get(maybe_eval(Key, X), Val, maybe_eval(Default, X))
+                end
+            };
+
+        [{'$mops_proxy', _} = Key, Default] ->
+            {'$mops_proxy',
+                fun(X) -> maps:get(maybe_eval(Key, X), Val, Default) end
+            };
+
+        [Key, {'$mops_proxy', _} = Default] ->
+            {'$mops_proxy',
+                fun(X) -> maps:get(Key, Val, maybe_eval(Default, X)) end
+            };
+
         [Key, Default] ->
             maps:get(Key, Val, Default);
-        _ -> 
+
+        _ ->
             error({invalid_expression, Op})
     end;
 
 apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
 
-    Args = case 
-        [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] 
+    Args = case
+        [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)]
     of
         [Expr2] ->
             {Expr1, Expr2};
@@ -545,7 +560,7 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
             error({invalid_expression, Op})
     end,
     case Args of
-        {{'$mops_proxy', LT}, {'$mops_proxy', RT}} 
+        {{'$mops_proxy', LT}, {'$mops_proxy', RT}}
         when is_map(LT) andalso is_map(RT) ->
             {'$mops_proxy', maps:merge(LT, RT)};
 
@@ -564,11 +579,11 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
             {'$mops_proxy',
                 fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
             };
-        
+
         {L, R} when is_map(L), is_map(R) ->
             maps:merge(L, R);
 
-        _ -> 
+        _ ->
             error({invalid_expression, Op})
     end;
 
@@ -597,9 +612,9 @@ apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
             maps:with(Ls, Val);
         {Ls, Rs} ->
             {'$mops_proxy',
-                fun(X) -> 
+                fun(X) ->
                     Keys = lists:append(Ls, [maybe_eval(R, X) || R <- Rs]),
-                    maps:with(Keys, Val) 
+                    maps:with(Keys, Val)
                 end
             }
     end;
@@ -619,9 +634,9 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
             maps:without(Ls, Val);
         {Ls, Rs} ->
             {'$mops_proxy',
-                fun(X) -> 
+                fun(X) ->
                     Keys = lists:append(Ls, [maybe_eval(R, X) || R <- Rs]),
-                    maps:with(Keys, Val) 
+                    maps:with(Keys, Val)
                 end
             }
     end;
@@ -631,17 +646,17 @@ apply_custom_op(Op, Val, _) ->
 
 
 %% @private
-maybe_merge({'$mops_proxy', L}, {'$mops_proxy', R}) 
+maybe_merge({'$mops_proxy', L}, {'$mops_proxy', R})
 when is_map(L) andalso is_map(R) ->
     {'$mops_proxy', maps:merge(L, R)};
 
 maybe_merge({'$mops_proxy', _} = L, R) ->
-    {'$mops_proxy', 
+    {'$mops_proxy',
         fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
     };
 
 maybe_merge(L, {'$mops_proxy', _} = R) ->
-    {'$mops_proxy', 
+    {'$mops_proxy',
         fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
     };
 
@@ -652,7 +667,7 @@ maybe_merge(L, R) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Evaluates only binary terms and any other term wrapped in a 
+%% Evaluates only binary terms and any other term wrapped in a
 %% '$mops_proxy' tuple. For all other terms, returns the term untouched.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -674,9 +689,9 @@ maybe_eval(Term, _Ctxt) ->
 %% @private
 unquote(<<$', Rest/binary>>) ->
     {true, binary:part(Rest, {0, byte_size(Rest) - 1})};
-    
+
 unquote(Other) ->
-    {false, Other}.    
+    {false, Other}.
 
 
 %% @private
@@ -698,7 +713,7 @@ term_to_iolist(Term) when is_binary(Term) ->
 
 term_to_iolist(Term) when is_list(Term) ->
     Term;
-    
+
 term_to_iolist(Term) ->
     io_lib:format("~p", [Term]).
 
@@ -722,12 +737,12 @@ trimb(<<C, Rest/binary>>, Acc) when C =:= $\s; C =:= $\t ->
     trimb(Rest, Acc);
 
 trimb(Bin, Acc) ->
-    case binary:match(Bin, [<<$\s>>, <<$\t>>], []) of 
+    case binary:match(Bin, [<<$\s>>, <<$\t>>], []) of
         nomatch ->
             <<Acc/binary, Bin/binary>>;
         {Pos, 1} ->
             Part = binary:part(Bin, 0, Pos),
             trimb(
-                binary:part(Bin, Pos, byte_size(Bin) - Pos), 
+                binary:part(Bin, Pos, byte_size(Bin) - Pos),
                 <<Acc/binary, Part/binary>>)
     end.
