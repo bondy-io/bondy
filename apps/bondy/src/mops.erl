@@ -19,9 +19,10 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% This module enables the evaluation of a very simple mustache-inspired 
-%% Expression lnguage against a Context, where the latter is represented by a 
-%% map where all keys are binaries.
+%% This module implements Mops, a very simple mustache-inspired expression 
+%% language.
+%% All expressions in Mops are evaluated against a Context, an erlang `map()` 
+%% where all keys are of type `binary()`.
 %%
 %% The following are the key characteristics and features:
 %% * 
@@ -35,6 +36,7 @@
 
 -define(OPTS_SPEC, #{
     %% Defines the format of the keys in the map
+    %% not in use at the moment
     labels => #{
         required => true,
         default => binary,
@@ -43,6 +45,7 @@
         datatype => {in, [binary, atom]}
     },
     %% Allows to register custom pipe operators (aka filters)
+    %% not in use at the moment
     operators => #{
         required => false,
         allow_null => false,
@@ -239,11 +242,19 @@ maybe_unwrap(Val, _) ->
     Val.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
--spec eval_expr(binary(), state()) -> any() | no_return().
+%% @doc
+%% Parses the provided binary to determine if it represents a mops expression, 
+%% and if it does, evaluates it against the context, otherwise returns it 
+%% untouched.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec eval_expr(binary(), state()) -> 
+    {'$mops_proxy', any()} | any() | no_return().
 
 eval_expr(<<>>, #state{is_ground = true} = St) ->
-    %% The end of a string (quoted expression)
+    %% The end of a string (quoted) expression
     %% We reverse the list of terms and turn them into iolist()
     Fun = fun
         (X, Acc) -> 
@@ -253,7 +264,7 @@ eval_expr(<<>>, #state{is_ground = true} = St) ->
         lists:foldl(Fun, [], [?DOUBLE_QUOTES | St#state.acc]));
 
 eval_expr(<<>>, #state{is_ground = false} = St) ->
-    %% The end of a string (quoted expression)
+    %% The end of a string (quoted) expression
     %% We have functions so we wrap the iolist in a function receiving
     %% a future context as an argument
     Fun = fun(Ctxt) ->
@@ -269,40 +280,40 @@ eval_expr(<<>>, #state{is_ground = false} = St) ->
     {'$mops_proxy', Fun};
 
 eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
-    %% We start processing a binary
-    
+    %% We start parsing a binary
     case binary:match(Bin0, St0#state.sp) of
         nomatch ->
-            %% Not a mop expression, so we return and finish
+            %% No mustaches found so this is not a mop expression, 
+            %% we return and finish
             Bin0;         
         {Pos, 2}  ->
-            Bin1 = trim(Bin0),
             %% Maybe a mop expression as we found the left moustache
+            Bin1 = trim(Bin0),
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
             case binary:matches(Bin1, St0#state.dqp) of
                 [] when Pos =:= 0 ->
                     %% Not a string so we should have a single 
                     %% mustache expression
-                    parse_expr(
-                        binary:part(Bin1, 2, Len - 4), St1);
+                    parse_expr(binary:part(Bin1, 2, Len - 4), St1);
                 [{0, 1}, {QPos, 1}] when QPos =:= Len - 1 ->
-                    %% A string so we might have multiple 
-                    %% mustache expressions
+                    %% A string so we might have multiple mustache expressions
                     %% e.g. "Hello {{foo}}. Today is {{date}}."
                     Unquoted = binary:part(Bin1, 1, Len - 2),
                     [Pre, Rest] = binary:split(Unquoted, St0#state.sp),
                     eval_expr(Rest, acc(St1, Pre));
                 _ ->
-                    %% We found quotes that are in the middle of the string
-                    %% or we have no closing quote
-                    %% or this is not a string and we have no quotes but chars 
-                    %% before opening mustache
+                    %% An invalid expression as:
+                    %% - we found quotes that are in the middle of the string
+                    %% - or we have no closing quote
+                    %% - or this is not a string and we have no quotes but 
+                    %% chars before opening mustache
                     error(badarg)
             end
     end;
 
 eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
+    %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
@@ -317,6 +328,7 @@ eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
     end;
 
 eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
+    %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
@@ -330,10 +342,11 @@ eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
     end.
     
 
-%% @private
+
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
-%% Accumulates the evaluation in the case of strings.
+%% Accumulates the evaluation in the case of strings (quoted) expressions.
 %% @end
 %% -----------------------------------------------------------------------------
 acc(#state{acc = []} = St, Val) ->
@@ -357,6 +370,7 @@ acc(#state{acc = Acc} = St, Val) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
+%% Parses a single mustache expression
 %% @end
 %% -----------------------------------------------------------------------------
 parse_expr(Bin, #state{context = Ctxt} = St) ->
@@ -364,6 +378,7 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
         [Val] ->
             get_value(trim(Val), Ctxt);
         [Val | Ops] ->
+            %% A pipe expression
             %% We evaluate the value and apply the ops in the pipe
             apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
@@ -514,31 +529,6 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
         _ -> 
             error({invalid_expression, Op})
     end;
-
-%% apply_custom_op(<<"merge(", _/binary>> = Op, Val, _) when is_function(Val, 1) ->
-%%     fun(X) -> apply_custom_op(Op, Val(X), X) end;
-
-%% apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-%%     case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
-%%         [R] when is_function(R, 1) ->
-%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
-%%             fun(X) -> maps:merge(R(X), Val) end;
-%%         [R] when is_map(R) ->
-%%             maps:merge(Val, R);
-%%         [<<"_">>, R] when is_function(R, 1) ->
-%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
-%%             fun(X) -> maps:merge(R(X), Val) end;
-%%         [<<"_">>, R] when is_map(R) ->
-%%             maps:merge(Val, R);
-%%         [L, <<"_">>] when is_function(L, 1) ->
-%%             %% fun(X) -> apply_custom_op(Op, Val, X) end;
-%%             fun(X) -> maps:merge(Val, L(X)) end;
-%%         [L, <<"_">>] ->
-%%             maps:merge(L, Val);
-%%         _ -> 
-%%             error({invalid_expression, Op})
-%%     end;
-
 
 apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
 
