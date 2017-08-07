@@ -136,35 +136,8 @@ eval(T, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec eval(any(), context(), map()) -> any().
 
-eval(T, Ctxt, _) when is_function(T, 1), is_map(Ctxt) ->
-    T(Ctxt);
-
-eval(T, Ctxt, Opts) when is_map(T), is_map(Ctxt), is_map(Opts) ->
-    F = fun
-        (_, V) ->
-            eval(V, Ctxt, Opts)
-    end,
-    maps:map(F, T);
-
-eval(T, Ctxt, Opts) when is_list(T), is_map(Ctxt), is_map(Opts) ->
-    [eval(X, Ctxt) || X <- T];
-
-eval(T, Ctxt, Opts) when is_tuple(T), is_map(Ctxt), is_map(Opts) ->
-    list_to_tuple([eval(X, Ctxt, Opts) || X <- tuple_to_list(T)]);
-
-eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
-    <<>>;
-
-eval(T, Ctxt, Opts) when is_binary(T), is_map(Ctxt), is_map(Opts) ->
-    %% eval(T, Ctxt);
-    do_eval(T, #state{
-        context = Ctxt, 
-        opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
-    });
-
-eval(T, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
-    T.
-
+eval(T, Ctxt, Opts) ->
+    do_eval(T, Ctxt, Opts#{unwrap => true}).
 
 
 
@@ -174,10 +147,102 @@ eval(T, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
 
 
 
-%% @private
--spec do_eval(binary(), state()) -> any() | no_return().
 
-do_eval(<<>>, #state{is_ground = true} = St) ->
+%% @private
+do_eval(T, Ctxt) ->
+    do_eval(T, Ctxt, #{}).
+
+
+%% @private
+-spec do_eval(any(), context(), map()) -> any().
+
+do_eval({'$mops_proxy', T}, Ctxt, Opts) when is_map(Ctxt) ->
+    do_eval(T, Ctxt, Opts);
+
+do_eval(T, Ctxt, Opts) when is_function(T, 1), is_map(Ctxt) ->
+    maybe_unwrap(T(Ctxt), Opts);
+
+do_eval(T, Ctxt, Opts) when is_map(T), is_map(Ctxt), is_map(Opts) ->
+    eval_map(T, Ctxt, Opts);
+
+do_eval(T, Ctxt, Opts) when is_list(T), is_map(Ctxt), is_map(Opts) ->
+    eval_list(T, Ctxt, Opts);
+
+do_eval(T, Ctxt, Opts) when is_tuple(T), is_map(Ctxt), is_map(Opts) ->
+    list_to_tuple(eval_list(tuple_to_list(T), Ctxt, Opts));
+
+do_eval(<<>>, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
+    <<>>;
+
+do_eval(T, Ctxt, Opts) when is_binary(T), is_map(Ctxt), is_map(Opts) ->
+    maybe_unwrap(
+        eval_expr(T, #state{
+            context = Ctxt, 
+            opts = maps_utils:validate(Opts, ?OPTS_SPEC) 
+        }),
+        Opts
+    );
+
+do_eval(T, Ctxt, Opts) when is_map(Ctxt), is_map(Opts) ->
+    T.
+
+
+%% @private
+eval_map(Map, Ctxt, Opts) ->
+    Fold = fun(K, V0, {L, R}) ->
+        case do_eval(V0, Ctxt, Opts) of
+            {'$mops_proxy', _} = V1 ->
+                {L, [{K, V1}|R]};
+            V1 ->
+                {[{K, V1}|L], R}
+        end
+    end,
+    case maps:fold(Fold, {[], []}, Map) of
+        {Ls, []} ->
+            maps:from_list(Ls);
+        {Ls, Rs} ->
+            maybe_unwrap(
+                {'$mops_proxy', maps:from_list(lists:append(Ls, Rs))}, Opts)
+    end.
+
+%% @private
+eval_list(List, Ctxt, Opts) ->
+    Fold = fun(V0, {L, R}) ->
+        case do_eval(V0, Ctxt, Opts) of
+            {'$mops_proxy', _} = V1 ->
+                {[V1|L], true};
+            V1 ->
+                {[V1|L], R}
+        end
+    end,
+    case lists:foldl(Fold, {[], false}, List) of
+        {L, false} ->
+            L;
+        {L, true} ->
+            maybe_unwrap({'$mops_proxy', lists:reverse(L)}, Opts)
+    end.
+
+
+%% @private
+maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts) 
+when is_map(Val) ->
+    maps:map(fun(_K, V) -> maybe_unwrap(V, Opts) end, Val);
+
+maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true} = Opts) 
+when is_list(Val) ->
+    [maybe_unwrap(X, Opts) || X <- Val];
+
+maybe_unwrap({'$mops_proxy', Val}, #{unwrap := true}) ->
+    Val;
+
+maybe_unwrap(Val, _) ->
+    Val.
+
+
+%% @private
+-spec eval_expr(binary(), state()) -> any() | no_return().
+
+eval_expr(<<>>, #state{is_ground = true} = St) ->
     %% The end of a string (quoted expression)
     %% We reverse the list of terms and turn them into iolist()
     Fun = fun
@@ -187,11 +252,11 @@ do_eval(<<>>, #state{is_ground = true} = St) ->
     iolist_to_binary(
         lists:foldl(Fun, [], [?DOUBLE_QUOTES | St#state.acc]));
 
-do_eval(<<>>, #state{is_ground = false} = St) ->
+eval_expr(<<>>, #state{is_ground = false} = St) ->
     %% The end of a string (quoted expression)
     %% We have functions so we wrap the iolist in a function receiving
     %% a future context as an argument
-    fun(Ctxt) ->
+    Fun = fun(Ctxt) ->
         Eval = fun
             (F, Acc) when is_function(F, 1) ->
                 [term_to_iolist(F(Ctxt))|Acc];
@@ -200,9 +265,10 @@ do_eval(<<>>, #state{is_ground = false} = St) ->
         end,
         iolist_to_binary(
             lists:foldl(Eval, [], [?DOUBLE_QUOTES | St#state.acc]))
-    end;
+    end,
+    {'$mops_proxy', Fun};
 
-do_eval(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
+eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
     %% We start processing a binary
     
     case binary:match(Bin0, St0#state.sp) of
@@ -226,7 +292,7 @@ do_eval(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
                     %% e.g. "Hello {{foo}}. Today is {{date}}."
                     Unquoted = binary:part(Bin1, 1, Len - 2),
                     [Pre, Rest] = binary:split(Unquoted, St0#state.sp),
-                    do_eval(Rest, acc(St1, Pre));
+                    eval_expr(Rest, acc(St1, Pre));
                 _ ->
                     %% We found quotes that are in the middle of the string
                     %% or we have no closing quote
@@ -236,7 +302,7 @@ do_eval(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
             end
     end;
 
-do_eval(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
+eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
@@ -244,23 +310,23 @@ do_eval(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
     case binary:split(Bin, St0#state.ep) of
         [Expr, Rest] ->
             St1 = St0#state{is_open = false},
-            do_eval(Rest, acc(St1, parse_expr(Expr, St1)));
+            eval_expr(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
             %% We did not find matching closing mustaches
             error(badarg)
     end;
 
-do_eval(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
+eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
     %% Split produces a list of binaries that are all referencing Bin. 
     %% This means that the data in Bin is not copied to new binaries, 
     %% and that Bin cannot be garbage collected until the results of the split 
     %% are no longer referenced.
     case binary:split(Bin, St#state.sp) of
         [Pre, Rest]->
-            do_eval(Rest, acc(St#state{is_open = true}, Pre));
+            eval_expr(Rest, acc(St#state{is_open = true}, Pre));
         [Bin] ->
             %% No more mustaches so we finish
-            do_eval(<<>>, acc(St, Bin))
+            eval_expr(<<>>, acc(St, Bin))
     end.
     
 
@@ -310,10 +376,10 @@ get_value(Key, Ctxt) ->
     try  
         PathElems = binary:split(Key, <<$.>>, [global]),
         case get(PathElems, Ctxt) of
-            {ok, '$mop_proxy', _Rem} ->
-                fun(X) -> get_value(Key, X) end;
+            {ok, '$mops_proxy', _Rem} ->
+                {'$mops_proxy', fun(X) -> get_value(Key, X) end};
             {ok, Val} ->
-                eval(Val, Ctxt)
+                do_eval(Val, Ctxt)
         end
     catch
         error:{badkey, _} ->
@@ -325,13 +391,13 @@ get_value(Key, Ctxt) ->
 
 
 %% @private
-get(Rem, '$mop_proxy') ->
-    {ok, '$mop_proxy', Rem};
+get(Rem, '$mops_proxy') ->
+    {ok, '$mops_proxy', Rem};
 
 get([], Term) ->
     {ok, Term};
 
-get(Key, F) when is_function(F, 1) ->
+get(Key, {'$mops_proxy', F}) when is_function(F, 1) ->
     Fun = fun(X) ->
         try 
             get_value(Key, F(X))
@@ -340,7 +406,7 @@ get(Key, F) when is_function(F, 1) ->
                 error({badkeypath, Key})
         end
     end,
-    {ok, Fun};
+    {ok, {'$mops_proxy', Fun}};
 
 get([H|T], Ctxt) when is_map(Ctxt) ->
     get(T, maps:get(H, Ctxt)).
@@ -355,7 +421,7 @@ apply_ops([], Val, _) ->
 
 
 %% @private
-apply_op(Op, Val, _) 
+apply_op(Op, {'$mops_proxy', Val}, _) 
 when is_function(Val, 1) andalso (
     Op == <<"integer">> orelse 
     Op == <<"float">> orelse
@@ -365,7 +431,7 @@ when is_function(Val, 1) andalso (
     Op == <<"last">> orelse
     Op == <<"length">>
     ) ->
-    fun(X) -> apply_op(Op, Val(X), X) end;
+    {'$mops_proxy', fun(X) -> apply_op(Op, Val(X), X) end};
 
 apply_op(_, <<>>, _) ->
     <<>>;
@@ -426,9 +492,10 @@ apply_op(Bin, Val, Ctxt) ->
 
 %% @private
 
-apply_custom_op(<<"get", _/binary>> = Op, Val, _)
-when is_function(Val, 1) ->
-    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+apply_custom_op(<<"get", _/binary>> = Op, {'$mops_proxy', _} = Val, _) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
+    };
 
 apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
@@ -473,51 +540,62 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
 %%     end;
 
 
-apply_custom_op(<<"merge(", Rest/binary>> = Op, Val, Ctxt) ->
-    
-    case [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] of
-        [R] when is_function(R, 1), is_function(Val, 1) ->
-            fun(X) -> maybe_merge(R(X), Val(X)) end;
-        [R] when is_function(R, 1) ->
-            fun(X) -> maybe_merge(R(X), maybe_eval(Val, X)) end;
+apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
+
+    Args = case 
+        [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)] 
+    of
+        [Expr2] ->
+            {Expr1, Expr2};
+        [<<"_">>, Expr2] ->
+            {Expr1, Expr2};
+        [Expr2, <<"_">>] ->
+            {Expr2, Expr1};
+        _ ->
+            error({invalid_expression, Op})
+    end,
+    case Args of
+        {{'$mops_proxy', LT}, {'$mops_proxy', RT}} 
+        when is_map(LT) andalso is_map(RT) ->
+            {'$mops_proxy', maps:merge(LT, RT)};
+
+        {{'$mops_proxy', LT}, R} when is_map(LT) andalso is_map(R) ->
+            {'$mops_proxy', maps:merge(LT, R)};
+
+        {L, {'$mops_proxy', RT}} when is_map(L) andalso is_map(RT) ->
+            {'$mops_proxy', maps:merge(L, RT)};
+
+        {{'$mops_proxy', LT} = L, R} when is_function(LT, 1) ->
+            {'$mops_proxy',
+                fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+            };
+
+        {L, {'$mops_proxy', RT} = R} when is_function(RT, 1) ->
+            {'$mops_proxy',
+                fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+            };
         
-        [R] when is_map(R), is_function(Val) ->
-            fun(X) -> maybe_merge(Val(X), maybe_eval(R, X)) end;
-        [R] when is_map(R) ->
-            maps:merge(Val, R);
-
-        [<<"_">>, R] when is_function(R, 1), is_function(Val) ->
-            fun(X) -> maybe_merge(R(X), Val(X)) end;
-        [<<"_">>, R] when is_function(R, 1) ->
-            fun(X) -> maybe_merge(R(X), maybe_eval(Val, X)) end;
-
-        [<<"_">>, R] when is_map(R), is_function(Val) ->
-            fun(X) -> maybe_merge(Val(X), maybe_eval(R, X)) end;
-        [<<"_">>, R] when is_map(R) ->
-            maps:merge(Val, R);
-
-        [L, <<"_">>] when is_function(L, 1), is_function(Val) ->
-            fun(X) -> maybe_merge(Val(X), L(X)) end;
-        [L, <<"_">>] when is_function(L, 1) ->
-            fun(X) -> maybe_merge(maybe_eval(Val, X), L(X)) end;
-
-        [L, <<"_">>] when is_function(Val)->
-            fun(X) -> maybe_merge(maybe_eval(L, X), Val(X)) end;
-        [L, <<"_">>] ->
-            maps:merge(L, Val);
+        {L, R} when is_map(L), is_map(R) ->
+            maps:merge(L, R);
 
         _ -> 
             error({invalid_expression, Op})
     end;
 
-apply_custom_op(<<"with", _/binary>> = Op, Val, _)
-when is_function(Val, 1) ->
-    fun(X) -> apply_custom_op(Op, Val(X), X) end;
+apply_custom_op(<<"with(", _/binary>> = Op, {'$mops_proxy', _} = L, _) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(L, X), X) end
+    };
+
+apply_custom_op(<<"without(", _/binary>> = Op, {'$mops_proxy', _} = L, _) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(L, X), X) end
+    };
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Fold = fun(K, {L, R}) ->
         case maybe_eval(K, Ctxt) of
-            V when is_function(V, 1) ->
+            {'$mops_proxy', _} = V ->
                 {L, [V|R]};
             V ->
                 {[V|L], R}
@@ -525,19 +603,21 @@ apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     end,
     Args = get_arguments(Rest, Op, <<"])">>),
     case lists:foldl(Fold, {[], []}, Args) of
-        {L, []} ->
-            maps:with(L, Val);
-        {L, R} ->
-            fun(X) -> 
-                Keys = lists:append(L, [F(X) || F <- R]),
-                maps:with(Keys, Val) 
-            end
+        {Ls, []} ->
+            maps:with(Ls, Val);
+        {Ls, Rs} ->
+            {'$mops_proxy',
+                fun(X) -> 
+                    Keys = lists:append(Ls, [maybe_eval(R, X) || R <- Rs]),
+                    maps:with(Keys, Val) 
+                end
+            }
     end;
 
 apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     Fold = fun(K, {L, R}) ->
         case maybe_eval(K, Ctxt) of
-            V when is_function(V, 1) ->
+            {'$mops_proxy', _} = V  ->
                 {L, [V|R]};
             V ->
                 {[V|L], R}
@@ -545,13 +625,15 @@ apply_custom_op(<<"without([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
     end,
     Args = get_arguments(Rest, Op, <<"])">>),
     case lists:foldl(Fold, {[], []}, Args) of
-        {L, []} ->
-            maps:without(L, Val);
-        {L, R} ->
-            fun(X) -> 
-                Keys = lists:append(L, [F(X) || F <- R]),
-                maps:without(Keys, Val) 
-            end
+        {Ls, []} ->
+            maps:without(Ls, Val);
+        {Ls, Rs} ->
+            {'$mops_proxy',
+                fun(X) -> 
+                    Keys = lists:append(Ls, [maybe_eval(R, X) || R <- Rs]),
+                    maps:with(Keys, Val) 
+                end
+            }
     end;
 
 apply_custom_op(Op, Val, _) ->
@@ -559,30 +641,44 @@ apply_custom_op(Op, Val, _) ->
 
 
 %% @private
-maybe_merge(L, R) when is_function(L, 1), is_function(R, 1) ->
-    fun(X) -> maybe_merge(L(X), R(X)) end;
+maybe_merge({'$mops_proxy', L}, {'$mops_proxy', R}) 
+when is_map(L) andalso is_map(R) ->
+    {'$mops_proxy', maps:merge(L, R)};
 
-maybe_merge(L, R) when is_function(L, 1) ->
-    fun(X) -> maybe_merge(L(X), maybe_eval(R, X)) end;
+maybe_merge({'$mops_proxy', _} = L, R) ->
+    {'$mops_proxy', 
+        fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+    };
 
-maybe_merge(L, R) when is_function(R, 1) ->
-    fun(X) -> maybe_merge(maybe_eval(L, X), R(X)) end;
+maybe_merge(L, {'$mops_proxy', _} = R) ->
+    {'$mops_proxy', 
+        fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+    };
 
 maybe_merge(L, R) ->
     maps:merge(L, R).
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Evaluates only binary terms and any other term wrapped in a 
+%% '$mops_proxy' tuple. For all other terms, returns the term untouched.
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_eval({'$mops_proxy', T}, Ctxt) ->
+    do_eval(T, Ctxt);
+
 maybe_eval(Term, Ctxt) when is_binary(Term) ->
     case unquote(Term) of
         {true, Key} ->
             Key;
         {false, Expr} ->
-            eval(Expr, Ctxt)
+            do_eval(Expr, Ctxt)
     end;
 
-maybe_eval(Term, Ctxt) ->
-    eval(Term, Ctxt).
+maybe_eval(Term, _Ctxt) ->
+    Term.
 
 
 %% @private
@@ -607,12 +703,6 @@ get_arguments(Rest, Op, Terminal) ->
 
 
 %% @private
-%% TODO Replace this as it is not efficient, it generates a new binary each time
-%% trim(Bin, St) ->
-%%     re:replace(Bin, St#state.re, "", [{return, binary}, global]).
-
-
-%% @private
 term_to_iolist(Term) when is_binary(Term) ->
     Term;
 
@@ -624,7 +714,13 @@ term_to_iolist(Term) ->
 
 
 
+
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc
+%% Eliminates whitespaces in a binary
+%% @end
+%% -----------------------------------------------------------------------------
 trim(Bin) ->
     trimb(Bin, <<>>).
 

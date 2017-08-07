@@ -228,7 +228,7 @@ merge_right_2_test(_) ->
             <<"a">> => <<"{{map2.c}}">>,
             <<"b">> => 2
         },
-        <<"map2">> => '$mop_proxy',
+        <<"map2">> => '$mops_proxy',
         <<"map3">> => #{}
     },
     Ctxt1 = #{
@@ -244,7 +244,7 @@ merge_right_3_test(_) ->
             <<"code">> => <<"{{action.error.error_uri}}">>,
             <<"message">> => <<"{{action.error.arguments |> head}}">>
         },
-        <<"action">> => '$mop_proxy',
+        <<"action">> => '$mops_proxy',
         <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
     },
     Ctxt1 = #{

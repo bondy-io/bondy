@@ -56,7 +56,7 @@
     <<"put">>
 ]).
 
--define(MOP_PROXY_FUN_TYPE, {function, 1}).
+-define(MOPS_PROXY_FUN_TYPE, {function, 1}).
 
 -define(API_HOST, #{
     <<"host">> => #{
@@ -553,12 +553,12 @@
     <<"headers">> => #{
         alias => headers,
         required => true,
-        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
         alias => body,
         required => true,
-        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 
@@ -589,42 +589,42 @@
     <<"path">> => #{
         alias => path,
         required => true,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"query_string">> => #{
         alias => query_string,
         required => true,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"headers">> => #{
         alias => headers,
         required => true,
-        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
         alias => body,
         required => true,
-        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
         alias => timeout,
         required => true,
-        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
+        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"connect_timeout">> => #{
         alias => connect_timeout,
         required => true,
-        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
+        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
         alias => retries,
         required => true,
-        datatype => [integer, ?MOP_PROXY_FUN_TYPE]
+        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"retry_timeout">> => #{
         alias => retry_timeout,
         required => true,
-        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
+        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 
@@ -664,12 +664,12 @@ end).
     <<"timeout">> => #{
         alias => timeout,
         required => true,
-        datatype => [timeout, ?MOP_PROXY_FUN_TYPE]
+        datatype => [timeout, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"retries">> => #{
         alias => retries,
         required => true,
-        datatype => [integer, ?MOP_PROXY_FUN_TYPE]
+        datatype => [integer, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"procedure">> => #{
         alias => procedure,
@@ -682,19 +682,19 @@ end).
         alias => options,
         required => true,
         allow_null => true,
-        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"arguments">> => #{
         alias => arguments,
         required => true,
         allow_null => true,
-        datatype => [list, ?MOP_PROXY_FUN_TYPE]
+        datatype => [list, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"arguments_kw">> => #{
         alias => arguments_kw,
         required => true,
         allow_null => true,
-        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 
@@ -708,25 +708,25 @@ end).
         alias => headers,
         required => true,
         allow_null => false,
-        datatype => [map, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"body">> => #{
         alias => body,
         required => true,
         allow_null => false,
-        datatype => [map, binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"status_code">> => #{
         alias => status_code,
         required => false,
         allow_null => false,
-        datatype => [integer, binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"uri">> => #{
         alias => uri,
         required => false,
         allow_null => false,
-        datatype => [binary, ?MOP_PROXY_FUN_TYPE]
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 
@@ -1321,11 +1321,11 @@ security_scheme_rules(_, _, _, _, _) ->
 %% -----------------------------------------------------------------------------
 get_context_proxy() ->
     %% We cannot used funs as they will break when we run the 
-    %% parse transform, so we use '$mop_proxy'
+    %% parse transform, so we use '$mops_proxy'
     #{
-        <<"request">> => '$mop_proxy',
-        <<"action">> => '$mop_proxy',
-        <<"security">> => '$mop_proxy'
+        <<"request">> => '$mops_proxy',
+        <<"action">> => '$mops_proxy',
+        <<"security">> => '$mops_proxy'
     }.
 
 
