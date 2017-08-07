@@ -404,7 +404,7 @@ do_forward(#register{} = M, Ctxt) ->
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
 
     Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
-        {ok, Map} ->
+        {ok, Map, _} ->
             RegId = maps:get(id, Map),
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->
