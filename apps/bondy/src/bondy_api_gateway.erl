@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_api_gateway.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -195,14 +195,14 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec load(file:filename() | map()) -> 
+-spec load(file:filename() | map()) ->
     ok | {error, invalid_specification_format}.
 
 load(Spec) when is_map(Spec) ->
     %% We append the new spec to the base ones
     Specs = [Spec | specs()],
     _ = [
-        update_dispatch_table(Scheme, Routes) 
+        update_dispatch_table(Scheme, Routes)
         || {Scheme, Routes} <- parse_specs(Specs)
     ],
     ok;
@@ -227,7 +227,7 @@ load(FName) ->
 -spec add_client(uri(), map()) -> {ok, map()} | {error, atom() | map()}.
 
 add_client(RealmUri, Info0) ->
-    try 
+    try
         ok = maybe_init_security(RealmUri),
         {Id, Opts, Info1} = validate_client(Info0, ?CLIENT_SPEC),
         case bondy_security:add_user(RealmUri, Id, Opts) of
@@ -248,7 +248,7 @@ add_client(RealmUri, Info0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update_client(uri(), binary(), map()) -> 
+-spec update_client(uri(), binary(), map()) ->
     {ok, map()} | {error, term()} | no_return().
 
 update_client(RealmUri, ClientId, Info0) ->
@@ -278,7 +278,7 @@ remove_client(RealmUri, Id) ->
 %% Creates a new user adding it to the `resource_owners` group.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_resource_owner(uri(), map()) -> 
+-spec add_resource_owner(uri(), map()) ->
     {ok, map()} | {error, term()} | no_return().
 
 add_resource_owner(RealmUri, Info0) ->
@@ -297,7 +297,7 @@ add_resource_owner(RealmUri, Info0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update_resource_owner(uri(), binary(), map()) -> 
+-spec update_resource_owner(uri(), binary(), map()) ->
     {ok, map()} | {error, term()} | no_return().
 
 update_resource_owner(RealmUri, Username, Info0) ->
@@ -324,15 +324,15 @@ remove_resource_owner(RealmUri, Id) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Conditionally start the public http and https listeners based on the 
+%% Conditionally start the public http and https listeners based on the
 %% configuration. This will load any default Bondy api specs.
-%% Notice this is not the way to start the admin api listeners see 
+%% Notice this is not the way to start the admin api listeners see
 %% {@link start_admin_listeners()} for that.
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
     _ = [
-        start_listener({Scheme, Routes}) 
+        start_listener({Scheme, Routes})
         || {Scheme, Routes} <- parse_specs(specs())],
     ok.
 
@@ -343,7 +343,7 @@ start_listeners() ->
 %% -----------------------------------------------------------------------------
 start_admin_listeners() ->
     _ = [
-        start_admin_listener({Scheme, Routes}) 
+        start_admin_listener({Scheme, Routes})
         || {Scheme, Routes} <- parse_specs([admin_spec()])],
     ok.
 
@@ -386,12 +386,10 @@ start_admin_listener({<<"https">>, Routes}) ->
 -spec start_http(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_http(Routes, Name) ->
-    %% io:format("HTTP Routes ~p~n", [Routes]),
-    % io:format("Table ~p~n", [Table]),
     {ok, Opts} = application:get_env(bondy, Name),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
     {_, Port} = lists:keyfind(port, 1, Opts),
-    
+
     cowboy:start_clear(
         Name,
         PoolSize,
@@ -403,13 +401,13 @@ start_http(Routes, Name) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Routes), 
+                dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
             middlewares => [
-                cowboy_router, 
+                cowboy_router,
                 % bondy_api_gateway,
-                % bondy_security_middleware, 
+                % bondy_security_middleware,
                 cowboy_handler
             ]
         }
@@ -423,7 +421,6 @@ start_http(Routes, Name) ->
 -spec start_https(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_https(Routes, Name) ->
-    %% io:format("HTTPS Routes ~p~n", [Routes]),
     {ok, Opts} = application:get_env(bondy, Name),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
     {_, Port} = lists:keyfind(port, 1, Opts),
@@ -439,13 +436,13 @@ start_https(Routes, Name) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Routes), 
+                dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
             middlewares => [
-                cowboy_router, 
+                cowboy_router,
                 % bondy_api_gateway,
-                % bondy_security_middleware, 
+                % bondy_security_middleware,
                 cowboy_handler
             ]
         }
@@ -537,7 +534,7 @@ admin_spec() ->
     catch
         error:badarg ->
             _ = lager:error(
-                "Error processing API Gateway Specification file. File not found or invalid specification format, file_name=~p", 
+                "Error processing API Gateway Specification file. File not found or invalid specification format, file_name=~p",
                 [File]),
             exit(badarg)
     end.
@@ -602,7 +599,7 @@ maybe_init_security(RealmUri) ->
 %% @private
 maybe_init_group(RealmUri, #{<<"name">> := Name} = G) ->
     case bondy_security_group:lookup(RealmUri, Name) of
-        {error, not_found} -> 
+        {error, not_found} ->
             bondy_security_group:add(RealmUri, G);
         _ ->
             ok
@@ -615,7 +612,7 @@ validate_resource_owner(Info0, Spec) ->
     Groups = ["resource_owners" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"password">>, Info1)},
-        {"groups", Groups} | 
+        {"groups", Groups} |
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Username = maps:get(<<"username">>, Info1, undefined),
@@ -627,7 +624,7 @@ validate_client(Info0, Spec) ->
     Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
     Opts = [
         {"password", maps:get(<<"client_secret">>, Info1)},
-        {"groups", Groups} | 
+        {"groups", Groups} |
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Id = maps:get(<<"client_id">>, Info1, undefined),

@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -70,13 +70,13 @@ send(PeerId, M) ->
 %% @doc
 %% Sends a message to a peer.
 %% If the transport is not open it fails with an exception.
-%% This function is used by the router (dealer | broker) to send wamp messages 
+%% This function is used by the router (dealer | broker) to send wamp messages
 %% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({SessionId, Pid} = P, M, Opts) 
+send({SessionId, Pid} = P, M, Opts)
 when is_integer(SessionId), Pid =:= self() ->
     wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
     Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
@@ -110,14 +110,12 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            % io:format("Process down ~p error=~p~n", [Pid, Reason]),
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
-    after 
+    after
         Timeout ->
-            % io:format("Timeout~n"),
             demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
@@ -168,12 +166,12 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec call(
-    binary(), 
-    map(), 
-    list() | undefined, 
-    map() | undefined, 
-    bondy_context:context()) -> 
-    {ok, map(), bondy_context:context()} 
+    binary(),
+    map(),
+    list() | undefined,
+    map() | undefined,
+    bondy_context:context()) ->
+    {ok, map(), bondy_context:context()}
     | {error, wamp_error_map(), bondy_context:context()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
@@ -195,7 +193,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                     Ctxt2 = bondy_context:remove_awaiting_call(
                         Ctxt1, R#error.request_id),
                     {error, message_to_map(R), Ctxt2}
-            after 
+            after
                 Timeout ->
                     Error = #{
                         error_uri => ?BONDY_ERROR_TIMEOUT,
@@ -208,7 +206,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, message_to_map(Error), Ctxt1};
-        {reply, _, Ctxt1} -> 
+        {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = #{
                 error_uri => ?BONDY_ERROR_UNKNOWN,
@@ -281,7 +279,7 @@ message_to_map(#error{} = M) ->
     %% inject this in a mops context.
     #{
         details => Details,
-        error_uri => Uri, 
+        error_uri => Uri,
         arguments => args(Args),
         arguments_kw => args_kw(ArgsKw)
     }.

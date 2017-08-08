@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_wamp_raw_handler.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -58,12 +58,12 @@
 }).
 -type state() :: #state{}.
 
--type raw_error()           :: invalid_response 
-                                | invalid_socket 
-                                | invalid_wamp_data 
-                                | maximum_connection_count_reached 
-                                | maximum_message_length_unacceptable 
-                                | serializer_unsupported 
+-type raw_error()           :: invalid_response
+                                | invalid_socket
+                                | invalid_wamp_data
+                                | maximum_connection_count_reached
+                                | maximum_message_length_unacceptable
+                                | serializer_unsupported
                                 | use_of_reserved_bits.
 
 -export([start_link/4]).
@@ -120,7 +120,7 @@ start_listeners([H|T]) ->
                 PoolSize,
                 ranch_mod(H),
                 [{port, Port}],
-                bondy_wamp_raw_handler, 
+                bondy_wamp_raw_handler,
                 TransportOpts
             ),
             _ = ranch:set_max_connections(H, MaxConns),
@@ -150,11 +150,11 @@ start_link(Ref, Socket, Transport, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 init({Ref, Socket, Transport, _Opts}) ->
-    %% We must call ranch:accept_ack/1 before doing any socket operation. 
-    %% This will ensure the connection process is the owner of the socket. 
+    %% We must call ranch:accept_ack/1 before doing any socket operation.
+    %% This will ensure the connection process is the owner of the socket.
     %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
-    Transport:setopts(Socket, [{active, once}, {packet, 0}]),    
+    Transport:setopts(Socket, [{active, once}, {packet, 0}]),
     St = #state{
         socket = Socket,
         transport = Transport
@@ -163,11 +163,11 @@ init({Ref, Socket, Transport, _Opts}) ->
 
 
 handle_info(
-    {tcp, Socket, Data}, 
+    {tcp, Socket, Data},
     #state{socket = Socket, transport = Transport} = St0) ->
 
     case handle_data(Data, St0) of
-        {ok, St1} -> 
+        {ok, St1} ->
             Transport:setopts(Socket, [{active, once}]),
             {noreply, St1, ?TIMEOUT};
         {stop, St1} ->
@@ -188,20 +188,20 @@ handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
 
 handle_info({tcp_closed, Socket}, St) ->
     _ = lager:info(
-        <<"TCP Connection closed by peer, socket=~p, pid=~p">>, 
+        <<"TCP Connection closed by peer, socket=~p, pid=~p">>,
         [Socket, self()]
-    ),	
+    ),
     {stop, normal, St};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
     _ = lager:error(
-        "TCP Connection closing, error=tcp_error, reason=~p, socket=~p, pid=~p", 
+        "TCP Connection closing, error=tcp_error, reason=~p, socket=~p, pid=~p",
         [Reason, Socket, self()]),
 	{stop, Reason, State};
 
 handle_info(timeout, State) ->
     _ = lager:error(
-        "TCP Connection closing, error=timeout, pid='~p'", 
+        "TCP Connection closing, error=timeout, pid='~p'",
         [self()]
     ),
 	{stop, normal, State};
@@ -239,30 +239,29 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 -spec handle_data(Data :: binary(), State :: state()) ->
-    {ok, state()} 
+    {ok, state()}
     | {stop, state()}
     | {error, raw_error(), state()}.
 
 handle_data(
-    <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>, 
+    <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>,
     #state{protocol_state = undefined} = St) ->
     handle_handshake(MaxLen, Encoding, St);
 
 handle_data(_Data, #state{protocol_state = undefined} = St) ->
-    %% After a _Client_ has connected to a _Router_, the _Router_ will 
+    %% After a _Client_ has connected to a _Router_, the _Router_ will
     %% first receive the 4 octets handshake request from the _Client_.
-    %% If the _first octet_ differs from "0x7F", it is not a WAMP-over- 
-    %% RawSocket request. Unless the _Router_ also supports other 
-    %% transports on the connecting port (such as WebSocket), the 
+    %% If the _first octet_ differs from "0x7F", it is not a WAMP-over-
+    %% RawSocket request. Unless the _Router_ also supports other
+    %% transports on the connecting port (such as WebSocket), the
     %% _Router_ MUST *fail the connection*.
     {error, invalid_wamp_data, St};
 
 handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
     {error, error_reason(Error), St};
 
-handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St) 
+handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St)
 when byte_size(Data) > Max->
-    % io:format("Message length is ~p~n", [byte_size(Data)]), 
     ok = send_frame(error_number(maximum_message_length_unacceptable), St),
     {stop, St};
 
@@ -292,7 +291,7 @@ handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
 handle_data(Data, St) when is_binary(Data) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
-            {ok, St#state{protocol_state = PSt}}; 
+            {ok, St#state{protocol_state = PSt}};
         {reply, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
             ok = send(L, St1),
@@ -344,7 +343,7 @@ init_wamp(Len, Enc, St0) ->
         {ok, {_, _} = Peer} ->
             MaxLen = validate_max_len(Len),
             {FrameType, EncName} = validate_encoding(Enc),
-            
+
             Proto = {raw, FrameType, EncName},
             case bondy_wamp_protocol:init(Proto, Peer, #{}) of
                 {ok, CBState} ->
@@ -356,7 +355,7 @@ init_wamp(Len, Enc, St0) ->
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
-                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>, 
+                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>,
                         [FrameType, EncName, Peer]
                     ),
                     {ok, St1};
@@ -376,11 +375,11 @@ init_wamp(Len, Enc, St0) ->
 %% @doc
 %% The possible values for "LENGTH" are:
 %%
-%% 0: 2**9 octets 
+%% 0: 2**9 octets
 %% 1: 2**10 octets ...
 %% 15: 2**24 octets
 %%
-%% This means a _Client_ can choose the maximum message length between *512* 
+%% This means a _Client_ can choose the maximum message length between *512*
 %% and *16M* octets.
 %% @end
 %% -----------------------------------------------------------------------------

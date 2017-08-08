@@ -1,14 +1,14 @@
-%% 
+%%
 %%  bondy_api_gateway_spec_parser.erl - parses the Bondy API Specification file
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -95,7 +95,7 @@
         required => true,
         allow_null => false,
         datatype => map
-        % , validator => fun(M) -> 
+        % , validator => fun(M) ->
         %     R = maps:map(
         %         fun(_, Ver) -> maps_utils:validate(Ver, ?API_VERSION) end, M),
         %     {ok, R}
@@ -112,14 +112,14 @@
     },
     <<"is_active">> => #{
         alias => is_active,
-        required => true, 
+        required => true,
         allow_null => false,
         default => false,
         datatype => boolean
     },
     <<"is_deprecated">> => #{
         alias => is_deprecated,
-        required => true, 
+        required => true,
         allow_null => false,
         default => false,
         datatype => boolean
@@ -167,14 +167,14 @@
         required => true,
         allow_null => false,
         datatype => map,
-        validator => fun(M1) -> 
+        validator => fun(M1) ->
             Inner = fun
                 (<<"/">> = P, _) ->
                     error({invalid_path, P});
                 (<<"/ws">> = P, _) ->
                     error({reserved_path, P});
-                (_, Val) -> 
-                    % maps_utils:validate(Val, ?API_PATH) 
+                (_, Val) ->
+                    % maps_utils:validate(Val, ?API_PATH)
                     Val
             end,
             {ok, maps:map(Inner, M1)}
@@ -270,7 +270,7 @@
         allow_null => false,
         default => ?DEFAULT_SCHEMES,
         datatype => {list, binary}
-    }, 
+    },
     <<"header_name">> => #{
         alias => header_name,
         required => true,
@@ -293,7 +293,7 @@
         allow_null => false,
         default => ?DEFAULT_SCHEMES,
         datatype => {list, binary}
-    }, 
+    },
     <<"flow">> => #{
         alias => flow,
         required => true,
@@ -318,7 +318,7 @@
     <<"description">> => #{
         alias => description,
         required => false,
-        datatype => binary   
+        datatype => binary
     }
 }).
 
@@ -365,7 +365,7 @@
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list, 
+        datatype => {list,
             {in, [
                 <<"application/json">>, <<"application/msgpack">>
             ]}
@@ -376,7 +376,7 @@
         required => true,
         allow_null => false,
         datatype => {list, binary}
-    }, 
+    },
     <<"security">> => #{
         alias => security,
         required => true,
@@ -479,14 +479,14 @@
         alias => accepts,
         required => true,
         allow_null => false,
-        datatype => {list, 
+        datatype => {list,
             {in, [<<"application/json">>, <<"application/msgpack">>]}}
     },
     <<"provides">> => #{
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list, 
+        datatype => {list,
             {in, [<<"application/json">>, <<"application/msgpack">>]}}
     },
     <<"headers">> => #{
@@ -765,34 +765,34 @@ end).
 }).
 
 -define(VAR(Term), {var, Term}).
--define(SCHEME_HEAD, 
+-define(SCHEME_HEAD,
     {
-        ?VAR(scheme), 
-        ?VAR(host), 
-        ?VAR(realm), 
-        ?VAR(path), 
-        ?VAR(mod), 
+        ?VAR(scheme),
+        ?VAR(host),
+        ?VAR(realm),
+        ?VAR(path),
+        ?VAR(mod),
         ?VAR(state)
     }
 ).
 
 
 -type scheme_rule()     ::  {
-                                Scheme :: binary(), 
-                                Host :: route_match(), 
-                                Realm :: binary(), 
-                                Path :: route_match(), 
-                                Handler :: module(), 
+                                Scheme :: binary(),
+                                Host :: route_match(),
+                                Realm :: binary(),
+                                Path :: route_match(),
+                                Handler :: module(),
                                 Opts :: any()
                             }.
 %% Cowboy types
 -type route_path()      ::  {
-                                Path :: route_match(), 
-                                Handler :: module(), 
+                                Path :: route_match(),
+                                Handler :: module(),
                                 Opts :: any()
-                            }. 
--type route_rule()      ::  {Host :: route_match(), Paths :: [route_path()]}. 
--type route_match()     ::  '_' | iodata(). 
+                            }.
+-type route_rule()      ::  {Host :: route_match(), Paths :: [route_path()]}.
+-type route_match()     ::  '_' | iodata().
 
 
 -export([from_file/1]).
@@ -827,7 +827,7 @@ from_file(Filename) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Parses the Spec map returning a new valid spec where all defaults have been 
+%% Parses the Spec map returning a new valid spec where all defaults have been
 %% applied and all variables have been replaced by either a value of a promise.
 %% Fails with in case the Spec is invalid.
 %%
@@ -846,7 +846,7 @@ parse(Spec) ->
 %% a cowboy dispatch table.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dispatch_table([map()] | map()) -> 
+-spec dispatch_table([map()] | map()) ->
     [{Scheme :: binary(), [route_rule()]}] | no_return().
 
 dispatch_table(API) when is_map(API) ->
@@ -862,7 +862,7 @@ dispatch_table(Specs) when is_list(Specs) ->
 %% a cowboy dispatch table.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dispatch_table([map()] | map(), [route_rule()]) -> 
+-spec dispatch_table([map()] | map(), [route_rule()]) ->
     [{Scheme :: binary(), [route_rule()]}] | no_return().
 
 dispatch_table(API, RulesToAdd) when is_map(API) ->
@@ -879,9 +879,9 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
     A0 = leap_relation:relation(?SCHEME_HEAD, [
-        {S, H, undefined, P, M, O} || 
-            {H, HRules} <- RulesToAdd, 
-            {P, M, O} <- HRules, 
+        {S, H, undefined, P, M, O} ||
+            {H, HRules} <- RulesToAdd,
+            {P, M, O} <- HRules,
             {S} <- Schemes
     ]),
     R1 = leap_relation:union(R0, A0),
@@ -894,7 +894,7 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
     Proj2 = {?VAR(scheme), {as, HPMS, ?VAR(hpms)}},
     SHP = leap_relation:summarize(R2, Proj2, #{}),
     leap_relation:tuples(SHP).
-    
+
 
 
 
@@ -919,7 +919,7 @@ parse_host(Host0, Ctxt0) ->
         ?VARS_KEY => Vars,
         ?DEFAULTS_KEY => Defs
     },
-    
+
     %% parse all versions
     Vs0 = maps:get(<<"versions">>, Host2),
     Fun = fun(_, V) -> parse_version(V, Ctxt1) end,
@@ -938,16 +938,13 @@ parse_version(V0, Ctxt0) ->
     %% We merge again in case the validation added defaults
     {V3, Ctxt2} = merge(V2, Ctxt1),
     %% Finally we parse the contained paths
-    Fun = fun(Uri, P) -> 
-        try 
-            parse_path(P, Ctxt2) 
-        catch 
+    Fun = fun(Uri, P) ->
+        try
+            parse_path(P, Ctxt2)
+        catch
             error:{badkey, Key} ->
-                io:format(
-                    "Path ~p~nST:~p~n", 
-                    [P, erlang:get_stacktrace()]),
                 error({
-                    badarg, 
+                    badarg,
                     <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
                 })
         end
@@ -981,25 +978,24 @@ parse_path(P0, Ctxt0) ->
     P6 = maps_utils:validate(P5, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
     P7 = maps:put(<<"allowed_methods">>, to_uppercase(L), P6),
-    P8 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P7), 
+    P8 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P7),
 
     %% Now we evaluate each request type spec
     PFun = fun(Method, IPath) ->
         Sec0 = maps:get(Method, IPath),
-        try  
-            Sec1 = parse_request_method(Sec0, Ctxt2), 
+        try
+            Sec1 = parse_request_method(Sec0, Ctxt2),
             Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
             error:{badkey, Key} ->
-                io:format("Method ~p\nCtxt: ~p\nST:~p", [Sec0, Ctxt2, erlang:get_stacktrace()]),
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
     lists:foldl(PFun, P8, L).
-    
 
-%% @private 
+
+%% @private
 parse_path_elements(Path, Ctxt) ->
     L = [
         <<"accepts">>,
@@ -1022,23 +1018,23 @@ parse_path_elements([H|T], P0, Ctxt) ->
                     maps:put(H, Val, P0);
                 false ->
                     error({
-                        badarg, 
+                        badarg,
                         <<"The key ", H/binary, " does not exist in path.">>
                     })
             end
-    end,    
-    Eval = fun(V) -> mops:eval(V, Ctxt) end,    
+    end,
+    Eval = fun(V) -> mops:eval(V, Ctxt) end,
     P2 = maps:update_with(H, Eval, P1),
     parse_path_elements(T, P2, Ctxt);
 
 parse_path_elements([], Path, _) ->
     Path.
 
-    
+
 %% @private
 parse_request_method(Spec, Ctxt) when is_binary(Spec) ->
     parse_request_method(mops:eval(Spec, Ctxt), Ctxt);
-    
+
 parse_request_method(Spec, Ctxt) ->
     #{
         % <<"accepts">> := Acc,
@@ -1049,7 +1045,7 @@ parse_request_method(Spec, Ctxt) ->
     Spec#{
         % <<"accepts">> := mops:eval(Acc, Ctxt),
         % <<"provides">> := mops:eval(Prov, Ctxt),
-        
+
         <<"action">> => parse_action(Act, Ctxt),
         %% TODO we should be doing parser_response() here!
         <<"response">> => parse_response(Resp, Ctxt)
@@ -1060,29 +1056,29 @@ parse_request_method(Spec, Ctxt) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Parses a path action section definition. Before applying validations
-%% this function applies defaults values and evaluates all terms 
+%% this function applies defaults values and evaluates all terms
 %% (using mops:eval/2).
-%% If the action type provided is not reconised it fails with 
-%% `{unsupported_action_type, Type}'. 
+%% If the action type provided is not reconised it fails with
+%% `{unsupported_action_type, Type}'.
 %% If an action type is not provided if fails with `action_type_missing'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec parse_action(map(), map()) -> map().
 parse_action(#{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
         ?WAMP_ACTION_SPEC
     );
 
 parse_action(#{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
         ?FWD_ACTION_SPEC
     );
 
 parse_action(#{<<"type">> := <<"static">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt), 
+        mops:eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
         ?STATIC_ACTION_SPEC
     );
 
@@ -1097,10 +1093,9 @@ parse_action(_, _) ->
 parse_response(Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
     OE0 = maps:get(<<"on_error">>, Spec0, ?DEFAULT_RESPONSE),
-
     [OR1, OE1] = [
         maps_utils:validate(
-            mops:eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt), 
+            mops:eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
             ?RESPONSE_SPEC
         ) || X <- [OR0, OE0]
     ],
@@ -1131,7 +1126,7 @@ eval(Ctxt) ->
 eval(S0, Ctxt0) ->
     Vars = maps:get(?VARS_KEY, S0),
     Defs = maps:get(?DEFAULTS_KEY, S0),
-    %% We evaluate variables by iterating over each 
+    %% We evaluate variables by iterating over each
     %% updating the context in each turn as we might have interdependencies
     %% amongst them
     VFun = fun(Var, Val, ICtxt) ->
@@ -1140,7 +1135,7 @@ eval(S0, Ctxt0) ->
         maps:update(?VARS_KEY, IVars1, ICtxt)
     end,
     Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
-    
+
     %% We evaluate defaults
     DFun = fun(Var, Val, ICtxt) ->
         IDefs1 = maps:update(
@@ -1189,15 +1184,15 @@ to_uppercase(<<"put">>) ->
 allowed_methods(Path) ->
     L = sets:to_list(
         sets:intersection(
-            sets:from_list(?HTTP_METHODS), 
+            sets:from_list(?HTTP_METHODS),
             sets:from_list(maps:keys(Path)
             )
         )
     ),
     case L of
-        [] ->  
+        [] ->
             error(
-                {missing_required_key, 
+                {missing_required_key,
             <<"At least one request method should be specified">>});
         _ ->
             L
@@ -1225,7 +1220,7 @@ do_dispatch_table(API) ->
     } = API,
 
     lists:append([dispatch_table_version(Host, Realm, V) || V <- maps:to_list(Vers)]).
-    
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1243,7 +1238,7 @@ dispatch_table_version(Host, Realm, {_Name, Spec}) ->
         <<"is_deprecated">> := Deprecated,
         <<"paths">> := Paths
     } = Spec,
-    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P) 
+    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P)
         || P <- maps:to_list(Paths)].
 
 
@@ -1251,7 +1246,7 @@ dispatch_table_version(Host, Realm, {_Name, Spec}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dispatch_table_path(binary(), binary(), boolean(), binary(), tuple()) -> 
+-spec dispatch_table_path(binary(), binary(), boolean(), binary(), tuple()) ->
     [scheme_rule()] | no_return().
 
 dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
@@ -1262,14 +1257,14 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
         <<"content_types_accepted">> => content_types_accepted(Accepts),
         <<"content_types_provided">> => content_types_provided(Provides)
     },
-    
+
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
     Mod = bondy_api_gateway_handler,
     %% State informally defined in bondy_api_gateway_handler
     State = #{
         api_spec => Spec3,
-        realm_uri => Realm, 
+        realm_uri => Realm,
         deprecated => Deprecated,
         security => Sec
     },
@@ -1279,16 +1274,16 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
             security_scheme_rules(S, Host, BasePath, Realm, Sec)
         ] || S <- Schemes
     ]).
-    
+
 
 %% @private
-%% The OAUTH2 spec requires the scheme to be HTTPS but we 
+%% The OAUTH2 spec requires the scheme to be HTTPS but we
 %% will enable it anyway as we assume BONDY would be behind
 %% an HTTPS load balancer
 security_scheme_rules(
-    S, Host, BasePath, Realm, 
+    S, Host, BasePath, Realm,
     #{
-        <<"type">> := <<"oauth2">>, 
+        <<"type">> := <<"oauth2">>,
         <<"flow">> := <<"resource_owner_password_credentials">>
     } = Sec) ->
 
@@ -1315,12 +1310,12 @@ security_scheme_rules(_, _, _, _, _) ->
 %% @private
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns a context where all keys have been assigned funs that take 
+%% Returns a context where all keys have been assigned funs that take
 %% a context as an argument.
 %% @end
 %% -----------------------------------------------------------------------------
 get_context_proxy() ->
-    %% We cannot used funs as they will break when we run the 
+    %% We cannot used funs as they will break when we run the
     %% parse transform, so we use '$mops_proxy'
     #{
         <<"request">> => '$mops_proxy',
