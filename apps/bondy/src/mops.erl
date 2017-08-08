@@ -387,38 +387,55 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
 
 
 %% @private
-get_value(Key, Ctxt) ->
+get_value(Key, F) when is_function(F, 1) ->
+    fun(X) -> get_value(Key, maybe_eval(F, X)) end;
+
+get_value(Key, {'$mops_proxy', _} = T) ->
+    {'$mops_proxy', fun(X) -> get_value(Key, maybe_eval(T, X)) end};
+
+get_value(Key, Ctxt) when is_binary(Key) ->
+    get_value(binary:split(Key, <<$.>>, [global]), Ctxt);
+
+get_value(Path, Ctxt) when is_list(Path) ->
     try
-        PathElems = binary:split(Key, <<$.>>, [global]),
-        case get(PathElems, Ctxt) of
+        case get(Path, Ctxt) of
             {ok, '$mops_proxy', _Rem} ->
-                {'$mops_proxy', fun(X) -> get_value(Key, X) end};
+                {'$mops_proxy', fun(X) -> get_value(Path, X) end};
             {ok, Val} ->
-                do_eval(Val, Ctxt)
+                maybe_eval(Val, Ctxt)
         end
     catch
         error:{badkey, _} ->
             %% We blame the full key
-            error({badkeypath, Key})
+            error({badkeypath, Path})
     end.
 
 
-
-
 %% @private
-get(Rem, '$mops_proxy') ->
-    {ok, '$mops_proxy', Rem};
+get(Path, '$mops_proxy') ->
+    {ok, '$mops_proxy', Path};
 
 get([], Term) ->
     {ok, Term};
 
-get(Key, {'$mops_proxy', F}) when is_function(F, 1) ->
+get(Path, Val) when is_function(Val, 1) ->
     Fun = fun(X) ->
         try
-            get_value(Key, F(X))
+            get_value(Path, maybe_eval(Val, X))
         catch
             error:{badkey, _} ->
-                error({badkeypath, Key})
+                error({badkeypath, Path})
+        end
+    end,
+    {ok, {'$mops_proxy', Fun}};
+
+get(Path, {'$mops_proxy', _} = Val) ->
+    Fun = fun(X) ->
+        try
+            get_value(Path, maybe_eval(Val, X))
+        catch
+            error:{badkey, _} ->
+                error({badkeypath, Path})
         end
     end,
     {ok, {'$mops_proxy', Fun}};
@@ -436,7 +453,7 @@ apply_ops([], Val, _) ->
 
 
 %% @private
-apply_op(Op, {'$mops_proxy', Val}, _)
+apply_op(Op, {'$mops_proxy', _} = Val, _)
 when (
     Op == <<"integer">> orelse
     Op == <<"float">> orelse
@@ -446,7 +463,7 @@ when (
     Op == <<"last">> orelse
     Op == <<"length">>
     ) ->
-    {'$mops_proxy', fun(X) -> apply_op(Op, Val(X), X) end};
+    {'$mops_proxy', fun(X) -> apply_op(Op, maybe_eval(Val, X), X) end};
 
 apply_op(_, <<>>, _) ->
     <<>>;
@@ -570,14 +587,19 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
         {L, {'$mops_proxy', RT}} when is_map(L) andalso is_map(RT) ->
             {'$mops_proxy', maps:merge(L, RT)};
 
-        {{'$mops_proxy', LT} = L, R} when is_function(LT, 1) ->
+        {{'$mops_proxy', _} = L, {'$mops_proxy', _} = R} ->
             {'$mops_proxy',
                 fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
             };
 
-        {L, {'$mops_proxy', RT} = R} when is_function(RT, 1) ->
+        {{'$mops_proxy', _} = L, R} ->
             {'$mops_proxy',
-                fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+                fun(X) -> maybe_merge(maybe_eval(L, X), R) end
+            };
+
+        {L, {'$mops_proxy', _} = R} ->
+            {'$mops_proxy',
+                fun(X) -> maybe_merge(L, maybe_eval(R, X)) end
             };
 
         {L, R} when is_map(L), is_map(R) ->
@@ -598,8 +620,8 @@ apply_custom_op(<<"without(", _/binary>> = Op, {'$mops_proxy', _} = L, _) ->
     };
 
 apply_custom_op(<<"with([", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
-    Fold = fun(K, {L, R}) ->
-        case maybe_eval(K, Ctxt) of
+    Fold = fun(Arg, {L, R}) ->
+        case maybe_eval(Arg, Ctxt) of
             {'$mops_proxy', _} = V ->
                 {L, [V|R]};
             V ->
@@ -650,14 +672,19 @@ maybe_merge({'$mops_proxy', L}, {'$mops_proxy', R})
 when is_map(L) andalso is_map(R) ->
     {'$mops_proxy', maps:merge(L, R)};
 
-maybe_merge({'$mops_proxy', _} = L, R) ->
+maybe_merge({'$mops_proxy', _} = L, {'$mops_proxy', _} = R) ->
     {'$mops_proxy',
         fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
     };
 
+maybe_merge({'$mops_proxy', _} = L, R) ->
+    {'$mops_proxy',
+        fun(X) -> maybe_merge(maybe_eval(L, X), R) end
+    };
+
 maybe_merge(L, {'$mops_proxy', _} = R) ->
     {'$mops_proxy',
-        fun(X) -> maybe_merge(maybe_eval(L, X), maybe_eval(R, X)) end
+        fun(X) -> maybe_merge(L, maybe_eval(R, X)) end
     };
 
 maybe_merge(L, R) ->
