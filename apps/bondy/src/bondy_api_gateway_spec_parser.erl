@@ -56,7 +56,7 @@
     <<"put">>
 ]).
 
--define(MOPS_PROXY_FUN_TYPE, {function, 1}).
+-define(MOPS_PROXY_FUN_TYPE, tuple).
 
 -define(API_HOST, #{
     <<"host">> => #{
@@ -324,14 +324,20 @@
 
 
 -define(DEFAULT_PATH, #{
-    <<"is_collection">> => false,
     <<"variables">> => #{},
     <<"defaults">> => #{},
+    <<"is_collection">> => false,
+    <<"headers">> => <<"{{defaults.headers}}">>,
     <<"accepts">> => <<"{{defaults.accepts}}">>,
     <<"provides">> => <<"{{defaults.provides}}">>,
     <<"schemes">> => <<"{{defaults.schemes}}">>,
-    <<"security">> => <<"{{defaults.security}}">>
+    <<"security">> => <<"{{defaults.security}}">>,
+    <<"timeout">> => <<"{{defaults.timeout}}">>,
+    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
+    <<"retries">> => <<"{{defaults.retries}}">>,
+    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
 }).
+
 
 -define(API_PATH, #{
     <<"is_collection">> => #{
@@ -357,7 +363,8 @@
         allow_null => false,
         datatype => {list,
             {in, [
-                <<"application/json">>, <<"application/msgpack">>
+                <<"application/json">>,
+                <<"application/msgpack">>
             ]}
         }
     },
@@ -367,7 +374,8 @@
         allow_null => false,
         datatype => {list,
             {in, [
-                <<"application/json">>, <<"application/msgpack">>
+                <<"application/json">>,
+                <<"application/msgpack">>
             ]}
         }
     },
@@ -381,7 +389,7 @@
         alias => security,
         required => true,
         allow_null => false,
-        datatype => map,
+        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE],
         validator => fun
             (#{<<"type">> := <<"oauth2">>} = V) ->
                 {ok, maps_utils:validate(V, ?OAUTH2_SPEC)};
@@ -430,18 +438,6 @@
     }
 }).
 
--define(DEFAULT_PATH_DEFAULTS, #{
-    <<"schemes">> => <<"{{defaults.schemes}}">>,
-    <<"security">> => <<"{{defaults.security}}">>,
-    <<"accepts">> => <<"{{defaults.accepts}}">>,
-    <<"provides">> => <<"{{defaults.provides}}">>,
-    <<"headers">> => <<"{{defaults.headers}}">>,
-    <<"timeout">> => <<"{{defaults.timeout}}">>,
-    <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
-    <<"retries">> => <<"{{defaults.retries}}">>,
-    <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>,
-    <<"security">> => <<"{{defaults.security}}">>
-}).
 
 -define(PATH_DEFAULTS, #{
     <<"schemes">> => #{
@@ -817,13 +813,17 @@ end).
 %% -----------------------------------------------------------------------------
 -spec from_file(file:filename()) -> {ok, any()} | {error, any()}.
 from_file(Filename) ->
-    case file:consult(Filename) of
-        {ok, [Spec]} when is_map(Spec) ->
+    try jsx:consult(Filename, [return_maps]) of
+        [Spec] when is_map(Spec) ->
             {ok, parse(Spec, get_context_proxy())};
         _ ->
             {error, invalid_specification_format}
+    catch
+        error:badarg ->
+            _ = lager:error(
+                "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
+            {error, invalid_specification_format}
     end.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -932,11 +932,11 @@ parse_host(Host0, Ctxt0) ->
 -spec parse_version(map(), map()) -> map().
 parse_version(V0, Ctxt0) ->
     %% We merge variables and defaults
-    {V1, Ctxt1} = merge(V0, Ctxt0),
+    {V1, Ctxt1} = merge_eval_vars(V0, Ctxt0),
     %% We then validate the resulting version
     V2 = maps_utils:validate(V1, ?API_VERSION),
     %% We merge again in case the validation added defaults
-    {V3, Ctxt2} = merge(V2, Ctxt1),
+    {V3, Ctxt2} = merge_eval_vars(V2, Ctxt1),
     %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
         try
@@ -961,24 +961,33 @@ parse_path(P0, Ctxt0) ->
     L = allowed_methods(P0),
     %% We merge path spec with gateway default spec
     P1  = maps:merge(?DEFAULT_PATH, P0),
-    %% We merge path's defaults key with gateway defaults
-    % Defs0 = maps:merge(?DEFAULT_PATH_DEFAULTS, maps:get(?DEFAULTS_KEY, P1)),
-    % P2 = maps:update(?DEFAULTS_KEY, Defs0, P1),
-    P2 = P1,
     %% We merge path's variables and defaults into context
-    {P3, Ctxt1} = merge(P2, eval(Ctxt0)),
+    {P2, Ctxt1} = merge_eval_vars(P1, eval_vars(Ctxt0)),
+    %% Ctxt1 = eval(Ctxt0),
+    %% P11 = eval(P1, Ctxt1),
+    %% {P2, Ctxt2} = merge(P11, Ctxt1),
 
     %% We apply defaults and evaluate before validating
-    Ctxt2 = eval(P3, Ctxt1),
-    P4 = validate(?DEFAULTS_KEY, P3, ?PATH_DEFAULTS),
+    %% Ctxt2 = eval_vars(P2, Ctxt1),
+    Ctxt2 = Ctxt1,
+    P3 = validate(?DEFAULTS_KEY, P2, ?PATH_DEFAULTS),
 
-    P5 = parse_path_elements(P4, Ctxt2),
+    P4 = parse_path_elements(P3, Ctxt2),
+    %% io:format("Ctxt0= ~n~p~n", [Ctxt0]),
+    %% io:format("Ctxt1= ~n~p~n", [Ctxt1]),
+    %% io:format("Ctxt2= ~n~p~n", [Ctxt2]),
+    %% io:format("P0= ~n~p~n", [P0]),
+    %% io:format("P1= ~n~p~n", [P1]),
+    %% %% io:format("P11= ~n~p~n", [P11]),
+    %% io:format("P2= ~n~p~n", [P2]),
+    %% io:format("P3= ~n~p~n", [P3]),
+    %% io:format("P4= ~n~p~n", [P4]),
 
     %% FInally we validate the resulting path
-    P6 = maps_utils:validate(P5, ?API_PATH),
+    P5 = maps_utils:validate(P4, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
-    P7 = maps:put(<<"allowed_methods">>, to_uppercase(L), P6),
-    P8 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P7),
+    P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
+    P7 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], P6),
 
     %% Now we evaluate each request type spec
     PFun = fun(Method, IPath) ->
@@ -992,7 +1001,9 @@ parse_path(P0, Ctxt0) ->
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
-    lists:foldl(PFun, P8, L).
+    Res = lists:foldl(PFun, P7, L),
+    %% io:format("P Final= ~n~p~n", [Res]),
+    Res.
 
 
 %% @private
@@ -1104,28 +1115,63 @@ parse_response(Spec0, Ctxt) ->
         <<"on_error">> => OE1
     }.
 
+
+
+
+
+%% -----------------------------------------------------------------------------
 %% @private
-merge(S0, Ctxt0) ->
-    %% We merge variables and defaults
-    VVars = maps:get(?VARS_KEY, S0, #{}),
-    VDefs = maps:get(?DEFAULTS_KEY, S0, #{}),
+%% @doc
+%% Lower level variables and defaults override previous ones
+%% @end
+%% -----------------------------------------------------------------------------
+merge_eval_vars(Spec0, Ctxt0) ->
+    %% We merge (override) ctxt variables and defaults
+    VVars = maps:get(?VARS_KEY, Spec0, #{}),
     MVars = maps:merge(maps:get(?VARS_KEY, Ctxt0), VVars),
+    VDefs = maps:get(?DEFAULTS_KEY, Spec0, #{}),
     MDefs = maps:merge(maps:get(?DEFAULTS_KEY, Ctxt0), VDefs),
-    %% We update section and ctxt
-    S1 = S0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
+
+    %% We update the API section
+    Spec1 = Spec0#{?VARS_KEY => MVars, ?DEFAULTS_KEY => MDefs},
+    %% We also update the ctxt as we use it as an accummulator
     Ctxt1 = maps:update(?VARS_KEY, MVars, Ctxt0),
     Ctxt2 = maps:update(?DEFAULTS_KEY, MDefs, Ctxt1),
-    {S1, Ctxt2}.
-
-
-eval(Ctxt) ->
-    eval(Ctxt, Ctxt).
+    eval_vars(Spec1, Ctxt2).
 
 
 %% @private
-eval(S0, Ctxt0) ->
-    Vars = maps:get(?VARS_KEY, S0),
-    Defs = maps:get(?DEFAULTS_KEY, S0),
+eval_vars(Ctxt) ->
+    element(1, eval_vars(Ctxt, Ctxt)).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% We assume Ctxt0 has been previously evaluated.
+%% Variables are evaluated before defaults
+%%
+%% If at level 1 we have:
+%% a = b
+%% b = 1
+%% c = 2
+%% After eval we get:
+%% a = 1
+%% b = 1
+%% c = 2
+%%
+%% If at level 2 we have:
+%% a = 2
+%% c = b
+%% After eval we get:
+%% a = 2
+%% b = 1
+%% c = 1
+%% @end
+%% -----------------------------------------------------------------------------
+eval_vars(S0, Ctxt0) ->
+    Vars = maps:get(?VARS_KEY, S0, #{}),
+    Defs = maps:get(?DEFAULTS_KEY, S0, #{}),
     %% We evaluate variables by iterating over each
     %% updating the context in each turn as we might have interdependencies
     %% amongst them
@@ -1142,7 +1188,12 @@ eval(S0, Ctxt0) ->
             Var, mops:eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
         maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
     end,
-    maps:fold(DFun, Ctxt1, Defs).
+    Ctxt2 = maps:fold(DFun, Ctxt1, Defs),
+    S1 = S0#{
+        ?VARS_KEY => maps:with(maps:keys(Vars), maps:get(?VARS_KEY, Ctxt2)),
+        ?DEFAULTS_KEY => maps:with(maps:keys(Defs), maps:get(?DEFAULTS_KEY, Ctxt2))
+    },
+    {S1, Ctxt2}.
 
 
 
@@ -1316,11 +1367,11 @@ security_scheme_rules(_, _, _, _, _) ->
 %% -----------------------------------------------------------------------------
 get_context_proxy() ->
     %% We cannot used funs as they will break when we run the
-    %% parse transform, so we use '$mops_proxy'
+    %% parse transform, so we use mops:proxy()
     #{
-        <<"request">> => '$mops_proxy',
-        <<"action">> => '$mops_proxy',
-        <<"security">> => '$mops_proxy'
+        <<"request">> => mops:proxy(),
+        <<"action">> => mops:proxy(),
+        <<"security">> => mops:proxy()
     }.
 
 

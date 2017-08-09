@@ -46,19 +46,15 @@
             "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
             "access-control-max-age": "86400"
         },
-        "wamp_error_override": {
-            "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
-            "code": "{{action.error.error_uri}}",
-            "message": "{{action.error.arguments |> head}}"
-        },
-        "wamp_error_body": "{{action.error.arguments_kw |> merge({{variables.wamp_error_override}})}}"
+        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}})}}"
     },
     "defaults" : {
         "retries" : 0,
         "timeout" : 5000,
         "connect_timeout" : 5000,
         "schemes" : "{{variables.schemes}}",
-        "headers": "{{variables.cors_headers}}"
+        "headers": "{{variables.cors_headers}}",
+        "security":{}
     },
     "versions" :  {
         "1.0.0" : {
