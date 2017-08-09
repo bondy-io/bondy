@@ -181,6 +181,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
             %% Timeout = bondy_utils:timeout(Opts),
+            %% @TODO Take this from Opts map
             Timeout = 20000,
             receive
                 {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
