@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_utils.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -45,11 +45,20 @@
 to_binary_keys(Map) when is_map(Map) ->
     F = fun
         (K, V, Acc) when is_binary(K) ->
-            maps:put(K, V, Acc);
+            maps:put(K, maybe_to_binary_keys(V), Acc);
         (K, V, Acc) when is_atom(K) ->
-            maps:put(list_to_binary(atom_to_list(K)), V, Acc)
+            maps:put(list_to_binary(atom_to_list(K)), maybe_to_binary_keys(V), Acc)
     end,
     maps:fold(F, #{}, Map).
+
+
+
+%% @private
+maybe_to_binary_keys(T) when is_map(T) ->
+    to_binary_keys(T);
+maybe_to_binary_keys(T) ->
+    T.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -104,7 +113,7 @@ decode(json, Term) ->
 
 decode(msgpack, Term) ->
     Opts = [
-        {map_format, map}, 
+        {map_format, map},
         {unpack_str, as_binary}
     ],
     {ok, Bin} = msgpack:unpack(Term, Opts),
@@ -210,14 +219,14 @@ merge_fun(K, V, Acc) ->
 get_nonce() ->
     list_to_binary(
         get_random_string(
-            32, 
+            32,
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
 
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% borrowed from 
+%% borrowed from
 %% http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/
 %% @end
 %% -----------------------------------------------------------------------------
@@ -227,6 +236,6 @@ get_random_string(Length, AllowedChars) ->
             [lists:nth(rand:uniform(length(AllowedChars)),
             AllowedChars)]
             ++ Acc
-        end, 
-        [], 
+        end,
+        [],
         lists:seq(1, Length)).
