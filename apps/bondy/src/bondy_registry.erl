@@ -259,9 +259,11 @@ add(Type, Uri, Options, Ctxt) ->
     MatchPolicy = validate_match_policy(Options),
 
     MaybeAdd = fun
-        (true) ->
+        ({error, _} = Error) ->
+            Error;
+        (RegId) when is_integer(RegId) ->
             Entry = #entry{
-                key = {RealmUri, SessionId, bondy_utils:get_id(global)},
+                key = {RealmUri, SessionId, RegId},
                 type = Type,
                 uri = Uri,
                 match_policy = MatchPolicy,
@@ -269,9 +271,7 @@ add(Type, Uri, Options, Ctxt) ->
                 created = calendar:local_time(),
                 options = parse_options(Type, Options)
             },
-            do_add(Type, Entry, Ctxt);
-        (#entry{} = Entry) ->
-            {error, {already_exists, to_details_map(Entry)}}
+            do_add(Type, Entry, Ctxt)
     end,
 
     Pattern = #entry{
@@ -289,7 +289,7 @@ add(Type, Uri, Options, Ctxt) ->
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
-            MaybeAdd(true);
+            MaybeAdd(bondy_utils:get_id(global));
 
         [#entry{} = Entry] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
@@ -318,8 +318,12 @@ add(Type, Uri, Options, Ctxt) ->
             Flag = SharedEnabled andalso
                 NewPolicy =/= ?INVOKE_SINGLE andalso
                 NewPolicy =:= PrevPolicy,
-
-            MaybeAdd(Flag orelse Entry)
+            case Flag of
+                true ->
+                    MaybeAdd(entry_id(Entry));
+                false ->
+                    MaybeAdd({error, {already_exists, to_details_map(Entry)}})
+            end
     end.
 
 
@@ -356,7 +360,7 @@ remove_all(_, _) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Lookup an entry by Type, Id and Ctxt
+%% Lookup an entry by Type, Id (Registration or Subscription Id) and Ctxt
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(entry_type(), id(), bondy_context:context()) ->

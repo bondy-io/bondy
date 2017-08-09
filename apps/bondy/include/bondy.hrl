@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy.hrl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -40,7 +40,7 @@
     registration_revocation => false,
     session_meta_api => false,
     pattern_based_registration => true,
-    procedure_reflection => false,
+    reflection => false,
     shared_registration => true,
     sharded_registration => false
 }).
@@ -77,7 +77,7 @@
     sharded_subscription => false,
     subscriber_blackwhite_listing => false,
     subscription_meta_api => false,
-    topic_reflection => false
+    reflection => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
