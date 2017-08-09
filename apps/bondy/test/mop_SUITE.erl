@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  mop_SUITE.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,10 +25,10 @@ all() ->
 
 groups() ->
     [{main, [parallel], common:tests(?MODULE)}].
-    
+
 % Bin = <<"\"{{foo}}\"">>.
 % Len = byte_size(Bin).
-% 
+%
 % mops:eval(<<"\"Hello {{foo}}, {{foo}}\"">>, #{<<"foo">> => 3}).
 % mops:eval(<<"\"Hello {{foo |> float |> integer}}, {{foo |> integer}}\"">>, #{<<"foo">> => 3}).
 % [_, Fun, _]=mops:eval(<<"\"{{foo.bar.a |> integer}}\"">>, #{<<"foo">> => fun(X) -> X end}).
@@ -66,8 +66,8 @@ pipe_3_test(_) ->
    3.0 =:= mops:eval(<<"{{foo |> integer |> float}}">>, #{<<"foo">> => 3.0}).
 
 recursive_1_test(_) ->
-    Ctxt = #{ 
-        <<"name">> => <<"{{lastname}}">>, 
+    Ctxt = #{
+        <<"name">> => <<"{{lastname}}">>,
         <<"lastname">> => <<"{{surname}}">>,
         <<"surname">> => <<"Ramallo">>
     },
@@ -76,16 +76,16 @@ recursive_1_test(_) ->
 
 recursive_2_test(_) ->
     Ctxt = #{
-        <<"fullname">> => <<"\"{{name}} {{surname}}\"">>, 
-        <<"name">> => <<"Alejandro">>, 
+        <<"fullname">> => <<"\"{{name}} {{surname}}\"">>,
+        <<"name">> => <<"Alejandro">>,
         <<"surname">> => <<"Ramallo">>
     },
     <<"Alejandro Ramallo">> =:= mops:eval(<<"{{fullname}}">>, Ctxt).
 
 recursive_3_test(_) ->
     Ctxt = #{
-        <<"fullname">> => <<"\"{{name}} {{surname}}\"">>, 
-        <<"name">> => <<"Alejandro">>, 
+        <<"fullname">> => <<"\"{{name}} {{surname}}\"">>,
+        <<"name">> => <<"Alejandro">>,
         <<"surname">> => <<"Ramallo">>
     },
     <<"\"Alejandro Ramallo\"">> =:= mops:eval(<<"\"{{fullname}}\"">>, Ctxt).
@@ -221,3 +221,40 @@ merge_right_test(_) ->
         <<"bar">> => #{<<"a">> => 10}
     },
     #{<<"a">> => 1} =:= mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).
+
+merge_right_2_test(_) ->
+    Ctxt0 = #{
+        <<"map1">> => #{
+            <<"a">> => <<"{{map2.c}}">>,
+            <<"b">> => 2
+        },
+        <<"map2">> => '$mops_proxy',
+        <<"map3">> => #{}
+    },
+    Ctxt1 = #{
+        <<"map2">> => #{<<"c">> => 1}
+    },
+    Map = mops:eval(<<"{{map3 |> merge({{map1}})}}">>, Ctxt0),
+    #{<<"a">> := 1, <<"b">> := 2} = mops:eval(Map, Ctxt1).
+
+
+merge_right_3_test(_) ->
+    Ctxt0 = #{
+        <<"wamp_error_override">> => #{
+            <<"code">> => <<"{{action.error.error_uri}}">>,
+            <<"message">> => <<"{{action.error.arguments |> head}}">>
+        },
+        <<"action">> => '$mops_proxy',
+        <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
+    },
+    Ctxt1 = #{
+        <<"action">> => #{
+            <<"error">> => #{
+                <<"error_uri">> => <<"com.foo">>,
+                <<"arguments">> => [<<"foobar">>],
+                <<"arguments_kw">> =>#{}
+            }
+        }
+    },
+    Map = mops:eval(<<"{{wamp_error_body}}">>, Ctxt0),
+    #{<<"code">> := <<"com.foo">>, <<"message">> := <<"foobar">>} = mops:eval(Map, Ctxt1).

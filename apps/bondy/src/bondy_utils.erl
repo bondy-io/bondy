@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_utils.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,7 +24,6 @@
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([timeout/1]).
--export([error_uri_to_status_code/1]).
 -export([eval_term/2]).
 -export([maybe_encode/2]).
 -export([encode/2]).
@@ -46,11 +45,20 @@
 to_binary_keys(Map) when is_map(Map) ->
     F = fun
         (K, V, Acc) when is_binary(K) ->
-            maps:put(K, V, Acc);
+            maps:put(K, maybe_to_binary_keys(V), Acc);
         (K, V, Acc) when is_atom(K) ->
-            maps:put(list_to_binary(atom_to_list(K)), V, Acc)
+            maps:put(list_to_binary(atom_to_list(K)), maybe_to_binary_keys(V), Acc)
     end,
     maps:fold(F, #{}, Map).
+
+
+
+%% @private
+maybe_to_binary_keys(T) when is_map(T) ->
+    to_binary_keys(T);
+maybe_to_binary_keys(T) ->
+    T.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -105,7 +113,7 @@ decode(json, Term) ->
 
 decode(msgpack, Term) ->
     Opts = [
-        {map_format, map}, 
+        {map_format, map},
         {unpack_str, as_binary}
     ],
     {ok, Bin} = msgpack:unpack(Term, Opts),
@@ -171,32 +179,6 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
 
 
 
-
-%% @private
-error_uri_to_status_code(timeout) ->                                     504;
-error_uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
-error_uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
-error_uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
-error_uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         500;
-error_uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
-error_uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
-error_uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502; 
-error_uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502; 
-error_uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401; 
-error_uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502; 
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_PROCEDURE) ->               501; 
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REALM) ->                   502; 
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_REGISTRATION) ->            502;
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_ROLE) ->                    400;
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SESSION) ->                 500;
-error_uri_to_status_code(?WAMP_ERROR_NO_SUCH_SUBSCRIPTION) ->            502;
-error_uri_to_status_code(?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME) ->   500;
-error_uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
-error_uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
-error_uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
-error_uri_to_status_code(_) ->                                           500.
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -237,14 +219,14 @@ merge_fun(K, V, Acc) ->
 get_nonce() ->
     list_to_binary(
         get_random_string(
-            32, 
+            32,
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
 
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% borrowed from 
+%% borrowed from
 %% http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/
 %% @end
 %% -----------------------------------------------------------------------------
@@ -254,6 +236,6 @@ get_random_string(Length, AllowedChars) ->
             [lists:nth(rand:uniform(length(AllowedChars)),
             AllowedChars)]
             ++ Acc
-        end, 
-        [], 
+        end,
+        [],
         lists:seq(1, Length)).

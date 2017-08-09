@@ -404,7 +404,7 @@ do_forward(#register{} = M, Ctxt) ->
     #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
 
     Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
-        {ok, Map} ->
+        {ok, Map, _} ->
             RegId = maps:get(id, Map),
             wamp_message:registered(ReqId, RegId);
         {error, not_authorized} ->
@@ -449,11 +449,14 @@ do_forward(M, Ctxt0) ->
         error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
+            ErrorMap = bondy_error:map(Reason),
             Reply = wamp_message:error(
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
-                bondy_error:error_map(Reason),
-                ?WAMP_ERROR_CANCELLED
+                #{},
+                ?WAMP_ERROR_CANCELLED,
+                [maps:get(<<"message">>, ErrorMap)],
+                #{error => ErrorMap}
             ),
             ok = bondy_stats:update(Reply, Ctxt0),
             {reply, Reply, Ctxt0};

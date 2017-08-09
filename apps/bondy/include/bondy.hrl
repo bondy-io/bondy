@@ -102,12 +102,11 @@
 %% =============================================================================
 
 
-
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"com.leapsight.bondy.error.not_in_session">>).
 -define(BONDY_SESSION_ALREADY_EXISTS, <<"com.leapsight.bondy.error.session_already_exists">>).
 
 -define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
-
+-define(BONDY_ERROR_UNKNOWN, <<"com.leapsight.bondy.error.unknown_error">>).
 -type peer_id() :: {integer(), pid()}.
 
 

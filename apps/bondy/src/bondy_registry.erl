@@ -256,17 +256,6 @@ add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     MatchPolicy = validate_match_policy(Options),
-    
-    Pattern = #entry{
-        key = key_pattern(Type, RealmUri, SessionId),
-        type = Type,
-        uri = Uri,
-        match_policy = MatchPolicy,
-        criteria = [], % TODO Criteria
-        created = '_',
-        options = '_'
-    },
-    Tab = entry_table(Type, RealmUri),
 
     MaybeAdd = fun
         (true) ->
@@ -280,9 +269,20 @@ add(Type, Uri, Options, Ctxt) ->
                 options = parse_options(Type, Options)
             },
             do_add(Type, Entry, Ctxt);
-        (Entry) ->
+        (#entry{} = Entry) ->
             {error, {already_exists, to_details_map(Entry)}}
     end,
+
+    Pattern = #entry{
+        key = key_pattern(Type, RealmUri, SessionId),
+        type = Type,
+        uri = Uri,
+        match_policy = MatchPolicy,
+        criteria = '_', % TODO Criteria
+        created = '_',
+        options = '_'
+    },
+    Tab = entry_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
         [] ->
@@ -442,6 +442,7 @@ entries(Type, Ctxt) ->
 entries(Type, RealmUri, SessionId) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
+        type = Type,
         uri = '_',
         match_policy = '_',
         criteria = '_',
@@ -467,6 +468,7 @@ entries(Type, RealmUri, SessionId) ->
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
+        type = Type,
         uri = '_',
         match_policy = '_',
         criteria = '_',

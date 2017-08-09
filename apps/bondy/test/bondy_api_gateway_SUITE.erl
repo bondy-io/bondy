@@ -107,6 +107,4 @@ simple_1_test(_) ->
             }
         }
     },
-    Expected = bondy_api_gateway_spec:parse(Spec),
-    Result = bondy_api_gateway_spec:compile([Expected]),
-    bondy_api_gateway_spec:load(Result).
+    bondy_api_gateway_spec_parser:parse(Spec).

@@ -1,5 +1,5 @@
 %% =============================================================================
-%% bondy_app - 
+%% bondy_app -
 %%
 %% Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -52,7 +52,7 @@ stop(_State) ->
 
 vsn() ->
     application:get_env(bondy, vsn, "undefined").
-    
+
 
 %% =============================================================================
 %% PRIVATE

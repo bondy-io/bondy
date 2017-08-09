@@ -9,13 +9,14 @@
             "revoke_token_path" : "/oauth/revoke",
             "schemes" : "{{variables.schemes}}"
         },
-        "query_spec" : 
+        "query_spec" :
             "{{request.query_params |> with([_q,_p,_limit,_sort,_page])}}",
-        "query_match" : 
+        "query_match" :
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
         "schemes" : ["http"],
         "error_codes" : {
             "com.leapsight.bondy.error.not_found" : 404,
+            "com.leapsight.bondy.error.role_exists": 400,
             "com.leapsight.bondy.error.unknown_user": 400,
             "wamp.error.authorization_failed" : 403,
             "wamp.error.cancelled​" : 500,
@@ -36,25 +37,24 @@
             "wamp.error.option_disallowed.disclose_me" : 400,
             "wamp.error.option_not_allowed" : 400,
             "wamp.error.procedure_already_exists" : 400,
-            "wamp.error.system_shutdown" : 400
+            "wamp.error.system_shutdown" : 500
         },
-        "cors_headers" : {
-            "access-control-allow-origin" : "*",
+        "cors_headers": {
+            "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
-            // "access-control-allow-methods" : "{{request.headers |> get(access-control-request-method, 'Origin, X-Requested-With, Content-Type, Accept')}}",
-            // "access-control-allow-headers" : "{{request.headers |> get(access-control-request-headers, '')}}",
-            "access-control-allow-methods" : "GET,HEAD,PUT,PATCH,POST,DELETE",
-            "access-control-allow-headers" : "origin,x-requested-with,content-type,accept",
-            "access-control-max-age" : "86400"
-        }
-    },  
+            "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+            "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
+            "access-control-max-age": "86400"
+        },
+        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}}) |> put(status_code, {{action.error.status_code}})}}"
+    },
     "defaults" : {
         "retries" : 0,
         "timeout" : 5000,
         "connect_timeout" : 5000,
         "schemes" : "{{variables.schemes}}",
-        "headers": "{{variables.cors_headers}}"
-        // ,"security" : "{{variables.oauth2}}"
+        "headers": "{{variables.cors_headers}}",
+        "security":{}
     },
     "versions" :  {
         "1.0.0" : {
@@ -79,15 +79,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.wamp_error_body.status_code}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -105,15 +103,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "delete" : {
@@ -128,15 +124,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -157,15 +151,59 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/clients/:id" : {
+                    "is_collection" : false,
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.update_client",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.remove_client",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -186,15 +224,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -209,19 +245,17 @@
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
-                            ]   
+                            ]
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "delete" : {
@@ -236,15 +270,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -265,15 +297,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "get" : {
@@ -290,14 +320,12 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : {}
+                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
-                            } 
+                                "body" : "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -315,15 +343,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "put" : {
@@ -335,19 +361,17 @@
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
-                            ]   
+                            ]
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "delete" : {
@@ -362,15 +386,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -391,15 +413,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "get" : {
@@ -416,14 +436,12 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : {}
+                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}",
-                                "headers" : {}
-                            } 
+                                "body" : "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 },
@@ -441,15 +459,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "put" : {
@@ -461,19 +477,17 @@
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
-                            ]   
+                            ]
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     },
                     "delete" : {
@@ -488,15 +502,13 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.details.code}}, 500) |> integer}}",
-                                "body" : "{{action.error.details}}",
-                                "headers" : "{{defaults.headers}}"
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : 
-                                    "{{action.result.arguments |> head}}",
-                                "headers" : "{{defaults.headers}}"
-                            } 
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
                         }
                     }
                 }
