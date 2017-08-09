@@ -21,22 +21,41 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--export([error_map/1]).
--export([error_map/2]).
--export([error_uri/1]).
 
 
+%% -type error_map() :: #{
+%%     code => binary(),
+%%     message => binary(),
+%%     description => binary(),
+%%     errors => [#{
+%%         code => binary(),
+%%         message => binary(),
+%%         description => binary(),
+%%         key => any(),
+%%         value => any()
+%%     }]
+%% }.
+
+-export([map/1]).
+-export([map/2]).
+-export([code_to_uri/1]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-error_uri(Reason) when is_atom(Reason) ->
+code_to_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
     <<"com.leapsight.bondy.error.", R/binary>>;
 
-error_uri(Reason) when is_binary(Reason) ->
+code_to_uri(Reason) when is_binary(Reason) ->
     <<"com.leapsight.bondy.error.", Reason/binary>>.
 
 
@@ -45,62 +64,28 @@ error_uri(Reason) when is_binary(Reason) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-error_map(#{code := _} = M) ->
+map(#error{} = Err) ->
+    map(#{
+        error_uri => Err#error.error_uri,
+        details => Err#error.details,
+        arguments => Err#error.arguments,
+        arguments_kw => Err#error.arguments_kw
+    });
+
+map(#{error_uri := Uri} = M) ->
+    Error = get_error(M),
+    Error#{
+        <<"code">> => Uri,
+        <<"message">> => get_message(M)
+    };
+
+map(#{code := _} = M) ->
     bondy_utils:to_binary_keys(M);
 
+map(#{<<"code">> := _} = M) ->
+    M;
 
-error_map(#error{arguments = undefined, arguments_kw = undefined} = Err) ->
-    #error{error_uri = Uri} = Err,
-    #{
-        <<"code">> => Uri,
-        <<"message">> => <<>>,
-        <<"description">> => <<>>
-    };
-
-
-
-error_map(#error{arguments = L, arguments_kw = undefined} = Err)
-when is_list(L) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = case L of
-        [] ->
-            [];
-        _ ->
-            hd(L)
-    end,
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Mssg
-    };
-
-error_map(#error{arguments = undefined, arguments_kw = M} = Err)
-when is_map(M) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = maps:get(<<"message">>, M),
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-error_map(#error{arguments = L, arguments_kw = M} = Err) ->
-    #error{error_uri = Uri} = Err,
-    Mssg = case L of
-        [] ->
-            [];
-        _ ->
-            hd(L)
-    end,
-    Desc = maps:get(<<"description">>, M, Mssg),
-    #{
-        <<"code">> => Uri,
-        <<"message">> => Mssg,
-        <<"description">> => Desc
-    };
-
-error_map(oauth2_invalid_request) ->
+map(oauth2_invalid_request) ->
     #{
         <<"code">> => <<"invalid_request">>,
         <<"status_code">> => 400,
@@ -108,7 +93,7 @@ error_map(oauth2_invalid_request) ->
         <<"description">> => <<"The request is missing a required parameter, includes an unsupported parameter value (other than grant type), repeats a parameter, includes multiple credentials, utilizes more than one mechanism for authenticating the client, or is otherwise malformed.">>
     };
 
-error_map(oauth2_invalid_client) ->
+map(oauth2_invalid_client) ->
     %% Client authentication failed (e.g., unknown client, no
     %% client authentication included, or unsupported
     %% authentication method).  The authorization server MAY
@@ -126,15 +111,15 @@ error_map(oauth2_invalid_client) ->
         <<"description">> => <<"Client authentication failed (e.g., unknown client, no client authentication included, or unsupported authentication method).">>
     };
 
-error_map(oauth2_invalid_grant) ->
+map(oauth2_invalid_grant) ->
     #{
         <<"code">> => <<"invalid_grant">>,
         <<"status_code">> => 400,
         <<"message">> => <<"The access or refresh token provided is expired, revoked, malformed, or invalid.">>,
-        <<"description">> => <<"The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client. The client MAY request a new access token and retry the protected resource request.">>
+        <<"description">> => <<"The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does wamp_ match the redirection URI used in the authorization request, or was issued to another client. The client MAY request a new access token and retry the protected resource request.">>
     };
 
-error_map(oauth2_unauthorized_client) ->
+map(oauth2_unauthorized_client) ->
     #{
         <<"code">> => <<"unauthorized_client">>,
         <<"status_code">> => 400,
@@ -142,7 +127,7 @@ error_map(oauth2_unauthorized_client) ->
         <<"description">> => <<>>
     };
 
-error_map(oauth2_unsupported_grant_type) ->
+map(oauth2_unsupported_grant_type) ->
     #{
         <<"code">> => <<"unsupported_grant_type">>,
         <<"status_code">> => 400,
@@ -150,7 +135,7 @@ error_map(oauth2_unsupported_grant_type) ->
         <<"description">> => <<>>
     };
 
-error_map(oauth2_invalid_scope) ->
+map(oauth2_invalid_scope) ->
     #{
         <<"code">> => <<"invalid_scope">>,
         <<"status_code">> => 400,
@@ -158,43 +143,93 @@ error_map(oauth2_invalid_scope) ->
         <<"description">> => <<"The authorization grant type is not supported by the authorization server.">>
     };
 
-error_map(invalid_scheme) ->
+map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
-    maps:put(<<"status_code">>, Msg, error_map(oauth2_invalid_client));
+    maps:put(<<"status_code">>, Msg, map(oauth2_invalid_client));
 
-error_map({badarg, {decoding, json}}) ->
+map({badarg, {decoding, json}}) ->
     #{
         <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid json.">>,
         <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
     };
 
-error_map({badarg, {decoding, msgpack}}) ->
+map({badarg, {decoding, msgpack}}) ->
     #{
         <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid msgpack.">>,
         <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
     };
 
-error_map({Code, Mssg}) ->
+map({Code, Mssg}) ->
     #{
         <<"code">> => Code,
         <<"message">> => Mssg,
         <<"description">> => <<>>
     };
 
-error_map({Code, Mssg, Desc}) ->
+map({Code, Mssg, Desc}) ->
     #{
         <<"code">> => Code,
         <<"message">> => Mssg,
         <<"description">> => Desc
     };
 
-error_map(Code) ->
+map(Code) ->
     #{
-        <<"code">> => Code
+        <<"code">> => Code,
+        <<"message">> => <<>>,
+        <<"description">> => <<>>
     }.
 
 
-error_map(Error, N) ->
-    maps:put(<<"status_code">>, N, error_map(Error)).
+map(Code, Term) when is_binary(Code) ->
+    maps:put(code, Code, map(Term)).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+get_error(#{arguments_kw := #{<<"error">> := Map}}) ->
+    Map;
+
+get_error(_) ->
+    #{}.
+
+    
+%% @private
+get_message(#{arguments := undefined}) -> 
+    <<>>;
+
+get_message(#{arguments := []}) -> 
+    <<>>;
+
+get_message(#{arguments := L}) when is_list(L) -> 
+    hd(L);
+
+get_message(#{arguments_kw := undefined}) -> 
+    <<>>;
+
+get_message(#{arguments_kw := #{}}) -> 
+    <<>>;
+
+get_message(#{arguments_kw := #{<<"error">> := Map}}) when is_map(Map) ->
+    case maps:find(<<"message">>, Map) of
+        {ok, Val} -> Val;
+        error -> <<>>
+    end;
+
+get_message(_) ->
+    <<>>.
+
+
+
+
+

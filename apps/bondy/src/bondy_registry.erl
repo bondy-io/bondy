@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_registry.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -49,13 +49,13 @@
     type                    ::  entry_type(),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
-    criteria                ::  [{'=:=', Field :: binary(), Value :: any()}] 
+    criteria                ::  [{'=:=', Field :: binary(), Value :: any()}]
                                 | atom(),
     created                 ::  calendar:date_time() | atom(),
     options                 ::  map() | atom()
 }).
 
-%% TODO indices should be recomputed based on entry creation/deletion but are 
+%% TODO indices should be recomputed based on entry creation/deletion but are
 %% always local (i.e. they should not be replicated)
 -record(index, {
     key                     ::  tuple() | atom(),  % dynamically generated
@@ -205,7 +205,7 @@ options(#entry{options = Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Converts the entry into a map according to the WAMP protocol Details 
+%% Converts the entry into a map according to the WAMP protocol Details
 %% dictionary format.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -216,7 +216,8 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
         id => Id,
         created => E#entry.created,
         uri => E#entry.uri,
-        match => E#entry.match_policy
+        match => E#entry.match_policy,
+        invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
     }.
 
 
@@ -225,30 +226,30 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 %% @doc
 %% Adds an entry to the registry.
 %%
-%% Adding an already existing entry is treated differently based on whether the 
+%% Adding an already existing entry is treated differently based on whether the
 %% entry is a registration or a subscription.
-%% 
-%% According to the WAMP specifictation, in the case of a subscription that was 
-%% already added before by the same _Subscriber_, the _Broker_ should not fail 
+%%
+%% According to the WAMP specifictation, in the case of a subscription that was
+%% already added before by the same _Subscriber_, the _Broker_ should not fail
 %% and answer with a "SUBSCRIBED" message, containing the existing
-%% "Subscription|id". So in this case this function returns 
+%% "Subscription|id". So in this case this function returns
 %% {ok, details_map(), boolean()}.
 %%
-%% In case of a registration, as a default, only a single Callee may 
-%% register a procedure for an URI. However, when shared registrations are 
+%% In case of a registration, as a default, only a single Callee may
+%% register a procedure for an URI. However, when shared registrations are
 %% supported, then the first Callee to register a procedure for a particular URI
-%% MAY determine that additional registrations for this URI are allowed, and 
-%% what Invocation Rules to apply in case such additional registrations are 
+%% MAY determine that additional registrations for this URI are allowed, and
+%% what Invocation Rules to apply in case such additional registrations are
 %% made.
 %%
-%% This is configured through the 'invoke' options. 
-%% When invoke is not 'single', Dealer MUST fail all subsequent attempts to 
-%% register a procedure for the URI where the value for the invoke option does 
-%% not match that of the initial registration. Accordingly this function might 
+%% This is configured through the 'invoke' options.
+%% When invoke is not 'single', Dealer MUST fail all subsequent attempts to
+%% register a procedure for the URI where the value for the invoke option does
+%% not match that of the initial registration. Accordingly this function might
 %% return an error tuple.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(entry_type(), uri(), map(), bondy_context:context()) -> 
+-spec add(entry_type(), uri(), map(), bondy_context:context()) ->
     {ok, details_map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, id()}}.
 
@@ -256,22 +257,13 @@ add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     MatchPolicy = validate_match_policy(Options),
-    
-    Pattern = #entry{
-        key = key_pattern(Type, RealmUri, SessionId),
-        type = Type,
-        uri = Uri,
-        match_policy = MatchPolicy,
-        criteria = [], % TODO Criteria
-        created = '_',
-        options = '_'
-    },
-    Tab = entry_table(Type, RealmUri),
 
     MaybeAdd = fun
-        (true) ->
+        ({error, _} = Error) ->
+            Error;
+        (RegId) when is_integer(RegId) ->
             Entry = #entry{
-                key = {RealmUri, SessionId, bondy_utils:get_id(global)},
+                key = {RealmUri, SessionId, RegId},
                 type = Type,
                 uri = Uri,
                 match_policy = MatchPolicy,
@@ -279,16 +271,25 @@ add(Type, Uri, Options, Ctxt) ->
                 created = calendar:local_time(),
                 options = parse_options(Type, Options)
             },
-            do_add(Type, Entry, Ctxt);
-        (Entry) ->
-            {error, {already_exists, to_details_map(Entry)}}
+            do_add(Type, Entry, Ctxt)
     end,
+
+    Pattern = #entry{
+        key = key_pattern(Type, RealmUri, SessionId),
+        type = Type,
+        uri = Uri,
+        match_policy = MatchPolicy,
+        criteria = '_', % TODO Criteria
+        created = '_',
+        options = '_'
+    },
+    Tab = entry_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
-            MaybeAdd(true);
+            MaybeAdd(bondy_utils:get_id(global));
 
         [#entry{} = Entry] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
@@ -317,8 +318,12 @@ add(Type, Uri, Options, Ctxt) ->
             Flag = SharedEnabled andalso
                 NewPolicy =/= ?INVOKE_SINGLE andalso
                 NewPolicy =:= PrevPolicy,
-
-            MaybeAdd(Flag orelse Entry)
+            case Flag of
+                true ->
+                    MaybeAdd(entry_id(Entry));
+                false ->
+                    MaybeAdd({error, {already_exists, to_details_map(Entry)}})
+            end
     end.
 
 
@@ -348,17 +353,17 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
             %% Use iterator to remove each one
             do_remove_all(First, Tab, Ctxt)
     end;
-    
+
 remove_all(_, _) ->
     ok.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Lookup an entry by Type, Id and Ctxt
+%% Lookup an entry by Type, Id (Registration or Subscription Id) and Ctxt
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(entry_type(), id(), bondy_context:context()) -> 
+-spec lookup(entry_type(), id(), bondy_context:context()) ->
     entry() | {error, not_found}.
 
 lookup(Type, EntryId, Ctxt) ->
@@ -389,7 +394,7 @@ lookup(Type, EntryId, SessionId, RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(entry_type(), id(), bondy_context:context()) -> 
+-spec remove(entry_type(), id(), bondy_context:context()) ->
     ok | {error, not_found}.
 
 remove(Type, EntryId, Ctxt) ->
@@ -416,7 +421,7 @@ remove(Type, EntryId, Ctxt) ->
 %% @doc
 %% Returns the list of entries owned by the the active session.
 %%
-%% This function is equivalent to calling {@link entries/2} with the RealmUri 
+%% This function is equivalent to calling {@link entries/2} with the RealmUri
 %% and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -430,7 +435,7 @@ entries(Type, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the complete list of entries owned by a session matching  
+%% Returns the complete list of entries owned by a session matching
 %% RealmUri and SessionId.
 %%
 %% Use {@link entries/3} and {@link entries/1} to limit the number
@@ -442,6 +447,7 @@ entries(Type, Ctxt) ->
 entries(Type, RealmUri, SessionId) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
+        type = Type,
         uri = '_',
         match_policy = '_',
         criteria = '_',
@@ -455,9 +461,9 @@ entries(Type, RealmUri, SessionId) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Works like {@link entries/2,3}, but only returns a limited (Limit) number of 
-%% entries. Term Continuation can then be used in subsequent calls to entries/1 
-%% to get the next chunk of entries. 
+%% Works like {@link entries/2,3}, but only returns a limited (Limit) number of
+%% entries. Term Continuation can then be used in subsequent calls to entries/1
+%% to get the next chunk of entries.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(
@@ -467,6 +473,7 @@ entries(Type, RealmUri, SessionId) ->
 entries(Type, RealmUri, SessionId, Limit) ->
     Pattern = #entry{
         key = {RealmUri, SessionId, '_'},
+        type = Type,
         uri = '_',
         match_policy = '_',
         criteria = '_',
@@ -482,22 +489,22 @@ entries(Type, RealmUri, SessionId, Limit) ->
 %% Continues returning the list of entries owned by a session started with
 %% {@link entries/4}.
 %%
-%% The next chunk of the size specified in the initial entries/4 call is 
-%% returned together with a new Continuation, which can be used in subsequent 
+%% The next chunk of the size specified in the initial entries/4 call is
+%% returned together with a new Continuation, which can be used in subsequent
 %% calls to this function.
 %%
-%% When there are no more objects in the table, {[], '$end_of_table'} is 
+%% When there are no more objects in the table, {[], '$end_of_table'} is
 %% returned.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(continuation()) -> {[entry()], continuation() | eot()}.
 
-entries(?EOT) -> 
+entries(?EOT) ->
     {[], ?EOT};
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
     case ets:match_object(Cont) of
-        ?EOT -> 
+        ?EOT ->
             {[], ?EOT};
         {L, NewCont} ->
             {L, {Type, NewCont}}
@@ -519,11 +526,11 @@ match(Type, Uri, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the entries matching either a topic or procedure Uri according to 
+%% Returns the entries matching either a topic or procedure Uri according to
 %% each entry's configured match specification.
 %%
-%% This function is used by the Broker to return all subscriptions that match a 
-%% topic. And in case of registrations it is used by the Dealer to return all 
+%% This function is used by the Broker to return all subscriptions that match a
+%% topic. And in case of registrations it is used by the Dealer to return all
 %% registrations matching a procedure.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -535,7 +542,7 @@ match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
     MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     case ets:select(Tab, MS, Limit) of
-        ?EOT -> 
+        ?EOT ->
             {[], ?EOT};
         Result ->
             lookup_entries(Type, Result)
@@ -559,7 +566,7 @@ match(?EOT) ->
 
 match({Type, Cont}) ->
     case ets:select(Cont) of
-        ?EOT -> 
+        ?EOT ->
             {[], ?EOT};
         Result ->
             lookup_entries(Type, Result)
@@ -625,8 +632,8 @@ do_remove_all(_, _, _) ->
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
     P = maps:get(match, Options, ?EXACT_MATCH),
-    P == ?EXACT_MATCH 
-    orelse P == ?PREFIX_MATCH 
+    P == ?EXACT_MATCH
+    orelse P == ?PREFIX_MATCH
     orelse P == ?WILDCARD_MATCH
     orelse error({invalid_match_policy, P}),
     P.
@@ -675,7 +682,7 @@ index_table(registration, RealmUri) ->
 
 
 %% @private
--spec do_add(atom(), entry(), bondy_context:context()) -> 
+-spec do_add(atom(), entry(), bondy_context:context()) ->
     {ok, entry(), IsFirstEntry :: boolean()}.
 
 do_add(Type, Entry, Ctxt) ->
@@ -718,7 +725,7 @@ index_entry(EntryId, Uri, Policy, Ctxt) ->
             Entry#index{key = list_to_tuple(Cs)}
     end.
 
-    
+
 %% @private
 -spec index_ms(uri(), uri(), map()) -> ets:match_spec().
 
@@ -805,9 +812,9 @@ do_lookup_entries([], _, Acc) ->
 
 do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
     case ets:lookup(entry_table(Type, RealmUri), Key) of
-        [] -> 
+        [] ->
             do_lookup_entries(T, Type, Acc);
-        [Entry] -> 
+        [Entry] ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
 
@@ -844,10 +851,10 @@ uri_components(Uri) ->
 
 
 %% @private
-key_pattern(subscription, RealmUri, SessionId) -> 
+key_pattern(subscription, RealmUri, SessionId) ->
     {RealmUri, SessionId, '$1'};
 
-key_pattern(registration, RealmUri, _) -> 
+key_pattern(registration, RealmUri, _) ->
     {RealmUri, '_', '$1'}.
 
 
@@ -862,11 +869,11 @@ decr_counter(Tab, Key, N) ->
     Default = {counter, Key, 0},
     case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
         0 ->
-            %% Other process might have concurrently incremented the count, 
+            %% Other process might have concurrently incremented the count,
             %% so we do a match delete
             true = ets:match_delete(Tab, Default),
             0;
-        Val -> 
+        Val ->
             Val
     end.
 

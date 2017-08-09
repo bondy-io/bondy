@@ -162,11 +162,15 @@ handle_message(#publish{} = M, Ctxt) ->
                 ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, Reason} when Acknowledge == true ->
+            ErrorMap = bondy_error:map(?WAMP_ERROR_CANCELLED, Reason),
             Reply = wamp_message:error(
-                ?PUBLISH, 
-                ReqId, 
-                bondy_error:error_map(Reason), 
-                ?WAMP_ERROR_CANCELLED),
+                ?PUBLISH,
+                ReqId,
+                #{},
+                ?WAMP_ERROR_CANCELLED,
+                [maps:get(<<"message">>, ErrorMap)],
+                ErrorMap
+            ),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, _} ->
             ok
@@ -365,7 +369,7 @@ subscriptions({subscription, _} = Cont) ->
     [bondy_registry:entry()].
 
 subscriptions(RealmUri, SessionId) ->
-    bondy_registry:entries(subscription, RealmUri, SessionId, infinity).
+    bondy_registry:entries(subscription, RealmUri, SessionId).
 
 
 %% -----------------------------------------------------------------------------

@@ -357,10 +357,10 @@ reply(common_name_mismatch, Enc, Req) ->
 reply(oauth2_invalid_client = Error, Enc, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:error_map(Error), Headers, Req));
+        401, prepare_request(Enc, bondy_error:map(Error), Headers, Req));
 
 reply(Error, Enc, Req) ->
-    Map =  bondy_error:error_map(Error),
+    Map =  bondy_error:map(Error),
     Status = maps:get(<<"status_code">>, Map, 400),
     cowboy_req:reply(
         Status, prepare_request(Enc, Map, #{}, Req)).

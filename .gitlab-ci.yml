@@ -21,6 +21,9 @@ build1:
 
 publish1:
  stage: publish
+ only:
+   - master
+   - develop
  tags:
    - packet
  script:
@@ -28,6 +31,9 @@ publish1:
 
 test1:
  stage: test
+ only:
+   - master
+   - develop
  tags:
    - packet
  script:

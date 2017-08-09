@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,7 +26,15 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--import(bondy_error, [error_map/1]).
+
+-type wamp_error_map() :: #{
+    error_uri => uri(),
+    details => map(),
+    arguments => list(),
+    arguments_kw => map()
+}.
+
+-export_type([wamp_error_map/0]).
 
 
 -export([ack/2]).
@@ -62,13 +70,13 @@ send(PeerId, M) ->
 %% @doc
 %% Sends a message to a peer.
 %% If the transport is not open it fails with an exception.
-%% This function is used by the router (dealer | broker) to send wamp messages 
+%% This function is used by the router (dealer | broker) to send wamp messages
 %% to peers.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({SessionId, Pid} = P, M, Opts) 
+send({SessionId, Pid} = P, M, Opts)
 when is_integer(SessionId), Pid =:= self() ->
     wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
     Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
@@ -79,7 +87,7 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     Opts1 = maps_utils:validate(Opts0, #{
         timeout => #{
             required => true,
-            default => 5000,
+            default => 20000,
             datatype => timeout
         },
         enqueue => #{
@@ -102,14 +110,12 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
-            % io:format("Process down ~p error=~p~n", [Pid, Reason]),
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
             demonitor(MonitorRef, [flush]),
             ok
-    after 
+    after
         Timeout ->
-            % io:format("Timeout~n"),
             demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
@@ -160,13 +166,13 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec call(
-    binary(), 
-    map(), 
-    list() | undefined, 
-    map() | undefined, 
-    bondy_context:context()) -> 
-    {ok, map(), bondy_context:context()} 
-    | {error, map(), bondy_context:context()}.
+    binary(),
+    map(),
+    list() | undefined,
+    map() | undefined,
+    bondy_context:context()) ->
+    {ok, map(), bondy_context:context()}
+    | {error, wamp_error_map(), bondy_context:context()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
@@ -175,35 +181,53 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
             %% Timeout = bondy_utils:timeout(Opts),
-            Timeout = 5000,
+            %% @TODO Take this from Opts map
+            Timeout = 20000,
             receive
                 {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
                     Ctxt2 = bondy_context:remove_awaiting_call(
                         Ctxt1, R#result.request_id),
-                    {ok, to_map(R), Ctxt2};
+                    {ok, message_to_map(R), Ctxt2};
                 {?BONDY_PEER_CALL, Pid, Ref, #error{} = R} ->
                     ok = bondy:ack(Pid, Ref),
                     Ctxt2 = bondy_context:remove_awaiting_call(
                         Ctxt1, R#error.request_id),
-                    {error, to_map(R), Ctxt2}
-            after 
+                    {error, message_to_map(R), Ctxt2}
+            after
                 Timeout ->
-                    Error = {timeout, <<"The operation could not be completed in the time specified.">>},
-                    {error, error_map(Error), Ctxt1}
+                    Error = #{
+                        error_uri => ?BONDY_ERROR_TIMEOUT,
+                        details => #{},
+                        arguments => [<<"The operation could not be completed in the time specified.">>],
+                        arguments_kw => #{}
+                    },
+                    {error, Error, Ctxt1}
             end;
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1};
-        {reply, _, Ctxt1} -> 
+            {error, message_to_map(Error), Ctxt1};
+        {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(inconsistency_error), Ctxt1};
+            Error = #{
+                error_uri => ?BONDY_ERROR_UNKNOWN,
+                details => #{},
+                arguments => [<<"Inconsistency error">>],
+                arguments_kw => #{}
+            },
+            {error, Error, Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(Error), Ctxt1};
+            {error, message_to_map(Error), Ctxt1};
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            {error, error_map(inconsistency_error), Ctxt1}
+            Error = #{
+                error_uri => ?BONDY_ERROR_UNKNOWN,
+                details => #{},
+                arguments => [<<"Inconsistency error">>],
+                arguments_kw => #{}
+            },
+            {error, Error, Ctxt1}
     end.
 
 
@@ -233,7 +257,7 @@ maybe_enqueue(false, _, _, Reason) ->
 
 
 %% @private
-to_map(#result{} = M) ->
+message_to_map(#result{} = M) ->
     #result{
         details = Details,
         arguments = Args,
@@ -245,8 +269,21 @@ to_map(#result{} = M) ->
         arguments_kw => args_kw(ArgsKw)
     };
 
-to_map(#error{} = M) ->
-    error_map(M).
+message_to_map(#error{} = M) ->
+    #error{
+        details = Details,
+        error_uri = Uri,
+        arguments = Args,
+        arguments_kw = ArgsKw
+    } = M,
+    %% We need these keys to be binaries, becuase we will
+    %% inject this in a mops context.
+    #{
+        details => Details,
+        error_uri => Uri,
+        arguments => args(Args),
+        arguments_kw => args_kw(ArgsKw)
+    }.
 
 
 %% @private
