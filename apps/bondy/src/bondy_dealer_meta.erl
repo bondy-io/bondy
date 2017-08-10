@@ -200,17 +200,40 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_LOAD_API_SPEC} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_ADD} = M, Ctxt) ->
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
-            maybe_error(bondy_api_gateway:add_client(Uri, Info), M);
+            maybe_error(bondy_api_client:add(Uri, Info), M);
         {error, WampError} ->
             WampError
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_UPDATE} = M, Ctxt) ->
+    R = case validate_call_args(M, Ctxt, 3) of
+        {ok, [Uri, Username, Info]} ->
+            maybe_error(
+                bondy_api_client:update(Uri, Username, Info),
+                M
+            );
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{procedure_uri = ?BONDY_GATEWAY_CLIENT_DELETE} = M, Ctxt) ->
+    R = case validate_call_args(M, Ctxt, 2) of
+        {ok, [Uri, Username]} ->
+            maybe_error(
+                bondy_api_client:remove(Uri, Username),
+                M
+            );
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?BONDY_GATEWAY_ADD_RESOURCE_OWNER} = M, Ctxt) ->
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
-            maybe_error(bondy_api_gateway:add_resource_owner(Uri, Info), M);
+            maybe_error(bondy_api_resource_owner:add(Uri, Info), M);
         {error, WampError} ->
             WampError
     end,
@@ -221,7 +244,7 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_UPDATE_RESOURCE_OWNER} = M, Ctx
     R = case validate_call_args(M, Ctxt, 3) of
         {ok, [Uri, Username, Info]} ->
             maybe_error(
-                bondy_api_gateway:update_resource_owner(Uri, Username, Info),
+                bondy_api_resource_owner:update(Uri, Username, Info),
                 M
             );
         {error, WampError} ->
@@ -233,7 +256,7 @@ handle_call(#call{procedure_uri = ?BONDY_GATEWAY_DELETE_RESOURCE_OWNER} = M, Ctx
     R = case validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Username]} ->
             maybe_error(
-                bondy_api_gateway:remove_resource_owner(Uri, Username),
+                bondy_api_resource_owner:remove(Uri, Username),
                 M
             );
         {error, WampError} ->
