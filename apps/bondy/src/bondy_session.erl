@@ -143,7 +143,7 @@
                                         authmethod => binary(),
                                         authprovider => binary(),
                                         transport => #{
-
+                                            peername => binary()
                                         }
                                     }.
 
@@ -158,6 +158,7 @@
 -export([incr_seq/1]).
 -export([lookup/1]).
 -export([list/0]).
+-export([list/1]).
 -export([list_peers/0]).
 -export([new/3]).
 -export([new/4]).
@@ -408,6 +409,18 @@ fetch(Id) ->
 %% @TODO provide a limit and itereate on each table providing a custom
 %% continuation
 list() ->
+    list(#{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+list(#{return := details_map}) ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    [to_details_map(X) || T <- Tabs, X <- ets:tab2list(T)];
+
+list(_) ->
     Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
