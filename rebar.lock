@@ -73,7 +73,7 @@
   0},
  {<<"utils">>,
   {git,"git@gitlab.com:leapsight/utils.git",
-       {ref,"bc5611d58a5f788e2ae2bb1c4a252cd10d34ce67"}},
+       {ref,"35b5b427ff6543905e3de92cc56d26743c05a8dc"}},
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
