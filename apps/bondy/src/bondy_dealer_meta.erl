@@ -131,18 +131,28 @@ handle_call(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{procedure_uri = <<"wamp.registration.lookup">>} = M, Ctxt) ->
-    %% @TODO
+handle_call(#call{procedure_uri = <<"wamp.registration.lookup">>,
+    arguments = [Proc|_] = L} = M, Ctxt) when length(L) =:= 1; length(L) =:= 2 -> % @TODO: Implement options
+    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+        {[],'$end_of_table'} ->
+            [];
+        {Sessions,'$end_of_table'} ->
+            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+    end,
     ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = wamp_message:result(ReqId, #{}, Args),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{procedure_uri = <<"wamp.registration.match">>} = M, Ctxt) ->
-    %% @TODO
+handle_call(#call{procedure_uri = <<"wamp.registration.match">>,
+    arguments = [Proc] = L} = M, Ctxt) when length(L) =:= 1 ->
+    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+        {[],'$end_of_table'} ->
+            [];
+        {Sessions,'$end_of_table'} ->
+            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+    end,
     ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
+    R = wamp_message:result(ReqId, #{}, Args),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
