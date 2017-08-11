@@ -68,7 +68,7 @@
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.load_api_spec",
+                            "procedure" : "com.leapsight.bondy.api_gateway.load",
                             "options" : {},
                             "arguments" : [
                                 "{{request.body}}"
@@ -94,7 +94,7 @@
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.realms.enable_security",
+                            "procedure" : "com.leapsight.bondy.security.enable",
                             "options" : {},
                             "arguments" : ["{{request.bindings.realm_uri}}"],
                             "arguments_kw" : {
@@ -115,7 +115,7 @@
                     "delete" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.realms.disable_security",
+                            "procedure" : "com.leapsight.bondy.security.disable",
                             "options" : {},
                             "arguments" : ["{{request.bindings.realm_uri}}"],
                             "arguments_kw" : {
@@ -355,7 +355,7 @@
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.security.replace_user",
+                            "procedure" : "com.leapsight.bondy.security.update_user",
                             "options" : {},
                             "arguments" : [
                                 "{{request.bindings.realm_uri}}",
@@ -471,7 +471,7 @@
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.security.replace_group",
+                            "procedure" : "com.leapsight.bondy.security.update_group",
                             "options" : {},
                             "arguments" : [
                                 "{{request.bindings.realm_uri}}",

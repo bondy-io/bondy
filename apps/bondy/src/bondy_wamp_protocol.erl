@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_wamp_protocol.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -64,7 +64,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec init(binary() | subprotocol(), bondy_session:peer(), map()) -> 
+-spec init(binary() | subprotocol(), bondy_session:peer(), map()) ->
     {ok, state()} | {error, any(), state()}.
 
 init(Term, Peer, Opts) ->
@@ -90,31 +90,31 @@ terminate(St) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec validate_subprotocol(binary() | subprotocol()) -> 
+-spec validate_subprotocol(binary() | subprotocol()) ->
     {ok, subprotocol()} | {error, invalid_subprotocol}.
 
 validate_subprotocol(T) when is_binary(T) ->
     {ok, subprotocol(T)};
 
-validate_subprotocol({ws, text, json} = S) ->          
+validate_subprotocol({ws, text, json} = S) ->
     {ok, S};
-validate_subprotocol({ws, text, json_batched} = S) ->  
+validate_subprotocol({ws, text, json_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, msgpack_batched} = S) ->
     {ok, S};
 validate_subprotocol({ws, binary, bert_batched} = S) ->
     {ok, S};
-validate_subprotocol({ws, binary, erl_batched} = S) -> 
+validate_subprotocol({ws, binary, erl_batched} = S) ->
     {ok, S};
-validate_subprotocol({raw, binary, json} = S) ->          
+validate_subprotocol({raw, binary, json} = S) ->
     {ok, S};
-validate_subprotocol({raw, binary, erl} = S) ->         
+validate_subprotocol({raw, binary, erl} = S) ->
     {ok, S};
-validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->     
+validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
-validate_subprotocol({T, binary, bert} = S) when ?IS_TRANSPORT(T) ->        
+validate_subprotocol({T, binary, bert} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
-validate_subprotocol(_) ->                             
+validate_subprotocol(_) ->
     {error, invalid_subprotocol}.
 
 
@@ -126,7 +126,7 @@ validate_subprotocol(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_inbound(binary(), state()) ->
-    {ok, state()} 
+    {ok, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
@@ -143,7 +143,7 @@ handle_inbound(Data0, St) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_outbound(wamp_message:message(), state()) ->
-    {ok, binary(), state()} 
+    {ok, binary(), state()}
     | {stop, state()}
     | {stop, binary(), state()}.
 
@@ -185,7 +185,7 @@ handle_outbound(M, St) ->
 
 
 -spec handle_inbound_messages([wamp_message()], state()) ->
-    {ok, state()} 
+    {ok, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
@@ -204,7 +204,7 @@ handle_inbound_messages(Messages, St) ->
 %% -----------------------------------------------------------------------------
 -spec handle_inbound_messages(
     [wamp_message()], state(), Acc :: [wamp_message()]) ->
-    {ok, state()} 
+    {ok, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
@@ -228,7 +228,7 @@ handle_inbound_messages([#goodbye{} = M|_], St, Acc) ->
     end;
 
 handle_inbound_messages(
-    [#hello{} = M|_], 
+    [#hello{} = M|_],
     #wamp_state{context = #{session := _}} = St, _) ->
     ok = bondy_stats:update(M, St#wamp_state.context),
     %% Client already has a session!
@@ -237,8 +237,8 @@ handle_inbound_messages(
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
     abort(
-        ?BONDY_SESSION_ALREADY_EXISTS, 
-        <<"You've sent a HELLO message more than once.">>, 
+        ?BONDY_SESSION_ALREADY_EXISTS,
+        <<"You've sent a HELLO message more than once.">>,
         St);
 
 handle_inbound_messages(
@@ -247,8 +247,8 @@ handle_inbound_messages(
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     abort(
-        ?WAMP_ERROR_CANCELLED, 
-        <<"You've sent a HELLO message more than once.">>, 
+        ?WAMP_ERROR_CANCELLED,
+        <<"You've sent a HELLO message more than once.">>,
         St);
 
 handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
@@ -256,7 +256,7 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     ok = bondy_stats:update(M, Ctxt0),
     %% Client is requesting a session
     %% This will return either reply with wamp_welcome() | wamp_challenge()
-    %% or abort 
+    %% or abort
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
     maybe_open_session(
@@ -267,13 +267,13 @@ handle_inbound_messages(
     ok = bondy_stats:update(M, St#wamp_state.context),
     %% Client already has a session so is already authenticated.
     abort(
-        ?BONDY_SESSION_ALREADY_EXISTS, 
-        <<"You've sent an AUTHENTICATE message more than once.">>, 
+        ?BONDY_SESSION_ALREADY_EXISTS,
+        <<"You've sent an AUTHENTICATE message more than once.">>,
         St);
 
 handle_inbound_messages(
-    [#authenticate{} = M|_], 
-    #wamp_state{challenge_sent = {true, AuthMethod}} = St, 
+    [#authenticate{} = M|_],
+    #wamp_state{challenge_sent = {true, AuthMethod}} = St,
     _) ->
     ok = bondy_stats:update(M, St#wamp_state.context),
     %% Client is responding to a challenge
@@ -282,9 +282,9 @@ handle_inbound_messages(
     Realm = maps:get(realm_uri, Ctxt0),
     Peer = maps:get(peer, Ctxt0),
     AuthId = maps:get(authid, Ctxt0),
-    case 
+    case
         bondy_security_utils:authenticate(
-            AuthMethod, {AuthMethod, AuthId, Sign}, Realm, Peer) 
+            AuthMethod, {AuthMethod, AuthId, Sign}, Realm, Peer)
     of
         {ok, _AuthCtxt} ->
             %% We already stored the authid (username) in the ctxt
@@ -297,13 +297,13 @@ handle_inbound_messages([#authenticate{} = M|_], St, _) ->
     %% Client does not have a session and has not been sent a challenge
     ok = bondy_stats:update(M, St#wamp_state.context),
     abort(
-        ?WAMP_ERROR_CANCELLED, 
-        <<"You need to request a session first by sending a HELLO message.">>, 
+        ?WAMP_ERROR_CANCELLED,
+        <<"You need to request a session first by sending a HELLO message.">>,
         St);
-    
+
 handle_inbound_messages(
     [H|T], #wamp_state{context = #{session := _}} = St, Acc) ->
-    %% We have a session, so we forward messages via router    
+    %% We have a session, so we forward messages via router
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
             handle_inbound_messages(T, update_context(Ctxt, St), Acc);
@@ -318,8 +318,8 @@ handle_inbound_messages(
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO
     abort(
-        ?BONDY_ERROR_NOT_IN_SESSION, 
-        <<"You need to establish a session first.">>, 
+        ?BONDY_ERROR_NOT_IN_SESSION,
+        <<"You need to establish a session first.">>,
         St).
 
 
@@ -381,10 +381,10 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     | {stop, binary(), state()}.
 
 open_session(St0) ->
-    try 
+    try
         #{
-            realm_uri := Uri, 
-            id := Id, 
+            realm_uri := Uri,
+            id := Id,
             request_details := Details
         } = Ctxt0 = St0#wamp_state.context,
         Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
@@ -407,7 +407,7 @@ open_session(St0) ->
     catch
         error:{invalid_options, missing_client_role} ->
             abort(
-                <<"wamp.error.missing_client_role">>, 
+                <<"wamp.error.missing_client_role">>,
                 <<"Please provide at least one client role.">>,
                 St0)
     end.
@@ -499,14 +499,14 @@ maybe_auth_challenge(Details, Realm, St0) ->
 
 %% @private
 challenge(?WAMPCRA_AUTH, User, Details, St) ->
-    %% id is the future session_id 
+    %% id is the future session_id
     #{id := Id} = Ctxt = St#wamp_state.context,
     #{username := UserId} = User,
     Ch0 = #{
         challenge => #{
             authmethod => ?WAMPCRA_AUTH,
             authid => UserId,
-            authprovider => <<"bondy">>, 
+            authprovider => <<"com.leapsight.bondy">>,
             authrole => maps:get(authrole, Details, <<"user">>), % @TODO
             nonce => bondy_utils:get_nonce(),
             session => Id,
@@ -584,7 +584,7 @@ update_context(Ctxt, St) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subprotocol(binary()) -> 
+-spec subprotocol(binary()) ->
     bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
 
 subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
@@ -595,7 +595,7 @@ subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
 subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
 subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
 subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
-subprotocol(_) ->                           {error, invalid_subprotocol}. 
+subprotocol(_) ->                           {error, invalid_subprotocol}.
 
 
 

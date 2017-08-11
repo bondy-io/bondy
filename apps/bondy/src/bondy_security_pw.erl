@@ -23,6 +23,7 @@
 
 -export([hash_password/1]).
 -export([check_password/5]).
+-export([check_password/2]).
 
 %% TOOD should make these configurable in app.config
 -define(SALT_LENGTH, 16).
@@ -54,3 +55,13 @@ check_password(BinaryPass, HashedPassword, HashFunction, Salt, HashIterations) w
     {ok, HashedPass} = pbkdf2:pbkdf2(HashFunction, BinaryPass, Salt, HashIterations),
     HexPass = pbkdf2:to_hex(HashedPass),
     pbkdf2:compare_secure(HexPass, HashedPassword).
+
+check_password(BinaryPass, Password) when is_map(Password) ->
+    #{
+        hash_func := HashFunction,
+        hash_pass := HashedPassword,
+        iterations := HashIterations,
+        salt := Salt
+    } = Password,
+    check_password(
+        BinaryPass, HashedPassword, HashFunction, Salt, HashIterations).

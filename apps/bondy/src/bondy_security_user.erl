@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_security_user.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,6 +25,7 @@
 -define(UPDATE_SPEC, #{
     <<"password">> => #{
         alias => password,
+        key => "password",
         required => false,
         datatype => binary,
         validator => fun(X) ->
@@ -64,15 +65,17 @@
 }).
 
 -export([add/2]).
--export([groups/1]).
--export([update/3]).
+-export([add_source/5]).
+-export([change_password/3]).
+-export([change_password/4]).
 -export([fetch/2]).
+-export([groups/1]).
 -export([list/1]).
 -export([lookup/2]).
 -export([password/2]).
 -export([remove/2]).
 -export([remove_source/3]).
--export([add_source/5]).
+-export([update/3]).
 
 
 %% -----------------------------------------------------------------------------
@@ -82,7 +85,7 @@
 -spec add(uri(), user()) -> ok | {error, map()}.
 
 add(RealmUri, User0) ->
-    try 
+    try
         User1 = maps_utils:validate(User0, ?SPEC),
         {#{<<"username">> := Username}, Opts} = maps_utils:split(
             [<<"username">>], User1),
@@ -103,7 +106,7 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
     update(RealmUri, ?CHARS2LIST(Username), User0);
 
 update(RealmUri, Username, User0) ->
-    try 
+    try
         User1 = maps_utils:validate(User0, ?UPDATE_SPEC),
         bondy_security:alter_user(RealmUri, Username, maps:to_list(User1))
     catch
@@ -119,14 +122,15 @@ update(RealmUri, Username, User0) ->
 %% -----------------------------------------------------------------------------
 groups(#{<<"groups">> := Val}) -> Val.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add_source(
-    RealmUri :: uri(), 
-    Username :: binary(), 
-    CIDR :: bondy_security:cidr(), 
+    RealmUri :: uri(),
+    Username :: binary(),
+    CIDR :: bondy_security:cidr(),
     Source :: atom(),
     Options :: list()) -> ok.
 add_source(RealmUri, Username, CIDR, Source, Opts) ->
@@ -157,7 +161,7 @@ remove(RealmUri, Id) when is_list(Id) ->
 
 remove(RealmUri, Id) ->
     case bondy_security:del_user(RealmUri, Id) of
-        ok -> 
+        ok ->
             ok;
         {error, {unknown_user, Id}} ->
             {error, unknown_user}
@@ -175,9 +179,9 @@ lookup(RealmUri, Id) when is_list(Id) ->
 
 lookup(RealmUri, Id) ->
     case bondy_security:lookup_user(RealmUri, Id) of
-        {error, _} = Error -> 
+        {error, _} = Error ->
             Error;
-        User -> 
+        User ->
             to_map(RealmUri, User)
     end.
 
@@ -190,7 +194,7 @@ lookup(RealmUri, Id) ->
 
 fetch(RealmUri, Id) when is_list(Id) ->
     fetch(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
-    
+
 fetch(RealmUri, Id) ->
     case lookup(RealmUri, Id) of
         {error, _} = Error -> Error;
@@ -223,6 +227,32 @@ password(RealmUri, Username) ->
             case proplists:get_value("password", Opts) of
                 undefined -> undefined;
                 L -> maps:from_list(L)
+            end
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+change_password(RealmUri, Username, New) when is_binary(New) ->
+    update(RealmUri, Username, #{password => New}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+change_password(RealmUri, Username, New, Old) ->
+    case catch password(RealmUri, Username) of
+        {'EXIT',{Reason, _}} ->
+            {error, Reason};
+        Password ->
+            case bondy_security_pw:check_password(Old, Password) of
+                true ->
+                    change_password(RealmUri, Username, New);
+                false ->
+                    {error, bad_password}
             end
     end.
 
