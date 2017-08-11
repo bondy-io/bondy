@@ -196,12 +196,16 @@
 -export([registrations/3]).
 -export([match_registrations/2]).
 
+
+
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
 
 -spec close_context(bondy_context:context()) -> bondy_context:context().
+
 close_context(Ctxt) ->
     %% Cleanup callee role registrations
     ok = unregister_all(Ctxt),
@@ -210,6 +214,7 @@ close_context(Ctxt) ->
 
 
 -spec features() -> map().
+
 features() ->
     ?DEALER_FEATURES.
 
