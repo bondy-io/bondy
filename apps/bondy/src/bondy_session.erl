@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_session.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,15 +51,15 @@
     renews                          ::  pos_integer(),
     %% number of requests remaining in quota
     remaining                       ::  pos_integer(),
-    %% time in seconds during which quota is valid e.g. 
+    %% time in seconds during which quota is valid e.g.
     %% the length of the window
     duration                        ::  pos_integer()
 }).
 -type quota_window()                ::  #quota_window{}.
 
 -record(rate_window, {
-    %% max number of messages allowed during window 
-    limit                           ::  pos_integer(), 
+    %% max number of messages allowed during window
+    limit                           ::  pos_integer(),
     %% duration of window in seconds
     duration                        ::  pos_integer()
 }).
@@ -77,7 +77,7 @@
 %%     authid                          ::  binary(),
 %%     %% The authentication role of the session that joined
 %%     authrole                        ::  binary(),
-%%     %% The authentication method that was used for authentication 
+%%     %% The authentication method that was used for authentication
 %%     authmethod                      ::  binary(),
 %%     %% The provider that performed the authentication of the session that joined
 %%     authprovider = <<"bondy">>       ::  binary()
@@ -124,6 +124,8 @@
     publisher                       ::  map() | undefined,
     %% Auth
     authid                          ::  binary() | undefined,
+    authrole                        ::  binary() | undefined,
+    authmethod                      ::  binary() | undefined,
     %% Expiration and Limits
     created                         ::  calendar:date_time(),
     expires_in                      ::  pos_integer() | infinity,
@@ -134,6 +136,16 @@
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type session()                 ::  #session{}.
 -type session_opts()            ::  #{roles => map()}.
+-type details()                 ::  #{
+                                        session => id(),
+                                        authid => id(),
+                                        authrole => binary(),
+                                        authmethod => binary(),
+                                        authprovider => binary(),
+                                        transport => #{
+                                            peername => binary()
+                                        }
+                                    }.
 
 -export_type([peer/0]).
 
@@ -146,6 +158,7 @@
 -export([incr_seq/1]).
 -export([lookup/1]).
 -export([list/0]).
+-export([list/1]).
 -export([list_peers/0]).
 -export([new/3]).
 -export([new/4]).
@@ -157,6 +170,7 @@
 -export([realm_uri/1]).
 -export([size/0]).
 -export([update/1]).
+-export([to_details_map/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -170,7 +184,7 @@
 %% =============================================================================
 
 
--spec new(peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+-spec new(peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
 new(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
@@ -180,9 +194,9 @@ new(Peer, Realm, Opts) when is_map(Opts) ->
     new(bondy_utils:get_id(global), Peer, Realm, Opts).
 
 
--spec new(id(), peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+-spec new(id(), peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
-    
+
 new(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
     new(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
 
@@ -204,7 +218,7 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
 %% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec open(peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+-spec open(peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
 open(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
@@ -221,7 +235,7 @@ open(Peer, Realm, Opts) when is_map(Opts) ->
 %% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec open(id(), peer(), uri() | bondy_realm:realm(), session_opts()) -> 
+-spec open(id(), peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
     open(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
@@ -257,7 +271,7 @@ update(#session{id = Id} = S) ->
 close(#session{id = Id} = S) ->
     {IP, _} = S#session.peer,
     Realm = S#session.realm_uri,
-    Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created), 
+    Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
     ok = bondy_stats:update(
         {session_closed, Id, Realm, IP, Secs}),
     true = ets:delete(table(Id), Id),
@@ -337,7 +351,7 @@ peer(#session{peer = Val}) -> Val.
 
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
-    
+
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
     Tab = tuplespace:locate_table(?SESSION_TABLE_NAME, SessionId),
     ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
@@ -395,6 +409,18 @@ fetch(Id) ->
 %% @TODO provide a limit and itereate on each table providing a custom
 %% continuation
 list() ->
+    list(#{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+list(#{return := details_map}) ->
+    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    [to_details_map(X) || T <- Tabs, X <- ets:tab2list(T)];
+
+list(_) ->
     Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
@@ -426,6 +452,25 @@ list_peers() ->
     },
     MS = [{ Head, [], [{{'$1', '$2', '$3', '$4'}}] }],
     lists:append([ets:select(T, MS) || T <- Tabs]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_details_map(session()) -> details().
+
+to_details_map(#session{} = S) ->
+    #{
+        session => S#session.id,
+        authid => S#session.authid,
+        authrole => S#session.authrole,
+        authmethod => S#session.authmethod,
+        authprovider => <<"com.leapsight.bondy">>,
+        transport => #{
+            peername => inet_utils:peername_to_binary(S#session.peer)
+        }
+    }.
 
 
 %% =============================================================================

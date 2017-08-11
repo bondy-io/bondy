@@ -63,31 +63,31 @@
 %% ADDED BY US
 %% =============================================================================
 
-%% Note that Buckets are not buckets, 
+%% Note that Buckets are not buckets,
 %% these are the "resources" or assets being protected
 
--define(FULL_PREFIX(RealmUri, A, B), 
+-define(FULL_PREFIX(RealmUri, A, B),
     {<<RealmUri/binary, $., A/binary>>, B}
 ).
--define(USERS_PREFIX(RealmUri), 
+-define(USERS_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"users">>)
 ).
--define(GROUPS_PREFIX(RealmUri), 
+-define(GROUPS_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"groups">>)
 ).
--define(SOURCES_PREFIX(RealmUri), 
+-define(SOURCES_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"sources">>)
 ).
--define(USER_GRANTS_PREFIX(RealmUri), 
+-define(USER_GRANTS_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"usergrants">>)
 ).
--define(GROUP_GRANTS_PREFIX(RealmUri), 
+-define(GROUP_GRANTS_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"groupgrants">>)
 ).
--define(STATUS_PREFIX(RealmUri), 
+-define(STATUS_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"status">>)
 ).
--define(CONFIG_PREFIX(RealmUri), 
+-define(CONFIG_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"config">>)
 ).
 
@@ -151,7 +151,7 @@
 -endif.
 
 -record(context, {
-    realm_uri   ::  binary(), 
+    realm_uri   ::  binary(),
     username    ::  binary(),
     grants      ::  [{any(), any()}],
     epoch       ::  erlang:timestamp()
@@ -573,9 +573,9 @@ get_grants(#context{grants=Val}) ->
 
 
 % -spec authenticate(
-%     RealmUri :: uri(), 
-%     Username::binary(), 
-%     Password::binary(), 
+%     RealmUri :: uri(),
+%     Username::binary(),
+%     Password::binary(),
 %     ConnInfo :: [{atom(), any()}]) -> {ok, context()} | {error, term()}.
 % authenticate(RealmUri, Username, Password, ConnInfo) ->
 %     Uri = name2bin(RealmUri),
@@ -661,10 +661,12 @@ get_grants(#context{grants=Val}) ->
 
 
 -spec authenticate(
-    RealmUri :: uri(), 
-    Username::binary(), 
-    Password::binary() | {hash, binary()}, 
-    ConnInfo :: [{atom(), any()}]) -> {ok, context()} | {error, term()}.
+    RealmUri :: uri(),
+    Username::binary(),
+    Password::binary() | {hash, binary()},
+    ConnInfo :: [{atom(), any()}]) ->
+        {ok, context()} |
+        {error, unknown_user | missing_password | no_matching_sources }.
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
     case user_details(RealmUri, Username) of
@@ -675,7 +677,7 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
                 username => name2bin(Username),
                 password => Password,
                 realm_uri => name2bin(RealmUri),
-                conn_info => ConnInfo 
+                conn_info => ConnInfo
             },
             auth_with_data(Data, M)
     end.
@@ -720,13 +722,13 @@ auth_with_source(password, UserData, M) ->
             HashFunction = lookup(hash_func, PasswordData),
             Salt = lookup(salt, PasswordData),
             Iterations = lookup(iterations, PasswordData),
-            case 
+            case
                 bondy_security_pw:check_password(
                     maps:get(password, M),
                     HashedPass,
                     HashFunction,
                     Salt,
-                    Iterations) 
+                    Iterations)
             of
                 true ->
                     {ok, get_context(M)};
@@ -780,8 +782,8 @@ auth_with_source(Source, UserData, M) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add_user(
-    RealmUri :: binary(), 
-    Username :: string(), 
+    RealmUri :: binary(),
+    Username :: string(),
     Options :: [{string(), term()}]) ->
     ok | {error, reserved_name | role_exists | illegal_name_char}.
 add_user(RealmUri, Username, Options) ->
@@ -839,11 +841,11 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
 
 
 -spec alter_user(
-    RealmUri :: binary(), 
-    Username :: string(), 
+    RealmUri :: binary(),
+    Username :: string(),
     Options :: [{string(), term()}]) ->
     ok | {error, term()}.
-    
+
 alter_user(_, "all", _Options) ->
     {error, reserved_name};
 alter_user(RealmUri, Username, Options) ->
@@ -867,8 +869,8 @@ alter_user(RealmUri, Username, Options) ->
     end.
 
 -spec alter_group(
-    RealmUri :: binary(), 
-    Groupname :: string(), 
+    RealmUri :: binary(),
+    Groupname :: string(),
     Options :: [{string(), term()}]) ->
     ok | {error, term()}.
 alter_group(_, "all", _Options) ->
@@ -1032,8 +1034,8 @@ add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
     end.
 
 -spec add_source(
-    RealmUri :: binary(), 
-    userlist(), 
+    RealmUri :: binary(),
+    userlist(),
     CIDR :: {inet:ip_address(), non_neg_integer()},
     Source :: atom(),
     Options :: [{string(), term()}]) -> ok | {error, term()}.
@@ -1084,7 +1086,7 @@ del_source(RealmUri, Users, CIDR) ->
     Uri = name2bin(RealmUri),
     UserList = lists:map(fun name2bin/1, Users),
     _ = [plumtree_metadata:delete(
-            ?SOURCES_PREFIX(Uri), {User, anchor_mask(CIDR)}) 
+            ?SOURCES_PREFIX(Uri), {User, anchor_mask(CIDR)})
             || User <- UserList],
     ok.
 
@@ -1259,9 +1261,9 @@ concat_role(group, Name) ->
 get_context(RealmUri, Username) when is_binary(Username) ->
     Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
     #context{
-        realm_uri = name2bin(RealmUri), 
-        username=Username, 
-        grants=Grants, 
+        realm_uri = name2bin(RealmUri),
+        username=Username,
+        grants=Grants,
         epoch=os:timestamp()}.
 
 
@@ -1372,7 +1374,7 @@ validate_groups_option(RealmUri, Options) ->
 %% Handle 'password' option if given
 validate_password_option(Pass, Options) when is_list(Pass) ->
     validate_password_option(list_to_binary(Pass), Options);
-    
+
 validate_password_option(Pass, Options) ->
     {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
         bondy_security_pw:hash_password(Pass),
@@ -1577,8 +1579,8 @@ unknown_roles(RealmUri, RoleList, RoleType) ->
                 Acc;
             ({Rolename, _}, Acc) ->
                 Acc -- [Rolename]
-        end, 
-        RoleList, 
+        end,
+        RoleList,
         FP).
 
 user_details(RealmUri, U) ->
@@ -1687,7 +1689,7 @@ bucket2iolist(Bucket) ->
 
 
 %% =============================================================================
-%% THE FOLLOWING IS EXTRACTED FROM 
+%% THE FOLLOWING IS EXTRACTED FROM
 %% https://github.com/basho/riak_core/blob/develop/src/riak_core_ssl_util.erl
 %% =============================================================================
 
@@ -1746,8 +1748,8 @@ list(RealmUri, user) when is_binary(RealmUri) ->
                 Acc;
             ({Username, [Options]}, Acc) ->
                 [{Username, Options}|Acc]
-        end, 
-        [], 
+        end,
+        [],
         ?USERS_PREFIX(RealmUri)
     );
 
@@ -1758,8 +1760,8 @@ list(RealmUri, group) when is_binary(RealmUri) ->
                 Acc;
             ({Groupname, [Options]}, Acc) ->
                 [{Groupname, Options}|Acc]
-        end, 
-        [], 
+        end,
+        [],
         ?GROUPS_PREFIX(RealmUri)
     );
 
@@ -1770,8 +1772,8 @@ list(RealmUri, source) when is_binary(RealmUri) ->
                 [{Username, CIDR, Source, Options}|Acc];
             ({{_, _}, [?TOMBSTONE]}, Acc) ->
                 Acc
-        end, 
-        [], 
+        end,
+        [],
         ?SOURCES_PREFIX(RealmUri)
     ).
 
@@ -1781,17 +1783,17 @@ lookup_user_sources(RealmUri, Username) when is_binary(RealmUri) ->
         ?SOURCES_PREFIX(RealmUri), [{match, {name2bin(Username), '_'}}]),
     Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
     case lists:filter(Pred, L) of
-        L -> 
-            [{BinName, CIDR, Source, Options} || 
+        L ->
+            [{BinName, CIDR, Source, Options} ||
                 {{BinName, CIDR}, [{Source, Options}]} <- L];
-        [] -> 
+        [] ->
             {error, not_found}
     end.
 
 %% @private
 user_groups(RealmUri, {_, Opts}) ->
-    [R || 
-        R <- proplists:get_value("groups", Opts, []), 
+    [R ||
+        R <- proplists:get_value("groups", Opts, []),
         group_exists(RealmUri, R)].
 
 
@@ -1817,14 +1819,14 @@ group_grants(RealmUri, Group) ->
 %% -----------------------------------------------------------------------------
 context_to_map(#context{} = Ctxt) ->
     #context{
-        realm_uri = Uri, 
-        username = Username, 
-        grants = Grants, 
+        realm_uri = Uri,
+        username = Username,
+        grants = Grants,
         epoch = E
     } = Ctxt,
     #{
-        realm_uri => Uri, 
-        username => Username, 
+        realm_uri => Uri,
+        username => Username,
         grants => Grants,
         timestamp => E
     }.

@@ -196,12 +196,16 @@
 -export([registrations/3]).
 -export([match_registrations/2]).
 
+
+
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
 
 -spec close_context(bondy_context:context()) -> bondy_context:context().
+
 close_context(Ctxt) ->
     %% Cleanup callee role registrations
     ok = unregister_all(Ctxt),
@@ -210,6 +214,7 @@ close_context(Ctxt) ->
 
 
 -spec features() -> map().
+
 features() ->
     ?DEALER_FEATURES.
 
@@ -227,35 +232,35 @@ is_feature_enabled(F) when is_binary(F) ->
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
-handle_message(
-    #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
-    %% Check if it has callee role?
-    case register(Uri, Opts, Ctxt) of
-        {ok, Map, IsFirst} ->
-            R = wamp_message:registered(ReqId, maps:get(id, Map)),
-            ok = bondy:send(bondy_context:peer_id(Ctxt), R),
-            on_register(IsFirst, Map, Ctxt);
-        {error, {not_authorized, Mssg}} ->
-            R = wamp_message:error(
-                ?REGISTER,
-                ReqId,
-                #{},
-                ?WAMP_ERROR_NOT_AUTHORIZED,
-                [Mssg],
-                #{message => Mssg}
-            ),
-            bondy:send(bondy_context:peer_id(Ctxt), R);
-        {error, {procedure_already_exists, Mssg}} ->
-            R = wamp_message:error(
-                ?REGISTER,
-                ReqId,
-                #{},
-                ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
-                [Mssg],
-                #{message => Mssg}
-            ),
-            bondy:send(bondy_context:peer_id(Ctxt), R)
-    end;
+%% handle_message(
+%%     #register{procedure_uri = Uri, options = Opts, request_id = ReqId}, Ctxt) ->
+%%     %% Check if it has callee role?
+%%     case register(Uri, Opts, Ctxt) of
+%%         {ok, Map, IsFirst} ->
+%%             R = wamp_message:registered(ReqId, maps:get(id, Map)),
+%%             ok = bondy:send(bondy_context:peer_id(Ctxt), R),
+%%             on_register(IsFirst, Map, Ctxt);
+%%         {error, {not_authorized, Mssg}} ->
+%%             R = wamp_message:error(
+%%                 ?REGISTER,
+%%                 ReqId,
+%%                 #{},
+%%                 ?WAMP_ERROR_NOT_AUTHORIZED,
+%%                 [Mssg],
+%%                 #{message => Mssg}
+%%             ),
+%%             bondy:send(bondy_context:peer_id(Ctxt), R);
+%%         {error, {procedure_already_exists, Mssg}} ->
+%%             R = wamp_message:error(
+%%                 ?REGISTER,
+%%                 ReqId,
+%%                 #{},
+%%                 ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
+%%                 [Mssg],
+%%                 #{message => Mssg}
+%%             ),
+%%             bondy:send(bondy_context:peer_id(Ctxt), R)
+%%     end;
 
 handle_message(#unregister{} = M, Ctxt) ->
     Reply  = case unregister(M#unregister.registration_id, Ctxt) of
@@ -412,7 +417,7 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), bondy_context:context()) ->
-    {ok, map(), boolean()}
+    {ok, map()}
     | {error, {not_authorized | procedure_already_exists, binary()}}.
 
 register(<<"com.leapsight.bondy.", _/binary>>, _, _) ->
@@ -425,8 +430,9 @@ register(<<"wamp.", _/binary>>, _, _) ->
 
 register(ProcUri, Options, Ctxt) ->
     case bondy_registry:add(registration, ProcUri, Options, Ctxt) of
-        {ok, _Details, _IsFirst} = OK ->
-            OK;
+        {ok, Details, IsFirst} ->
+            ok = on_register(IsFirst, Details, Ctxt),
+            {ok, Details};
         {error, {already_exists, #{match := Policy}}} ->
             {error, {
                 procedure_already_exists,
@@ -457,7 +463,8 @@ unregister(<<"wamp.", _/binary>>, _) ->
 
 unregister(RegId, Ctxt) ->
     %% TODO Shouldn't we restrict this operation to the peer who registered it?
-    bondy_registry:remove(registration, RegId, Ctxt).
+    %% or a Bondy Admin?
+    bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2).
 
 
 %% -----------------------------------------------------------------------------
@@ -468,7 +475,7 @@ unregister(RegId, Ctxt) ->
 -spec unregister_all(bondy_context:context()) -> ok.
 
 unregister_all(Ctxt) ->
-    bondy_registry:remove_all(registration, Ctxt).
+    bondy_registry:remove_all(registration, Ctxt, fun on_unregister/2).
 
 
 
@@ -592,15 +599,19 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% for that procedure.
     case match_registrations(ProcUri, Ctxt0, #{exclude => [CallerSId]}) of
         {[], ?EOT} ->
+            Mssg = <<
+                "There are no registered procedures matching the uri",
+                $\s, $', ProcUri/binary, $', $.
+            >>,
             Error = wamp_message:error(
                 ?CALL,
                 CallId,
                 #{},
                 ?WAMP_ERROR_NO_SUCH_PROCEDURE,
-                [],
+                [Mssg],
                 #{
-                    message => iolist_to_binary(<<"There are no registered procedures matching the uri ", $', ProcUri/binary, $'>>),
-                    description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedure.">>
+                    message => Mssg,
+                    description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
                 }
             ),
             bondy:send(bondy_context:peer_id(Ctxt0), Error);
@@ -972,5 +983,11 @@ on_register(true, Map, Ctxt) ->
 
 on_register(false, Map, Ctxt) ->
     Uri = <<"wamp.registration.on_register">>,
+    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    ok.
+
+%% @private
+on_unregister(Map, Ctxt) ->
+    Uri = <<"wamp.registration.on_unregister">>,
     {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
     ok.
