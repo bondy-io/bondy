@@ -80,6 +80,9 @@
     match => binary()
 }.
 
+-type task() :: fun( (details_map(), bondy_context:context()) -> ok).
+
+
 
 -export_type([entry/0]).
 -export_type([entry_key/0]).
@@ -106,7 +109,9 @@
 -export([options/1]).
 -export([realm_uri/1]).
 -export([remove/3]).
+-export([remove/4]).
 -export([remove_all/2]).
+-export([remove_all/3]).
 -export([session_id/1]).
 -export([to_details_map/1]).
 -export([type/1]).
@@ -334,7 +339,19 @@ add(Type, Uri, Options, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec remove_all(entry_type(), bondy_context:context()) -> ok.
 
-remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
+remove_all(Type, Ctxt) ->
+    remove_all(Type, Ctxt, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Removes all entries matching the context's realm and session_id (if any).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_all(entry_type(), bondy_context:context(), task() | undefined) ->
+    ok.
+
+remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task) ->
     Pattern = #entry{
         key = {RealmUri, bondy_context:session_id(Ctxt), '_'},
         type = Type,
@@ -351,10 +368,10 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt) ->
             ok;
         {[First], _} ->
             %% Use iterator to remove each one
-            do_remove_all(First, Tab, Ctxt)
+            do_remove_all(First, Tab, Ctxt, Task)
     end;
 
-remove_all(_, _) ->
+remove_all(_, _, _) ->
     ok.
 
 
@@ -398,6 +415,17 @@ lookup(Type, EntryId, SessionId, RealmUri) ->
     ok | {error, not_found}.
 
 remove(Type, EntryId, Ctxt) ->
+    remove(Type, EntryId, Ctxt, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(entry_type(), id(), bondy_context:context(), task() | undefined) ->
+    ok | {error, not_found}.
+
+remove(Type, EntryId, Ctxt, Task) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     % TODO Use UserId when there is no SessionId
@@ -407,13 +435,13 @@ remove(Type, EntryId, Ctxt) ->
         [] ->
             %% The session had no entries with EntryId.
             {error, not_found};
-        [#entry{uri = Uri, match_policy = MP}] ->
+        [#entry{uri = Uri, match_policy = MP} = Entry] ->
             decr_counter(Tab, {RealmUri, Uri}, 1),
             %% Delete indices for entry
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(EntryId, Uri, MP, Ctxt),
             ets:delete_object(IdxTab, IdxEntry),
-            ok
+            maybe_execute(Task, Entry, Ctxt)
     end.
 
 
@@ -579,13 +607,20 @@ match({Type, Cont}) ->
 %% PRIVATE
 %% =============================================================================
 
+%% @private
+maybe_execute(undefined, _, _) ->
+    ok;
+
+maybe_execute(Task, Entry, Ctxt) when is_function(Task, 2) ->
+    _ = Task(to_details_map(Entry), Ctxt),
+    ok.
 
 
 %% @private
-do_remove_all(?EOT, _, _) ->
+do_remove_all(?EOT, _, _, _) ->
     ok;
 
-do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
+do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt, Task) ->
     {RealmUri, _, EntryId} = Key,
     %% We first delete the index entry associated with this Entry
     Uri = E#entry.uri,
@@ -595,10 +630,12 @@ do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt) ->
     %% We then delete the Entry and decrement the Uri count
     N = ets:select_delete(ETab, [{E, [], [true]}]),
     decr_counter(ETab, {RealmUri, Uri}, N),
+    %% We perform the task
+    ok = maybe_execute(Task, E, Ctxt),
     %% We continue traversing the ets table
-    do_remove_all(ets:next(ETab, Key), ETab, Ctxt);
+    do_remove_all(ets:next(ETab, Key), ETab, Ctxt, Task);
 
-do_remove_all({_, Sid, _} = Key, ETab, Ctxt) ->
+do_remove_all({_, Sid, _} = Key, ETab, Ctxt, Task) ->
     case bondy_context:session_id(Ctxt) of
         Sid ->
             case ets:lookup(ETab, Key) of
@@ -608,14 +645,14 @@ do_remove_all({_, Sid, _} = Key, ETab, Ctxt) ->
                     %% We should not be getting more than one
                     %% with ordered_set and the matching semantics
                     %% we are using
-                    do_remove_all(Entry, ETab, Ctxt)
+                    do_remove_all(Entry, ETab, Ctxt, Task)
             end;
         _ ->
             %% No longer our session
             ok
     end;
 
-do_remove_all(_, _, _) ->
+do_remove_all(_, _, _, _) ->
     %% No longer our session
     ok.
 
