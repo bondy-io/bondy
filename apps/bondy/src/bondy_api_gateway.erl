@@ -156,8 +156,7 @@ start_http(Routes, Name) ->
 
     cowboy:start_clear(
         Name,
-        PoolSize,
-        [{port, Port}],
+        [{port, Port}, {num_acceptors, PoolSize}],
         #{
             env => #{
                 bondy => #{
@@ -191,8 +190,7 @@ start_https(Routes, Name) ->
     {_, PKIFiles} = lists:keyfind(pki_files, 1, Opts),
     cowboy:start_tls(
         Name,
-        PoolSize,
-        [{port, Port} | PKIFiles],
+        [{port, Port}, {num_acceptors, PoolSize} | PKIFiles],
         #{
             env => #{
                 bondy => #{
