@@ -35,7 +35,7 @@ start(_Type, Args) ->
         {ok, Pid} ->
             ok = setup(Args),
             ok = bondy_router:start_pool(),
-            ok = bondy_stats:create_metrics(),
+            ok = bondy_stats:init(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
             {ok, Pid};

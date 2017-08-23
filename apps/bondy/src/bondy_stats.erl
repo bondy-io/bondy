@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_stats.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,20 +18,34 @@
 
 -module(bondy_stats).
 
--export([update/1]).
--export([update/2]).
 -export([get_stats/0]).
--export([create_metrics/0]).
+-export([init/0]).
 -export([otp_release/0]).
 -export([sys_driver_version/0]).
--export([system_version/0]).
--export([system_architecture/0]).
 -export([sys_monitor_count/0]).
+-export([system_architecture/0]).
+-export([system_version/0]).
+-export([update/1]).
+-export([update/2]).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec init() -> ok.
+
+init() ->
+    % create_metrics(system_specs()),
+    %% create_metrics(bc_specs()),
+    %% create_metrics(static_specs()).
+    bondy_prometheus:init().
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -91,22 +105,6 @@ sys_monitor_count() ->
 
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec create_metrics() -> ok.
-
-create_metrics() ->
-    % create_metrics(system_specs()),
-    create_metrics(bc_specs()),
-    create_metrics(static_specs()).
-
-
-
-
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -134,18 +132,19 @@ update(Event) ->
 %% -----------------------------------------------------------------------------
 -spec update(wamp_message:message(), bondy_context:context()) -> ok.
 
-update(M, #{peer := {IP, _}} = Ctxt) ->
-    Type = element(1, M),
-    Size = erts_debug:flat_size(M) * 8,
-    case Ctxt of
-        #{realm_uri := Uri, session := S} ->
-            Id = bondy_session:id(S),
-            do_update({message, Id, Uri, IP, Type, Size});
-        #{realm_uri := Uri} ->
-            do_update({message, Uri, IP, Type, Size});
-        _ ->
-            do_update({message, IP, Type, Size})
-    end.
+update(M, #{peer := {_IP, _}} = Ctxt) ->
+    %% Type = element(1, M),
+    %% Size = erts_debug:flat_size(M) * 8,
+    %% case Ctxt of
+    %%     #{realm_uri := Uri, session := S} ->
+    %%         Id = bondy_session:id(S),
+    %%         do_update({message, Id, Uri, IP, Type, Size});
+    %%     #{realm_uri := Uri} ->
+    %%         do_update({message, Uri, IP, Type, Size});
+    %%     _ ->
+    %%         do_update({message, IP, Type, Size})
+    %% end.
+    bondy_prometheus:wamp_message(M, Ctxt).
 
 
 
@@ -171,7 +170,7 @@ do_update({session_opened, Realm, _SessionId, IP}) ->
         [bondy, node, realm, sessions, Realm], 1, spiral, []),
     _ = exometer:update_or_create(
         [bondy, node, realm, sessions, active, Realm], 1, counter, []),
-    
+
     _ = exometer:update_or_create(
         [bondy, node, ip, sessions, BIP], 1, spiral, []),
     _ = exometer:update_or_create(
@@ -186,12 +185,12 @@ do_update({session_closed, SessionId, Realm, IP, Secs}) ->
         [bondy, node, realm, sessions, active, Realm], -1, counter, []),
     _ = exometer:update_or_create(
         [bondy, node, realm, sessions, duration, Realm], Secs, histogram, []),
-    
+
     _ = exometer:update_or_create(
         [bondy, node, ip, sessions, active, BIP], -1, counter, []),
     _ = exometer:update_or_create(
         [bondy, node, ip, sessions, duration, BIP], Secs, histogram, []),
-    
+
     %% Cleanup
     _ = exometer:delete([bondy, node, session, messages, SessionId]),
     lists:foreach(
@@ -199,7 +198,7 @@ do_update({session_closed, SessionId, Realm, IP, Secs}) ->
             _ = exometer:delete(Name)
         end,
         exometer:find_entries([bondy, node, session, messages, '_', SessionId])
-    ), 
+    ),
     ok;
 
 do_update({message, IP, Type, Sz}) ->
@@ -265,21 +264,21 @@ do_update({message, Session, Realm, IP, Type, Sz}) ->
 
 
 %% @private
-create_metrics(Stats) ->
-    %% We are assumming exometer was started by wamp app.
-    %% TODO Process aliases
-    lists:foreach(
-        fun({Name, Type , Opts, Aliases}) ->
-            exometer:re_register(Name, Type, Opts),
-            lists:foreach(
-                fun({DP, Alias}) ->
-                    exometer_alias:new(Alias, Name, DP)
-                end, 
-                Aliases
-            )
-        end,
-        Stats
-    ).
+%% create_metrics(Stats) ->
+%%     %% We are assumming exometer was started by wamp app.
+%%     %% TODO Process aliases
+%%     lists:foreach(
+%%         fun({Name, Type , Opts, Aliases}) ->
+%%             exometer:re_register(Name, Type, Opts),
+%%             lists:foreach(
+%%                 fun({DP, Alias}) ->
+%%                     exometer_alias:new(Alias, Name, DP)
+%%                 end,
+%%                 Aliases
+%%             )
+%%         end,
+%%         Stats
+%%     ).
 
 
 %% -----------------------------------------------------------------------------
@@ -287,36 +286,36 @@ create_metrics(Stats) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-static_specs() ->
-    [
-        {[bondy, node, sessions], 
-            spiral, [], [
-                {one, bondy_node_sessions}, 
-                {count, bondy_node_sessions_total}]},
-        {[bondy, node, messages], 
-            spiral, [], [
-                {one, bondy_node_messages}, 
-                {count, bondy_node_messages_total}]},
-        {[bondy, node, sessions, active], 
-            counter, [], [
-                {value, bondy_node_sessions_active}]},
-        {[bondy, node, sessions, duration], 
-            histogram, [], [
-                {mean, bondy_node_sessions_duration_mean},
-                {median, bondy_node_sessions_duration_median},
-                {95, bondy_node_sessions_duration_95},
-                {99, bondy_node_sessions_duration_99},
-                {max, bondy_node_sessions_duration_100}]}
-    ].
+%% static_specs() ->
+%%     [
+%%         {[bondy, node, sessions],
+%%             spiral, [], [
+%%                 {one, bondy_node_sessions},
+%%                 {count, bondy_node_sessions_total}]},
+%%         {[bondy, node, messages],
+%%             spiral, [], [
+%%                 {one, bondy_node_messages},
+%%                 {count, bondy_node_messages_total}]},
+%%         {[bondy, node, sessions, active],
+%%             counter, [], [
+%%                 {value, bondy_node_sessions_active}]},
+%%         {[bondy, node, sessions, duration],
+%%             histogram, [], [
+%%                 {mean, bondy_node_sessions_duration_mean},
+%%                 {median, bondy_node_sessions_duration_median},
+%%                 {95, bondy_node_sessions_duration_95},
+%%                 {99, bondy_node_sessions_duration_99},
+%%                 {max, bondy_node_sessions_duration_100}]}
+%%     ].
 
 
 %% borrowed from Riak Core
 % system_specs() ->
 %     [
 %      {
-%          cpu_stats, 
-%          cpu, 
-%          [{sample_interval, 5000}], 
+%          cpu_stats,
+%          cpu,
+%          [{sample_interval, 5000}],
 %          [
 %             {nprocs, cpu_nprocs},
 %             {avg1  , cpu_avg1},
@@ -325,28 +324,28 @@ static_specs() ->
 %         ]
 %     },
 %     {
-%         mem_stats, 
+%         mem_stats,
 %         {function, memsup, get_memory_data, [], match, {total, allocated, '_'}},
-%         [], 
+%         [],
 %         [
 %             {total, mem_total},
 %             {allocated, mem_allocated}
 %         ]
 %     },
 %     {
-%         memory_stats, 
+%         memory_stats,
 %         {function, erlang, memory, [], proplist, [
-%             total, 
-%             processes, 
+%             total,
+%             processes,
 %             processes_used,
-%             system, 
-%             atom, 
-%             atom_used, 
+%             system,
+%             atom,
+%             atom_used,
 %             binary,
-%             code, 
+%             code,
 %             ets
 %         ]},
-%         [], 
+%         [],
 %         [
 %             {total         , memory_total},
 %             {processes     , memory_processes},
@@ -363,27 +362,27 @@ static_specs() ->
 
 
 
-bc_specs() ->
-    Spec = fun(N, M, F, As) ->
-        {[bondy, node, N], {function, M, F, As, match, value}, [], [{value, N}]}
-    end,
+%% bc_specs() ->
+%%     Spec = fun(N, M, F, As) ->
+%%         {[bondy, node, N], {function, M, F, As, match, value}, [], [{value, N}]}
+%%     end,
 
-    [Spec(N, M, F, As) ||
-        {N, M, F, As} <- [{nodename, erlang, node, []},
-                          {connected_nodes, erlang, nodes, []},
-                          {sys_driver_version, ?MODULE, sys_driver_version, []},
-                          {sys_heap_type, erlang, system_info, [heap_type]},
-                          {sys_logical_processors, erlang, system_info, [logical_processors]},
-                          {sys_monitor_count, ?MODULE, sys_monitor_count, []},
-                          {sys_otp_release, ?MODULE, otp_release, []},
-                          {sys_port_count, erlang, system_info, [port_count]},
-                          {sys_process_count, erlang, system_info, [process_count]},
-                          {sys_smp_support, erlang, system_info, [smp_support]},
-                          {sys_system_version, ?MODULE, system_version, []},
-                          {sys_system_architecture, ?MODULE, system_architecture, []},
-                          {sys_threads_enabled, erlang, system_info, [threads]},
-                          {sys_thread_pool_size, erlang, system_info, [thread_pool_size]},
-                          {sys_wordsize, erlang, system_info, [wordsize]}]].
+%%     [Spec(N, M, F, As) ||
+%%         {N, M, F, As} <- [{nodename, erlang, node, []},
+%%                           {connected_nodes, erlang, nodes, []},
+%%                           {sys_driver_version, ?MODULE, sys_driver_version, []},
+%%                           {sys_heap_type, erlang, system_info, [heap_type]},
+%%                           {sys_logical_processors, erlang, system_info, [logical_processors]},
+%%                           {sys_monitor_count, ?MODULE, sys_monitor_count, []},
+%%                           {sys_otp_release, ?MODULE, otp_release, []},
+%%                           {sys_port_count, erlang, system_info, [port_count]},
+%%                           {sys_process_count, erlang, system_info, [process_count]},
+%%                           {sys_smp_support, erlang, system_info, [smp_support]},
+%%                           {sys_system_version, ?MODULE, system_version, []},
+%%                           {sys_system_architecture, ?MODULE, system_architecture, []},
+%%                           {sys_threads_enabled, erlang, system_info, [threads]},
+%%                           {sys_thread_pool_size, erlang, system_info, [thread_pool_size]},
+%%                           {sys_wordsize, erlang, system_info, [wordsize]}]].
 
 
 %% -----------------------------------------------------------------------------
@@ -416,4 +415,3 @@ disk_stats() ->
 % app_stats() ->
 %     [{list_to_atom(atom_to_list(A) ++ "_version"), list_to_binary(V)}
 %      || {A,_,V} <- application:which_applications()].
-    
