@@ -355,8 +355,8 @@ init_wamp(Len, Enc, St0) ->
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
-                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>,
-                        [FrameType, EncName, Peer]
+                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~s'">>,
+                        [FrameType, EncName, inet_utils:peername_to_binary(Peer)]
                     ),
                     {ok, St1};
                 {error, Reason} ->
