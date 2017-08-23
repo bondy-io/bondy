@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_context.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -59,7 +59,7 @@
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
--export([new/1]).
+-export([new/2]).
 -export([peer/1]).
 -export([add_awaiting_call/2]).
 -export([awaiting_calls/1]).
@@ -73,6 +73,8 @@
 -export([peer_id/1]).
 -export([set_peer/2]).
 -export([remove_awaiting_call/2]).
+-export([set_subprotocol/2]).
+-export([subprotocol/1]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
@@ -100,9 +102,9 @@ new() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(bondy_session:peer()) -> context().
-new(Peer) ->
-    set_peer(new(), Peer).
+-spec new(bondy_session:peer(), wamp_protocol:subprotocol()) -> context().
+new(Peer, Subprotocol) ->
+    set_subprotocol(set_peer(new(), Peer), Subprotocol).
 
 
 %% -----------------------------------------------------------------------------
@@ -121,7 +123,7 @@ reset(Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Closes the context. This function calls {@link bondy_session:close/1} 
+%% Closes the context. This function calls {@link bondy_session:close/1}
 %% and {@link bondy_router:close_context/1}.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -158,6 +160,24 @@ set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Returns the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subprotocol(context()) -> wamp_protocol:subprotocol().
+subprotocol(#{subprotocol := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Set the peer to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_subprotocol(context(), wamp_protocol:subprotocol()) -> context().
+set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
+    Ctxt#{subprotocol => S}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Returns the roles of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -187,14 +207,14 @@ realm_uri(#{realm_uri := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the sessionId of the provided context or 'undefined' 
+%% Returns the sessionId of the provided context or 'undefined'
 %% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session_id(context()) -> id() | undefined.
-session_id(#{session := S}) -> 
+session_id(#{session := S}) ->
     bondy_session:id(S);
-session_id(#{}) -> 
+session_id(#{}) ->
     undefined.
 
 
@@ -294,7 +314,7 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns a list containing the identifiers for the calls the peer performed 
+%% Returns a list containing the identifiers for the calls the peer performed
 %% and it is still awaiting a response for.  This is used by the internal rpc
 %% mechanism which is based on promises.
 %% @end
