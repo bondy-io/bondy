@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_realm.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,18 +19,35 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% An implementation of a WAMP realm. 
+%% An implementation of a WAMP realm.
 %% A Realm is a routing and administrative domain, optionally
 %% protected by authentication and authorization. Bondy messages are
-%% only routed within a Realm. 
+%% only routed within a Realm.
 %%
-%% Realms are persisted to disk and replicated across the cluster using the 
+%% Realms are persisted to disk and replicated across the cluster using the
 %% plumtree_metadata subsystem.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+
+-define(SPEC, #{
+    description => #{
+        alias => <<"description">>,
+        key => description,
+        required => true,
+        datatype => binary,
+        default => <<>>
+    },
+    authmethods => #{
+        alias => <<"authmethods">>,
+        key => authmethods,
+        required => true,
+        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
+        default => ?WAMP_AUTH_METHODS
+    }
+}).
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {global, realms}).
@@ -62,20 +79,21 @@
 -export([get/1]).
 -export([get/2]).
 -export([is_security_enabled/1]).
+-export([security_status/1]).
 -export([public_keys/1]).
 -export([get_random_kid/1]).
 -export([get_private_key/2]).
 -export([get_public_key/2]).
 -export([list/0]).
 -export([lookup/1]).
--export([put/1]).
--export([put/2]).
--export([security_status/1]).
+-export([add/1]).
+-export([add/2]).
 -export([select_auth_method/2]).
 -export([uri/1]).
+-export([to_map/1]).
 
 
--compile({no_auto_import, [put/2]}).
+%% -compile({no_auto_import, [put/2]}).
 
 
 
@@ -209,9 +227,9 @@ fetch(Uri) ->
     end.
 
 %% -----------------------------------------------------------------------------
-%% @doc 
+%% @doc
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will put a new one for Uri.
+%% does not exist it will add a new one for Uri.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri()) -> realm().
@@ -220,7 +238,7 @@ get(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc 
+%% @doc
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
 %% does not exist it will create a new one for Uri.
 %% @end
@@ -231,7 +249,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         {error, not_found} ->
-            put(Uri, Opts)
+            add(Uri, Opts)
     end.
 
 
@@ -239,21 +257,30 @@ get(Uri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec put(uri()) -> realm().
-put(Uri) ->
-    bondy_realm:put(Uri, #{}).
+-spec add(uri()) -> realm().
+
+add(Uri) when is_binary(Uri) ->
+    add(Uri, #{});
+
+add(#{uri := Uri} = Map) ->
+    add(Uri, Map);
+
+add(#{<<"uri">> := Uri} = Map) ->
+    add(Uri, Map).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec put(uri(), map()) -> realm().
-put(Uri, Opts) ->
+-spec add(uri(), map()) -> realm() | no_return().
+
+add(Uri, Opts) ->
     wamp_uri:is_valid(Uri) orelse error({?WAMP_ERROR_INVALID_URI, Uri}),
     #{
-        description := Desc, 
+        description := Desc,
         authmethods := Method
-    } = maps_utils:validate(Opts, opts_spec()),
+    } = maps_utils:validate(Opts, ?SPEC),
 
     Keys = maps:from_list([
         begin
@@ -265,7 +292,7 @@ put(Uri, Opts) ->
             {Kid, jose_jwk:merge(Priv, Fields)}
         end || _ <- lists:seq(1, 3)
     ]),
-    
+
     Realm = #realm{
         uri = Uri,
         description = Desc,
@@ -279,10 +306,9 @@ put(Uri, Opts) ->
             ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
             init(Realm);
         _ ->
-            ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
-            Realm
+            error({already_exist, Uri})
     end.
-    
+
 
 
 
@@ -290,11 +316,13 @@ put(Uri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(uri()) -> ok.
+-spec delete(uri()) -> ok | {error, not_permitted}.
+
 delete(?BONDY_REALM_URI) ->
     {error, not_permitted};
 
 delete(Uri) ->
+    %% TODO if there are users in the realm, the caller will need to first explicitely delete hthe users so return {error, users_exist} or similar
     plumtree_metadata:delete(?PREFIX, Uri),
     % TODO we need to close all sessions for this realm
     ok.
@@ -336,6 +364,21 @@ select_auth_method(#realm{authmethods = Allowed}, Requested) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_map(#realm{} = R) ->
+    #{
+        uri => R#realm.uri,
+        %% public_keys => R#realm.public_keys.
+        description => R#realm.description,
+        authmethods => R#realm.authmethods
+    }.
+
+
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -352,7 +395,7 @@ init(#realm{uri = Uri} = Realm) ->
     ok = bondy_security_user:add(Uri, User),
     % Opts = [],
     % _ = [
-    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts) 
+    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
     %     || CIDR <- ?LOCAL_CIDRS
     % ],
     %TODO remove this once we have the APIs to add sources
@@ -379,23 +422,3 @@ do_lookup(Uri) ->
             {error, not_found}
     end.
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the maps_utils:spec() for validation the options
-%% @end
-%% -----------------------------------------------------------------------------
-opts_spec() ->
-    #{
-        description => #{
-            required => true,
-            datatype => binary, 
-            default => <<>>
-        },
-        authmethods => #{
-            required => true,
-            datatype => {any, ?WAMP_AUTH_METHODS},
-            default => ?WAMP_AUTH_METHODS
-        }
-    }.
