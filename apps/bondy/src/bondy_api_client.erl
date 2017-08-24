@@ -187,7 +187,7 @@ maybe_init_security(RealmUri) ->
         <<"name">> => <<"api_clients">>,
         <<"meta">> => #{<<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>}
     },
-    case bondy_security_group:lookup(RealmUri, <<"resource_owners">>) of
+    case bondy_security_group:lookup(RealmUri, <<"api_clients">>) of
         {error, not_found} ->
             bondy_security_group:add(RealmUri, G);
         _ ->
