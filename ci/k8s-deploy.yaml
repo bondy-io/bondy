@@ -63,8 +63,8 @@ spec:
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
-      nodeSelector: # TODO: Esto es por packet que no tiene forma de acceder al storage desde varios nodos (no al mismo tiempo)
-        disk: bondy
+      # nodeSelector: # TODO: Esto es por packet que no tiene forma de acceder al storage desde varios nodos (no al mismo tiempo)
+      #   disk: bondy
       volumes:
         - name: datadir
           persistentVolumeClaim:
