@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_security_utils.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,10 +20,10 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--type auth_error_reason()           ::  bondy_oauth2:error() 
+-type auth_error_reason()           ::  bondy_oauth2:error()
                                         | invalid_scheme.
 
--type auth_scheme()                 ::  wampcra | basic | bearer | digest.                              
+-type auth_scheme()                 ::  wampcra | basic | bearer | digest.
 -type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}
                                         | {basic, binary(), binary()}
 	                                    | {bearer, binary()}
@@ -43,23 +43,25 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authenticate(
-    auth_scheme(), auth_scheme_val(), uri(), bondy_session:peer()) -> 
+    auth_scheme(), auth_scheme_val(), uri(), bondy_session:peer()) ->
     {ok, bondy_security:context() | map()} | {error, auth_error_reason()}.
 
 authenticate(?TICKET_AUTH, {?TICKET_AUTH, AuthId, Signature}, Realm, Peer) ->
     authenticate(basic, {basic, AuthId, Signature}, Realm, Peer);
-    
+
 authenticate(?WAMPCRA_AUTH, {?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
     bondy_security:authenticate(
-        Realm, ?CHARS2LIST(AuthId), {hash, Signature}, conn_info(Peer));
+        %% Realm, ?CHARS2LIST(AuthId), {hash, Signature}, conn_info(Peer));
+        Realm, AuthId, {hash, Signature}, conn_info(Peer));
 
 authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
     bondy_oauth2:verify_jwt(Realm, Token);
 
 authenticate(basic, {basic, Username, Pass}, Realm, Peer) ->
     bondy_security:authenticate(
-        Realm, ?CHARS2LIST(Username), Pass, conn_info(Peer));
-    
+        %% Realm, ?CHARS2LIST(Username), Pass, conn_info(Peer));
+        Realm, Username, Pass, conn_info(Peer));
+
 authenticate(digest, {digest, _List}, _Realm, _Peer) ->
     %% TODO support
     {error, invalid_scheme};
