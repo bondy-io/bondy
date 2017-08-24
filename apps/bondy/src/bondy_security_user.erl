@@ -54,6 +54,7 @@
 -define(SPEC, ?UPDATE_SPEC#{
     <<"username">> => #{
         alias => username,
+        key => <<"username">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -216,7 +217,7 @@ list(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(uri(), user() | id()) -> map() | no_return().
-password(RealmUri, #{username := Username}) ->
+password(RealmUri, #{<<"username">> := Username}) ->
     password(RealmUri, Username);
 
 password(RealmUri, Username) ->
@@ -280,7 +281,7 @@ to_map(RealmUri, {Username, PL}) ->
         Sources ->
             [maps:without([username], S) || S <- Sources]
     end,
-    Map1#{sources => L}.
+    Map1#{<<"sources">> => L}.
 
 
 %% @private
