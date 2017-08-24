@@ -6,7 +6,7 @@
 %% Whether to create a new realm or not when a session wants to connect
 %% to a non existing realm
 {mapping, "automatically_create_realms", "bondy.automatically_create_realms", [
-  {default, on},
+  {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
@@ -14,7 +14,7 @@
 %% to a non existing realm
 %% Not currently working, leave the value as 'session'
 {mapping, "connection_lifetime", "bondy.connection_lifetime", [
-  {default, session}, 
+  {default, session},
   {datatype, {enum, [session, connection]}},
   hidden
 ]}.
@@ -48,42 +48,42 @@
 
 
 {mapping, "load_regulation.router.pool.type", "bondy.router_pool.type", [
-  {default, permanent}, 
+  {default, permanent},
   {datatype, {enum, [permanent, transient]}},
   hidden
 ]}.
 
-%% The actual size will be the maximum between the configured value and 
+%% The actual size will be the maximum between the configured value and
 %% the result of evaluating `erlang:system_info(schedulers)`
 {mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
-  {default, 8}, 
+  {default, 8},
   {datatype, integer},
   hidden
 ]}.
 
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
-  {default, 10000}, 
+  {default, 10000},
   {datatype, integer},
   hidden
 ]}.
 
 %% It can only be permanent
 {mapping, "load_regulation.registry_manager.pool.type", "bondy.registry_manager_pool.type", [
-  {default, permanent}, 
+  {default, permanent},
   {datatype, {enum, [permanent]}},
   hidden
 ]}.
 
-%% The actual size will be the maximum between the configured value and 
+%% The actual size will be the maximum between the configured value and
 %% the result of evaluating `erlang:system_info(schedulers)`
 {mapping, "load_regulation.registry_manager.pool.size", "bondy.registry_manager_pool.size", [
-  {default, 8}, 
+  {default, 8},
   {datatype, integer},
   hidden
 ]}.
 
 {mapping, "load_regulation.registry_manager.pool.capacity", "bondy.registry_manager_pool.capacity", [
-  {default, 1000}, 
+  {default, 1000},
   {datatype, integer},
   hidden
 ]}.
@@ -157,7 +157,7 @@
   {default, "$(platform_etc_dir)/cert.pem"}
 ]}.
 
-%% @doc Default key location for https can be overridden with the 
+%% @doc Default key location for https can be overridden with the
 %%admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.keyfile", "bondy.admin_api_https.pki_files.keyfile", [
   {datatype, file},
@@ -259,7 +259,7 @@
   {default, "$(platform_etc_dir)/cert.pem"}
 ]}.
 
-%% @doc Default key location for https can be overridden with the 
+%% @doc Default key location for https can be overridden with the
 %%api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.keyfile", "bondy.api_gateway_https.pki_files.keyfile", [
   {datatype, file},
@@ -339,7 +339,7 @@
   {default, "$(platform_etc_dir)/cert.pem"}
 ]}.
 
-%% @doc Default key location for https can be overridden with the 
+%% @doc Default key location for https can be overridden with the
 %%wamp.tls config variable, for example:
 {mapping, "wamp.tls.keyfile", "bondy.wamp_tls.pki_files.keyfile", [
   {datatype, file},

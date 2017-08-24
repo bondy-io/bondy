@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_config.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -108,7 +108,7 @@ tcp_max_connections() ->
 
 tcp_port() ->
     Default = 8083,
-    try 
+    try
         case application:get_env(?APP, tcp_port, Default) of
             Int when is_integer(Int) -> Int;
             Str -> list_to_integer(Str)
@@ -143,7 +143,7 @@ tls_files() ->
 
 
 automatically_create_realms() ->
-    application:get_env(?APP, automatically_create_realms, true).
+    application:get_env(?APP, automatically_create_realms, false).
 
 
 %% =============================================================================
@@ -172,14 +172,14 @@ coordinator_timeout() ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns a proplist containing the following keys:
-%% 
+%%
 %% * type - can be one of the following:
 %%     * permanent - the pool contains a (size) number of permanent workers
 %% under a supervision tree. This is the "events as messages" design pattern.
 %%      * transient - the pool contains a (size) number of supervisors each one
 %% supervision a transient process. This is the "events as messages" design
 %% pattern.
-%% * size - The number of workers used by the load regulation system 
+%% * size - The number of workers used by the load regulation system
 %% for the provided pool
 %%% * capacity - The usage limit enforced by the load regulation system for the provided pool
 %% @end
