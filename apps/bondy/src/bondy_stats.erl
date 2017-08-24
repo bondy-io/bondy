@@ -27,6 +27,9 @@
 -export([system_version/0]).
 -export([update/1]).
 -export([update/2]).
+-export([socket_open/2]).
+-export([socket_closed/3]).
+-export([socket_error/2]).
 
 
 %% =============================================================================
@@ -115,6 +118,39 @@ sys_monitor_count() ->
 get_stats() ->
     exometer:get_values([bondy]) ++ expand_disk_stats(disk_stats()).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_open(atom(), atom()) -> ok.
+
+socket_open(Protocol, Transport) ->
+    %% Todo capture peername to feed Rate Limiting stats by IP
+    %% but do not forward to prometheus
+    bondy_prometheus:socket_open(Protocol, Transport).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_closed(atom(), atom(), Duration :: integer()) -> ok.
+
+socket_closed(Protocol, Transport, Duration) ->
+    %% Todo capture peername to feed Rate Limiting stats by IP
+    %% but do not forward to prometheus
+    bondy_prometheus:socket_closed(Protocol, Transport, Duration).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_error(atom(), atom()) -> ok.
+
+socket_error(Protocol, Transport) ->
+    bondy_prometheus:socket_error(Protocol, Transport).
 
 %% -----------------------------------------------------------------------------
 %% @doc

@@ -29,6 +29,9 @@
 -export([init/0]).
 -export([report/0]).
 -export([wamp_message/2]).
+-export([socket_open/2]).
+-export([socket_closed/3]).
+-export([socket_error/2]).
 -export([days_duration_buckets/0]).
 -export([hours_duration_buckets/0]).
 -export([minutes_duration_buckets/0]).
@@ -113,6 +116,45 @@ microseconds_duration_buckets() ->
     [10, 25, 50, 100, 250, 500,
       1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
       1000000, 2500000, 5000000, 10000000].
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_open(Protocol :: atom(), Transport :: atom()) -> ok.
+
+socket_open(Procotol, Transport) ->
+    Labels = get_socket_labels(Procotol, Transport),
+    ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
+    prometheus_gauge:inc(bondy_sockets_total, Labels).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_closed(
+    Protocol :: atom(), Transport:: atom(), Seconds :: integer()) -> ok.
+
+socket_closed(Procotol, Transport, Seconds) ->
+    Labels = get_socket_labels(Procotol, Transport),
+    ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
+    ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
+    prometheus_histogram:observe(
+        bondy_socket_duration_seconds, Labels, Seconds).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec socket_error(Protocol :: atom(), Transport:: atom()) -> ok.
+
+socket_error(Procotol, Transport) ->
+    Labels = get_socket_labels(Procotol, Transport),
+    ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
+    prometheus_gauge:dec(bondy_sockets_total, Labels).
 
 
 %% -----------------------------------------------------------------------------
@@ -200,6 +242,12 @@ wamp_message(#yield{} = M, Ctxt) ->
 %% PRIVATE
 %% =============================================================================
 
+get_socket_labels(Protocol, Transport) ->
+    [
+        node_name(),
+        Protocol,
+        Transport
+    ].
 
 
 get_wamp_labels(Ctxt) ->
@@ -229,25 +277,31 @@ net_metrics() ->
         {name, bondy_sockets_total},
         {help,
             <<"The number of active sockets on a bondy node.">>},
-        {labels, [node, protocol, transport, frame_type, encoding]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_opened_total},
         {help,
             <<"The number of sockets opened on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, frame_type, encoding]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_closed_total},
         {help,
             <<"The number of sockets closed on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, frame_type, encoding]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_socket_errors_total},
         {help,
             <<"The number of socket errors on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, frame_type, encoding]}
+        {labels, [node, protocol, transport]}
+    ]),
+    _ = prometheus_histogram:declare([
+        {name, bondy_socket_duration_seconds},
+        {help,
+            <<"A histogram of the duration of a socket.">>},
+        {labels, [node, protocol, transport]}
     ]),
 
     %% Bytes
