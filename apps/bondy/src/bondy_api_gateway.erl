@@ -69,7 +69,7 @@ load(Spec) when is_map(Spec) ->
     Specs = [Spec | specs()],
     _ = [
         update_dispatch_table(Scheme, Routes)
-        || {Scheme, Routes} <- parse_specs(Specs)
+        || {Scheme, Routes} <- parse_specs(Specs, base_routes())
     ],
     ok;
 
@@ -97,7 +97,7 @@ load(FName) ->
 start_listeners() ->
     _ = [
         start_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs(specs())],
+        || {Scheme, Routes} <- parse_specs(specs(), base_routes())],
     ok.
 
 
@@ -108,7 +108,7 @@ start_listeners() ->
 start_admin_listeners() ->
     _ = [
         start_admin_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs([admin_spec()])],
+        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
     ok.
 
 
@@ -260,7 +260,26 @@ update_dispatch_table(<<"https">>, Routes) ->
 %% -----------------------------------------------------------------------------
 base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
-    [ {'_', [{"/ws", bondy_ws_handler, #{}}]} ].
+    [
+        {'_', [
+            {"/ws", bondy_ws_handler, #{}}
+        ]}
+    ].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+admin_base_routes() ->
+    [
+        {'_', [
+            {"/ws", bondy_ws_handler, #{}},
+            {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
+        ]}
+    ].
+
 
 
 %% -----------------------------------------------------------------------------
@@ -325,13 +344,13 @@ specs(Path) ->
 
 
 %% @private
-parse_specs(Specs) ->
+parse_specs(Specs, BaseRoutes) ->
     case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
-            [{<<"http">>, base_routes()}, {<<"https">>, base_routes()}];
+            [{<<"http">>, BaseRoutes}, {<<"https">>, BaseRoutes}];
         Parsed ->
             bondy_api_gateway_spec_parser:dispatch_table(
-                Parsed, base_routes())
+                Parsed, BaseRoutes)
     end.
 
 
