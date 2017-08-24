@@ -39,7 +39,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
-
+-define(DEFAULT_MAX_BODY_LEN, 1024*1024*25). %% 25MB
 
 -type state() :: #{
     api_context => map(),
@@ -62,6 +62,7 @@
 -export([to_msgpack/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
+-export([from_form_urlencoded/2]).
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
@@ -217,6 +218,8 @@ from_msgpack(Req, St) ->
     accept(Req, St#{encoding => msgpack}).
 
 
+from_form_urlencoded(Req, St) ->
+    accept(Req, St#{encoding => urlencoded}).
 
 
 %% =============================================================================
@@ -390,7 +393,8 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
 update_context(Req0, Ctxt) ->
     %% At the moment we do not support partially reading the body
     %% nor streams so we drop the NewReq
-    {ok, Bin, Req1} = cowboy_req:read_body(Req0),
+    %% By default, Cowboy will attempt to read up to 8MB of data, for up to 15 seconds. The call will return once Cowboy has read at least 8MB of data, or at the end of the 15 seconds period.
+    {ok, Bin, Req1} = read_body(Req0),
     M = #{
         <<"method">> => method(Req1),
         <<"scheme">> => cowboy_req:scheme(Req1),
@@ -403,9 +407,36 @@ update_context(Req0, Ctxt) ->
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req1)),
         <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req1)),
         <<"body">> => Bin,
+        %% Note that the length may not be known by cowboy in advance.
+        %% In that case undefined will be returned.
         <<"body_length">> => cowboy_req:body_length(Req1)
     },
     maps:put(<<"request">>, M, Ctxt).
+
+
+%% @private
+%% is_multipart_form_body(Req) ->
+%%     case cowboy_req:parse_header(<<"content-type">>, Req) of
+%%         {<<"multipart">>, <<"form-data">>, _} ->
+%%             true;
+%%         _ ->
+%%             false
+%%     end.
+
+
+%% @private
+read_body(Req) ->
+    read_body(Req, <<>>).
+
+
+%% @private
+read_body(Req0, Acc) ->
+    case cowboy_req:read_body(Req0) of
+        {ok, _Data, _Req} = OK ->
+            OK;
+        {more, Data, Req} ->
+            read_body(Req, <<Acc/binary, Data/binary>>)
+    end.
 
 
 %% @private

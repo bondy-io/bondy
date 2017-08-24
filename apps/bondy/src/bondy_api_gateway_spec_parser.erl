@@ -1380,17 +1380,36 @@ get_context_proxy() ->
 content_types_accepted(L) when is_list(L) ->
     [content_types_accepted(T) || T <- L];
 
+content_types_accepted(<<"application/json; charset=utf-8">>) ->
+    {
+        {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
+        from_json
+    };
+
 content_types_accepted(<<"application/json">>) ->
     % {<<"application/json">>, from_json};
-    {{<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]}, from_json};
+    {
+        {<<"application">>, <<"json">>, '*'},
+        from_json
+    };
 
+content_types_accepted(<<"application/msgpack; charset=utf-8">>) ->
+    {
+        {<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]},
+        from_msgpack
+    };
 
 content_types_accepted(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, from_msgpack}.
-    {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack}.
+    {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack};
+
+content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
+    {
+        {<<"application">>, <<"x-www-form-urlencoded">>, '*'},
+        from_form_urlencoded
+    }.
 
 
-%% @private
 content_types_provided(L) when is_list(L) ->
     [X || {_, X} <- lists:ukeysort(1, [content_types_provided(T) || T <- L])];
 
