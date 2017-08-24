@@ -39,6 +39,8 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(DEFAULT_MAX_BODY_LEN, 1024*1024*25). %% 25MB
+
 -type state() :: #{
     api_context => map(),
     session => any(),
@@ -432,6 +434,31 @@ update_context(Req0, Ctxt) ->
         <<"body_length">> => cowboy_req:body_length(Req1)
     },
     maps:put(<<"request">>, M, Ctxt).
+
+%% @private
+
+%% is_multipart_form_body(Req) ->
+%%     case cowboy_req:parse_header(<<"content-type">>, Req) of
+%%         {<<"multipart">>, <<"form-data">>, _} ->
+%%             true;
+%%         _ ->
+%%             false
+%%     end.
+
+
+%% @private
+read_body(Req) ->
+    read_body(Req, <<>>).
+
+
+%% @private
+read_body(Req0, Acc) ->
+    case cowboy_req:read_body(Req0) of
+        {ok, _Data, _Req} = OK ->
+            OK;
+        {more, Data, Req} ->
+            read_body(Req, <<Acc/binary, Data/binary>>)
+    end.
 
 
 %% @private
