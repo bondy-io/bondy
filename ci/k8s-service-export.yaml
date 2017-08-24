@@ -11,11 +11,12 @@ spec:
     - name: api
       port: 8080
       targetPort: 18080
-      nodePort: 32500
+      #nodePort: 32500
     - name: admin
       port: 8081
       targetPort: 18081
-      nodePort: 32501
-  type: NodePort
+      #nodePort: 32501
+  #type: NodePort
+  type: LoadBalancer
   selector:
     app: bondy
