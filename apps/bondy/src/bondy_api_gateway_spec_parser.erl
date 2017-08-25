@@ -1428,7 +1428,7 @@ content_types_provided(<<"application/msgpack">>) ->
 ensure_setup_realm(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
-            ok = bondy_realm:add(Uri),
+            _ = bondy_realm:add(Uri),
             %% TODO get this from spec
             bondy_security:add_source(Uri, all, {{0,0,0,0},0}, password, []);
         _ ->
