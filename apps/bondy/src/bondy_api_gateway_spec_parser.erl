@@ -822,7 +822,9 @@ from_file(Filename) ->
         error:badarg ->
             _ = lager:error(
                 "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
-            {error, invalid_specification_format}
+            {error, invalid_specification_format};
+        error:Reason ->
+            {error, Reason}
     end.
 
 %% -----------------------------------------------------------------------------
@@ -874,7 +876,7 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
 
     %% We make sure all realms exists
     Realms = leap_relation:project(R0, [{var, realm}]),
-    _ = [ensure_setup_realm(Realm) || {Realm} <- leap_relation:tuples(Realms)],
+    _ = [check_realm_exists(Realm) || {Realm} <- leap_relation:tuples(Realms)],
 
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
@@ -1404,12 +1406,11 @@ content_types_provided(<<"application/msgpack">>) ->
 
 
 % @TODO Avoid doing this and require the user to setup the environment first!
-ensure_setup_realm(Uri) ->
+check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
-            _ = bondy_realm:add(Uri),
-            %% TODO get this from spec
-            bondy_security:add_source(Uri, all, {{0,0,0,0},0}, password, []);
+            error(
+                {badarg,  <<"There is no realm named ", $', Uri/binary, $'>>});
         _ ->
             ok
     end.
