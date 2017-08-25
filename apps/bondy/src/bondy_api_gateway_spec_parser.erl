@@ -821,7 +821,9 @@ from_file(Filename) ->
     catch
         error:badarg ->
             _ = lager:error(
-                "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
+                "Error processing API Gateway Specification file, "
+                "type=error, reason=~p, file_name=~p",
+                [invalid_specification_format, Filename]),
             {error, invalid_specification_format}
     end.
 
