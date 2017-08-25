@@ -308,7 +308,8 @@ specs() ->
 
 
 admin_spec() ->
-    File = "./etc/bondy_admin_api.json",
+    {ok, Base} = application:get_env(bondy, platform_etc_dir),
+    File = Base ++ "/bondy_admin_api.json",
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
             Spec
