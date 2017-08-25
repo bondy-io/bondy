@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_api_oauth2_handler.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,6 +28,24 @@
 % "grant_type=authorization_code&client_id=test&client_secret=test&redirect_uri=http://localhost&code=6nZNUuYeBM7dfD0k45VF8ZnVKTZJRe2C"
 
 -define(GRANT_TYPE, <<"grant_type">>).
+
+-define(ALLOWED_METHODS, [
+    <<"HEAD">>,
+    <<"OPTIONS">>,
+    <<"POST">>
+]).
+
+-define(CORS_HEADERS, #{
+    <<"access-control-allow-origin">> => <<"*">>,
+    <<"access-control-allow-credentials">> => <<"true">>,
+    <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept">>,
+    <<"access-control-max-age">> => <<"86400">>
+}).
+
+-define(OPTIONS_HEADERS, ?CORS_HEADERS#{
+    <<"access-control-allow">> => <<"HEAD,OPTIONS,POST">>
+}).
 
 -define(AUTH_CODE_SPEC, #{
     ?GRANT_TYPE => #{
@@ -149,7 +167,7 @@
 }).
 
 -type state() :: #{
-    realm_uri => binary(), 
+    realm_uri => binary(),
     client_id => binary()
 }.
 
@@ -157,6 +175,7 @@
 
 -export([init/2]).
 -export([allowed_methods/2]).
+-export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
 -export([is_authorized/2]).
@@ -179,13 +198,7 @@ init(Req, St) ->
 
 
 allowed_methods(Req, St) ->
-    Methods = [
-        <<"GET">>,
-        <<"HEAD">>,
-        <<"OPTIONS">>,
-        <<"POST">>
-    ],
-    {Methods, Req, St}.
+    {?ALLOWED_METHODS, Req, St}.
 
 
 content_types_accepted(Req, St) ->
@@ -201,6 +214,10 @@ content_types_provided(Req, St) ->
         {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}
     ],
     {L, Req, St}.
+
+
+options(Req, State) ->
+    {ok, cowboy_req:set_resp_headers(?OPTIONS_HEADERS, Req), State}.
 
 
 is_authorized(Req0, St0) ->
@@ -244,7 +261,8 @@ to_msgpack(Req, St) ->
 %% PRIVATE
 %% =============================================================================
 
-provide(_, _, _) -> ok.
+provide(_, Req, St) ->
+    {ok, cowboy_req:set_resp_header(?CORS_HEADERS, Req), St}.
 
 
 %% @private
@@ -255,7 +273,7 @@ accept(Req0, St) ->
     catch
         error:Reason ->
             _ = lager:error(
-                "error=error, reason=~p, stacktrace:~p", 
+                "error=error, reason=~p, stacktrace:~p",
                 [Reason, erlang:get_stacktrace()]),
             Req2 = reply(Reason, json, Req0),
             {false, Req2, St}
@@ -276,14 +294,15 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
         <<"password">> := P,
         <<"scope">> := _Scope
     } = maps_utils:validate(Map, ?RESOURCE_OWNER_SPEC),
-    
+
     {IP, _Port} = cowboy_req:peer(Req0),
     case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
             Username = bondy_security:get_username(AuthCtxt),
             issue_token(RealmUri, Username, Enc, Req0, St0);
         {error, Error} ->
-            _ = lager:info("Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
+            _ = lager:info(
+                "Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
             Req1 = reply(oauth2_invalid_grant, Enc, Req0),
             {stop, Req1, St0}
     end;
@@ -330,7 +349,7 @@ issue_token(RealmUri, Username, Enc, Req0, St0) ->
 
 
 %% @private
--spec reply(integer(), atom(), cowboy_req:req()) -> 
+-spec reply(integer(), atom(), cowboy_req:req()) ->
     cowboy_req:req().
 
 reply(unknown_realm, Enc, Req) ->
@@ -368,11 +387,12 @@ reply(Error, Enc, Req) ->
 
 
 %% @private
--spec prepare_request(atom(), map(), map(), cowboy_req:req()) -> 
+-spec prepare_request(atom(), map(), map(), cowboy_req:req()) ->
     cowboy_req:req().
 
 prepare_request(Enc, Body, Headers, Req0) ->
-    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+    Req1 = cowboy_req:set_resp_headers(
+        maps:merge(?CORS_HEADERS, Headers), Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
 
 
@@ -385,4 +405,5 @@ token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
             lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
         <<"expires_in">> => maps:get(<<"exp">>, Claims)
     },
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req0).
+    Req1 = cowboy_req:set_resp_headers(?CORS_HEADERS, Req0),
+    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).

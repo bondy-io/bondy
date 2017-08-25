@@ -53,6 +53,7 @@
 
 -export([init/2]).
 -export([allowed_methods/2]).
+-export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
 -export([is_authorized/2]).
@@ -101,6 +102,21 @@ content_types_provided(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_provided">>, Spec), Req, St}.
 
 
+options(Req, #{api_spec := Spec} = St) ->
+    Allowed = iolist_to_binary(
+        lists:join(<<$,>>, maps:get(<<"allowed_methods">>, Spec))
+    ),
+    Headers0 = eval_headers(Req, St),
+    Headers1 = case maps:find(<<"access-control-allow-methods">>, Headers0) of
+        {ok, _V} ->
+            maps:put(<<"access-control-allow-methods">>, Allowed, Headers0);
+        false ->
+            Headers0
+    end,
+    Headers2 = maps:put(<<"allow">>, Allowed, Headers1),
+    {ok, cowboy_req:set_resp_headers(Headers2, Req), St}.
+
+
 is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
@@ -126,13 +142,14 @@ is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             Response = #{
                 <<"body">> => maps:put(
                     <<"status_code">>, 401, bondy_error:map(unknown_realm)),
-                <<"headers">> => #{}
+                <<"headers">> => eval_headers(Req0, St0)
             },
             Req2 = reply(401, json, Response, Req0),
             {stop, Req2, St0};
         {error, Reason} ->
+            Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
             Req2 = reply_auth_error(
-                Reason, <<"Bearer">>, Realm, json, Req0),
+                Reason, <<"Bearer">>, Realm, json, Req1),
             {stop, Req2, St0}
     end;
 
@@ -763,3 +780,13 @@ uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
 uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
 uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
 uri_to_status_code(_) ->                                           500.
+
+
+%% @private
+eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
+    Expr = maps_utils:get_path(
+        [<<"response">>, <<"on_error">>, <<"headers">>],
+        maps:get(method(Req), Spec),
+        #{}
+    ),
+    mops:eval(Expr, Ctxt).
