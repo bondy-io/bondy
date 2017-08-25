@@ -223,21 +223,26 @@ options(Req, State) ->
 is_authorized(Req0, St0) ->
     %% TODO at the moment the flows that we support required these vals
     %% but not sure all flows do.
-    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-    Realm = maps:get(realm_uri, St0),
-    Peer = cowboy_req:peer(Req0),
-    case bondy_security_utils:authenticate(basic, Val, Realm, Peer) of
-        {ok, AuthCtxt} ->
-            St1 = St0#{
-                client_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
-            },
-            {true, Req0, St1};
-        {error, Reason} ->
-            _ = lager:info(
+    case cowboy_req:method(Req0) of
+        <<"OPTIONS">> ->
+            {true, Req0, St0};
+        _ ->
+            Val = cowboy_req:parse_header(<<"authorization">>, Req0),
+            Realm = maps:get(realm_uri, St0),
+            Peer = cowboy_req:peer(Req0),
+            case bondy_security_utils:authenticate(basic, Val, Realm, Peer) of
+                {ok, AuthCtxt} ->
+                    St1 = St0#{
+                        client_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
+                    },
+                    {true, Req0, St1};
+                {error, Reason} ->
+                    _ = lager:info("API Client login failed, error=oauth2_invalid_client,reason=~p", [Reason]),
                 "API Client login failed due to invalid client, "
                 "reason=~p", [Reason]),
-            Req1 = reply(oauth2_invalid_client, json, Req0),
-            {stop, Req1, St0}
+                    Req1 = reply(oauth2_invalid_client, json, Req0),
+                    {stop, Req1, St0}
+            end
     end.
 
 
