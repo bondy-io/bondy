@@ -39,8 +39,11 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+<<<<<<< HEAD
 -define(DEFAULT_MAX_BODY_LEN, 1024*1024*25). %% 25MB
 
+=======
+>>>>>>> fixed missing CORS headers in OAUTH responses
 -type state() :: #{
     api_context => map(),
     session => any(),
@@ -790,4 +793,8 @@ eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
         maps:get(method(Req), Spec),
         #{}
     ),
+<<<<<<< HEAD
     mops:eval(Expr, Ctxt).
+=======
+    mops:eval(Expr, Ctxt).
+>>>>>>> fixed missing CORS headers in OAUTH responses
