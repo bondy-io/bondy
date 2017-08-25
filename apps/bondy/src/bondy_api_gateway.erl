@@ -315,7 +315,9 @@ admin_spec() ->
     catch
         error:badarg ->
             _ = lager:error(
-                "Error processing API Gateway Specification file. File not found or invalid specification format, file_name=~p",
+                "Error processing API Gateway Specification file. "
+                "File not found or invalid specification format, "
+                "type=error, reason=badarg, file_name=~p",
                 [File]),
             exit(badarg)
     end.
@@ -335,7 +337,8 @@ specs(Path) ->
                 catch
                     error:badarg ->
                         _ = lager:error(
-                            "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
+                            "Error processing API Gateway Specification file, "
+                            "type=error, reason=~p, file_name=~p", [invalid_specification_format, FName]),
                         Acc
                 end
             end,

@@ -283,7 +283,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St0};
         Class:Reason ->
             _ = lager:error(
-                "error=~p, reason=~p, stacktrace=~p",
+                "type=~p, reason=~p, stacktrace=~p",
                 [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
                 <<"body">> => bondy_error:map(Reason),
@@ -331,10 +331,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             },
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
-        error:Reason ->
+        Class:Reason ->
             _ = lager:error(
-                "error=error, reason=~p, stacktrace=~p",
-                [Reason, erlang:get_stacktrace()]),
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
@@ -469,8 +469,9 @@ orelse Method =:= <<"put">> ->
     catch
         Class:Error ->
             _ = lager:info(
-                "Error while decoding HTTP body, error=~p, reason=~p",
-                [Class, Error]
+                "Error while decoding HTTP body, "
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Error, erlang:get_stacktrace()]
             ),
             throw({badarg, {decoding, Enc}})
     end;
@@ -528,8 +529,9 @@ perform_action(
     ],
     Url = url(Host, Path, QS),
     _ = lager:info(
-        "Gateway is forwarding request to ~p~n",
-        [[Method, Url, Headers, Body, Opts]]
+        "Gateway is forwarding request to upstream host, "
+        "method=~p, upstream_url=~p, headers=~p, body=~p, opts=~p",
+        [Method, Url, Headers, Body, Opts]
     ),
     RSpec = maps:get(<<"response">>, Spec),
 
