@@ -149,7 +149,7 @@ handle_call(
     Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Spec]} ->
-            maybe_error(bondy_api_gateway:load(Spec), M);
+            maybe_error(catch bondy_api_gateway:load(Spec), M);
         {error, WampError} ->
             WampError
     end,
