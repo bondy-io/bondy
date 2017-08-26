@@ -72,7 +72,7 @@
         allow_null => false,
         allow_undefined => false,
         datatype => binary,
-        default => fun() -> bondy_oauth2:generate_fragment(48) end
+        default => fun() -> bondy_oauth2:generate_fragment(32) end
     },
     <<"groups">> => #{
         alias => groups,
