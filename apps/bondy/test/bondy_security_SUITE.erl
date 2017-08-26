@@ -79,12 +79,12 @@ api_client_add(Config) ->
     {ok, #{
         <<"client_id">> := Id,
         <<"client_secret">> := Secret
-    }} = bondy_api_client:add(?config(realm, Prev), #{}),
+    }} = bondy_api_client:add(?config(realm_uri, Prev), #{}),
     {save_config, [{client_id, Id}, {client_secret, Secret} | Prev]}.
 
 
 api_client_delete(Config) ->
     {api_client_add, Prev} = ?config(saved_config, Config),
     ok = bondy_api_client:remove(
-        ?config(realm, Config), ?config(client_id, Prev)),
+        ?config(realm_uri, Config), ?config(client_id, Prev)),
     {save_config, Prev}.
