@@ -39,6 +39,7 @@
             cuttlefish,
             clique,
             exometer_core,
+            prometheus,
             cowboy,
             jsx,
             jose,

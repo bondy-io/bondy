@@ -1,5 +1,6 @@
 {"1.1.0",
-[{<<"base64url">>,{pkg,<<"base64url">>,<<"0.0.1">>},1},
+[{<<"accept">>,{pkg,<<"accept">>,<<"0.3.3">>},2},
+ {<<"base64url">>,{pkg,<<"base64url">>,<<"0.0.1">>},1},
  {<<"bear">>,{pkg,<<"bear">>,<<"0.8.3">>},2},
  {<<"bert">>,{pkg,<<"bert">>,<<"0.1.0">>},0},
  {<<"certifi">>,{pkg,<<"certifi">>,<<"1.1.0">>},1},
@@ -54,6 +55,12 @@
   {git,"https://github.com/Leapsight/plumtree.git",
        {ref,"19a8f526fdc12f0edc0bfc3073f791bcaced32fd"}},
   0},
+ {<<"prometheus">>,{pkg,<<"prometheus">>,<<"3.4.0">>},0},
+ {<<"prometheus_cowboy">>,
+  {git,"https://github.com/deadtrickster/prometheus-cowboy.git",
+       {ref,"a61bda0266bf397f0b4c56def91fc5a5c6b857be"}},
+  0},
+ {<<"prometheus_httpd">>,{pkg,<<"prometheus_httpd">>,<<"2.1.2">>},1},
  {<<"quickrand">>,{pkg,<<"quickrand">>,<<"1.7.0">>},1},
  {<<"ranch">>,
   {git,"https://github.com/ninenines/ranch",
@@ -82,6 +89,7 @@
   0}]}.
 [
 {pkg_hash,[
+ {<<"accept">>, <<"548EBB6FB2E8B0D170E75BB6123AEA6CEECB0189BB1231EEADF52EAC08384A97">>},
  {<<"base64url">>, <<"36A90125F5948E3AFD7BE97662A1504B934DD5DAC78451CA6E9ABF85A10286BE">>},
  {<<"bear">>, <<"866002127A97932720A0D475D8582C98EC5FB78DB3A18DFE7EAF91594D9024B8">>},
  {<<"bert">>, <<"A87D6693515070A9B287C1043CB7E5B2406BE0357685022764BFBD2609703555">>},
@@ -105,6 +113,8 @@
  {<<"msgpack">>, <<"128AE0A2227C7E7A2847C0F0F73551C268464F8C1EE96BFFB920BC0A5712B295">>},
  {<<"parse_trans">>, <<"9E96B1C9C3A0DF54E7B76F8F685D38BFA1EB21B31E042B1D1A5A70258E4DB1E3">>},
  {<<"pbkdf2">>, <<"11C23279FDED5C0027AB3996CFAE77805521D7EF4BABDE2BD7EC04A9086CF499">>},
+ {<<"prometheus">>, <<"91759726F2E384DF2EF48DAF039D506705A7AA81DCBBB2DBFFEE1FD0C5431D32">>},
+ {<<"prometheus_httpd">>, <<"F60AFB22501C7AF6C5AC882D13D851AC11C2073A10FB619BD5FEA6CC8536A4A2">>},
  {<<"quickrand">>, <<"FF3916C50BC10A8DC62417FC6049FEF5EA56D5DBCFCE546FAABFB6188E3BAEAA">>},
  {<<"riak_dt">>, <<"56B1898A543C561994F5D052FDEA972525CA98F46FDB3DCDB7366E4F92EE8F54">>},
  {<<"setup">>, <<"15DF8E57C6DF9755E22BFB1AEF0C640BD97E9889396FDFB2A85A5536A9043674">>},

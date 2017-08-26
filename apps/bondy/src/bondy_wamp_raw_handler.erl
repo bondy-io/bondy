@@ -48,13 +48,15 @@
 -define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
-    frame_type              ::  frame_type(),
-    protocol_state          ::  bondy_wamp_protocol:state() | undefined,
-    socket                  ::  gen_tcp:socket(),
-    transport               ::  module(),
-    max_len                 ::  pos_integer(),
-    ping_sent               ::  binary() | undefined,
-    hibernate = false       ::  boolean()
+    frame_type                                  ::  frame_type(),
+    protocol_state                              ::  bondy_wamp_protocol:state()
+                                                    | undefined,
+    socket                                      ::  gen_tcp:socket(),
+    transport                                   ::  module(),
+    max_len                                     ::  pos_integer(),
+    ping_sent                                   ::  binary() | undefined,
+    hibernate = false                           ::  boolean(),
+    start_time = erlang:monotonic_time(second)  ::  integer()
 }).
 -type state() :: #state{}.
 
@@ -159,6 +161,7 @@ init({Ref, Socket, Transport, _Opts}) ->
         socket = Socket,
         transport = Transport
     },
+    _ = bondy_stats:socket_open(wamp, raw),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
@@ -186,17 +189,19 @@ handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
     ok = bondy:ack(Pid, Ref),
     handle_outbound(M, St);
 
-handle_info({tcp_closed, Socket}, St) ->
+handle_info({tcp_closed, Socket}, State) ->
     _ = lager:info(
         <<"TCP Connection closed by peer, socket=~p, pid=~p">>,
         [Socket, self()]
     ),
-    {stop, normal, St};
+    ok = socket_closed(State, false),
+    {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
     _ = lager:error(
         "TCP Connection closing, error=tcp_error, reason=~p, socket=~p, pid=~p",
         [Reason, Socket, self()]),
+        ok = socket_closed(State, true),
 	{stop, Reason, State};
 
 handle_info(timeout, State) ->
@@ -204,10 +209,15 @@ handle_info(timeout, State) ->
         "TCP Connection closing, error=timeout, pid='~p'",
         [self()]
     ),
+    ok = socket_closed(State, true),
 	{stop, normal, State};
 
-handle_info(_Info, State) ->
-	{stop, normal, State}.
+handle_info(Info, State) ->
+    _ = lager:error(
+        "Unknown message received, message='~p'",
+        [Info]
+    ),
+	{noreply, State}.
 
 
 handle_call(_Request, _From, State) ->
@@ -441,3 +451,14 @@ send(Bin, St) ->
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
 
+
+%% @private
+socket_closed(St, IsError) ->
+    ok = case IsError of
+        true ->
+            bondy_stats:socket_error(wamp, raw);
+        false ->
+            ok
+    end,
+    Seconds = erlang:monotonic_time(second) - St#state.start_time,
+    ok = bondy_stats:socket_closed(wamp, raw, Seconds).

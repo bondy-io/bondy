@@ -569,7 +569,7 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 do_init(Subprotocol, Peer, _Opts) ->
     State = #wamp_state{
         subprotocol = Subprotocol,
-        context = bondy_context:new(Peer)
+        context = bondy_context:new(Peer, Subprotocol)
     },
     {ok, State}.
 
