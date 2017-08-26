@@ -1661,14 +1661,14 @@ bin2name(Bin) when is_binary(Bin) ->
 bin2name(Name) when is_atom(Name) ->
     Name.
 
-%% Rather than introduce yet another dependency to Riak this late in
-%% the 2.0 cycle, we'll live with string:to_lower/1. It will lowercase
-%% any latin1 characters. We can look at a better library to handle
-%% more of the unicode space later.
+
 name2bin(Name) when is_binary(Name) ->
-    Name;
+    unicode_util_compat:lowercase(Name);
+
 name2bin(Name) ->
-    unicode:characters_to_binary(string:to_lower(Name), utf8, utf8).
+    unicode:characters_to_binary(
+        unicode_util_compat:lowercase(Name), utf8, utf8).
+
 
 bucket2bin(any) ->
     any;
