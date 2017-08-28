@@ -35,6 +35,7 @@
 -define(USER_SPEC,#{
     <<"username">> => #{
         alias => username,
+        key => <<"username">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -43,6 +44,7 @@
     },
     <<"password">> => #{
         alias => password,
+        key => <<"password">>,
         required => true,
         allow_null => false,
         datatype => binary,
@@ -50,6 +52,7 @@
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => true,
         allow_null => false,
         datatype => {list, binary},
@@ -57,6 +60,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -68,6 +72,7 @@
 -define(USER_UPDATE_SPEC,#{
     <<"password">> => #{
         alias => password,
+        key => <<"password">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -75,6 +80,7 @@
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => false,
         allow_null => true,
         allow_undefined => true,
@@ -82,6 +88,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
