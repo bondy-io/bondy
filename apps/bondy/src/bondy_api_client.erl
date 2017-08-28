@@ -39,6 +39,7 @@
 -define(CLIENT_UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
+        key => <<"client_secret">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -46,6 +47,7 @@
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => false,
         allow_null => true,
         allow_undefined => true,
@@ -53,6 +55,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => false,
         allow_null => true,
         allow_undefined => true,
@@ -63,6 +66,7 @@
 -define(CLIENT_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
+        key => <<"client_id">>,
         required => true,
         allow_null => true,
         allow_undefined => true,
@@ -72,6 +76,7 @@
     },
     <<"client_secret">> => #{
         alias => client_secret,
+        key => <<"client_secret">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -82,6 +87,7 @@
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -90,6 +96,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
