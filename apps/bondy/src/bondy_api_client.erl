@@ -26,6 +26,10 @@
             false;
         (all) ->
             false;
+        (undefined) ->
+            {ok, undefined};
+        (null) ->
+            {ok, undefined};
         (_) ->
             true
     end
@@ -60,13 +64,11 @@
     <<"client_id">> => #{
         alias => client_id,
         required => true,
-        allow_null => false,
-        allow_undefined => false,
+        allow_null => true,
+        allow_undefined => true,
+        default => undefined,
         datatype => binary,
-        validator => ?VALIDATE_USERNAME,
-        default => fun() ->
-            bondy_utils:uuid()
-        end
+        validator => ?VALIDATE_USERNAME
     },
     <<"client_secret">> => #{
         alias => client_secret,
@@ -123,18 +125,23 @@
 add(RealmUri, Info0) ->
     try
         ok = maybe_init_security(RealmUri),
-        {Id, Opts, Info1} = validate(Info0, ?CLIENT_SPEC),
-        case bondy_security:add_user(RealmUri, Id, Opts) of
-            {error, _} = Error ->
-                Error;
-            ok ->
-                {ok, Info1}
+        case validate(Info0, ?CLIENT_SPEC) of
+            {undefined, _Info, _Opts} = Val ->
+                %% We will generate a client_id and try 3 times
+                %% This is to contemplate the unusual case in which the
+                %% uuid generated has already been used
+                %% (most probably due to manual input)
+                do_add(RealmUri, Val, 3);
+            Val ->
+                do_add(RealmUri, Val, 0)
         end
+
     catch
         %% @TODO change for throw when maps_validate is upgraded
         error:Reason when is_map(Reason) ->
             {error, Reason}
     end.
+
 
 
 
@@ -172,6 +179,25 @@ remove(RealmUri, Id) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+do_add(RealmUri, {undefined, Opts, Info}, Retries) ->
+    Id = bondy_utils:uuid(),
+    do_add(RealmUri, {Id, Opts, maps:put(<<"client_id">>, Id, Info)}, Retries);
+
+do_add(RealmUri, {Id, Opts, Info}, Retries) ->
+    case bondy_security:add_user(RealmUri, Id, Opts) of
+        {error, role_exists} when Retries > 0 ->
+            do_add(RealmUri, {undefined, Opts, Info}, Retries - 1);
+        {error, _} = Error ->
+            Error;
+        ok ->
+            {ok, Info}
+    end.
+
+
+
+
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
@@ -189,7 +215,9 @@ validate(Info0, Spec) ->
 maybe_init_security(RealmUri) ->
     G = #{
         <<"name">> => <<"api_clients">>,
-        <<"meta">> => #{<<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>}
+        <<"meta">> => #{
+            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
+            }
     },
     case bondy_security_group:lookup(RealmUri, <<"api_clients">>) of
         {error, not_found} ->
