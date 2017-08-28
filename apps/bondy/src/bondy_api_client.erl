@@ -64,7 +64,9 @@
         allow_undefined => false,
         datatype => binary,
         validator => ?VALIDATE_USERNAME,
-        default => fun() -> bondy_oauth2:generate_fragment(32) end
+        default => fun() ->
+            bondy_utils:uuid()
+        end
     },
     <<"client_secret">> => #{
         alias => client_secret,
@@ -72,7 +74,9 @@
         allow_null => false,
         allow_undefined => false,
         datatype => binary,
-        default => fun() -> bondy_oauth2:generate_fragment(32) end
+        default => fun() ->
+            bondy_oauth2:generate_fragment(48)
+        end
     },
     <<"groups">> => #{
         alias => groups,
