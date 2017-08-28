@@ -155,7 +155,17 @@ without_2_test(_) ->
             }
         }
     },
-    #{<<"x">> => 1} =:= mops:eval(<<"{{foo.bar |> without([{{foo.key}},z])}}">>, Ctxt).
+    Res = mops:eval(<<"{{foo.bar |> without([{{foo.key}},z])}}">>, Ctxt),
+    [<<"x">>] = maps:keys(Res).
+
+without_3_test(_) ->
+    Ctxt = #{
+        <<"foo">> => #{
+            <<"bar">> => #{}
+        }
+    },
+    Res = mops:eval(<<"{{foo.bar |> without([a,b,c])}}">>, Ctxt),
+    maps:size(Res) =:= 0.
 
 
 lists_1_test(_) ->
@@ -238,23 +248,23 @@ merge_right_2_test(_) ->
     #{<<"a">> := 1, <<"b">> := 2} = mops:eval(Map, Ctxt1).
 
 
-merge_right_3_test(_) ->
-    Ctxt0 = #{
-        <<"wamp_error_override">> => #{
-            <<"code">> => <<"{{action.error.error_uri}}">>,
-            <<"message">> => <<"{{action.error.arguments |> head}}">>
-        },
-        <<"action">> => '$mops_proxy',
-        <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
-    },
-    Ctxt1 = #{
-        <<"action">> => #{
-            <<"error">> => #{
-                <<"error_uri">> => <<"com.foo">>,
-                <<"arguments">> => [<<"foobar">>],
-                <<"arguments_kw">> =>#{}
-            }
-        }
-    },
-    Map = mops:eval(<<"{{wamp_error_body}}">>, Ctxt0),
-    #{<<"code">> := <<"com.foo">>, <<"message">> := <<"foobar">>} = mops:eval(Map, Ctxt1).
+%% merge_right_3_test(_) ->
+%%     Ctxt0 = #{
+%%         <<"wamp_error_override">> => #{
+%%             <<"code">> => <<"{{action.error.error_uri}}">>,
+%%             <<"message">> => <<"{{action.error.arguments |> head}}">>
+%%         },
+%%         <<"action">> => '$mops_proxy',
+%%         <<"wamp_error_body">> => <<"{{action.error.arguments_kw |> merge({{wamp_error_override}})}}">>
+%%     },
+%%     Ctxt1 = #{
+%%         <<"action">> => #{
+%%             <<"error">> => #{
+%%                 <<"error_uri">> => <<"com.foo">>,
+%%                 <<"arguments">> => [<<"foobar">>],
+%%                 <<"arguments_kw">> =>#{}
+%%             }
+%%         }
+%%     },
+%%     Map = mops:eval(<<"{{wamp_error_body}}">>, Ctxt0),
+%%     #{<<"code">> := <<"com.foo">>, <<"message">> := <<"foobar">>} = mops:eval(Map, Ctxt1).
