@@ -149,18 +149,12 @@ add(RealmUri, Info0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), binary(), map()) ->
-    {ok, map()} | {error, term()} | no_return().
+-spec update(uri(), binary(), map()) -> ok| {error, term()} | no_return().
 
 update(RealmUri, ClientId, Info0) ->
     ok = maybe_init_group(RealmUri),
-    {undefined, Opts, Info1} = validate(Info0, ?CLIENT_UPDATE_SPEC),
-    case bondy_security:alter_user(RealmUri, ClientId, Opts) of
-        {error, _} = Error ->
-            Error;
-        ok ->
-            {ok, Info1}
-    end.
+    {undefined, Opts, _} = validate(Info0, ?CLIENT_UPDATE_SPEC),
+    bondy_security:alter_user(RealmUri, ClientId, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -202,13 +196,15 @@ do_add(RealmUri, {Id, Opts, Info}, Retries) ->
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
     Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
-    Opts = [
-        {"password", maps:get(<<"client_secret">>, Info1)},
-        {"groups", Groups} |
-        maps:to_list(maps:with([<<"meta">>], Info1))
-    ],
+    Opts = [{"groups", Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
+    Pass = case maps:find(<<"client_secret">>, Info1) of
+        {ok, Val} ->
+            [{"password", Val}];
+        error ->
+            []
+    end,
     Id = maps:get(<<"client_id">>, Info1, undefined),
-    {Id, Opts, Info1}.
+    {Id, lists:append(Pass, Opts), Info1}.
 
 
 %% @private
