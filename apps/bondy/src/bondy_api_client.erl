@@ -124,7 +124,7 @@
 
 add(RealmUri, Info0) ->
     try
-        ok = maybe_init_security(RealmUri),
+        ok = maybe_init_group(RealmUri),
         case validate(Info0, ?CLIENT_SPEC) of
             {undefined, _Info, _Opts} = Val ->
                 %% We will generate a client_id and try 3 times
@@ -153,7 +153,7 @@ add(RealmUri, Info0) ->
     {ok, map()} | {error, term()} | no_return().
 
 update(RealmUri, ClientId, Info0) ->
-    ok = maybe_init_security(RealmUri),
+    ok = maybe_init_group(RealmUri),
     {undefined, Opts, Info1} = validate(Info0, ?CLIENT_UPDATE_SPEC),
     case bondy_security:alter_user(RealmUri, ClientId, Opts) of
         {error, _} = Error ->
@@ -212,7 +212,7 @@ validate(Info0, Spec) ->
 
 
 %% @private
-maybe_init_security(RealmUri) ->
+maybe_init_group(RealmUri) ->
     G = #{
         <<"name">> => <<"api_clients">>,
         <<"meta">> => #{
