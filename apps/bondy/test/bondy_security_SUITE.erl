@@ -32,6 +32,10 @@ groups() ->
             disable_security,
             security_disabled,
             api_client_add,
+            api_client_auth1,
+            api_client_update,
+            api_client_auth2,
+            api_client_auth3,
             api_client_delete
         ]}
     ].
@@ -82,9 +86,46 @@ api_client_add(Config) ->
     }} = bondy_api_client:add(?config(realm_uri, Prev), #{}),
     {save_config, [{client_id, Id}, {client_secret, Secret} | Prev]}.
 
+api_client_auth1(Config) ->
+    {api_client_add, Prev} = ?config(saved_config, Config),
+    Uri = ?config(realm_uri, Prev),
+    Id = ?config(client_id, Prev),
+    Secret = ?config(client_secret, Prev),
+    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
+    {save_config, Prev}.
+
+api_client_update(Config) ->
+    {api_client_auth1, Prev} = ?config(saved_config, Config),
+    Secret = <<"New-Password">>,
+    ok = bondy_api_client:update(
+        ?config(realm_uri, Prev),
+        ?config(client_id, Prev),
+        #{
+            <<"client_secret">> => Secret,
+            <<"meta">> => #{<<"foo">> => <<"bar">>}
+        }
+    ),
+    {save_config,
+        lists:keyreplace(client_secret, 1, Prev, {client_secret, Secret})}.
+
+api_client_auth2(Config) ->
+    {api_client_update, Prev} = ?config(saved_config, Config),
+    Uri = ?config(realm_uri, Prev),
+    Id = ?config(client_id, Prev),
+    Secret = ?config(client_secret, Prev),
+    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
+    {save_config, Prev}.
+
+api_client_auth3(Config) ->
+    {api_client_auth2, Prev} = ?config(saved_config, Config),
+    Uri = ?config(realm_uri, Prev),
+    Id = unicode_util_compat:uppercase(?config(client_id, Prev)),
+    Secret = ?config(client_secret, Prev),
+    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
+    {save_config, Prev}.
 
 api_client_delete(Config) ->
-    {api_client_add, Prev} = ?config(saved_config, Config),
+    {api_client_auth3, Prev} = ?config(saved_config, Config),
     ok = bondy_api_client:remove(
         ?config(realm_uri, Config), ?config(client_id, Prev)),
     {save_config, Prev}.
