@@ -1663,11 +1663,11 @@ bin2name(Name) when is_atom(Name) ->
 
 
 name2bin(Name) when is_binary(Name) ->
-    unicode_util_compat:lowercase(Name);
+    unicode_util_compat:casefold(Name);
 
 name2bin(Name) ->
     unicode:characters_to_binary(
-        unicode_util_compat:lowercase(Name), utf8, utf8).
+        unicode_util_compat:casefold(Name), utf8, utf8).
 
 
 bucket2bin(any) ->
