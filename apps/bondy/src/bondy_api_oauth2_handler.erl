@@ -294,9 +294,9 @@ accept(Req0, St) ->
         {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
         Data = maps:from_list(PList),
         case cowboy_req:path(Req1) of
-            <<"/oauth/token">> ->
+            <<"/oauth/token", _/binary>> ->
                 token_flow(Data, json, Req1, St);
-            <<"/oauth/revoke">> ->
+            <<"/oauth/revoke", _/binary>> ->
                 revoke_token_flow(Data, json, Req1, St)
         end
     catch
