@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_oauth2.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -48,11 +48,11 @@
 %     algorithm               ::  binary() %% HS256 RS256 ES256
 % }).
 
--define(REFRESH_TOKEN_PREFIX(Realm, Issuer), 
+-define(REFRESH_TOKEN_PREFIX(Realm, Issuer),
     {<<Realm/binary, $., Issuer/binary>>, <<"refresh_tokens">>}
 ).
 
-% -define(ACCESS_TOKEN, PREFIX(Realm, Issuer, Type), 
+% -define(ACCESS_TOKEN, PREFIX(Realm, Issuer, Type),
 %     {<<Realm/binary, $., Issuer/binary>>, <<"access_tokens">>}
 % ).
 
@@ -98,11 +98,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue_token(
-    bondy_realm:uri(), binary(), binary(), [binary()], map()) -> 
+    bondy_realm:uri(), binary(), binary(), [binary()], map()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
-issue_token(RealmUri, Issuer, Username, Groups, Meta) ->    
+issue_token(RealmUri, Issuer, Username, Groups, Meta) ->
     Data = #bondy_oauth2_token{
         issuer = Issuer,
         username = Username,
@@ -116,7 +116,7 @@ issue_token(RealmUri, Issuer, Username, Groups, Meta) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec issue_token(bondy_realm:uri(), #bondy_oauth2_token{}) -> 
+-spec issue_token(bondy_realm:uri(), #bondy_oauth2_token{}) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
@@ -158,15 +158,18 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
 
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec revoke_token(
-    bondy_realm:uri(), Issuer :: binary(), RefreshToken :: binary()) -> any().
+    bondy_realm:uri(), Issuer :: binary(), RefreshToken :: binary()) -> ok.
 
 revoke_token(RealmUri, Issuer, RefreshToken) ->
+    %% From https://tools.ietf.org/html/rfc7009#page-3
+    %% The authorization server responds with HTTP status code
+    %% 200 if the token has been revoked successfully or if the
+    %% client submitted an invalid token.
     plumtree_metadata:delete(
         ?REFRESH_TOKEN_PREFIX(RealmUri, Issuer), RefreshToken).
 
@@ -187,7 +190,7 @@ decode_jwt(JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(binary(), binary()) -> 
+-spec verify_jwt(binary(), binary()) ->
     {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT) ->
@@ -198,7 +201,7 @@ verify_jwt(RealmUri, JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(binary(), binary(), map()) -> 
+-spec verify_jwt(binary(), binary(), map()) ->
     {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT, Match0) ->
@@ -247,7 +250,7 @@ do_issue_token(Realm, Data0) ->
     %% We generate and store the refresh token
     RefreshToken = generate_fragment(?REFRESH_TOKEN_LEN),
     Data1 = Data0#bondy_oauth2_token{
-        expires_in = Now + ?DEFAULT_REFRESH_TTL, 
+        expires_in = Now + ?DEFAULT_REFRESH_TTL,
         issued_at = Now
     },
     ok = plumtree_metadata:put(
@@ -263,10 +266,10 @@ sign(Key, Claims) ->
 
 
 %% @private
--spec do_verify_jwt(binary(), map(), integer()) -> 
+-spec do_verify_jwt(binary(), map(), integer()) ->
     {ok, map()} | {error, error()}.
 
-do_verify_jwt(JWT, Match, Now) ->     
+do_verify_jwt(JWT, Match, Now) ->
     {jose_jwt, Map} = jose_jwt:peek(JWT),
     #{
         <<"aud">> := RealmUri,
@@ -281,12 +284,12 @@ do_verify_jwt(JWT, Match, Now) ->
                     {error, oauth2_invalid_grant};
                 JWK ->
                     case jose_jwt:verify(JWK, JWT) of
-                        {true, {jose_jwt, #{<<"exp">> := Exp}}, _} 
-                        when Exp =< Now ->         
+                        {true, {jose_jwt, #{<<"exp">> := Exp}}, _}
+                        when Exp =< Now ->
                             {error, oauth2_invalid_grant};
-                        {true, {jose_jwt, Claims}, _} -> 
+                        {true, {jose_jwt, Claims}, _} ->
                             matches(Claims, Match);
-                        {false, {jose_jwt, _Claims}, _} -> 
+                        {false, {jose_jwt, _Claims}, _} ->
                             {error, oauth2_invalid_grant}
                     end
             end
@@ -297,18 +300,18 @@ do_verify_jwt(JWT, Match, Now) ->
 matches(Claims, Match) ->
     Keys = maps:keys(Match),
     case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Match) of
-        true -> 
+        true ->
             {ok, Claims};
-        false -> 
+        false ->
             {error, oauth2_invalid_grant}
     end.
 
 
-%% Borrowed from 
+%% Borrowed from
 %% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
 -spec generate_fragment(non_neg_integer()) -> binary().
 
-generate_fragment(0) -> 
+generate_fragment(0) ->
     <<>>;
 
 generate_fragment(N) ->
