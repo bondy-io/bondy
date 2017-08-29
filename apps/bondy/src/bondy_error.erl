@@ -85,6 +85,14 @@ map(#{code := _} = M) ->
 map(#{<<"code">> := _} = M) ->
     M;
 
+map(unsupported_token_type) ->
+    #{
+        <<"code">> => <<"unsupported_token_type">>,
+        <<"status_code">> => 503,
+        <<"message">> => <<"The authorization server does not support the revocation of the presented token type.  That is, the client tried to revoke an access token on a server not supporting this feature.">>,
+        <<"description">> => <<"If the server responds with HTTP status code 503, the client must assume the token still exists and may retry after a reasonable delay. The server may include a 'Retry-After' header in the response to indicate how long the service is expected to be unavailable to the requesting client.">>
+    };
+
 map(oauth2_invalid_request) ->
     #{
         <<"code">> => <<"invalid_request">>,

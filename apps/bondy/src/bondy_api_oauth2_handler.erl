@@ -154,6 +154,22 @@
     }
 }).
 
+-define(REVOKE_TOKEN_SPEC, #{
+    <<"token">> => #{
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"token_type_hint">> => #{
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        default => <<"refresh_token">>,
+        datatype => {in, [<<"access_token">>, <<"refresh_token">>]}
+    }
+}).
+
 -define(STATE_SPEC, #{
     realm_uri => #{
         required => true,
@@ -276,7 +292,13 @@ provide(_, Req, St) ->
 accept(Req0, St) ->
     try
         {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
-        accept_flow(maps:from_list(PList), json, Req1, St)
+        Data = maps:from_list(PList),
+        case cowboy_req:path(Req1) of
+            <<"/oauth/token">> ->
+                token_flow(Data, json, Req1, St);
+            <<"/oauth/revoke">> ->
+                revoke_token_flow(Data, json, Req1, St)
+        end
     catch
         error:Reason ->
             _ = lager:error(
@@ -289,12 +311,12 @@ accept(Req0, St) ->
 
 %% @private
 
-accept_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Enc, Req, St) ->
+token_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Enc, Req, St) ->
     RealmUri = maps:get(realm_uri, St),
     Username = maps:get(client_id, St),
     issue_token(RealmUri, Username, Enc, Req, St);
 
-accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
+token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
     RealmUri = maps:get(realm_uri, St0),
     #{
         <<"username">> := U,
@@ -314,7 +336,7 @@ accept_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
             {stop, Req1, St0}
     end;
 
-accept_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
+token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
     #{
         <<"refresh_token">> := RT0
     } = maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC),
@@ -329,12 +351,44 @@ accept_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
             {stop, Req1, St0}
     end;
 
-accept_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
+token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
     %% TODO
     error({oauth2_unsupported_grant_type, <<"authorization_code">>});
 
-accept_flow(Map, _, _, _) ->
+token_flow(Map, _, _, _) ->
     error({oauth2_invalid_request, Map}).
+
+
+%% @private
+revoke_token_flow(Data0, Enc, Req0, St) ->
+    %% We do not use the token_type_hint
+    try
+        Data1 = maps_utils:validate(Data0, ?REVOKE_TOKEN_SPEC),
+        case maps:get(<<"token_type_hint">>, Data1) of
+            <<"access_token">> ->
+                Req1 = reply(unsupported_token_type, Enc, Req0),
+                {stop, Req1, St};
+            _ ->
+                RealmUri = maps:get(realm_uri, St),
+                Issuer = maps:get(client_id, St),
+                RefreshToken = maps:get(<<"token">>, Data1),
+                case bondy_oauth2:revoke_token(RealmUri, Issuer, RefreshToken) of
+                    ok ->
+                        %% From https://tools.ietf.org/html/rfc7009#page-3
+                        %% The authorization server responds with HTTP status code
+                        %% 200 if the token has been revoked successfully or if the
+                        %% client submitted an invalid token.
+                        {true, cowboy_req:reply(200, Req0), St};
+                    {error, Reason} ->
+                        {stop, reply(Reason, Enc, Req0), St}
+                end
+        end
+    catch
+        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
+            {stop, reply(unsupported_token_type, Enc, Req0), St}
+    end.
+
+
 
 
 %% @private
@@ -348,8 +402,8 @@ issue_token(RealmUri, Username, Enc, Req0, St0) ->
         {ok, JWT, RefreshToken, Claims} ->
             Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
             {true, Req1, St0};
-        {error, Error} ->
-            Req1 = reply(Error, Enc, Req0),
+        {error, Reason} ->
+            Req1 = reply(Reason, Enc, Req0),
             {stop, Req1, St0}
     end.
 
@@ -384,6 +438,10 @@ reply(oauth2_invalid_client = Error, Enc, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     cowboy_req:reply(
         401, prepare_request(Enc, bondy_error:map(Error), Headers, Req));
+
+reply(unsupported_token_type = Error, Enc, Req) ->
+    #{<<"status_code">> := Code} = Map = bondy_error:map(Error),
+    cowboy_req:reply(Code, prepare_request(Enc, Map, #{}, Req));
 
 reply(Error, Enc, Req) ->
     Map =  bondy_error:map(Error),
