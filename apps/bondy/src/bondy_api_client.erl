@@ -26,6 +26,10 @@
             false;
         (all) ->
             false;
+        (undefined) ->
+            {ok, undefined};
+        (null) ->
+            {ok, undefined};
         (_) ->
             true
     end
@@ -35,6 +39,7 @@
 -define(CLIENT_UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
+        key => <<"client_secret">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -42,6 +47,7 @@
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => false,
         allow_null => true,
         allow_undefined => true,
@@ -49,6 +55,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => false,
         allow_null => true,
         allow_undefined => true,
@@ -59,23 +66,28 @@
 -define(CLIENT_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
+        key => <<"client_id">>,
         required => true,
-        allow_null => false,
-        allow_undefined => false,
+        allow_null => true,
+        allow_undefined => true,
+        default => undefined,
         datatype => binary,
-        validator => ?VALIDATE_USERNAME,
-        default => fun() -> bondy_oauth2:generate_fragment(32) end
+        validator => ?VALIDATE_USERNAME
     },
     <<"client_secret">> => #{
         alias => client_secret,
+        key => <<"client_secret">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
         datatype => binary,
-        default => fun() -> bondy_oauth2:generate_fragment(48) end
+        default => fun() ->
+            bondy_oauth2:generate_fragment(48)
+        end
     },
     <<"groups">> => #{
         alias => groups,
+        key => <<"groups">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -84,6 +96,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -118,14 +131,18 @@
 
 add(RealmUri, Info0) ->
     try
-        ok = maybe_init_security(RealmUri),
-        {Id, Opts, Info1} = validate(Info0, ?CLIENT_SPEC),
-        case bondy_security:add_user(RealmUri, Id, Opts) of
-            {error, _} = Error ->
-                Error;
-            ok ->
-                {ok, Info1}
+        ok = maybe_init_group(RealmUri),
+        case validate(Info0, ?CLIENT_SPEC) of
+            {undefined, _Info, _Opts} = Val ->
+                %% We will generate a client_id and try 3 times
+                %% This is to contemplate the unusual case in which the
+                %% uuid generated has already been used
+                %% (most probably due to manual input)
+                do_add(RealmUri, Val, 3);
+            Val ->
+                do_add(RealmUri, Val, 0)
         end
+
     catch
         %% @TODO change for throw when maps_validate is upgraded
         error:Reason when is_map(Reason) ->
@@ -134,22 +151,17 @@ add(RealmUri, Info0) ->
 
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), binary(), map()) ->
-    {ok, map()} | {error, term()} | no_return().
+-spec update(uri(), binary(), map()) -> ok| {error, term()} | no_return().
 
 update(RealmUri, ClientId, Info0) ->
-    ok = maybe_init_security(RealmUri),
-    {undefined, Opts, Info1} = validate(Info0, ?CLIENT_UPDATE_SPEC),
-    case bondy_security:alter_user(RealmUri, ClientId, Opts) of
-        {error, _} = Error ->
-            Error;
-        ok ->
-            {ok, Info1}
-    end.
+    ok = maybe_init_group(RealmUri),
+    {undefined, Opts, _} = validate(Info0, ?CLIENT_UPDATE_SPEC),
+    bondy_security:alter_user(RealmUri, ClientId, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -168,26 +180,49 @@ remove(RealmUri, Id) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+do_add(RealmUri, {undefined, Opts, Info}, Retries) ->
+    Id = bondy_utils:uuid(),
+    do_add(RealmUri, {Id, Opts, maps:put(<<"client_id">>, Id, Info)}, Retries);
+
+do_add(RealmUri, {Id, Opts, Info}, Retries) ->
+    case bondy_security:add_user(RealmUri, Id, Opts) of
+        {error, role_exists} when Retries > 0 ->
+            do_add(RealmUri, {undefined, Opts, Info}, Retries - 1);
+        {error, _} = Error ->
+            Error;
+        ok ->
+            {ok, Info}
+    end.
+
+
+
+
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
     Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
-    Opts = [
-        {"password", maps:get(<<"client_secret">>, Info1)},
-        {"groups", Groups} |
-        maps:to_list(maps:with([<<"meta">>], Info1))
-    ],
+    Opts = [{"groups", Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
+    Pass = case maps:find(<<"client_secret">>, Info1) of
+        {ok, Val} ->
+            [{"password", Val}];
+        error ->
+            []
+    end,
     Id = maps:get(<<"client_id">>, Info1, undefined),
-    {Id, Opts, Info1}.
+    {Id, lists:append(Pass, Opts), Info1}.
 
 
 %% @private
-maybe_init_security(RealmUri) ->
+maybe_init_group(RealmUri) ->
     G = #{
         <<"name">> => <<"api_clients">>,
-        <<"meta">> => #{<<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway on behalf of the resource owner and with its authorisation.">>}
+        <<"meta">> => #{
+            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
+            }
     },
-    case bondy_security_group:lookup(RealmUri, <<"resource_owners">>) of
+    case bondy_security_group:lookup(RealmUri, <<"api_clients">>) of
         {error, not_found} ->
             bondy_security_group:add(RealmUri, G);
         _ ->

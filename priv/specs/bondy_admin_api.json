@@ -15,6 +15,7 @@
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
         "schemes" : ["http"],
         "error_codes" : {
+            "com.leapsight.bondy.error.badarg" : 400,
             "com.leapsight.bondy.error.not_found" : 404,
             "com.leapsight.bondy.error.role_exists": 400,
             "com.leapsight.bondy.error.unknown_user": 400,
@@ -65,6 +66,17 @@
             },
             "paths" : {
                 "/services/load_api_spec" : {
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -79,7 +91,8 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.wamp_error_body.status_code}}",
+                                // "status_code" : "{{variables.wamp_error_body.status_code}}",
+                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -89,8 +102,91 @@
                         }
                     }
                 },
-                "/realms/:realm_uri/security_enabled" : {
+                "/realms": {
                     "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.list_realms",
+                            "options" : {},
+                            "arguments" : [],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.create_realm",
+                            "options" : {},
+                            "arguments" : ["{{request.body}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "uri": "\"{{request.path}}/{{action.result.arguments |> head |> get('uri')}}\"",
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/security_enabled" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.is_enabled",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.realm_uri}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -136,6 +232,17 @@
                 },
                 "/realms/:realm_uri/clients" : {
                     "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -163,6 +270,17 @@
                 },
                 "/realms/:realm_uri/clients/:id" : {
                     "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -209,6 +327,17 @@
                 },
                 "/realms/:realm_uri/resource_owners" : {
                     "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -236,6 +365,17 @@
                 },
                 "/realms/:realm_uri/resource_owners/:id" : {
                     "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "put" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -282,6 +422,17 @@
                 },
                 "/realms/:realm_uri/users" : {
                     "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -331,6 +482,17 @@
                 },
                 "/realms/:realm_uri/users/:id" : {
                     "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "get" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -398,6 +560,17 @@
                 },
                 "/realms/:realm_uri/groups" : {
                     "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "post" : {
                         "action" : {
                             "type" : "wamp_call",
@@ -447,6 +620,17 @@
                 },
                 "/realms/:realm_uri/groups/:id" : {
                     "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
                     "get" : {
                         "action" : {
                             "type" : "wamp_call",

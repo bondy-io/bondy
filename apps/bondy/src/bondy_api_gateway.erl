@@ -69,7 +69,7 @@ load(Spec) when is_map(Spec) ->
     Specs = [Spec | specs()],
     _ = [
         update_dispatch_table(Scheme, Routes)
-        || {Scheme, Routes} <- parse_specs(Specs)
+        || {Scheme, Routes} <- parse_specs(Specs, base_routes())
     ],
     ok;
 
@@ -97,7 +97,7 @@ load(FName) ->
 start_listeners() ->
     _ = [
         start_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs(specs())],
+        || {Scheme, Routes} <- parse_specs(specs(), base_routes())],
     ok.
 
 
@@ -108,7 +108,7 @@ start_listeners() ->
 start_admin_listeners() ->
     _ = [
         start_admin_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs([admin_spec()])],
+        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
     ok.
 
 
@@ -262,7 +262,26 @@ update_dispatch_table(<<"https">>, Routes) ->
 %% -----------------------------------------------------------------------------
 base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
-    [ {'_', [{"/ws", bondy_ws_handler, #{}}]} ].
+    [
+        {'_', [
+            {"/ws", bondy_ws_handler, #{}}
+        ]}
+    ].
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+admin_base_routes() ->
+    [
+        {'_', [
+            {"/ws", bondy_ws_handler, #{}},
+            {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
+        ]}
+    ].
+
 
 
 %% -----------------------------------------------------------------------------
@@ -291,14 +310,17 @@ specs() ->
 
 
 admin_spec() ->
-    File = "./etc/bondy_admin_api.json",
+    {ok, Base} = application:get_env(bondy, platform_etc_dir),
+    File = Base ++ "/bondy_admin_api.json",
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
             Spec
     catch
         error:badarg ->
             _ = lager:error(
-                "Error processing API Gateway Specification file. File not found or invalid specification format, file_name=~p",
+                "Error processing API Gateway Specification file. "
+                "File not found or invalid specification format, "
+                "type=error, reason=badarg, file_name=~p",
                 [File]),
             exit(badarg)
     end.
@@ -318,7 +340,8 @@ specs(Path) ->
                 catch
                     error:badarg ->
                         _ = lager:error(
-                            "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, FName]),
+                            "Error processing API Gateway Specification file, "
+                            "type=error, reason=~p, file_name=~p", [invalid_specification_format, FName]),
                         Acc
                 end
             end,
@@ -327,13 +350,13 @@ specs(Path) ->
 
 
 %% @private
-parse_specs(Specs) ->
+parse_specs(Specs, BaseRoutes) ->
     case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
-            [{<<"http">>, base_routes()}, {<<"https">>, base_routes()}];
+            [{<<"http">>, BaseRoutes}, {<<"https">>, BaseRoutes}];
         Parsed ->
             bondy_api_gateway_spec_parser:dispatch_table(
-                Parsed, base_routes())
+                Parsed, BaseRoutes)
     end.
 
 

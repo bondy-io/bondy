@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_error.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -84,6 +84,14 @@ map(#{code := _} = M) ->
 
 map(#{<<"code">> := _} = M) ->
     M;
+
+map(unsupported_token_type) ->
+    #{
+        <<"code">> => <<"unsupported_token_type">>,
+        <<"status_code">> => 503,
+        <<"message">> => <<"The authorization server does not support the revocation of the presented token type.  That is, the client tried to revoke an access token on a server not supporting this feature.">>,
+        <<"description">> => <<"If the server responds with HTTP status code 503, the client must assume the token still exists and may retry after a reasonable delay. The server may include a 'Retry-After' header in the response to indicate how long the service is expected to be unavailable to the requesting client.">>
+    };
 
 map(oauth2_invalid_request) ->
     #{
@@ -203,21 +211,21 @@ get_error(#{arguments_kw := #{<<"error">> := Map}}) ->
 get_error(_) ->
     #{}.
 
-    
+
 %% @private
-get_message(#{arguments := undefined}) -> 
+get_message(#{arguments := undefined}) ->
     <<>>;
 
-get_message(#{arguments := []}) -> 
+get_message(#{arguments := []}) ->
     <<>>;
 
-get_message(#{arguments := L}) when is_list(L) -> 
+get_message(#{arguments := L}) when is_list(L) ->
     hd(L);
 
-get_message(#{arguments_kw := undefined}) -> 
+get_message(#{arguments_kw := undefined}) ->
     <<>>;
 
-get_message(#{arguments_kw := #{}}) -> 
+get_message(#{arguments_kw := #{}}) ->
     <<>>;
 
 get_message(#{arguments_kw := #{<<"error">> := Map}}) when is_map(Map) ->

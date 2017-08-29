@@ -822,7 +822,9 @@ from_file(Filename) ->
         error:badarg ->
             _ = lager:error(
                 "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
-            {error, invalid_specification_format}
+            {error, invalid_specification_format};
+        error:Reason ->
+            {error, Reason}
     end.
 
 %% -----------------------------------------------------------------------------
@@ -874,7 +876,7 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
 
     %% We make sure all realms exists
     Realms = leap_relation:project(R0, [{var, realm}]),
-    _ = [ensure_setup_realm(Realm) || {Realm} <- leap_relation:tuples(Realms)],
+    _ = [check_realm_exists(Realm) || {Realm} <- leap_relation:tuples(Realms)],
 
     %% We add the additional rules
     Schemes = leap_relation:tuples(leap_relation:project(R0, [{var, scheme}])),
@@ -973,17 +975,8 @@ parse_path(P0, Ctxt0) ->
     P3 = validate(?DEFAULTS_KEY, P2, ?PATH_DEFAULTS),
 
     P4 = parse_path_elements(P3, Ctxt2),
-    %% io:format("Ctxt0= ~n~p~n", [Ctxt0]),
-    %% io:format("Ctxt1= ~n~p~n", [Ctxt1]),
-    %% io:format("Ctxt2= ~n~p~n", [Ctxt2]),
-    %% io:format("P0= ~n~p~n", [P0]),
-    %% io:format("P1= ~n~p~n", [P1]),
-    %% %% io:format("P11= ~n~p~n", [P11]),
-    %% io:format("P2= ~n~p~n", [P2]),
-    %% io:format("P3= ~n~p~n", [P3]),
-    %% io:format("P4= ~n~p~n", [P4]),
 
-    %% FInally we validate the resulting path
+    %% Finally we validate the resulting path
     P5 = maps_utils:validate(P4, ?API_PATH),
     %% HTTP (and COWBOY) requires uppercase method names
     P6 = maps:put(<<"allowed_methods">>, to_uppercase(L), P5),
@@ -993,7 +986,7 @@ parse_path(P0, Ctxt0) ->
     PFun = fun(Method, IPath) ->
         Sec0 = maps:get(Method, IPath),
         try
-            Sec1 = parse_request_method(Sec0, Ctxt2),
+            Sec1 = parse_request_method(Method, Sec0, Ctxt2),
             Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
@@ -1001,9 +994,7 @@ parse_path(P0, Ctxt0) ->
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
-    Res = lists:foldl(PFun, P7, L),
-    %% io:format("P Final= ~n~p~n", [Res]),
-    Res.
+    lists:foldl(PFun, P7, L).
 
 
 %% @private
@@ -1043,23 +1034,23 @@ parse_path_elements([], Path, _) ->
 
 
 %% @private
-parse_request_method(Spec, Ctxt) when is_binary(Spec) ->
-    parse_request_method(mops:eval(Spec, Ctxt), Ctxt);
+parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
+    parse_request_method(Method, mops:eval(Spec, Ctxt), Ctxt);
 
-parse_request_method(Spec, Ctxt) ->
+%% parse_request_method(<<"options">>, Spec, Ctxt) ->
+%%     #{<<"response">> := Resp} = Spec,
+%%     Spec#{
+%%         <<"response">> => parse_response(Resp, Ctxt)
+%%     };
+
+parse_request_method(Method, Spec, Ctxt) ->
     #{
-        % <<"accepts">> := Acc,
-        % <<"provides">> := Prov,
         <<"action">> := Act,
         <<"response">> := Resp
     } = Spec,
     Spec#{
-        % <<"accepts">> := mops:eval(Acc, Ctxt),
-        % <<"provides">> := mops:eval(Prov, Ctxt),
-
-        <<"action">> => parse_action(Act, Ctxt),
-        %% TODO we should be doing parser_response() here!
-        <<"response">> => parse_response(Resp, Ctxt)
+        <<"action">> => parse_action(Method, Act, Ctxt),
+        <<"response">> => parse_response(Method, Resp, Ctxt)
     }.
 
 
@@ -1074,34 +1065,38 @@ parse_request_method(Spec, Ctxt) ->
 %% If an action type is not provided if fails with `action_type_missing'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec parse_action(map(), map()) -> map().
-parse_action(#{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
+-spec parse_action(binary(), map(), map()) -> map().
+
+parse_action(_, #{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops:eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
         ?WAMP_ACTION_SPEC
     );
 
-parse_action(#{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
+parse_action(_, #{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops:eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
         ?FWD_ACTION_SPEC
     );
 
-parse_action(#{<<"type">> := <<"static">>} = Spec, Ctxt) ->
+parse_action(_, #{<<"type">> := <<"static">>} = Spec, Ctxt) ->
     maps_utils:validate(
         mops:eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
         ?STATIC_ACTION_SPEC
     );
 
-parse_action(#{<<"type">> := Type}, _) ->
+parse_action(_, #{<<"type">> := Type}, _) ->
     error({unsupported_action_type, Type});
 
-parse_action(_, _) ->
+parse_action(<<"options">>, Spec, _) ->
+    Spec;
+
+parse_action(_, _, _) ->
     error(action_type_missing).
 
 
 
-parse_response(Spec0, Ctxt) ->
+parse_response(_, Spec0, Ctxt) ->
     OR0 = maps:get(<<"on_result">>, Spec0, ?DEFAULT_RESPONSE),
     OE0 = maps:get(<<"on_error">>, Spec0, ?DEFAULT_RESPONSE),
     [OR1, OE1] = [
@@ -1411,12 +1406,11 @@ content_types_provided(<<"application/msgpack">>) ->
 
 
 % @TODO Avoid doing this and require the user to setup the environment first!
-ensure_setup_realm(Uri) ->
+check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
-            ok = bondy_realm:put(Uri),
-            %% TODO get this from spec
-            bondy_security:add_source(Uri, all, {{0,0,0,0},0}, password, []);
+            error(
+                {badarg,  <<"There is no realm named ", $', Uri/binary, $'>>});
         _ ->
             ok
     end.

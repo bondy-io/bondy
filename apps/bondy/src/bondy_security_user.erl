@@ -27,10 +27,7 @@
         alias => password,
         key => "password",
         required => false,
-        datatype => binary,
-        validator => fun(X) ->
-            {ok, ?CHARS2LIST(X)}
-        end
+        datatype => binary
     },
     <<"groups">> => #{
         alias => groups,
@@ -43,6 +40,7 @@
     },
     <<"meta">> => #{
         alias => meta,
+        key => <<"meta">>,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -58,10 +56,7 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => binary,
-        validator => fun(X) ->
-            {ok, ?CHARS2LIST(X)}
-        end
+        datatype => binary
     }
 }).
 

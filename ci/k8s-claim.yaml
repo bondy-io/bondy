@@ -6,13 +6,14 @@ metadata:
     tier: gateway
   name: bondy-claim
   namespace: magenta
+  annotations:
+    volume.beta.kubernetes.io/storage-class: fast
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 10Gi
-  storageClassName: "default"
-  selector:
-    matchLabels:
-      app: "bondy"
+  # selector:
+  #   matchLabels:
+  #     app: "bondy"

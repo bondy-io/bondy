@@ -39,8 +39,6 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
-
-
 -type state() :: #{
     api_context => map(),
     session => any(),
@@ -53,6 +51,7 @@
 
 -export([init/2]).
 -export([allowed_methods/2]).
+-export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
 -export([is_authorized/2]).
@@ -100,39 +99,60 @@ content_types_provided(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_provided">>, Spec), Req, St}.
 
 
+options(Req, #{api_spec := Spec} = St) ->
+    Allowed = iolist_to_binary(
+        lists:join(<<$,>>, maps:get(<<"allowed_methods">>, Spec))
+    ),
+    Headers0 = eval_headers(Req, St),
+    Headers1 = case maps:find(<<"access-control-allow-methods">>, Headers0) of
+        {ok, _V} ->
+            maps:put(<<"access-control-allow-methods">>, Allowed, Headers0);
+        false ->
+            Headers0
+    end,
+    Headers2 = maps:put(<<"allow">>, Allowed, Headers1),
+    {ok, cowboy_req:set_resp_headers(Headers2, Req), St}.
+
+
 is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-    Realm = maps:get(realm_uri, St0),
-    Peer = cowboy_req:peer(Req0),
-    case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
-        {ok, Claims} when is_map(Claims) ->
-            %% The token claims
-            Ctxt = update_context(
-                {security, Claims}, maps:get(api_context, St0)),
-            St1 = maps:update(api_context, Ctxt, St0),
-            {true, Req0, St1};
-        {ok, AuthCtxt} ->
-            %% TODO Here we need the token or the session withe the
-            %% token grants and not the AuthCtxt
-            St1 = St0#{
-                user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
-            },
-            %% TODO update context
-            {true, Req0, St1};
-        {error, unknown_realm} ->
-            Response = #{
-                <<"body">> => maps:put(
-                    <<"status_code">>, 401, bondy_error:map(unknown_realm)),
-                <<"headers">> => #{}
-            },
-            Req2 = reply(401, json, Response, Req0),
-            {stop, Req2, St0};
-        {error, Reason} ->
-            Req2 = reply_auth_error(
-                Reason, <<"Bearer">>, Realm, json, Req0),
-            {stop, Req2, St0}
+    case cowboy_req:method(Req0) of
+        <<"OPTIONS">> ->
+            {true, Req0, St0};
+        _ ->
+            Val = cowboy_req:parse_header(<<"authorization">>, Req0),
+            Realm = maps:get(realm_uri, St0),
+            Peer = cowboy_req:peer(Req0),
+            case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
+                {ok, Claims} when is_map(Claims) ->
+                    %% The token claims
+                    Ctxt = update_context(
+                        {security, Claims}, maps:get(api_context, St0)),
+                    St1 = maps:update(api_context, Ctxt, St0),
+                    {true, Req0, St1};
+                {ok, AuthCtxt} ->
+                    %% TODO Here we need the token or the session withe the
+                    %% token grants and not the AuthCtxt
+                    St1 = St0#{
+                        user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
+                    },
+                    %% TODO update context
+                    {true, Req0, St1};
+                {error, unknown_realm} ->
+                    Response = #{
+                        <<"body">> => maps:put(
+                            <<"status_code">>, 401, bondy_error:map(unknown_realm)),
+                        <<"headers">> => eval_headers(Req0, St0)
+                    },
+                    Req2 = reply(401, json, Response, Req0),
+                    {stop, Req2, St0};
+                {error, Reason} ->
+                    Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
+                    Req2 = reply_auth_error(
+                        Reason, <<"Bearer">>, Realm, json, Req1),
+                    {stop, Req2, St0}
+            end
     end;
 
 is_authorized(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
@@ -265,7 +285,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St0};
         Class:Reason ->
             _ = lager:error(
-                "error=~p, reason=~p, stacktrace=~p",
+                "type=~p, reason=~p, stacktrace=~p",
                 [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
                 <<"body">> => bondy_error:map(Reason),
@@ -313,10 +333,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             },
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
-        error:Reason ->
+        Class:Reason ->
             _ = lager:error(
-                "error=error, reason=~p, stacktrace=~p",
-                [Reason, erlang:get_stacktrace()]),
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Reason, erlang:get_stacktrace()]),
             Response = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
@@ -423,8 +443,9 @@ orelse Method =:= <<"put">> ->
     catch
         Class:Error ->
             _ = lager:info(
-                "Error while decoding HTTP body, error=~p, reason=~p",
-                [Class, Error]
+                "Error while decoding HTTP body, "
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Error, erlang:get_stacktrace()]
             ),
             throw({badarg, {decoding, Enc}})
     end;
@@ -482,8 +503,9 @@ perform_action(
     ],
     Url = url(Host, Path, QS),
     _ = lager:info(
-        "Gateway is forwarding request to ~p~n",
-        [[Method, Url, Headers, Body, Opts]]
+        "Gateway is forwarding request to upstream host, "
+        "method=~p, upstream_url=~p, headers=~p, body=~p, opts=~p",
+        [Method, Url, Headers, Body, Opts]
     ),
     RSpec = maps:get(<<"response">>, Spec),
 
@@ -530,6 +552,7 @@ perform_action(
     RealmUri = maps:get(realm_uri, St1),
     WampCtxt0 = #{
         peer => Peer,
+        subprotocol => {http, text, maps:get(encoding, St0)},
         realm_uri => RealmUri,
         awaiting_calls => sets:new(),
         timeout => T,
@@ -732,3 +755,13 @@ uri_to_status_code(?WAMP_ERROR_OPTION_NOT_ALLOWED) ->              400;
 uri_to_status_code(?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS) ->        400;
 uri_to_status_code(?WAMP_ERROR_SYSTEM_SHUTDOWN) ->                 500;
 uri_to_status_code(_) ->                                           500.
+
+
+%% @private
+eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
+    Expr = maps_utils:get_path(
+        [<<"response">>, <<"on_error">>, <<"headers">>],
+        maps:get(method(Req), Spec),
+        #{}
+    ),
+    mops:eval(Expr, Ctxt).

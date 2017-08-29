@@ -18,6 +18,20 @@ _build/dev/rel/bondy/bin/bondy console
 ## Configuration
 On the first startup Bondy creates the root realm called "com.leapsight.bondy" and user with username `admin` and password `bondy` with local network access.
 
+## Create a Realm
+In order tu use `bondy` you will first need a _realm_ in place:
+
+```bash
+curl -X "POST" "http://localhost:18081/realms" \
+     -H "Content-Type: application/json; charset=utf-8" \
+     -H "Accept: application/json; charset=utf-8" \
+     -d $'{
+  "uri": "com.myapi"
+}'
+```
+
+This will create a new realm `com.myapi` ready to use.
+
 ## Add an API Client
 
 If you want to define your own `client_id` and `client_secret` for a realm called `com.myapi` do:

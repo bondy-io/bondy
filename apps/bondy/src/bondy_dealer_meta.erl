@@ -149,7 +149,7 @@ handle_call(
     Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Spec]} ->
-            maybe_error(bondy_api_gateway:load(Spec), M);
+            maybe_error(catch bondy_api_gateway:load(Spec), M);
         {error, WampError} ->
             WampError
     end,
@@ -235,11 +235,33 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.delete_reso
 %% -----------------------------------------------------------------------------
 
 handle_call(#call{
+    procedure_uri = <<"com.leapsight.bondy.security.create_realm">>} = M,
+    Ctxt) ->
+    R = case validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [Map]} ->
+            maybe_error(catch bondy_realm:to_map(bondy_realm:add(Map)), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{
+    procedure_uri = <<"com.leapsight.bondy.security.list_realms">>} = M,
+    Ctxt) ->
+    R = maybe_error(
+        catch [bondy_realm:to_map(X) || X <- bondy_realm:list()],
+        M
+    ),
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{
     procedure_uri = <<"com.leapsight.bondy.security.enable">>} = M,
     Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Uri]} ->
-            maybe_error(bondy_realm:enable_security(bondy_realm:get(Uri)), M);
+            maybe_error(
+                catch bondy_realm:enable_security(bondy_realm:fetch(Uri)),
+                M);
         {error, WampError} ->
             WampError
     end,
@@ -249,7 +271,32 @@ handle_call(#call{
     procedure_uri = <<"com.leapsight.bondy.security.disable">>} = M, Ctxt) ->
     R = case validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Uri]} ->
-            maybe_error(bondy_realm:disable_security(bondy_realm:get(Uri)), M);
+            maybe_error(
+                catch bondy_realm:disable_security(bondy_realm:fetch(Uri)),
+                M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{
+    procedure_uri = <<"com.leapsight.bondy.security.status">>} = M, Ctxt) ->
+    R = case validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [Uri]} ->
+            maybe_error(
+                catch bondy_realm:security_status(bondy_realm:fetch(Uri)),
+                M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{
+    procedure_uri = <<"com.leapsight.bondy.security.is_enabled">>} = M, Ctxt) ->
+    R = case validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [Uri]} ->
+            maybe_error(
+                catch bondy_realm:is_security_enabled(bondy_realm:fetch(Uri)), M);
         {error, WampError} ->
             WampError
     end,
@@ -425,6 +472,9 @@ maybe_error(ok, M) ->
 
 maybe_error({ok, Val}, M) ->
     wamp_message:result(M#call.request_id, #{}, [Val], #{});
+
+maybe_error({'EXIT', {Reason, _}}, M) ->
+    maybe_error({error, Reason}, M);
 
 maybe_error({error, Reason}, M) ->
     #{<<"code">> := Code} = Map = bondy_error:map(Reason),
