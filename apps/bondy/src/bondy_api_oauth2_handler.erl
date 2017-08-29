@@ -253,9 +253,9 @@ is_authorized(Req0, St0) ->
                     },
                     {true, Req0, St1};
                 {error, Reason} ->
-                    _ = lager:info("API Client login failed, error=oauth2_invalid_client,reason=~p", [Reason]),
-                "API Client login failed due to invalid client, "
-                "reason=~p", [Reason]),
+                    _ = lager:info(
+                        "API Client login failed due to invalid client, "
+                        "reason=~p", [Reason]),
                     Req1 = reply(oauth2_invalid_client, json, Req0),
                     {stop, Req1, St0}
             end

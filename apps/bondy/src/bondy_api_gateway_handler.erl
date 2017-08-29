@@ -462,31 +462,6 @@ read_body(Req0, Acc) ->
 
 
 %% @private
-%% is_multipart_form_body(Req) ->
-%%     case cowboy_req:parse_header(<<"content-type">>, Req) of
-%%         {<<"multipart">>, <<"form-data">>, _} ->
-%%             true;
-%%         _ ->
-%%             false
-%%     end.
-
-
-%% @private
-read_body(Req) ->
-    read_body(Req, <<>>).
-
-
-%% @private
-read_body(Req0, Acc) ->
-    case cowboy_req:read_body(Req0) of
-        {ok, _Data, _Req} = OK ->
-            OK;
-        {more, Data, Req} ->
-            read_body(Req, <<Acc/binary, Data/binary>>)
-    end.
-
-
-%% @private
 decode_body_in_context(Method, St)
 when Method =:= <<"post">>
 orelse Method =:= <<"patch">>
@@ -747,7 +722,12 @@ url(Host, Path, QS) ->
 
 
 
+%% -----------------------------------------------------------------------------
 % private
+%% @doc
+%% The Spec uses lowercase for the method names but Cowboy uses uppercase
+%% @end
+%% -----------------------------------------------------------------------------
 method(Req) ->
     method_to_lowercase(cowboy_req:method(Req)).
 
@@ -764,7 +744,7 @@ method_to_lowercase(<<"PUT">>) -> <<"put">>.
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function exists just becuase becuase hackney (http client) uses atoms
+%% This function exists just becuase because hackney (http client) uses atoms
 %% @end
 %% -----------------------------------------------------------------------------
 method_to_atom(<<"delete">>) -> delete;
@@ -774,8 +754,6 @@ method_to_atom(<<"options">>) -> options;
 method_to_atom(<<"patch">>) -> patch;
 method_to_atom(<<"post">>) -> post;
 method_to_atom(<<"put">>) -> put.
-
-
 
 
 %% @private
