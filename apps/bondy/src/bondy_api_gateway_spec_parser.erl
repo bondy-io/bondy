@@ -918,14 +918,15 @@ from_file(Filename) ->
 %% -----------------------------------------------------------------------------
 -spec parse(map()) -> map() | no_return().
 
-parse(Spec) ->
-    parse(Spec, get_context_proxy()).
+parse(Map) ->
+    Spec = parse(Map, get_context_proxy()),
+    maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Spec).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Given a valid API Spec returned by {@link parse/1}, dynamically generates
-%% a cowboy dispatch table.
+%% Given a valid API Spec or list of Specs returned by {@link parse/1},
+%% dynamically generates a cowboy dispatch table.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table([map()] | map()) ->
@@ -940,8 +941,10 @@ dispatch_table(Specs) when is_list(Specs) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Given a valid API Spec returned by {@link parse/1}, dynamically generates
-%% a cowboy dispatch table.
+%% Given a list of valid API Specs returned by {@link parse/1} and
+%% dynamically generates the cowboy dispatch table.
+%% Notice this does not update the cowboy dispatch table. You will need to do
+%% that yourself.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table([map()] | map(), [route_rule()]) ->
