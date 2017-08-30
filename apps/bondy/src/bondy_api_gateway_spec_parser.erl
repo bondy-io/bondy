@@ -59,10 +59,19 @@
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
 -define(API_HOST, #{
-    <<"meta">> => #{
-        alias => meta,
-        required => false,
-        datatype => map
+    <<"id">> => #{
+        alias => id,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"name">> => #{
+        alias => id,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
     },
     <<"host">> => #{
         alias => host,
@@ -79,6 +88,11 @@
         required => true,
         allow_null => false,
         datatype => binary
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        datatype => map
     },
     ?VARS_KEY => #{
         alias => variables,
@@ -119,7 +133,7 @@
         alias => is_active,
         required => true,
         allow_null => false,
-        default => false,
+        default => true,
         datatype => boolean
     },
     <<"is_deprecated">> => #{
@@ -1348,7 +1362,7 @@ do_dispatch_table(API) ->
 -spec dispatch_table_version(binary(), binary(), tuple()) ->
     [scheme_rule()] | no_return().
 
-dispatch_table_version(_, _, #{<<"is_active">> := false}) ->
+dispatch_table_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
 
 dispatch_table_version(Host, Realm, {_Name, Spec}) ->
