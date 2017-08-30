@@ -455,7 +455,7 @@ init_context(Req) ->
 %% By default, Cowboy will attempt to read up to 8MB of data, for up to 15
 %% seconds. The call will return once Cowboy has read at least 8MB of data, or
 %% at the end of the 15 seconds period.
-%% We get the path's body_max_bytes, body_bytes_limit and body_seconds_limit
+%% We get the path's body_max_bytes, body_read_bytes and body_read_seconds
 %% attributes to configure the cowboy_req's length and period options and also
 %% setup a total max length.
 %% @end
@@ -470,15 +470,14 @@ read_body(Req, St) ->
 %% @private
 read_body(Req0, #{api_spec := Spec, api_context := Ctxt0} = St0, Acc) ->
     MSpec = maps:get(method(Req0), Spec),
-
     Opts = #{
-        length => maps:get(<<"body_bytes_limit">>, MSpec),
-        period => maps:get(<<"body_seconds_limit">>, MSpec)
+        length => maps:get(<<"body_read_bytes">>, MSpec),
+        period => maps:get(<<"body_read_seconds">>, MSpec)
     },
     MaxLen = maps:get(<<"body_max_bytes">>, MSpec),
-    Len = byte_size(Acc),
+
     case cowboy_req:read_body(Req0, Opts) of
-        {_, Data, _Req1} when byte_size(Data) > MaxLen - Len ->
+        {_, Data, _Req1} when byte_size(Data) > MaxLen - byte_size(Acc) ->
             throw({badarg, {body_max_bytes_exceeded, MaxLen}});
         {ok, Data, Req1} ->
             %% @TODO Stream Body in the future using WAMP Progressive Calls

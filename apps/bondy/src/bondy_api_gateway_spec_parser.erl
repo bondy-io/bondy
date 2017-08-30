@@ -202,14 +202,14 @@
         datatype => pos_integer,
         default => 25000000 %% 25MB
     },
-    <<"body_bytes_limit">> => #{
-        alias => body_bytes_limit,
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
         required => true,
         datatype => pos_integer,
         default => 8000000 %% 8MB is Cowboy 2 default
     },
-    <<"body_seconds_limit">> => #{
-        alias => body_seconds_limit,
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
         required => true,
         datatype => pos_integer,
         default => 15000 %% 15 secs is Cowboy 2 default
@@ -351,8 +351,8 @@
     <<"schemes">> => <<"{{defaults.schemes}}">>,
     <<"security">> => <<"{{defaults.security}}">>,
     <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
-    <<"body_bytes_limit">> => <<"{{defaults.body_bytes_limit}}">>,
-    <<"body_seconds_limit">> => <<"{{defaults.body_seconds_limit}}">>,
+    <<"body_read_bytes">> => <<"{{defaults.body_read_bytes}}">>,
+    <<"body_read_seconds">> => <<"{{defaults.body_read_seconds}}">>,
     <<"timeout">> => <<"{{defaults.timeout}}">>,
     <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
     <<"retries">> => <<"{{defaults.retries}}">>,
@@ -478,14 +478,14 @@
         datatype => pos_integer,
         default => 25000000 %% 25MB
     },
-    <<"body_bytes_limit">> => #{
-        alias => body_bytes_limit,
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
         required => true,
         datatype => pos_integer,
         default => 8000000 %% 8MB is Cowboy 2 default
     },
-    <<"body_seconds_limit">> => #{
-        alias => body_seconds_limit,
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
         required => true,
         datatype => pos_integer,
         default => 15000 %% 15 secs is Cowboy 2 default
@@ -533,8 +533,8 @@
 
 -define(DEFAULT_REQ, #{
     <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
-    <<"body_bytes_limit">> => <<"{{defaults.body_bytes_limit}}">>,
-    <<"body_seconds_limit">> => <<"{{defaults.body_seconds_limit}}">>
+    <<"body_read_bytes">> => <<"{{defaults.body_read_bytes}}">>,
+    <<"body_read_seconds">> => <<"{{defaults.body_read_seconds}}">>
 }).
 
 -define(REQ_SPEC, #{
@@ -560,13 +560,13 @@
         required => true,
         datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
-    <<"body_bytes_limit">> => #{
-        alias => body_bytes_limit,
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
         required => true,
         datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
-    <<"body_seconds_limit">> => #{
-        alias => body_seconds_limit,
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
         required => true,
         datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
@@ -1110,15 +1110,15 @@ parse_request_method(Method, Spec0, Ctxt) ->
         <<"action">> := Act,
         <<"response">> := Resp,
         <<"body_max_bytes">> := MB,
-        <<"body_bytes_limit">> := BL,
-        <<"body_seconds_limit">> := SL
+        <<"body_read_bytes">> := BL,
+        <<"body_read_seconds">> := SL
     } = Spec1,
     Spec1#{
         <<"action">> => parse_action(Method, Act, Ctxt),
         <<"response">> => parse_response(Method, Resp, Ctxt),
         <<"body_max_bytes">> => mops:eval(MB, Ctxt),
-        <<"body_bytes_limit">> => mops:eval(BL, Ctxt),
-        <<"body_seconds_limit">> => mops:eval(SL, Ctxt)
+        <<"body_read_bytes">> => mops:eval(BL, Ctxt),
+        <<"body_read_seconds">> => mops:eval(SL, Ctxt)
     }.
 
 
