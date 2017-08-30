@@ -59,6 +59,11 @@
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
 -define(API_HOST, #{
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        datatype => map
+    },
     <<"host">> => #{
         alias => host,
         required => true,
