@@ -39,7 +39,7 @@
     <<"access-control-allow-origin">> => <<"*">>,
     <<"access-control-allow-credentials">> => <<"true">>,
     <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
-    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
     <<"access-control-max-age">> => <<"86400">>
 }).
 
