@@ -196,6 +196,24 @@
         % datatype => map,
         default => #{}
     },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 25000000 %% 25MB
+    },
+    <<"body_bytes_limit">> => #{
+        alias => body_bytes_limit,
+        required => true,
+        datatype => pos_integer,
+        default => 8000000 %% 8MB is Cowboy 2 default
+    },
+    <<"body_seconds_limit">> => #{
+        alias => body_seconds_limit,
+        required => true,
+        datatype => pos_integer,
+        default => 15000 %% 15 secs is Cowboy 2 default
+    },
     <<"timeout">> => #{
         alias => timeout,
         required => true,
@@ -332,6 +350,9 @@
     <<"provides">> => <<"{{defaults.provides}}">>,
     <<"schemes">> => <<"{{defaults.schemes}}">>,
     <<"security">> => <<"{{defaults.security}}">>,
+    <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
+    <<"body_bytes_limit">> => <<"{{defaults.body_bytes_limit}}">>,
+    <<"body_seconds_limit">> => <<"{{defaults.body_seconds_limit}}">>,
     <<"timeout">> => <<"{{defaults.timeout}}">>,
     <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
     <<"retries">> => <<"{{defaults.retries}}">>,
@@ -451,6 +472,24 @@
         allow_null => false,
         datatype => map
     },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 25000000 %% 25MB
+    },
+    <<"body_bytes_limit">> => #{
+        alias => body_bytes_limit,
+        required => true,
+        datatype => pos_integer,
+        default => 8000000 %% 8MB is Cowboy 2 default
+    },
+    <<"body_seconds_limit">> => #{
+        alias => body_seconds_limit,
+        required => true,
+        datatype => pos_integer,
+        default => 15000 %% 15 secs is Cowboy 2 default
+    },
     <<"timeout">> => #{
         alias => timeout,
         required => true,
@@ -492,6 +531,11 @@
     }
 }).
 
+-define(DEFAULT_REQ, #{
+    <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
+    <<"body_bytes_limit">> => <<"{{defaults.body_bytes_limit}}">>,
+    <<"body_seconds_limit">> => <<"{{defaults.body_seconds_limit}}">>
+}).
 
 -define(REQ_SPEC, #{
     <<"info">> => #{
@@ -510,6 +554,21 @@
                 validator => ?API_PARAMS
             }
         }
+    },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"body_bytes_limit">> => #{
+        alias => body_bytes_limit,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"body_seconds_limit">> => #{
+        alias => body_seconds_limit,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"action">> => #{
         alias => action,
@@ -600,6 +659,8 @@
     <<"body">> => #{
         alias => body,
         required => true,
+        %% TODO map? a body could be anything!
+        %% TODO Fix this we should not request a datatype
         datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
@@ -1043,14 +1104,21 @@ parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
 %%         <<"response">> => parse_response(Resp, Ctxt)
 %%     };
 
-parse_request_method(Method, Spec, Ctxt) ->
+parse_request_method(Method, Spec0, Ctxt) ->
+    Spec1 = maps:merge(?DEFAULT_REQ, Spec0),
     #{
         <<"action">> := Act,
-        <<"response">> := Resp
-    } = Spec,
-    Spec#{
+        <<"response">> := Resp,
+        <<"body_max_bytes">> := MB,
+        <<"body_bytes_limit">> := BL,
+        <<"body_seconds_limit">> := SL
+    } = Spec1,
+    Spec1#{
         <<"action">> => parse_action(Method, Act, Ctxt),
-        <<"response">> => parse_response(Method, Resp, Ctxt)
+        <<"response">> => parse_response(Method, Resp, Ctxt),
+        <<"body_max_bytes">> => mops:eval(MB, Ctxt),
+        <<"body_bytes_limit">> => mops:eval(BL, Ctxt),
+        <<"body_seconds_limit">> => mops:eval(SL, Ctxt)
     }.
 
 
