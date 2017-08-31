@@ -378,7 +378,7 @@ revoke_token_flow(Data0, Enc, Req0, St) ->
                         %% The authorization server responds with HTTP status code
                         %% 200 if the token has been revoked successfully or if the
                         %% client submitted an invalid token.
-                        {true, cowboy_req:reply(200, Req0), St};
+                        {<<>>, Req0, St};
                     {error, Reason} ->
                         {stop, reply(Reason, Enc, Req0), St}
                 end
