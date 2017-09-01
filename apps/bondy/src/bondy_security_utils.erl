@@ -51,7 +51,6 @@ authenticate(?TICKET_AUTH, {?TICKET_AUTH, AuthId, Signature}, Realm, Peer) ->
 
 authenticate(?WAMPCRA_AUTH, {?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
     bondy_security:authenticate(
-        %% Realm, ?CHARS2LIST(AuthId), {hash, Signature}, conn_info(Peer));
         Realm, AuthId, {hash, Signature}, conn_info(Peer));
 
 authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
@@ -59,7 +58,6 @@ authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
 
 authenticate(basic, {basic, Username, Pass}, Realm, Peer) ->
     bondy_security:authenticate(
-        %% Realm, ?CHARS2LIST(Username), Pass, conn_info(Peer));
         Realm, Username, Pass, conn_info(Peer));
 
 authenticate(digest, {digest, _List}, _Realm, _Peer) ->

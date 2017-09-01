@@ -153,10 +153,11 @@ map(oauth2_invalid_scope) ->
 
 map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
-    maps:put(<<"status_code">>, Msg, map(oauth2_invalid_client));
+    maps:put(<<"message">>, Msg, map(oauth2_invalid_client));
 
 map({badarg, {decoding, json}}) ->
     #{
+        <<"status_code">> => 400,
         <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid json.">>,
         <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
@@ -164,9 +165,18 @@ map({badarg, {decoding, json}}) ->
 
 map({badarg, {decoding, msgpack}}) ->
     #{
+        <<"status_code">> => 400,
         <<"code">> => <<"invalid_data">>,
         <<"message">> => <<"The data provided is not a valid msgpack.">>,
         <<"description">> => <<"Make sure the data type you are sending matches a supported mime type and that it matches the request content-type header.">>
+    };
+
+map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
+    #{
+        <<"status_code">> => 400,
+        <<"code">> => <<"body_max_bytes_exceeded">>,
+        <<"message">> => <<"The body content size exceeds the allowable limit of", $\s, (integer_to_binary(MaxLen))/binary, $\s, "bytes">>,
+        <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
 map({Code, Mssg}) ->

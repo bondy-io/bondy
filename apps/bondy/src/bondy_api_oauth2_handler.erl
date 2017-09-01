@@ -39,7 +39,7 @@
     <<"access-control-allow-origin">> => <<"*">>,
     <<"access-control-allow-credentials">> => <<"true">>,
     <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
-    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
     <<"access-control-max-age">> => <<"86400">>
 }).
 
@@ -253,9 +253,9 @@ is_authorized(Req0, St0) ->
                     },
                     {true, Req0, St1};
                 {error, Reason} ->
-            _ = lager:info(
-                "API Client login failed due to invalid client, "
-                "reason=~p", [Reason]),
+                    _ = lager:info(
+                        "API Client login failed due to invalid client, "
+                        "reason=~p", [Reason]),
                     Req1 = reply(oauth2_invalid_client, json, Req0),
                     {stop, Req1, St0}
             end

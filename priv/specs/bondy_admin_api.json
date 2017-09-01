@@ -1,4 +1,6 @@
 {
+    "id": "com.leapsight.bondy",
+    "name": "Bondy Admin API",
     "host" : "_",
     "realm_uri" : "com.leapsight.bondy",
     "variables" : {

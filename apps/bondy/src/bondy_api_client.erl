@@ -21,10 +21,10 @@
 
 -define(VALIDATE_USERNAME, fun
         (<<"all">>) ->
-            false;
-        ("all") ->
+            %% Reserved
             false;
         (all) ->
+            %% Reserved
             false;
         (undefined) ->
             {ok, undefined};
@@ -202,11 +202,11 @@ do_add(RealmUri, {Id, Opts, Info}, Retries) ->
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
-    Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
-    Opts = [{"groups", Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
+    Groups = [<<"api_clients">> | maps:get(<<"groups">>, Info1, [])],
+    Opts = [{<<"groups">>, Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
     Pass = case maps:find(<<"client_secret">>, Info1) of
         {ok, Val} ->
-            [{"password", Val}];
+            [{<<"password">>, Val}];
         error ->
             []
     end,
