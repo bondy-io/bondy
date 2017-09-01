@@ -25,18 +25,42 @@
 -define(UPDATE_SPEC, #{
     <<"password">> => #{
         alias => password,
-        key => "password",
+        key => <<"password">>,
         required => false,
         datatype => binary
     },
     <<"groups">> => #{
         alias => groups,
-        key => "groups", %% bondy_security requirement
+        key => <<"groups">>, %% bondy_security requirement
         allow_null => false,
         allow_undefined => false,
+        required => false,
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => false,
+        datatype => map
+    }
+}).
+
+-define(SPEC, #{
+    <<"password">> => #{
+        alias => password,
+        key => <<"password">>,
         required => true,
-        datatype => {list, binary},
-        default => []
+        datatype => binary
+    },
+    <<"username">> => #{
+        alias => username,
+        key => <<"username">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
     },
     <<"meta">> => #{
         alias => meta,
@@ -46,17 +70,15 @@
         required => true,
         datatype => map,
         default => #{}
-    }
-}).
-
--define(SPEC, ?UPDATE_SPEC#{
-    <<"username">> => #{
-        alias => username,
-        key => <<"username">>,
-        required => true,
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>, %% bondy_security requirement
         allow_null => false,
         allow_undefined => false,
-        datatype => binary
+        required => true,
+        default => [],
+        datatype => {list, binary}
     }
 }).
 
@@ -99,9 +121,6 @@ add(RealmUri, User0) ->
 -spec update(uri(), binary(), user()) -> ok.
 
 update(RealmUri, Username, User0) when is_binary(Username) ->
-    update(RealmUri, ?CHARS2LIST(Username), User0);
-
-update(RealmUri, Username, User0) ->
     try
         User1 = maps_utils:validate(User0, ?UPDATE_SPEC),
         bondy_security:alter_user(RealmUri, Username, maps:to_list(User1))
@@ -129,6 +148,7 @@ groups(#{<<"groups">> := Val}) -> Val.
     CIDR :: bondy_security:cidr(),
     Source :: atom(),
     Options :: list()) -> ok.
+
 add_source(RealmUri, Username, CIDR, Source, Opts) ->
     bondy_security_source:add(RealmUri, [Username], CIDR, Source, Opts).
 
@@ -150,10 +170,10 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), list() | binary()) -> ok | {error, unknown_user}.
+-spec remove(uri(), binary() | map()) -> ok | {error, unknown_user}.
 
-remove(RealmUri, Id) when is_list(Id) ->
-    remove(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
+remove(RealmUri, #{<<"username">> := Username}) ->
+    remove(RealmUri, Username);
 
 remove(RealmUri, Id) ->
     case bondy_security:del_user(RealmUri, Id) of
@@ -168,10 +188,7 @@ remove(RealmUri, Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri(), list() | binary()) -> user() | {error, not_found}.
-
-lookup(RealmUri, Id) when is_list(Id) ->
-    lookup(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
+-spec lookup(uri(), binary()) -> user() | {error, not_found}.
 
 lookup(RealmUri, Id) ->
     case bondy_security:lookup_user(RealmUri, Id) of
@@ -186,10 +203,7 @@ lookup(RealmUri, Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(uri(), list() | binary()) -> user() | no_return().
-
-fetch(RealmUri, Id) when is_list(Id) ->
-    fetch(RealmUri, unicode:characters_to_binary(Id, utf8, utf8));
+-spec fetch(uri(), binary()) -> user() | no_return().
 
 fetch(RealmUri, Id) ->
     case lookup(RealmUri, Id) of
@@ -203,6 +217,7 @@ fetch(RealmUri, Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(user()).
+
 list(RealmUri) ->
     [to_map(RealmUri, User) || User <- bondy_security:list(RealmUri, user)].
 
@@ -212,6 +227,7 @@ list(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(uri(), user() | id()) -> map() | no_return().
+
 password(RealmUri, #{<<"username">> := Username}) ->
     password(RealmUri, Username);
 
@@ -220,7 +236,7 @@ password(RealmUri, Username) ->
         {error, Reason} ->
             error(Reason);
         {Username, Opts} ->
-            case proplists:get_value("password", Opts) of
+            case proplists:get_value(<<"password">>, Opts) of
                 undefined -> undefined;
                 L -> maps:from_list(L)
             end
@@ -267,7 +283,7 @@ to_map(RealmUri, {Username, PL}) ->
     Map1 = #{
         <<"username">> => Username,
         <<"has_password">> => has_password(PL),
-        <<"groups">> => proplists:get_value("groups", PL, []),
+        <<"groups">> => proplists:get_value(<<"groups">>, PL, []),
         <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
@@ -281,7 +297,7 @@ to_map(RealmUri, {Username, PL}) ->
 
 %% @private
 has_password(Opts) ->
-    case proplists:get_value("password", Opts) of
+    case proplists:get_value(<<"password">>, Opts) of
         undefined -> false;
         _ -> true
     end.

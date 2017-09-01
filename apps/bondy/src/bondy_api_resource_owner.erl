@@ -140,8 +140,7 @@ add(RealmUri, Info0) ->
 
 update(RealmUri, Username, Info0) ->
     ok = maybe_init_security(RealmUri),
-    {undefined, Opts, Info1} = validate(
-        Info0, ?USER_UPDATE_SPEC),
+    {undefined, Opts, Info1} = validate(Info0, ?USER_UPDATE_SPEC),
     case bondy_security:alter_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
@@ -170,10 +169,10 @@ remove(RealmUri, Id) ->
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
-    Groups = ["resource_owners" | maps:get(<<"groups">>, Info1, [])],
+    Groups = [<<"resource_owners">> | maps:get(<<"groups">>, Info1, [])],
     Opts = [
-        {"password", maps:get(<<"password">>, Info1)},
-        {"groups", Groups} |
+        {<<"password">>, maps:get(<<"password">>, Info1)},
+        {<<"groups">>, Groups} |
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Username = maps:get(<<"username">>, Info1, undefined),

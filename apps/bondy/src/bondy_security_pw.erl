@@ -39,7 +39,8 @@ hash_password(BinaryPass) when is_binary(BinaryPass) ->
     Salt = crypto:strong_rand_bytes(?SALT_LENGTH),
 
     % Hash the original password and store as hex
-    {ok, HashedPass} = pbkdf2:pbkdf2(?HASH_FUNCTION, BinaryPass, Salt, ?HASH_ITERATIONS),
+    {ok, HashedPass} = pbkdf2:pbkdf2(
+        ?HASH_FUNCTION, BinaryPass, Salt, ?HASH_ITERATIONS),
     HexPass = pbkdf2:to_hex(HashedPass),
     {ok, HexPass, ?AUTH_NAME, ?HASH_FUNCTION, Salt, ?HASH_ITERATIONS}.
 
