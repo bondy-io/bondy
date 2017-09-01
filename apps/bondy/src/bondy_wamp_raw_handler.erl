@@ -267,36 +267,36 @@ handle_data(_Data, #state{protocol_state = undefined} = St) ->
     %% _Router_ MUST *fail the connection*.
     {error, invalid_wamp_data, St};
 
-handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
-    {error, error_reason(Error), St};
+%% handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
+%%     {error, error_reason(Error), St};
 
-handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St)
-when byte_size(Data) > Max->
-    ok = send_frame(error_number(maximum_message_length_unacceptable), St),
-    {stop, St};
+%% handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St)
+%% when byte_size(Data) > Max->
+%%     ok = send_frame(error_number(maximum_message_length_unacceptable), St),
+%%     {stop, St};
 
-handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
-    %% We received a PING, send a PONG
-    ok = send_frame(<<0:5, 2:3, Rest/binary>>, St),
-    {ok, St};
+%% handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
+%%     %% We received a PING, send a PONG
+%%     ok = send_frame(<<0:5, 2:3, Rest/binary>>, St),
+%%     {ok, St};
 
-handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
-    %% We received a PONG
-    case St#state.ping_sent of
-        undefined ->
-            %% We never sent this ping
-            {ok, St};
-        Rest ->
-            {ok, St#state{ping_sent = undefined}};
-        _ ->
-            %% Wrong answer
-            _ = lager:error("Invalid ping response from peer"),
-            {error, invalid_response, St}
-    end;
+%% handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
+%%     %% We received a PONG
+%%     case St#state.ping_sent of
+%%         undefined ->
+%%             %% We never sent this ping
+%%             {ok, St};
+%%         Rest ->
+%%             {ok, St#state{ping_sent = undefined}};
+%%         _ ->
+%%             %% Wrong answer
+%%             _ = lager:error("Invalid ping response from peer"),
+%%             {error, invalid_response, St}
+%%     end;
 
-handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
-    ok = send_frame(error_number(use_of_reserved_bits), St),
-    {stop, St};
+%% handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
+%%     ok = send_frame(error_number(use_of_reserved_bits), St),
+%%     {stop, St};
 
 handle_data(Data, St) when is_binary(Data) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
@@ -427,10 +427,10 @@ error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
 error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
 
-error_reason(1) -> serializer_unsupported;
-error_reason(2) -> maximum_message_length_unacceptable;
-error_reason(3) -> use_of_reserved_bits;
-error_reason(4) -> maximum_connection_count_reached.
+%% error_reason(1) -> serializer_unsupported;
+%% error_reason(2) -> maximum_message_length_unacceptable;
+%% error_reason(3) -> use_of_reserved_bits;
+%% error_reason(4) -> maximum_connection_count_reached.
 
 %% @private
 -spec send(binary() | list(), state()) -> ok | {error, any()}.
