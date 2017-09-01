@@ -24,7 +24,8 @@ all() ->
     [
         {group, api_client},
         {group, resource_owner},
-        {group, user}
+        {group, user},
+        {group, group}
     ].
 
 groups() ->
@@ -58,6 +59,9 @@ groups() ->
             user_auth2,
             user_auth3,
             user_delete
+        ]},
+        {group, [sequence], [
+            create_group
         ]}
     ].
 
@@ -107,9 +111,17 @@ security_disabled(Config) ->
 %% GROUP
 %% =============================================================================
 
-%% create_group(Config) ->
-%%     Realm = bondy_security_group:add(?config(realm_uri, Config)).
-
+create_group(Config) ->
+    Uri = ?config(realm_uri, Config),
+    Name = <<"group_a">>,
+    N = length(bondy_security_group:list(Uri)),
+    ok = bondy_security_group:add(Uri, #{<<"name">> => Name}),
+    #{
+        <<"name">> := Name,
+        <<"groups">> := [],
+        <<"meta">> := #{}
+    } = bondy_security_group:lookup(Uri, Name),
+    true = length(bondy_security_group:list(Uri)) =:= N + 1.
 
 
 %% =============================================================================
