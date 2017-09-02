@@ -32,8 +32,8 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--type subprotocol()        ::  wamp_protocol:subprotocol()
-                            | {http, text, json | msgpack}.
+-type subprotocol_2()        ::  subprotocol()
+                                | {http, text, json | msgpack}.
 
 
 -type context()       ::  #{
@@ -106,7 +106,7 @@ new() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(bondy_session:peer(), subprotocol()) -> context().
+-spec new(bondy_session:peer(), subprotocol_2()) -> context().
 new(Peer, Subprotocol) ->
     set_subprotocol(set_peer(new(), Peer), Subprotocol).
 
@@ -167,7 +167,7 @@ set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
 %% Returns the peer of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subprotocol(context()) -> subprotocol().
+-spec subprotocol(context()) -> subprotocol_2().
 subprotocol(#{subprotocol := Val}) -> Val.
 
 
@@ -176,7 +176,7 @@ subprotocol(#{subprotocol := Val}) -> Val.
 %% Set the peer to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_subprotocol(context(), subprotocol()) -> context().
+-spec set_subprotocol(context(), subprotocol_2()) -> context().
 set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
     Ctxt#{subprotocol => S}.
 
