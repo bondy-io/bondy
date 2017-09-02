@@ -89,7 +89,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"8da95449e1f94d9f51fffeea46788464f3a4915f"}},
+       {ref,"78bf8cc023939a32b90697cb18e1ebceba19b4e5"}},
   0}]}.
 [
 {pkg_hash,[
