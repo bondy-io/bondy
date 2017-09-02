@@ -29,16 +29,17 @@
 
 -record(wamp_state, {
     subprotocol             ::  subprotocol(),
-    buffer = <<>>           ::  binary(),
     challenge_sent          ::  {true, AuthMethod :: any()} | false,
     goodbye_initiated       ::  boolean(),
     context                 ::  bondy_context:context() | undefined
 }).
 
 
--type subprotocol()         ::  {transport(), frame_type(), encoding()}.
-
 -type state()               ::  #wamp_state{} | undefined.
+-type raw_wamp_message()    ::  wamp_message:message()
+                                | {raw, ping}
+                                | {raw, pong}
+                                | {raw, wamp_encoding:raw_error()}.
 
 
 -export_type([frame_type/0]).
@@ -47,6 +48,7 @@
 -export_type([state/0]).
 
 -export([init/3]).
+-export([peer/1]).
 -export([handle_inbound/2]).
 -export([handle_outbound/2]).
 -export([terminate/1]).
@@ -74,6 +76,16 @@ init(Term, Peer, Opts) ->
         {error, Reason} ->
             {error, Reason, undefined}
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer(state()) -> {inet:ip_address(), inet:port_number()}.
+
+peer(#wamp_state{context = Ctxt}) ->
+    bondy_context:peer(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -131,10 +143,9 @@ validate_subprotocol(_) ->
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
 
-handle_inbound(Data0, St) ->
-    Data1 = <<(St#wamp_state.buffer)/binary, Data0/binary>>,
-    {Messages, Buffer} = wamp_encoding:decode(St#wamp_state.subprotocol, Data1),
-    handle_inbound_messages(Messages, St#wamp_state{buffer = Buffer}).
+handle_inbound(Data, St) ->
+    {Messages, <<>>} = wamp_encoding:decode(St#wamp_state.subprotocol, Data),
+    handle_inbound_messages(Messages, St).
 
 
 
@@ -184,7 +195,7 @@ handle_outbound(M, St) ->
 
 
 
--spec handle_inbound_messages([wamp_message()], state()) ->
+-spec handle_inbound_messages([raw_wamp_message()], state()) ->
     {ok, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
@@ -203,7 +214,7 @@ handle_inbound_messages(Messages, St) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_inbound_messages(
-    [wamp_message()], state(), Acc :: [wamp_message()]) ->
+    [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
     {ok, state()}
     | {stop, state()}
     | {stop, [binary()], state()}
