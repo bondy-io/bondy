@@ -39,8 +39,6 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(DEFAULT_MAX_BODY_LEN, 1024*1024*25). %% 25MB
-
 -type state() :: #{
     api_context => map(),
     session => any(),
@@ -328,8 +326,8 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 Req2 = reply(
                     get_status_code(Response), Enc, Response, Req1),
                 {stop, Req2, St2};
-
             {error, HTTPCode, Response, St2} ->
+
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2}
         end
     catch

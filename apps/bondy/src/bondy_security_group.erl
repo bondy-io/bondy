@@ -182,9 +182,9 @@ list(RealmUri) when is_binary(RealmUri) ->
 %% @private
 to_map({Id, PL}) ->
     #{
-        name => Id,
-        groups => proplists:get_value(<<"groups">>, PL, []),
-        meta => proplists:get_value(<<"meta">>, PL, #{})
+        <<"name">> => Id,
+        <<"groups">> => proplists:get_value(<<"groups">>, PL, []),
+        <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
     }.
 
 

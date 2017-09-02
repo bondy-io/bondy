@@ -79,7 +79,7 @@
        {ref,"d540f76ccf587734b86d80eb7d8a4e8a4514d5af"}},
   0},
  {<<"unicode_util_compat">>,
-  {git,"git@github.com:Leapsight/unicode_util_compat.git",
+  {git,"https://github.com/Leapsight/unicode_util_compat.git",
        {ref,"3c6ff1093aaace2053d36d0043e974e83e17d7ca"}},
   0},
  {<<"utils">>,
@@ -89,7 +89,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"fd90314b4e5a6536a38b953e4d4a032d400fd265"}},
+       {ref,"78bf8cc023939a32b90697cb18e1ebceba19b4e5"}},
   0}]}.
 [
 {pkg_hash,[
