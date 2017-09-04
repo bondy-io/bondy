@@ -205,6 +205,7 @@ load(Map) when is_map(Map) ->
     try bondy_api_gateway_spec_parser:parse(Map) of
         #{<<"id">> := Id} = Spec ->
             %% We store the parsed Spec in the MD store
+            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
             ok = add(Id, Spec),
             %% We rebuild the dispatch table
             rebuild_dispatch_tables()
@@ -396,6 +397,10 @@ parse_specs(Specs, BaseRoutes) ->
                 {<<"https">>, BaseRoutes}
             ];
         L ->
+            _ = [
+                maybe_init_groups(maps:get(<<"realm_uri">>, Spec))
+                || Spec <- L
+            ],
             bondy_api_gateway_spec_parser:dispatch_table(L, BaseRoutes)
     end.
 
@@ -450,3 +455,28 @@ parse_specs(Specs, BaseRoutes) ->
 
 
 
+%% @private
+maybe_init_groups(RealmUri) ->
+    Gs = [
+        #{
+            <<"name">> => <<"resource_owners">>,
+            <<"meta">> => #{
+                <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
+            }
+        },
+        #{
+            <<"name">> => <<"api_clients">>,
+            <<"meta">> => #{
+                <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
+                }
+        }
+    ],
+    _ = [begin
+        case bondy_security_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
+            {error, not_found} ->
+                bondy_security_group:add(RealmUri, G);
+            _ ->
+                ok
+        end
+    end || G <- Gs],
+    ok.

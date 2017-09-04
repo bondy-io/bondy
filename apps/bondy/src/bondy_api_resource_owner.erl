@@ -120,7 +120,6 @@
     {ok, map()} | {error, term()} | no_return().
 
 add(RealmUri, Info0) ->
-    ok = maybe_init_security(RealmUri),
     {Username, Opts, Info1} = validate(Info0, ?USER_SPEC),
     case bondy_security:add_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
@@ -139,7 +138,6 @@ add(RealmUri, Info0) ->
     {ok, map()} | {error, term()} | no_return().
 
 update(RealmUri, Username, Info0) ->
-    ok = maybe_init_security(RealmUri),
     {undefined, Opts, Info1} = validate(Info0, ?USER_UPDATE_SPEC),
     case bondy_security:alter_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
@@ -179,19 +177,6 @@ validate(Info0, Spec) ->
     {Username, Opts, Info1}.
 
 
-%% @private
-maybe_init_security(RealmUri) ->
-    G = #{
-        <<"name">> => <<"resource_owners">>,
-        <<"meta">> => #{
-            <<"description">> => <<"A group of entities capable of granting access to a protected resource. When the resource owner is a person, it is referred to as an end-user.">>
-        }
-    },
-    case bondy_security_group:lookup(RealmUri, <<"resource_owners">>) of
-        {error, not_found} ->
-            bondy_security_group:add(RealmUri, G);
-        _ ->
-            ok
-    end.
+
 
 
