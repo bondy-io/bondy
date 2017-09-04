@@ -111,7 +111,7 @@ add(RealmUri, Group0) ->
 update(RealmUri, Name, Group0) when is_binary(Name) ->
     try
         Group1 = maps_utils:validate(Group0, ?UPDATE_SPEC),
-        bondy_security:alter_user(RealmUri, Name, maps:to_list(Group1))
+        bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1))
     catch
         error:Reason ->
             {error, Reason}
