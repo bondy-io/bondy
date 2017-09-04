@@ -146,10 +146,11 @@ start_http(Routes, Name) ->
                 dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
+            stream_handlers => [
+                cowboy_compress_h, cowboy_stream_h
+            ],
             middlewares => [
                 cowboy_router,
-                % bondy_api_gateway,
-                % bondy_security_middleware,
                 cowboy_handler
             ]
         }
@@ -180,10 +181,11 @@ start_https(Routes, Name) ->
                 dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
+            stream_handlers => [
+                cowboy_compress_h, cowboy_stream_h
+            ],
             middlewares => [
                 cowboy_router,
-                % bondy_api_gateway,
-                % bondy_security_middleware,
                 cowboy_handler
             ]
         }
