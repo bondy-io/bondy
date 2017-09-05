@@ -32,7 +32,7 @@
 
 -define(TCP, wamp_tcp).
 -define(TLS, wamp_tls).
--define(TIMEOUT, 60000 * 60). % 1min
+-define(TIMEOUT, 60000 * 60). % 1hr
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
