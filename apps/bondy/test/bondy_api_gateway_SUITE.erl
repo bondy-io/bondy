@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_api_gateway_SUITE.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,9 +25,11 @@ all() ->
 
 groups() ->
     [{main, [parallel], common:tests(?MODULE)}].
-    
+
 simple_1_test(_) ->
     Spec = #{
+        <<"id">> => <<"com.myapi">>,
+        <<"name">> => <<"com.myapi">>,
         <<"host">> => <<"[www.]myapi.com">>,
         <<"realm_uri">> => <<"com.myapi">>,
         <<"variables">> => #{
@@ -40,7 +42,7 @@ simple_1_test(_) ->
                 <<"revoke_token_path">> => <<"/auth/revoke_token">>,
                 <<"schemes">> => <<"{{variables.schemes}}">>
             }
-        },  
+        },
         <<"defaults">> => #{
             <<"timeout">> => 15000,
             <<"security">> => <<"{{variables.oauth2}}">>,
@@ -51,7 +53,7 @@ simple_1_test(_) ->
                 <<"base_path">> => <<"/v1.0">>,
                 <<"variables">> => #{
                     <<"foo">> => 200
-                },  
+                },
                 <<"defaults">> => #{
                     <<"timeout">> => 20000
                 },
@@ -59,7 +61,7 @@ simple_1_test(_) ->
                     <<"/things">> => #{
                         <<"variables">> => #{
                             <<"foo">> => 300
-                        },  
+                        },
                         <<"defaults">> => #{
                             <<"timeout">> => 30000
                         },
@@ -75,7 +77,7 @@ simple_1_test(_) ->
                             },
                             <<"response">> => #{
                                 <<"on_error">> => #{
-                                
+
                                 },
                                 <<"on_result">> => #{
                                   <<"body">> => <<"{{action.result}}">>
@@ -95,10 +97,10 @@ simple_1_test(_) ->
                             },
                             <<"response">> => #{
                                 <<"on_error">> => #{
-                                
+
                                 },
                                 <<"on_result">> => #{
-                                  
+
                                 }
                             }
                         }

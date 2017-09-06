@@ -24,7 +24,8 @@ all() ->
     [
         {group, api_client},
         {group, resource_owner},
-        {group, user}
+        {group, user},
+        {group, group}
     ].
 
 groups() ->
@@ -46,6 +47,7 @@ groups() ->
             resource_owner_add,
             resource_owner_auth1,
             resource_owner_update,
+            resource_owner_change_password,
             resource_owner_auth2,
             resource_owner_auth3,
             resource_owner_delete
@@ -57,6 +59,9 @@ groups() ->
             user_auth2,
             user_auth3,
             user_delete
+        ]},
+        {group, [sequence], [
+            create_group
         ]}
     ].
 
@@ -97,6 +102,33 @@ security_disabled(Config) ->
     disabled = bondy_realm:security_status(R),
     false = bondy_realm:is_security_enabled(R),
     {save_config, Prev}.
+
+
+
+
+
+%% =============================================================================
+%% GROUP
+%% =============================================================================
+
+create_group(Config) ->
+    Uri = ?config(realm_uri, Config),
+    Name = <<"group_a">>,
+    N = length(bondy_security_group:list(Uri)),
+    ok = bondy_security_group:add(Uri, #{<<"name">> => Name}),
+    #{
+        <<"name">> := Name,
+        <<"groups">> := [],
+        <<"meta">> := #{}
+    } = bondy_security_group:lookup(Uri, Name),
+    true = length(bondy_security_group:list(Uri)) =:= N + 1.
+
+
+%% =============================================================================
+%% API CLIENT
+%% =============================================================================
+
+
 
 api_client_add(Config) ->
     {security_disabled, Prev} = ?config(saved_config, Config),
@@ -150,6 +182,15 @@ api_client_delete(Config) ->
         ?config(realm_uri, Config), ?config(client_id, Prev)),
     {save_config, Prev}.
 
+
+
+
+%% =============================================================================
+%% RESOURCE OWNER
+%% =============================================================================
+
+
+
 resource_owner_add(Config) ->
     R = #{
         username => <<"AlE">>,
@@ -173,20 +214,40 @@ resource_owner_auth1(Config) ->
 
 resource_owner_update(Config) ->
     {resource_owner_auth1, Prev} = ?config(saved_config, Config),
+    RealmUri = ?config(realm_uri, Prev),
+    Username = ?config(username, Prev),
     Pass = <<"New-Password">>,
+    #{<<"groups">> := Gs} = bondy_security_user:lookup(RealmUri, Username),
     {ok, _} = bondy_api_resource_owner:update(
-        ?config(realm_uri, Prev),
-        ?config(username, Prev),
+        RealmUri,
+        Username,
         #{
             <<"password">> => Pass,
             <<"meta">> => #{<<"foo">> => <<"bar">>}
         }
     ),
+    #{<<"groups">> := Gs} = bondy_security_user:lookup(RealmUri, Username),
     {save_config,
         lists:keyreplace(password, 1, Prev, {password, Pass})}.
 
-resource_owner_auth2(Config) ->
+resource_owner_change_password(Config) ->
     {resource_owner_update, Prev} = ?config(saved_config, Config),
+    RealmUri = ?config(realm_uri, Prev),
+    Username = ?config(username, Prev),
+    OldPass = ?config(password, Prev),
+    User1 = bondy_security_user:lookup(RealmUri, Username),
+    NewPass = <<"New-Password2">>,
+    ok = bondy_security_user:change_password(
+        RealmUri, Username, NewPass, OldPass),
+    %% Validate that we have only changed the password
+    User2 = bondy_security_user:lookup(RealmUri, Username),
+    %% error([User1, User2]),
+    true = User1 =:= User2,
+    {save_config,
+        lists:keyreplace(password, 1, Prev, {password, NewPass})}.
+
+resource_owner_auth2(Config) ->
+    {resource_owner_change_password, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = ?config(password, Prev),
@@ -209,18 +270,24 @@ resource_owner_delete(Config) ->
         ?config(realm_uri, Config), ?config(username, Prev)),
     {save_config, Prev}.
 
+
+
+
+%% =============================================================================
 %% USER
+%% =============================================================================
+
 
 
 user_add(Config) ->
     R = #{
-        username => <<"AlE">>,
+        username => <<"AlE2">>,
         password => <<"ale">>,
         meta => #{<<"foo">> => <<"bar">>},
         groups => []
     },
     ok = bondy_security_user:add(?config(realm_uri, Config), R),
-    {save_config, [{username, <<"AlE">>}, {password, <<"ale">>} | Config]}.
+    {save_config, [{username, <<"AlE2">>}, {password, <<"ale">>} | Config]}.
 
 user_auth1(Config) ->
     {user_add, Prev} = ?config(saved_config, Config),

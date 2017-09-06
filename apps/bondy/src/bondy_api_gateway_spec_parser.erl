@@ -59,6 +59,20 @@
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
 -define(API_HOST, #{
+    <<"id">> => #{
+        alias => id,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"name">> => #{
+        alias => id,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
     <<"host">> => #{
         alias => host,
         required => true,
@@ -74,6 +88,11 @@
         required => true,
         allow_null => false,
         datatype => binary
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => false,
+        datatype => map
     },
     ?VARS_KEY => #{
         alias => variables,
@@ -114,7 +133,7 @@
         alias => is_active,
         required => true,
         allow_null => false,
-        default => false,
+        default => true,
         datatype => boolean
     },
     <<"is_deprecated">> => #{
@@ -195,6 +214,24 @@
         allow_null => false,
         % datatype => map,
         default => #{}
+    },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 25000000 %% 25MB
+    },
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 8000000 %% 8MB is Cowboy 2 default
+    },
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
+        required => true,
+        datatype => pos_integer,
+        default => 15000 %% 15 secs is Cowboy 2 default
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -332,6 +369,9 @@
     <<"provides">> => <<"{{defaults.provides}}">>,
     <<"schemes">> => <<"{{defaults.schemes}}">>,
     <<"security">> => <<"{{defaults.security}}">>,
+    <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
+    <<"body_read_bytes">> => <<"{{defaults.body_read_bytes}}">>,
+    <<"body_read_seconds">> => <<"{{defaults.body_read_seconds}}">>,
     <<"timeout">> => <<"{{defaults.timeout}}">>,
     <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
     <<"retries">> => <<"{{defaults.retries}}">>,
@@ -451,6 +491,24 @@
         allow_null => false,
         datatype => map
     },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 25000000 %% 25MB
+    },
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
+        required => true,
+        datatype => pos_integer,
+        default => 8000000 %% 8MB is Cowboy 2 default
+    },
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
+        required => true,
+        datatype => pos_integer,
+        default => 15000 %% 15 secs is Cowboy 2 default
+    },
     <<"timeout">> => #{
         alias => timeout,
         required => true,
@@ -492,6 +550,11 @@
     }
 }).
 
+-define(DEFAULT_REQ, #{
+    <<"body_max_bytes">> => <<"{{defaults.body_max_bytes}}">>,
+    <<"body_read_bytes">> => <<"{{defaults.body_read_bytes}}">>,
+    <<"body_read_seconds">> => <<"{{defaults.body_read_seconds}}">>
+}).
 
 -define(REQ_SPEC, #{
     <<"info">> => #{
@@ -510,6 +573,21 @@
                 validator => ?API_PARAMS
             }
         }
+    },
+    <<"body_max_bytes">> => #{
+        alias => body_max_bytes,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"body_read_bytes">> => #{
+        alias => body_read_bytes,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"body_read_seconds">> => #{
+        alias => body_read_seconds,
+        required => true,
+        datatype => [pos_integer, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"action">> => #{
         alias => action,
@@ -600,6 +678,8 @@
     <<"body">> => #{
         alias => body,
         required => true,
+        %% TODO map? a body could be anything!
+        %% TODO Fix this we should not request a datatype
         datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
@@ -838,14 +918,15 @@ from_file(Filename) ->
 %% -----------------------------------------------------------------------------
 -spec parse(map()) -> map() | no_return().
 
-parse(Spec) ->
-    parse(Spec, get_context_proxy()).
+parse(Map) ->
+    Spec = parse(Map, get_context_proxy()),
+    maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Spec).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Given a valid API Spec returned by {@link parse/1}, dynamically generates
-%% a cowboy dispatch table.
+%% Given a valid API Spec or list of Specs returned by {@link parse/1},
+%% dynamically generates a cowboy dispatch table.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table([map()] | map()) ->
@@ -860,8 +941,10 @@ dispatch_table(Specs) when is_list(Specs) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Given a valid API Spec returned by {@link parse/1}, dynamically generates
-%% a cowboy dispatch table.
+%% Given a list of valid API Specs returned by {@link parse/1} and
+%% dynamically generates the cowboy dispatch table.
+%% Notice this does not update the cowboy dispatch table. You will need to do
+%% that yourself.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table([map()] | map(), [route_rule()]) ->
@@ -1043,14 +1126,21 @@ parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
 %%         <<"response">> => parse_response(Resp, Ctxt)
 %%     };
 
-parse_request_method(Method, Spec, Ctxt) ->
+parse_request_method(Method, Spec0, Ctxt) ->
+    Spec1 = maps:merge(?DEFAULT_REQ, Spec0),
     #{
         <<"action">> := Act,
-        <<"response">> := Resp
-    } = Spec,
-    Spec#{
+        <<"response">> := Resp,
+        <<"body_max_bytes">> := MB,
+        <<"body_read_bytes">> := BL,
+        <<"body_read_seconds">> := SL
+    } = Spec1,
+    Spec1#{
         <<"action">> => parse_action(Method, Act, Ctxt),
-        <<"response">> => parse_response(Method, Resp, Ctxt)
+        <<"response">> => parse_response(Method, Resp, Ctxt),
+        <<"body_max_bytes">> => mops:eval(MB, Ctxt),
+        <<"body_read_bytes">> => mops:eval(BL, Ctxt),
+        <<"body_read_seconds">> => mops:eval(SL, Ctxt)
     }.
 
 
@@ -1275,7 +1365,7 @@ do_dispatch_table(API) ->
 -spec dispatch_table_version(binary(), binary(), tuple()) ->
     [scheme_rule()] | no_return().
 
-dispatch_table_version(_, _, #{<<"is_active">> := false}) ->
+dispatch_table_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
 
 dispatch_table_version(Host, Realm, {_Name, Spec}) ->
@@ -1375,15 +1465,34 @@ get_context_proxy() ->
 content_types_accepted(L) when is_list(L) ->
     [content_types_accepted(T) || T <- L];
 
+content_types_accepted(<<"application/json; charset=utf-8">>) ->
+    {
+        {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
+        from_json
+    };
+
 content_types_accepted(<<"application/json">>) ->
     % {<<"application/json">>, from_json};
-    {{<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]}, from_json};
+    {
+        {<<"application">>, <<"json">>, '*'},
+        from_json
+    };
 
+content_types_accepted(<<"application/msgpack; charset=utf-8">>) ->
+    {
+        {<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]},
+        from_msgpack
+    };
 
 content_types_accepted(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, from_msgpack}.
-    {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack}.
+    {{<<"application">>, <<"msgpack">>, '*'}, from_msgpack};
 
+content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
+    {
+        {<<"application">>, <<"x-www-form-urlencoded">>, '*'},
+        from_form_urlencoded
+    }.
 
 %% @private
 content_types_provided(L) when is_list(L) ->

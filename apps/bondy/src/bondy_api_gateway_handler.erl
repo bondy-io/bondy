@@ -61,6 +61,7 @@
 -export([to_msgpack/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
+-export([from_form_urlencoded/2]).
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
@@ -82,7 +83,7 @@ init(Req, St0) ->
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
         session => Session,
-        api_context => update_context(Req, #{})
+        api_context => init_context(Req)
     },
     {cowboy_rest, Req, St1}.
 
@@ -237,6 +238,8 @@ from_msgpack(Req, St) ->
     accept(Req, St#{encoding => msgpack}).
 
 
+from_form_urlencoded(Req, St) ->
+    accept(Req, St#{encoding => urlencoded}).
 
 
 %% =============================================================================
@@ -306,43 +309,45 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 %% @end
 %% -----------------------------------------------------------------------------
 accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
+
     Method = method(Req0),
+    try
+        %% We now read the body from the request into the context
+        {ok, Req1, St1} = read_body(Req0, St0),
+        case perform_action(Method, maps:get(Method, Spec), St1) of
+            {ok, Response, St2} ->
+                Req2 = prepare_request(Enc, Response, Req1),
+                {maybe_location(Method, Response), Req2, St2};
 
-    try perform_action(Method, maps:get(Method, Spec), St0) of
-        {ok, Response, St1} ->
-            Req1 = prepare_request(Enc, Response, Req0),
-            {maybe_location(Method, Response), Req1, St1};
+            {ok, HTTPCode, Response, St2} ->
+                {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
-        {ok, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
-            {stop, Req1, St1};
+            {error, Response, St2} ->
+                Req2 = reply(
+                    get_status_code(Response), Enc, Response, Req1),
+                {stop, Req2, St2};
+            {error, HTTPCode, Response, St2} ->
 
-        {error, Response, St1} ->
-            Req1 = reply(
-                get_status_code(Response), Enc, Response, Req0),
-            {stop, Req1, St1};
-
-        {error, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
-            {stop, Req1, St1}
+                {stop, reply(HTTPCode, Enc, Response, Req1), St2}
+        end
     catch
         throw:Reason ->
-            Response = #{
+            ErrResp = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
-            Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
-            {stop, Req1, St0};
+            Req = reply(get_status_code(ErrResp, 400), Enc, ErrResp, Req0),
+            {stop, Req, St0};
         Class:Reason ->
             _ = lager:error(
                 "type=~p, reason=~p, stacktrace=~p",
                 [Class, Reason, erlang:get_stacktrace()]),
-            Response = #{
+            ErrResp = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
             },
-            Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
-            {stop, Req1, St0}
+            Req = reply(get_status_code(ErrResp, 500), Enc, ErrResp, Req0),
+            {stop, Req, St0}
     end.
 
 
@@ -407,25 +412,80 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
     },
     maps:put(<<"security">>, Map, Ctxt);
 
-update_context(Req0, Ctxt) ->
-    %% At the moment we do not support partially reading the body
-    %% nor streams so we drop the NewReq
-    {ok, Bin, Req1} = cowboy_req:read_body(Req0),
+update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
+    Ctxt1 = maps_utils:put_path([<<"request">>, <<"body">>], Body, Ctxt0),
+    maps_utils:put_path(
+        [<<"request">>, <<"body_length">>], byte_size(Body), Ctxt1).
+
+
+init_context(Req) ->
     M = #{
-        <<"method">> => method(Req1),
-        <<"scheme">> => cowboy_req:scheme(Req1),
-        <<"peer">> => cowboy_req:peer(Req1),
-        <<"path">> => cowboy_req:path(Req1),
-        <<"host">> => cowboy_req:host(Req1),
-        <<"port">> => cowboy_req:port(Req1),
-        <<"headers">> => cowboy_req:headers(Req1),
-        <<"query_string">> => cowboy_req:qs(Req1),
-        <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req1)),
-        <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req1)),
-        <<"body">> => Bin,
-        <<"body_length">> => cowboy_req:body_length(Req1)
+        <<"method">> => method(Req),
+        <<"scheme">> => cowboy_req:scheme(Req),
+        <<"peer">> => cowboy_req:peer(Req),
+        <<"path">> => cowboy_req:path(Req),
+        <<"host">> => cowboy_req:host(Req),
+        <<"port">> => cowboy_req:port(Req),
+        <<"headers">> => cowboy_req:headers(Req),
+        <<"query_string">> => cowboy_req:qs(Req),
+        <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req)),
+        <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req)),
+        <<"body">> => <<>>,
+        <<"body_length">> => 0
     },
-    maps:put(<<"request">>, M, Ctxt).
+    maps:put(<<"request">>, M, #{}).
+
+%% @private
+
+%% is_multipart_form_body(Req) ->
+%%     case cowboy_req:parse_header(<<"content-type">>, Req) of
+%%         {<<"multipart">>, <<"form-data">>, _} ->
+%%             true;
+%%         _ ->
+%%             false
+%%     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% By default, Cowboy will attempt to read up to 8MB of data, for up to 15
+%% seconds. The call will return once Cowboy has read at least 8MB of data, or
+%% at the end of the 15 seconds period.
+%% We get the path's body_max_bytes, body_read_bytes and body_read_seconds
+%% attributes to configure the cowboy_req's length and period options and also
+%% setup a total max length.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec read_body(cowboy_req:request(), state()) ->
+    {ok, cowboy_req:request(), state()} | no_return().
+
+read_body(Req, St) ->
+    read_body(Req, St, <<>>).
+
+
+%% @private
+read_body(Req0, #{api_spec := Spec, api_context := Ctxt0} = St0, Acc) ->
+    MSpec = maps:get(method(Req0), Spec),
+    Opts = #{
+        length => maps:get(<<"body_read_bytes">>, MSpec),
+        period => maps:get(<<"body_read_seconds">>, MSpec)
+    },
+    MaxLen = maps:get(<<"body_max_bytes">>, MSpec),
+
+    case cowboy_req:read_body(Req0, Opts) of
+        {_, Data, _Req1} when byte_size(Data) > MaxLen - byte_size(Acc) ->
+            throw({badarg, {body_max_bytes_exceeded, MaxLen}});
+        {ok, Data, Req1} ->
+            %% @TODO Stream Body in the future using WAMP Progressive Calls
+            %% The API Spec will need a way to tell me you want to stream
+            Body = <<Acc/binary, Data/binary>>,
+            Ctxt1 = update_context({body, Body}, Ctxt0),
+            {ok, Req1, maps:update(api_context, Ctxt1, St0)};
+        {more, Data, Req1} ->
+            read_body(Req1, St0, <<Acc/binary, Data/binary>>)
+    end.
 
 
 %% @private
@@ -479,7 +539,6 @@ perform_action(
     St0) ->
     %% At the moment we just do not decode it and asume upstream accepts
     %% the same type
-    %% St1 = decode_body_in_context(Method, St0),
     Ctxt0 = maps:get(api_context, St0),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
@@ -689,7 +748,12 @@ url(Host, Path, QS) ->
 
 
 
+%% -----------------------------------------------------------------------------
 % private
+%% @doc
+%% The Spec uses lowercase for the method names but Cowboy uses uppercase
+%% @end
+%% -----------------------------------------------------------------------------
 method(Req) ->
     method_to_lowercase(cowboy_req:method(Req)).
 
@@ -706,7 +770,7 @@ method_to_lowercase(<<"PUT">>) -> <<"put">>.
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% This function exists just becuase becuase hackney (http client) uses atoms
+%% This function exists just becuase because hackney (http client) uses atoms
 %% @end
 %% -----------------------------------------------------------------------------
 method_to_atom(<<"delete">>) -> delete;
@@ -716,8 +780,6 @@ method_to_atom(<<"options">>) -> options;
 method_to_atom(<<"patch">>) -> patch;
 method_to_atom(<<"post">>) -> post;
 method_to_atom(<<"put">>) -> put.
-
-
 
 
 %% @private

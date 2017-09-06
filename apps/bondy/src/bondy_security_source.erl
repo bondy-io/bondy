@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_security_source.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,7 +22,6 @@
 
 -type source() :: map().
 
--define(INFO_KEYS, [<<"description">>]).
 
 -export([add/5]).
 -export([list/1]).
@@ -35,11 +34,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(
-    RealmUri :: uri(), 
-    Usernames :: [binary()] | all, 
-    CIDR :: bondy_security:cidr(), 
+    RealmUri :: uri(),
+    Usernames :: [binary()] | all,
+    CIDR :: bondy_security:cidr(),
     Source :: atom(),
     Options :: list()) -> ok.
+
 add(RealmUri, Usernames, CIDR, Source, Opts) ->
     bondy_security:add_source(RealmUri, Usernames, CIDR, Source, Opts).
 
@@ -50,8 +50,12 @@ add(RealmUri, Usernames, CIDR, Source, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec remove(
     RealmUri :: uri(),
-    Usernames :: [binary()] | all,
+    Usernames :: [binary()] | binary() | all,
     CIDR :: bondy_security:cidr()) -> ok.
+
+remove(RealmUri, <<"all">>, CIDR) ->
+    remove(RealmUri, all, CIDR);
+
 remove(RealmUri, Usernames, CIDR) ->
     bondy_security:del_source(RealmUri, Usernames, CIDR).
 
@@ -60,16 +64,13 @@ remove(RealmUri, Usernames, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list(uri(), list() | binary()) -> source() | {error, not_found}.
-
-list(RealmUri, Username) when is_binary(Username) ->
-    list(RealmUri, unicode:characters_to_list(Username, utf8));
+-spec list(uri(), binary()) -> source() | {error, not_found}.
 
 list(RealmUri, Username) ->
     case bondy_security:lookup_user_sources(RealmUri, Username) of
         {error, _} = Error ->
             Error;
-        Sources -> 
+        Sources ->
             [to_map(S) || S <- Sources]
     end.
 
@@ -80,6 +81,7 @@ list(RealmUri, Username) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list(uri()) -> list(source()).
+
 list(RealmUri) ->
     [to_map(Obj) || Obj <- bondy_security:list(RealmUri, source)].
 

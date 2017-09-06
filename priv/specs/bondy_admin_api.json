@@ -1,4 +1,6 @@
 {
+    "id": "com.leapsight.bondy",
+    "name": "Bondy Admin API",
     "host" : "_",
     "realm_uri" : "com.leapsight.bondy",
     "variables" : {
@@ -692,6 +694,42 @@
                             "on_result" : {
                                 "body" :
                                     "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/services/change_password" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "com.leapsight.bondy.security.change_password",
+                            "options": {},
+                            "arguments": [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body.username}}",
+                                "{{request.body.new_password}}"
+                            ],
+                            "arguments_kw": {}
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": "{{variables.wamp_error_body}}"
+                            },
+                            "on_result": {
+                                "body": "{{action.result.arguments |> head}}"
                             }
                         }
                     }

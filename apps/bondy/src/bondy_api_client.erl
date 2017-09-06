@@ -21,10 +21,10 @@
 
 -define(VALIDATE_USERNAME, fun
         (<<"all">>) ->
-            false;
-        ("all") ->
+            %% Reserved
             false;
         (all) ->
+            %% Reserved
             false;
         (undefined) ->
             {ok, undefined};
@@ -131,7 +131,6 @@
 
 add(RealmUri, Info0) ->
     try
-        ok = maybe_init_group(RealmUri),
         case validate(Info0, ?CLIENT_SPEC) of
             {undefined, _Info, _Opts} = Val ->
                 %% We will generate a client_id and try 3 times
@@ -159,7 +158,6 @@ add(RealmUri, Info0) ->
 -spec update(uri(), binary(), map()) -> ok| {error, term()} | no_return().
 
 update(RealmUri, ClientId, Info0) ->
-    ok = maybe_init_group(RealmUri),
     {undefined, Opts, _} = validate(Info0, ?CLIENT_UPDATE_SPEC),
     bondy_security:alter_user(RealmUri, ClientId, Opts).
 
@@ -202,29 +200,14 @@ do_add(RealmUri, {Id, Opts, Info}, Retries) ->
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
-    Groups = ["api_clients" | maps:get(<<"groups">>, Info1, [])],
-    Opts = [{"groups", Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
+    Groups = [<<"api_clients">> | maps:get(<<"groups">>, Info1, [])],
+    Opts = [{<<"groups">>, Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
     Pass = case maps:find(<<"client_secret">>, Info1) of
         {ok, Val} ->
-            [{"password", Val}];
+            [{<<"password">>, Val}];
         error ->
             []
     end,
     Id = maps:get(<<"client_id">>, Info1, undefined),
     {Id, lists:append(Pass, Opts), Info1}.
 
-
-%% @private
-maybe_init_group(RealmUri) ->
-    G = #{
-        <<"name">> => <<"api_clients">>,
-        <<"meta">> => #{
-            <<"description">> => <<"A group of applications making protected resource requests through Bondy API Gateway by themselves or on behalf of a Resource Owner.">>
-            }
-    },
-    case bondy_security_group:lookup(RealmUri, <<"api_clients">>) of
-        {error, not_found} ->
-            bondy_security_group:add(RealmUri, G);
-        _ ->
-            ok
-    end.

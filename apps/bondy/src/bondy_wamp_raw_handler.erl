@@ -32,7 +32,7 @@
 
 -define(TCP, wamp_tcp).
 -define(TLS, wamp_tls).
--define(TIMEOUT, 60000 * 60).
+-define(TIMEOUT, 60000 * 60). % 1hr
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -48,23 +48,27 @@
 -define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
-    frame_type                                  ::  frame_type(),
-    protocol_state                              ::  bondy_wamp_protocol:state()
-                                                    | undefined,
     socket                                      ::  gen_tcp:socket(),
     transport                                   ::  module(),
+    frame_type                                  ::  frame_type(),
+    encoding                                    ::  atom(),
     max_len                                     ::  pos_integer(),
-    ping_sent                                   ::  binary() | undefined,
+    ping_sent                                   ::  {true, binary()}
+                                                    | false,
     hibernate = false                           ::  boolean(),
-    start_time = erlang:monotonic_time(second)  ::  integer()
+    start_time = erlang:monotonic_time(second)  ::  integer(),
+    protocol_state                              ::  bondy_wamp_protocol:state()
+                                                    | undefined,
+    buffer = <<>>                               ::  binary()
 }).
 -type state() :: #state{}.
 
 -type raw_error()           :: invalid_response
                                 | invalid_socket
-                                | invalid_wamp_data
+                                | invalid_handshake
                                 | maximum_connection_count_reached
                                 | maximum_message_length_unacceptable
+                                | maximum_message_length_exceeded
                                 | serializer_unsupported
                                 | use_of_reserved_bits.
 
@@ -132,25 +136,20 @@ start_listeners([H|T]) ->
     end.
 
 
-%% @private
-ranch_mod(?TCP) -> ranch_tcp;
-ranch_mod(?TLS) -> ranch_ssl.
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+%% =============================================================================
+%% GEN SERVER CALLBACKS
+%% =============================================================================
+
+
+
 init({Ref, Socket, Transport, _Opts}) ->
     %% We must call ranch:accept_ack/1 before doing any socket operation.
     %% This will ensure the connection process is the owner of the socket.
@@ -161,83 +160,113 @@ init({Ref, Socket, Transport, _Opts}) ->
         socket = Socket,
         transport = Transport
     },
-    _ = bondy_stats:socket_open(wamp, raw),
+    ok = socket_opened(St),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
+
+handle_info(
+    {tcp, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
+    #state{socket = Socket, protocol_state = undefined} = St0) ->
+    case handle_handshake(MaxLen, Encoding, St0) of
+        {ok, St1} ->
+            (St1#state.transport):setopts(Socket, [{active, once}]),
+            {noreply, St1, ?TIMEOUT};
+        {stop, Reason, St1} ->
+            ok = close_socket(Reason, St1),
+            {stop, Reason, St1}
+    end;
+
 handle_info(
     {tcp, Socket, Data},
-    #state{socket = Socket, transport = Transport} = St0) ->
+    #state{socket = Socket, protocol_state = undefined} = St) ->
+    %% RFC: After a _Client_ has connected to a _Router_, the _Router_ will
+    %% first receive the 4 octets handshake request from the _Client_.
+    %% If the _first octet_ differs from "0x7F", it is not a WAMP-over-
+    %% RawSocket request. Unless the _Router_ also supports other
+    %% transports on the connecting port (such as WebSocket), the
+    %% _Router_ MUST *fail the connection*.
+    _ = lager:error(
+        "Received data before WAMP protocol handshake, reason=invalid_handshake, data=~p",
+        [Data]
+    ),
+    {stop, invalid_handshake, St};
 
-    case handle_data(Data, St0) of
-        {ok, St1} ->
-            Transport:setopts(Socket, [{active, once}]),
-            {noreply, St1, ?TIMEOUT};
-        {stop, St1} ->
-            {stop, normal, St1};
-        {error, Reason, St1} ->
-            _ = lager:error("TCP Connection closing, error=~p", [Reason]),
-            {stop, reason, St1}
+handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
+    %% We append the newly received data to any existing buffer
+    Buffer = St0#state.buffer,
+    St1 = St0#state{buffer = <<>>},
+    case handle_data(<<Buffer/binary, Data/binary>>, St1) of
+        {ok, St2} ->
+            (St2#state.transport):setopts(Socket, [{active, once}]),
+            {noreply, St2, ?TIMEOUT};
+        {stop, Reason, St2} ->
+            ok = close_socket(Reason, St2),
+            {stop, Reason, St2}
     end;
 
 handle_info({?BONDY_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+    %% Here we receive a message from the bondy_rotuer in those cases
+    %% in which the router is embodied by our process i.e. the sync part
+    %% of a routing process e.g. wamp calls, so we do not ack
+    %% TODO check if we still need this now that bondy:ack seems to handle this case
     handle_outbound(M, St);
 
 handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
-    %% sent to us using bondy:send/2,3
+    %% have sent to us using bondy:send/2,3 which requires us to ack
     ok = bondy:ack(Pid, Ref),
+    %% We send the message to the peer
     handle_outbound(M, St);
 
 handle_info({tcp_closed, Socket}, State) ->
-    _ = lager:info(
-        <<"TCP Connection closed by peer, socket=~p, pid=~p">>,
-        [Socket, self()]
-    ),
-    ok = socket_closed(State, false),
+    _ = log(
+        info, "Connection closed by peer, socket='~p'", [Socket], State),
+    ok = socket_closed(false, State),
     {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
-    _ = lager:error(
-        "TCP Connection closing, error=tcp_error, reason=~p, socket=~p, pid=~p",
-        [Reason, Socket, self()]),
-        ok = socket_closed(State, true),
+    _ = log(
+        error,
+        "Connection closing, error=tcp_error, reason=~p, socket='~p'",
+        [Reason, Socket],
+        State
+    ),
+    ok = socket_closed(true, State),
 	{stop, Reason, State};
 
 handle_info(timeout, State) ->
-    _ = lager:error(
-        "TCP Connection closing, error=timeout, pid='~p'",
-        [self()]
+    _ = log(
+        error,
+        "Connection closing, reason=timeout",
+        [],
+        State
     ),
-    ok = socket_closed(State, true),
-	{stop, normal, State};
+    ok = close_socket(timeout, State),
+	{stop, timeout, State};
 
 handle_info(Info, State) ->
-    _ = lager:error(
-        "Unknown message received, message='~p'",
-        [Info]
-    ),
+    _ = lager:error("Received unknown info, message='~p'", [Info]),
 	{noreply, State}.
 
 
-handle_call(_Request, _From, State) ->
-	{reply, ok, State}.
+handle_call(Msg, From, State) ->
+    _ = lager:info("Received unknown call, message=~p, from=~p", [Msg, From]),
+	{noreply, State}.
 
 
-handle_cast(_Msg, State) ->
+handle_cast(Msg, State) ->
+    _ = lager:info("Received unknown cast, message=~p", [Msg]),
 	{noreply, State}.
 
 
 terminate(Reason, St) ->
-    _ = lager:info("TCP Connection closing, reason=~p", [Reason]),
+    _ = lager:info("Terminating, reason=~p", [Reason]),
 	bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
-
-
-
 
 
 
@@ -248,71 +277,103 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
+%% @private
+ranch_mod(?TCP) -> ranch_tcp;
+ranch_mod(?TLS) -> ranch_ssl.
+
+
+%% @private
 -spec handle_data(Data :: binary(), State :: state()) ->
-    {ok, state()}
-    | {stop, state()}
-    | {error, raw_error(), state()}.
+    {ok, state()} | {stop, raw_error(), state()}.
 
-handle_data(
-    <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>,
-    #state{protocol_state = undefined} = St) ->
-    handle_handshake(MaxLen, Encoding, St);
+handle_data(<<0:5, _:3, Len:24, _Data/binary>>, #state{max_len = MaxLen} = St)
+when Len > MaxLen ->
+    %% RFC: During the connection, Router MUST NOT send messages to the Client
+    %% longer than the LENGTH requested by the Client, and the Client MUST NOT
+    %% send messages larger than the maximum requested by the Router in it's
+    %% handshake reply.
+    %% If a message received during a connection exceeds the limit requested,
+    %% a Peer MUST fail the connection.
+    _ = log(
+        error,
+        "Client committed a WAMP protocol violation, "
+        "reason=maximum_message_length_exceeded, message_length=~p",
+        [Len],
+        St
+    ),
+    ok = close_socket(maximum_message_length_exceeded, St),
+    {stop, maximum_message_length_exceeded, St};
 
-handle_data(_Data, #state{protocol_state = undefined} = St) ->
-    %% After a _Client_ has connected to a _Router_, the _Router_ will
-    %% first receive the 4 octets handshake request from the _Client_.
-    %% If the _first octet_ differs from "0x7F", it is not a WAMP-over-
-    %% RawSocket request. Unless the _Router_ also supports other
-    %% transports on the connecting port (such as WebSocket), the
-    %% _Router_ MUST *fail the connection*.
-    {error, invalid_wamp_data, St};
-
-handle_data(<<?RAW_MAGIC:8, Error:4, 0:20>>, St) ->
-    {error, error_reason(Error), St};
-
-handle_data(<<0:5, _:3, _:24, Data/binary>>, #state{max_len = Max} = St)
-when byte_size(Data) > Max->
-    ok = send_frame(error_number(maximum_message_length_unacceptable), St),
-    {stop, St};
-
-handle_data(<<0:5, 1:3, Rest/binary>>, St) ->
-    %% We received a PING, send a PONG
-    ok = send_frame(<<0:5, 2:3, Rest/binary>>, St),
-    {ok, St};
-
-handle_data(<<0:5, 2:3, Rest/binary>>, St) ->
-    %% We received a PONG
-    case St#state.ping_sent of
-        undefined ->
-            %% We never sent this ping
-            {ok, St};
-        Rest ->
-            {ok, St#state{ping_sent = undefined}};
-        _ ->
-            %% Wrong answer
-            _ = lager:error("Invalid ping response from peer"),
-            {error, invalid_response, St}
-    end;
-
-handle_data(<<0:5, R:3, _Len:24, _Rest/binary>>, St) when R > 2 andalso R < 8 ->
-    ok = send_frame(error_number(use_of_reserved_bits), St),
-    {stop, St};
-
-handle_data(Data, St) when is_binary(Data) ->
-    case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
+handle_data(<<0:5, 0:3, Len:24, Data/binary>>, St)
+when byte_size(Data) >= Len ->
+    %% We received a WAMP message
+    %% Len is the number of octets after serialization
+    <<Mssg:Len/binary, Rest/binary>> = Data,
+    case bondy_wamp_protocol:handle_inbound(Mssg, St#state.protocol_state) of
         {ok, PSt} ->
-            {ok, St#state{protocol_state = PSt}};
+            handle_data(Rest, St#state{protocol_state = PSt});
         {reply, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
             ok = send(L, St1),
-            {ok, St1};
+            handle_data(Rest, St1);
         {stop, PSt} ->
-            {stop, St#state{protocol_state = PSt}};
+            {stop, normal, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
             ok = send(L, St1),
-            {stop, St1}
-    end.
+            {stop, normal, St1};
+        {stop, Reason, L, PSt} ->
+            St1 = St#state{protocol_state = PSt},
+            ok = send(L, St1),
+            {stop, Reason, St1}
+    end;
+
+handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
+    %% We received a PING, send a PONG
+    <<Payload:Len/binary, Rest/binary>> = Data,
+    ok = send_frame(<<0:5, 2:3, Payload/binary>>, St),
+    handle_data(Rest, St);
+
+handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
+    %% We received a PONG
+    <<Payload:Len/binary, Rest/binary>> = Data,
+    case St#state.ping_sent of
+        {true, Payload} ->
+            handle_data(Rest, St#state{ping_sent = false});
+        {true, _} ->
+            %% Should we stop instead?
+            _ = log(error, "Unrequested pong message from peer", [], St),
+            handle_data(Rest, St);
+        false ->
+            %% Should we stop instead?
+            _ = log(error, "Unrequested pong message from peer", [], St),
+            handle_data(Rest, St)
+    end;
+
+handle_data(<<0:5, R:3, Len:24, Data/binary>>, St) when R > 2 ->
+    %% The three bits (R) encode the type of the transport message,
+    %% values 3 to 7 are reserved
+    <<Mssg:Len, Rest/binary>> = Data,
+    ok = send_frame(error_number(use_of_reserved_bits), St),
+    _ = log(
+        error,
+        "Client committed a WAMP protocol violation and the message was dropped, reason=~p, value=~p, message=~p",
+        [use_of_reserved_bits, R, Mssg],
+        St
+    ),
+    %% Should we stop instead?
+    handle_data(Rest, St);
+
+handle_data(<<>>, St) ->
+    %% We finished consuming data
+    {ok, St};
+
+handle_data(Data, St) ->
+    %% We have a partial message i.e. byte_size(Data) < Len
+    %% we store is as buffer
+    {ok, St#state{buffer = Data}}.
+
+
 
 
 
@@ -342,43 +403,68 @@ handle_handshake(Len, Enc, St) ->
     catch
         throw:Reason ->
             ok = send_frame(error_number(Reason), St),
-            _ = lager:info("TCP Connection closing, reason=~p", [Reason]),
-            {stop, St}
+            _ = lager:error("WAMP protocol error, reason=~p", [Reason]),
+            {stop, Reason, St}
     end.
 
 
 %% @private
 init_wamp(Len, Enc, St0) ->
+    MaxLen = validate_max_len(Len),
+    {FrameType, EncName} = validate_encoding(Enc),
+
     case inet:peername(St0#state.socket) of
         {ok, {_, _} = Peer} ->
-            MaxLen = validate_max_len(Len),
-            {FrameType, EncName} = validate_encoding(Enc),
-
             Proto = {raw, FrameType, EncName},
             case bondy_wamp_protocol:init(Proto, Peer, #{}) of
                 {ok, CBState} ->
                     St1 = St0#state{
                         frame_type = FrameType,
-                        protocol_state = CBState,
-                        max_len = MaxLen
+                        encoding = EncName,
+                        max_len = MaxLen,
+                        protocol_state = CBState
                     },
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
-                        <<"Established connection with peer, transport=raw, frame_type=~p, encoding=~p, peer='~p'">>,
-                        [FrameType, EncName, Peer]
+                        "Established connection with peer, protocol=wamp,transport=raw, frame_type=~p, encoding=~p,  message_max_length=~p, peer=~s",
+                        [FrameType, EncName, MaxLen, inet_utils:peername_to_binary(Peer)]
                     ),
                     {ok, St1};
                 {error, Reason} ->
-                    {error, Reason, St0}
+                    {stop, Reason, St0}
             end;
-        {ok, Peer} ->
-            _ = lager:error("Unexpected peername, result=~p", [Peer]),
-            {error, invalid_socket, St0};
+        {ok, NonIPAddr} ->
+            _ = lager:error(
+                "Unexpected peername when establishing connection, received a non IP address of '~p', reason=invalid_socket, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                [NonIPAddr, FrameType, EncName, MaxLen]
+            ),
+            {stop, invalid_socket, St0};
         {error, Reason} ->
-            _ = lager:error("Invalid peername, error=~p", [Reason]),
-            {error, invalid_socket, St0}
+            _ = lager:error(
+                "Invalid peername when establishing connection, reason=~p, description=~p, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                [Reason, inet:format_error(Reason), FrameType, EncName, MaxLen]
+            ),
+            {stop, invalid_socket, St0}
     end.
+
+
+
+%% @private
+-spec send(binary() | list(), state()) -> ok | {error, any()}.
+
+send(L, St) when is_list(L) ->
+    lists:foreach(fun(Bin) -> send(Bin, St) end, L);
+
+send(Bin, St) ->
+    send_frame(?RAW_FRAME(Bin), St).
+
+
+%% @private
+-spec send_frame(binary(), state()) -> ok | {error, any()}.
+
+send_frame(Frame, St) when is_binary(Frame) ->
+    (St#state.transport):send(St#state.socket, Frame).
 
 
 %% -----------------------------------------------------------------------------
@@ -394,7 +480,7 @@ init_wamp(Len, Enc, St0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 validate_max_len(N) when N >= 0, N =< 15 ->
-    math:pow(2, 9 + N);
+    trunc(math:pow(2, 9 + N));
 
 validate_max_len(_) ->
     %% TODO define correct error return
@@ -427,38 +513,56 @@ error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
 error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
 
-error_reason(1) -> serializer_unsupported;
-error_reason(2) -> maximum_message_length_unacceptable;
-error_reason(3) -> use_of_reserved_bits;
-error_reason(4) -> maximum_connection_count_reached.
-
-%% @private
--spec send(binary() | list(), state()) -> ok | {error, any()}.
-
-send(L, St) when is_list(L) ->
-    lists:foreach(fun(Bin) -> send(Bin, St) end, L);
-
-send(Bin, St) ->
-    send_frame(?RAW_FRAME(Bin), St).
-
-
-
+%% error_reason(1) -> serializer_unsupported;
+%% error_reason(2) -> maximum_message_length_unacceptable;
+%% error_reason(3) -> use_of_reserved_bits;
+%% error_reason(4) -> maximum_connection_count_reached.
 
 
 %% @private
--spec send_frame(binary(), state()) -> ok | {error, any()}.
+close_socket(Reason, St) when Reason =:= normal orelse Reason =:= shutdown ->
+    ok = (St#state.transport):close(St#state.socket),
+    _ = log(info, <<"TCP Connection closed, reason=~p">>, [Reason], St),
+    socket_closed(false, St);
 
-send_frame(Frame, St) when is_binary(Frame) ->
-    (St#state.transport):send(St#state.socket, Frame).
+close_socket(Reason, St) ->
+    ok = (St#state.transport):close(St#state.socket),
+    _ = log(error, <<"TCP Connection closed, reason=~p">>, [Reason], St),
+    socket_closed(true, St).
 
 
 %% @private
-socket_closed(St, IsError) ->
-    ok = case IsError of
-        true ->
-            bondy_stats:socket_error(wamp, raw);
-        false ->
-            ok
-    end,
+log(Level, Prefix, Head, St)
+when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+    Format = iolist_to_binary([
+        Prefix,
+        <<
+            ", transport=raw, frame_type=~p, encoding=~p"
+            ", message_max_length=~p, peer=~s"
+        >>
+    ]),
+    Peername = inet_utils:peername_to_binary(
+        bondy_wamp_protocol:peer(St#state.protocol_state)),
+    Tail = [
+        St#state.frame_type,
+        St#state.encoding,
+        St#state.max_len,
+        Peername
+    ],
+    lager:log(Level, self(), Format, lists:append(Head, Tail)).
+
+
+%% @private
+socket_opened(_St) ->
+    _ = bondy_stats:socket_open(wamp, raw),
+    ok.
+
+%% @private
+socket_closed(true, St) ->
+    ok = bondy_stats:socket_error(wamp, raw),
+    socket_closed(false, St);
+
+socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    ok = bondy_stats:socket_closed(wamp, raw, Seconds).
+    bondy_stats:socket_closed(wamp, raw, Seconds).
+
