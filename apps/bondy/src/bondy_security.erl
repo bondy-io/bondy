@@ -144,8 +144,7 @@
 
 %% Avoid whitespace, control characters, comma, semi-colon,
 %% non-standard Windows-only characters, other misc
--define(ILLEGAL,
-    lists:seq(0, 44) ++ lists:seq(58, 63) ++ lists:seq(127, 191)).
+-define(ILLEGAL, lists:seq(0, 32) ++ [60,62] ++ lists:seq(127, 191)).
 
 -ifdef(TEST).
 -define(REFRESH_TIME, 1).
