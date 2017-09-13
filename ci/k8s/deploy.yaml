@@ -18,7 +18,7 @@ spec:
       imagePullSecrets:
       - name: gitlab-registry
       containers:
-      - image: registry.gitlab.com/leapsight/bondy:latest
+      - image: registry.gitlab.com/leapsight/bondy:{{.branch}}
         name: bondy
         imagePullPolicy: Always
         ports:
@@ -63,8 +63,10 @@ spec:
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
-      # nodeSelector: # TODO: Esto es por packet que no tiene forma de acceder al storage desde varios nodos (no al mismo tiempo)
-      #   disk: bondy
+      {{- if eq .name "packet" }}
+      nodeSelector:
+        disk: bondy
+      {{- end }}
       volumes:
         - name: datadir
           persistentVolumeClaim:
