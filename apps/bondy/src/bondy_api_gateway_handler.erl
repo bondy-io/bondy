@@ -423,7 +423,7 @@ init_context(Req) ->
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => cowboy_req:peer(Req),
-        <<"path">> => cowboy_req:path(Req),
+        <<"path">> => trim_trailing_slash(cowboy_req:path(Req)),
         <<"host">> => cowboy_req:host(Req),
         <<"port">> => cowboy_req:port(Req),
         <<"headers">> => cowboy_req:headers(Req),
@@ -827,3 +827,12 @@ eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
         #{}
     ),
     mops:eval(Expr, Ctxt).
+
+
+trim_trailing_slash(Bin) ->
+    case binary:longest_common_suffix([Bin, <<$/>>]) of
+        1 ->
+            binary:part(Bin, 0, byte_size(Bin) -1);
+        0 ->
+            Bin
+    end.
