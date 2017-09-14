@@ -1,7 +1,8 @@
-kind: Service # Servicio interno, para los microservicios
+# Servicio headless para tener un fqdn en bondy (Interno a bondy)
+kind: Service
 apiVersion: v1
 metadata:
-  name: bondy
+  name: bondy-fqdn
   namespace: magenta
   labels:
     app: bondy
@@ -12,5 +13,6 @@ spec:
       port: 8080
       targetPort: 18082
   type: ClusterIP
+  clusterIP: None
   selector:
     app: bondy

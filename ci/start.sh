@@ -3,10 +3,11 @@
 set -e
 
 NAME="bondy"
+HOSTNAME=`hostname -f`
 BASE_REL="/opt/app"
 CONFIG_FILE="$BASE_REL/etc/bondy.conf"
 SCRIPT="$BASE_REL/bin/bondy"
-NODE_NAME="$NAME@$NAME.magenta"
+NODE_NAME="$NAME@$HOSTNAME"
 
 # functions
 trap_with_arg() {

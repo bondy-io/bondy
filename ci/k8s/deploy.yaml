@@ -15,6 +15,8 @@ spec:
         app: bondy
         tier: gateway
     spec:
+      hostname: bondy
+      subdomain: bondy-fqdn
       imagePullSecrets:
       - name: gitlab-registry
       containers:
