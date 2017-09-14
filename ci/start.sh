@@ -3,7 +3,7 @@
 set -e
 
 NAME="bondy"
-HOSTNAME=`hostname -f`
+HOSTNAME=`hostname -d`
 BASE_REL="/opt/app"
 CONFIG_FILE="$BASE_REL/etc/bondy.conf"
 SCRIPT="$BASE_REL/bin/bondy"
