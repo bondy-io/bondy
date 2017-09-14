@@ -66,6 +66,7 @@
     acc = []                                                    ::  any(),
     is_ground = true                                            ::  boolean(),
     is_open = false                                             ::  boolean(),
+    is_string = false                                           ::  boolean(),
     sp = binary:compile_pattern(?START)                         ::  any(),
     dqp = binary:compile_pattern(?DOUBLE_QUOTES)                ::  any(),
     pop = binary:compile_pattern(?PIPE_OP)                      ::  any(),
@@ -262,7 +263,7 @@ eval_list(List, Ctxt, Opts) ->
 -spec eval_expr(binary(), state()) ->
     {'$mops_proxy', function()} | any() | no_return().
 
-eval_expr(<<>>, #state{is_ground = true} = St) ->
+eval_expr(<<>>, #state{is_ground = true, is_string = true} = St) ->
     %% The end of a string (quoted) expression
     %% We reverse the list of terms and turn them into iolist()
     Fun = fun
@@ -270,58 +271,82 @@ eval_expr(<<>>, #state{is_ground = true} = St) ->
             [term_to_iolist(X)|Acc]
     end,
     iolist_to_binary(
-        lists:foldl(Fun, [], [?DOUBLE_QUOTES | St#state.acc]));
+        lists:foldl(Fun, [], St#state.acc));
 
-eval_expr(<<>>, #state{is_ground = false} = St) ->
+eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
     %% The end of a string (quoted) expression
     %% We have functions so we wrap the iolist in a function receiving
     %% a future context as an argument
-    Fun = fun(Ctxt) ->
-        Eval = fun
-            (F, Acc) when is_function(F, 1) ->
-                [term_to_iolist(F(Ctxt))|Acc];
-            (Val, Acc) ->
-                [term_to_iolist(Val)|Acc]
-        end,
-        iolist_to_binary(
-            lists:foldl(Eval, [], [?DOUBLE_QUOTES | St#state.acc]))
-    end,
-    {'$mops_proxy', Fun};
 
-eval_expr(Bin0, #state{acc = []} = St0) when is_binary(Bin0) ->
+    Fold = fun Fold(FAcc, FCtxt) ->
+        DoEval = fun
+            DoEval({'$mops_proxy', Proxy}, {Flag, Acc}) ->
+                DoEval(Proxy, {Flag, Acc});
+
+            DoEval(F, {Flag, Acc}) when is_function(F, 1) ->
+                case F(FCtxt) of
+                    {'$mops_proxy', _} = Res ->
+                        {true, [Res|Acc]};
+                    Res ->
+                        {Flag, [term_to_iolist(Res)|Acc]}
+                end;
+
+            DoEval(Val, {Flag, Acc}) ->
+                {Flag, [term_to_iolist(Val)|Acc]}
+        end,
+        case lists:foldl(DoEval, {false, []}, FAcc) of
+            {true, L} ->
+                {'$mops_proxy', fun(OtherCtxt) ->  Fold(L, OtherCtxt) end};
+            {false, L} ->
+                iolist_to_binary(L)
+        end
+    end,
+
+    {'$mops_proxy', fun(Ctxt) ->  Fold(St#state.acc, Ctxt) end};
+
+eval_expr(Bin0, #state{acc = [], is_string = false} = St0)
+when is_binary(Bin0) ->
     %% We start parsing a binary
-    case binary:match(Bin0, St0#state.sp) of
+    Bin1 = maybe_trim(Bin0),
+    case binary:match(Bin1, St0#state.sp) of
         nomatch ->
             %% No mustaches found so this is not a mop expression,
             %% we return and finish
             Bin0;
         {Pos, 2}  ->
             %% Maybe a mop expression as we found the left moustache
-            Bin1 = trim(Bin0),
+            %% Bin1 = maybe_trim(Bin0),
             St1 = St0#state{is_open = true},
             Len = byte_size(Bin1),
+            %% We first find out if this is a string (quoted) expression
             case binary:matches(Bin1, St0#state.dqp) of
                 [] when Pos =:= 0 ->
                     %% Not a string so we should have a single
                     %% mustache expression
                     parse_expr(binary:part(Bin1, 2, Len - 4), St1);
+                [] when St1#state.is_string =:= true ->
+                    %% An unquoted string so we might have multiple mustache expressions
+                    %% e.g. "Hello {{foo}}. Today is {{date}}."
+                    [Pre, Rest] = binary:split(Bin1, St0#state.sp),
+                    eval_expr(Rest, acc(St1, Pre));
                 [{0, 1}, {QPos, 1}] when QPos =:= Len - 1 ->
                     %% A string so we might have multiple mustache expressions
-                    %% e.g. "Hello {{foo}}. Today is {{date}}."
+                    %% e.g. "\"Hello {{foo}}. Today is {{date}}.\""
                     Unquoted = binary:part(Bin1, 1, Len - 2),
                     [Pre, Rest] = binary:split(Unquoted, St0#state.sp),
-                    eval_expr(Rest, acc(St1, Pre));
+                    eval_expr(Rest, acc(St1#state{is_string = true}, Pre));
                 _ ->
                     %% An invalid expression as:
-                    %% - we found quotes that are in the middle of the string
+                    %% - we found quotes that are in the middle of the string %% e.g. <<"   \"foo\"">> or <<"\"foo\"   ">>
                     %% - or we have no closing quote
                     %% - or this is not a string and we have no quotes but
                     %% chars before opening mustache
-                    error(badarg)
+                    error({badarg, Bin0})
             end
     end;
 
-eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
+eval_expr(Bin, #state{is_open = true, is_string = true} = St0)
+when is_binary(Bin) ->
     %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin.
     %% This means that the data in Bin is not copied to new binaries,
@@ -333,10 +358,11 @@ eval_expr(Bin, #state{is_open = true} = St0) when is_binary(Bin) ->
             eval_expr(Rest, acc(St1, parse_expr(Expr, St1)));
         _ ->
             %% We did not find matching closing mustaches
-            error(badarg)
+            error({badarg, Bin})
     end;
 
-eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
+eval_expr(Bin, #state{is_open = false, is_string = true} = St)
+when is_binary(Bin) ->
     %% We continue evaluating a string (quoted) expression
     %% Split produces a list of binaries that are all referencing Bin.
     %% This means that the data in Bin is not copied to new binaries,
@@ -358,11 +384,14 @@ eval_expr(Bin, #state{is_open = false} = St) when is_binary(Bin) ->
 %% Accumulates the evaluation in the case of strings (quoted) expressions.
 %% @end
 %% -----------------------------------------------------------------------------
-acc(#state{acc = []} = St, Val) ->
-    acc(St#state{acc= [?DOUBLE_QUOTES]}, Val);
+%% acc(#state{acc = []} = St, Val) ->
+%%     acc(St#state{acc= [?DOUBLE_QUOTES]}, Val);
 
 acc(St, <<>>) ->
     St;
+
+acc(#state{acc = Acc} = St, {'$mops_proxy', _} = Val)  ->
+    St#state{acc = [Val | Acc], is_ground = false};
 
 acc(#state{acc = Acc} = St, Val) when is_function(Val, 1) ->
     St#state{acc = [Val | Acc], is_ground = false};
@@ -391,7 +420,7 @@ parse_expr(Bin, #state{context = Ctxt} = St) ->
             %% We evaluate the value and apply the ops in the pipe
             apply_ops([trim(P) || P <- Ops], get_value(trim(Val), Ctxt), Ctxt);
         _ ->
-            error(badarg)
+            error({badarg, Bin})
     end.
 
 
@@ -793,6 +822,11 @@ term_to_iolist(Term) ->
     io_lib:format("~p", [Term]).
 
 
+
+maybe_trim(<<$", _Rest/binary>> = Bin) ->
+    Bin;
+maybe_trim(Bin) ->
+    trim(Bin).
 
 
 %% -----------------------------------------------------------------------------

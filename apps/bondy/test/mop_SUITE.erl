@@ -44,17 +44,24 @@ simple_2_test(_) ->
    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_3_test(_) ->
-   <<"3">> =:= mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
+   <<"The number is 3">> =:= mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_4_test(_) ->
     try mops:eval(<<"The number is {{foo}}">>, #{<<"foo">> => 3})
     catch
-        error:badarg -> ok;
+        error:{badarg, _} -> ok;
         _ -> error(wrong_result)
     end.
 
 simple_5_test(_) ->
    <<"3 3">> =:= mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
+
+simple_3_future_test(_) ->
+    Proxy = mops:proxy(),
+    {Proxy, F} = mops:eval(
+        <<"\"The number is {{foo}}\"">>, #{<<"foo">> => Proxy}),
+    true = is_function(F, 1),
+    <<"The number is 3">> = F(#{<<"foo">> => 3}).
 
 pipe_1_test(_) ->
    3 =:= mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3}).
