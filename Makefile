@@ -20,6 +20,9 @@ compile:
 rel:
 	$(REBAR) release
 
+cleandata:
+	rm -fr _build/dev/rel/bondy/data
+
 stage:
 	$(REBAR) release -d
 
