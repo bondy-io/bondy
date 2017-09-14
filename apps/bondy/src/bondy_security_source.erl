@@ -102,10 +102,10 @@ to_map({Username, CIDR, Source, Opts} = _Obj) ->
     CIDRStr = list_to_binary(
         io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])),
     Map0#{
-        username => Username,
-        cidr => CIDRStr,
-        source => list_to_binary(atom_to_list(Source)),
-        options => maps:from_list(Opts)
+        <<"username">> => Username,
+        <<"cidr">> => CIDRStr,
+        <<"source">> => list_to_binary(atom_to_list(Source)),
+        <<"options">> => maps:from_list(Opts)
     }.
 
 

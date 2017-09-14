@@ -370,10 +370,10 @@ select_auth_method(#realm{authmethods = Allowed}, Requested) ->
 %% -----------------------------------------------------------------------------
 to_map(#realm{} = R) ->
     #{
-        uri => R#realm.uri,
+        <<"uri">> => R#realm.uri,
         %% public_keys => R#realm.public_keys.
-        description => R#realm.description,
-        authmethods => R#realm.authmethods
+        <<"description">> => R#realm.description,
+        <<"authmethods">> => R#realm.authmethods
     }.
 
 
