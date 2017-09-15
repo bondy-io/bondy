@@ -334,13 +334,23 @@ load_dispatch_tables() ->
     %% on wall clock, to be solve by using a CRDT?
     Specs = lists:sort([
         begin
-            Ts = maps:get(<<"ts">>, V),
-            lager:info(
-                "Loading and parsing API Gateway specification from store"
-                ", name=~s, id=~s, ts=~p",
-                [maps:get(<<"name">>, V), maps:get(<<"id">>, V), Ts]
-            ),
-            {K, Ts, bondy_api_gateway_spec_parser:parse(V)}
+            try
+                Parsed = bondy_api_gateway_spec_parser:parse(V),
+                Ts = maps:get(<<"ts">>, V),
+                lager:info(
+                    "Loading and parsing API Gateway specification from store"
+                    ", name=~s, id=~s, ts=~p",
+                    [maps:get(<<"name">>, V), maps:get(<<"id">>, V), Ts]
+                ),
+                {K, Ts, Parsed}
+            catch
+                _:_ ->
+                    _ = delete(K),
+                    lager:info(
+                        "Removed invalid API Gateway specification from store"),
+                    []
+            end
+
         end ||
         {K, [V]} <- plumtree_metadata:to_list(?PREFIX),
         V =/= '$deleted'
