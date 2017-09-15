@@ -179,10 +179,17 @@ map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
         <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
-map({Code, Mssg}) ->
+map({Code, Mssg}) when is_binary(Mssg); is_atom(Mssg) ->
     #{
         <<"code">> => Code,
         <<"message">> => Mssg,
+        <<"description">> => <<>>
+    };
+
+map({_, _}) ->
+    #{
+        <<"code">> => internal_server_error,
+        <<"message">> => <<"An internal server error ocurred.">>,
         <<"description">> => <<>>
     };
 

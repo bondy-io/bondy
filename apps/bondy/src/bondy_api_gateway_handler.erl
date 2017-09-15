@@ -41,6 +41,7 @@
 
 -type state() :: #{
     api_context => map(),
+    body_evaluated => boolean(),
     session => any(),
     realm_uri => binary(),
     deprecated => boolean(),
@@ -83,7 +84,9 @@ init(Req, St0) ->
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
         session => Session,
-        api_context => init_context(Req)
+        body_evaluated => false,
+        api_context => init_context(Req),
+        session => Session
     },
     {cowboy_rest, Req, St1}.
 
@@ -287,9 +290,12 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
             {stop, Req1, St0};
         Class:Reason ->
-            _ = lager:error(
+            _ = log(
+                error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()]),
+                [Class, Reason, erlang:get_stacktrace()],
+                St0
+            ),
             Response = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
@@ -339,9 +345,12 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             Req = reply(get_status_code(ErrResp, 400), Enc, ErrResp, Req0),
             {stop, Req, St0};
         Class:Reason ->
-            _ = lager:error(
+            _ = log(
+                error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()]),
+                [Class, Reason, erlang:get_stacktrace()],
+                St0
+            ),
             ErrResp = #{
                 <<"body">> => bondy_error:map(Reason),
                 <<"headers">> => #{}
@@ -419,10 +428,12 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 
 
 init_context(Req) ->
+    Peer = cowboy_req:peer(Req),
     M = #{
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
-        <<"peer">> => cowboy_req:peer(Req),
+        <<"peer">> => Peer,
+        <<"peername">> => inet_utils:peername_to_binary(Peer),
         <<"path">> => trim_trailing_slash(cowboy_req:path(Req)),
         <<"host">> => cowboy_req:host(Req),
         <<"port">> => cowboy_req:port(Req),
@@ -482,7 +493,11 @@ read_body(Req0, #{api_spec := Spec, api_context := Ctxt0} = St0, Acc) ->
             %% The API Spec will need a way to tell me you want to stream
             Body = <<Acc/binary, Data/binary>>,
             Ctxt1 = update_context({body, Body}, Ctxt0),
-            {ok, Req1, maps:update(api_context, Ctxt1, St0)};
+            St1 = St0#{
+                body_evaluated => true,
+                api_context => Ctxt1
+            },
+            {ok, Req1, St1};
         {more, Data, Req1} ->
             read_body(Req1, St0, <<Acc/binary, Data/binary>>)
     end.
@@ -502,10 +517,12 @@ orelse Method =:= <<"put">> ->
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
         Class:Error ->
-            _ = lager:info(
+            _ = log(
+                error,
                 "Error while decoding HTTP body, "
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Error, erlang:get_stacktrace()]
+                [Class, Error, erlang:get_stacktrace()],
+                St
             ),
             throw({badarg, {decoding, Enc}})
     end;
@@ -561,10 +578,12 @@ perform_action(
         {recv_timeout, T}
     ],
     Url = url(Host, Path, QS),
-    _ = lager:info(
+    _ = log(
+        info,
         "Gateway is forwarding request to upstream host, "
-        "method=~p, upstream_url=~p, headers=~p, body=~p, opts=~p",
-        [Method, Url, Headers, Body, Opts]
+        "upstream_url=~p, headers=~p, body=~p, opts=~p",
+        [Url, Headers, Body, Opts],
+        St0
     ),
     RSpec = maps:get(<<"response">>, Spec),
 
@@ -836,3 +855,53 @@ trim_trailing_slash(Bin) ->
         0 ->
             Bin
     end.
+
+
+%% @private
+log(Level, Prefix, Head, #{api_context := Ctxt} = St)
+when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+    #{
+        <<"method">> := Method,
+        <<"scheme">> := Scheme,
+        <<"peername">> := Peername,
+        <<"path">> := Path,
+        %% <<"headers">> := Headers,
+        <<"query_string">> := QueryString,
+        <<"bindings">> := Bindings,
+        <<"body_length">> := Len
+    } = maps:get(<<"request">>, Ctxt),
+    Format = iolist_to_binary([
+        Prefix,
+        <<
+            ", realm_uri=~s"
+            ", encoding=~s"
+            ", method=~s"
+            ", scheme=~s"
+            ", peername=~s"
+            ", path=~s"
+            %% ", headers=~s"
+            ", query_string=~s",
+            ", bindings=~p"
+            ", body_length=~p"
+        >>
+    ]),
+    BodyLen = case maps:get(body_evaluated, St) of
+        true ->
+            Len;
+        false ->
+            undefined
+    end,
+
+    Tail = [
+        maps:get(realm_uri, St, undefined),
+        maps:get(encoding, St, undefined),
+        Method,
+        Scheme,
+        Peername,
+        Path,
+        %% Headers,
+        QueryString,
+        Bindings,
+        BodyLen
+    ],
+    lager:log(Level, self(), Format, lists:append(Head, Tail)).
