@@ -278,12 +278,10 @@ eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
     %% We have functions so we wrap the iolist in a function receiving
     %% a future context as an argument
 
-    Fold = fun Fold(FAcc, FCtxt) ->
-        DoEval = fun
-            DoEval({'$mops_proxy', Proxy}, {Flag, Acc}) ->
-                DoEval(Proxy, {Flag, Acc});
-
-            DoEval(F, {Flag, Acc}) when is_function(F, 1) ->
+    Fold = fun DoFold(FAcc, FCtxt) ->
+        Map = fun
+            ({'$mops_proxy', F}, {Flag, Acc}) when is_function(F, 1) ->
+                %% DoEval(F, {Flag, Acc});
                 case F(FCtxt) of
                     {'$mops_proxy', _} = Res ->
                         {true, [Res|Acc]};
@@ -291,12 +289,21 @@ eval_expr(<<>>, #state{is_ground = false, is_string = true} = St) ->
                         {Flag, [term_to_iolist(Res)|Acc]}
                 end;
 
-            DoEval(Val, {Flag, Acc}) ->
+            %% DoEval(F, {Flag, Acc}) when is_function(F, 1) ->
+            %%     case F(FCtxt) of
+            %%         {'$mops_proxy', _} = Res ->
+            %%             {true, [Res|Acc]};
+            %%         Res ->
+            %%             {Flag, [term_to_iolist(Res)|Acc]}
+            %%     end;
+
+            (Val, {Flag, Acc}) ->
                 {Flag, [term_to_iolist(Val)|Acc]}
         end,
-        case lists:foldl(DoEval, {false, []}, FAcc) of
+        case lists:foldl(Map, {false, []}, FAcc) of
             {true, L} ->
-                {'$mops_proxy', fun(OtherCtxt) ->  Fold(L, OtherCtxt) end};
+                {'$mops_proxy',
+                    fun(OtherCtxt) ->  DoFold(lists:reverse(L), OtherCtxt) end};
             {false, L} ->
                 iolist_to_binary(L)
         end

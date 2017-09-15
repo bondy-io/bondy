@@ -40,8 +40,14 @@ groups() ->
 simple_1_test(_) ->
    3 =:= mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
 
-simple_2_test(_) ->
+simple_2_0_test(_) ->
    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
+
+simple_2_1_test(_) ->
+    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => "3"}).
+
+simple_2_2_test(_) ->
+    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => <<"3">>}).
 
 simple_3_test(_) ->
    <<"The number is 3">> =:= mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
@@ -56,12 +62,20 @@ simple_4_test(_) ->
 simple_5_test(_) ->
    <<"3 3">> =:= mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
 
-simple_3_future_test(_) ->
+simple_future_1_test(_) ->
     Proxy = mops:proxy(),
     {Proxy, F} = mops:eval(
         <<"\"The number is {{foo}}\"">>, #{<<"foo">> => Proxy}),
     true = is_function(F, 1),
     <<"The number is 3">> = F(#{<<"foo">> => 3}).
+
+simple_future_2_test(_) ->
+    Proxy = mops:proxy(),
+    {Proxy, F} = mops:eval(
+        <<"\"The number is {{foo}} or {{bar}}\"">>, #{<<"foo">> => Proxy, <<"bar">> => Proxy}),
+    true = is_function(F, 1),
+    {Proxy, F2} = F(#{<<"foo">> => 3, <<"bar">> => Proxy}),
+    <<"The number is 3 or 4">> = F2(#{<<"bar">> => 4}).
 
 pipe_1_test(_) ->
    3 =:= mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3}).
