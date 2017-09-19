@@ -232,7 +232,7 @@ do_issue_token(Realm, Data0) ->
     Kid = bondy_realm:get_random_kid(Realm),
     Key = bondy_realm:get_private_key(Realm, Kid),
     Now = os:system_time(seconds),
-    Exp = Now + ?DEFAULT_TTL,
+    Exp = ?DEFAULT_TTL,
     Iss = Data0#bondy_oauth2_token.issuer,
     %% We generate and sign the JWT
     Claims = #{
@@ -250,7 +250,7 @@ do_issue_token(Realm, Data0) ->
     %% We generate and store the refresh token
     RefreshToken = generate_fragment(?REFRESH_TOKEN_LEN),
     Data1 = Data0#bondy_oauth2_token{
-        expires_in = Now + ?DEFAULT_REFRESH_TTL,
+        expires_in = ?DEFAULT_REFRESH_TTL,
         issued_at = Now
     },
     ok = plumtree_metadata:put(
