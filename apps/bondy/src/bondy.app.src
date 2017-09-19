@@ -32,6 +32,7 @@
             inets,
             tools,
             runtime_tools,
+            redbug,
             sidejob,
             tuplespace,
             plumtree,
