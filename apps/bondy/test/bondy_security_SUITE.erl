@@ -24,8 +24,7 @@ all() ->
     [
         {group, api_client},
         {group, resource_owner},
-        {group, user},
-        {group, group}
+        {group, user}
     ].
 
 groups() ->
@@ -36,6 +35,7 @@ groups() ->
             security_enabled,
             disable_security,
             security_disabled,
+            create_groups,
             api_client_add,
             api_client_auth1,
             api_client_update,
@@ -59,9 +59,6 @@ groups() ->
             user_auth2,
             user_auth3,
             user_delete
-        ]},
-        {group, [sequence], [
-            create_group
         ]}
     ].
 
@@ -107,11 +104,13 @@ security_disabled(Config) ->
 
 
 
+
 %% =============================================================================
-%% GROUP
+%% API CLIENT
 %% =============================================================================
 
-create_group(Config) ->
+create_groups(Config) ->
+    {security_disabled, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Config),
     Name = <<"group_a">>,
     N = length(bondy_security_group:list(Uri)),
@@ -121,17 +120,14 @@ create_group(Config) ->
         <<"groups">> := [],
         <<"meta">> := #{}
     } = bondy_security_group:lookup(Uri, Name),
-    true = length(bondy_security_group:list(Uri)) =:= N + 1.
-
-
-%% =============================================================================
-%% API CLIENT
-%% =============================================================================
-
-
+    true = length(bondy_security_group:list(Uri)) =:= N + 1,
+    %% Create required groups for the tests
+    ok = bondy_security_group:add(Uri, #{<<"name">> => <<"api_clients">>}),
+    ok = bondy_security_group:add(Uri, #{<<"name">> => <<"resource_owners">>}),
+    {save_config, Prev}.
 
 api_client_add(Config) ->
-    {security_disabled, Prev} = ?config(saved_config, Config),
+    {create_groups, Prev} = ?config(saved_config, Config),
     {ok, #{
         <<"client_id">> := Id,
         <<"client_secret">> := Secret

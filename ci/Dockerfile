@@ -15,15 +15,16 @@ RUN apt-get update \
 EXPOSE 18080 18081 18082 18083 18084 18085
 
 # Copy source code
-COPY app.tar.gz /tmp
+COPY app.tar.gz start.sh /tmp/
 
 RUN groupadd -r app -g 1000 && \
 	useradd -u 1000 -r -g app -m -d /opt/app -s /bin/bash -c "App user" app && \
 	tar xf /tmp/app.tar.gz -C /opt/app && \
+	cp /tmp/start.sh /opt/app/bin && \
 	chown -R app:app /opt/app && \
-	rm /tmp/app.tar.gz
+	rm /tmp/*
 
 USER app
 VOLUME /opt/app/data
 WORKDIR /opt/app
-CMD /opt/app/bin/bondy foreground
+CMD /opt/app/bin/start.sh

@@ -202,16 +202,18 @@ start_https(Routes, Name) ->
     ok | {error, invalid_specification_format | any()}.
 
 load(Map) when is_map(Map) ->
-    try bondy_api_gateway_spec_parser:parse(Map) of
-        #{<<"id">> := Id} = Spec ->
+    case parse_spec(Map) of
+        {ok, #{<<"id">> := Id} = Spec} ->
             %% We store the parsed Spec in the MD store
             ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
-            ok = add(Id, Spec),
+            ok = add(
+                Id,
+                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
+            ),
             %% We rebuild the dispatch table
-            rebuild_dispatch_tables()
-    catch
-        error:Reason ->
-            {error, Reason}
+            rebuild_dispatch_tables();
+        {error, _} = Error ->
+            Error
     end;
 
 load(FName) ->
@@ -254,6 +256,10 @@ dispatch_table(Listener) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% We store the API Spec in the metadata store. Notice that we store the JSON
+%% and not the parsed spec as the parsed spec might contain mops proxy
+%% functions.  In case we upgrade the code of the mops.erl module those funs
+%% will no longer be valid and will fail with a badfun exception.
 %% @end
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
@@ -303,11 +309,22 @@ delete(Id) when is_binary(Id) ->
 %% =============================================================================
 
 
+
+parse_spec(Map) ->
+    try bondy_api_gateway_spec_parser:parse(Map) of
+        Spec ->
+            {ok, Spec}
+    catch
+        error:Reason ->
+            {error, Reason}
+    end.
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Loads parsed API specs from metadata store and generates the a dispatch table
-%% per scheme.
+%% Loads  API specs from metadata store, parses them and generates a
+%% dispatch table per scheme.
 %% @end
 %% -----------------------------------------------------------------------------
 load_dispatch_tables() ->
@@ -316,12 +333,31 @@ load_dispatch_tables() ->
     %% @TODO This does not work in a distributed env, since we are relying
     %% on wall clock, to be solve by using a CRDT?
     Specs = lists:sort([
-        {K, maps:get(<<"ts">>, V), V} ||
+        begin
+            try
+                Parsed = bondy_api_gateway_spec_parser:parse(V),
+                Ts = maps:get(<<"ts">>, V),
+                lager:info(
+                    "Loading and parsing API Gateway specification from store"
+                    ", name=~s, id=~s, ts=~p",
+                    [maps:get(<<"name">>, V), maps:get(<<"id">>, V), Ts]
+                ),
+                {K, Ts, Parsed}
+            catch
+                _:_ ->
+                    _ = delete(K),
+                    lager:info(
+                        "Removed invalid API Gateway specification from store"),
+                    []
+            end
+
+        end ||
         {K, [V]} <- plumtree_metadata:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
     bondy_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
+
 
 %% -----------------------------------------------------------------------------
 %% @private

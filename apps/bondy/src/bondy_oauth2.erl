@@ -68,9 +68,9 @@
 
 
 -define(REFRESH_TOKEN_LEN, 46).
--define(DEFAULT_TTL, 7200). % 2h
+-define(DEFAULT_TTL, 900). % 15mins
 -define(DEFAULT_REFRESH_TTL, 86400). % 1d
--define(EXP_LEEWAY, 2*60). % 2m
+-define(EXP_LEEWAY, 2*60). % 2mins
 
 -type error()      ::   oauth2_invalid_grant | unknown_realm.
 
@@ -91,6 +91,8 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -139,7 +141,8 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
     Prefix = ?REFRESH_TOKEN_PREFIX(RealmUri, Issuer),
     Now = os:system_time(seconds) + ?EXP_LEEWAY,
     case plumtree_metadata:get(Prefix, RefreshToken) of
-        #bondy_oauth2_token{expires_in = Exp} when Exp =< Now ->
+        #bondy_oauth2_token{issued_at = Ts, expires_in = Exp}
+        when Ts + Exp =< Now ->
             {error, oauth2_invalid_grant};
         #bondy_oauth2_token{} = Data0 ->
             %% Issue new tokens
@@ -208,7 +211,7 @@ verify_jwt(RealmUri, JWT, Match0) ->
     Match1 = Match0#{<<"aud">> => RealmUri},
     Now = os:system_time(seconds) + ?EXP_LEEWAY,
     case bondy_cache:get(RealmUri, JWT) of
-        {ok, #{<<"exp">> := Exp}} when Exp =< Now ->
+        {ok, #{<<"iat">> := Ts, <<"exp">> := Exp}} when Ts + Exp =< Now ->
             ok = bondy_cache:remove(JWT),
             {error, oauth2_invalid_grant};
         {ok, Claims} ->
@@ -232,7 +235,7 @@ do_issue_token(Realm, Data0) ->
     Kid = bondy_realm:get_random_kid(Realm),
     Key = bondy_realm:get_private_key(Realm, Kid),
     Now = os:system_time(seconds),
-    Exp = Now + ?DEFAULT_TTL,
+    Exp = ?DEFAULT_TTL,
     Iss = Data0#bondy_oauth2_token.issuer,
     %% We generate and sign the JWT
     Claims = #{
@@ -249,13 +252,15 @@ do_issue_token(Realm, Data0) ->
     JWT = sign(Key, Claims),
     %% We generate and store the refresh token
     RefreshToken = generate_fragment(?REFRESH_TOKEN_LEN),
+    %% We create the refresh token data by cloning the access token
+    %% and changing only the expires_in property
     Data1 = Data0#bondy_oauth2_token{
-        expires_in = Now + ?DEFAULT_REFRESH_TTL,
+        expires_in = ?DEFAULT_REFRESH_TTL,
         issued_at = Now
     },
     ok = plumtree_metadata:put(
         ?REFRESH_TOKEN_PREFIX(Uri, Iss), RefreshToken, Data1),
-    ok = bondy_cache:put(Uri, JWT, Claims ,#{exp => Exp}),
+    ok = bondy_cache:put(Uri, JWT, Claims ,#{exp => Now + Exp + ?EXP_LEEWAY}),
     {ok, JWT, RefreshToken, Claims}.
 
 
@@ -284,8 +289,11 @@ do_verify_jwt(JWT, Match, Now) ->
                     {error, oauth2_invalid_grant};
                 JWK ->
                     case jose_jwt:verify(JWK, JWT) of
-                        {true, {jose_jwt, #{<<"exp">> := Exp}}, _}
-                        when Exp =< Now ->
+                        {
+                            true,
+                            {jose_jwt, #{<<"iat">> := Ts, <<"exp">> := Exp}},
+                            _
+                        } when Ts + Exp =< Now ->
                             {error, oauth2_invalid_grant};
                         {true, {jose_jwt, Claims}, _} ->
                             matches(Claims, Match);

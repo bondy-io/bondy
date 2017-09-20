@@ -1,4 +1,5 @@
-kind: Service # Service externo, para admin y api
+# Service externo, para admin y api
+kind: Service
 apiVersion: v1
 metadata:
   name: bondy-export
@@ -11,12 +12,19 @@ spec:
     - name: api
       port: 8080
       targetPort: 18080
-      #nodePort: 32500
+      {{- if eq .name "packet" }}
+      nodePort: 32500
+      {{- end }}
     - name: admin
       port: 8081
       targetPort: 18081
-      #nodePort: 32501
-  #type: NodePort
+      {{- if eq .name "packet" }}
+      nodePort: 32501
+      {{- end }}
+  {{- if eq .name "packet" }}
+  type: NodePort
+  {{- else }}
   type: LoadBalancer
+  {{- end }}
   selector:
     app: bondy

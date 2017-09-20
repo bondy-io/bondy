@@ -179,11 +179,19 @@ map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
         <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
-map({Code, Mssg}) ->
+
+map({Code, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
     #{
         <<"code">> => Code,
         <<"message">> => Mssg,
         <<"description">> => <<>>
+    };
+
+map({_, _} = Error) ->
+    #{
+        <<"code">> => unknwon_error,
+        <<"message">> => <<"An unknwon error ocurred.">>,
+        <<"description">> => io_lib:format("~p", [Error])
     };
 
 map({Code, Mssg, Desc}) ->

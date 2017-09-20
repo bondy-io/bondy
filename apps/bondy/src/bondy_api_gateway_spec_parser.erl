@@ -919,8 +919,7 @@ from_file(Filename) ->
 -spec parse(map()) -> map() | no_return().
 
 parse(Map) ->
-    Spec = parse(Map, get_context_proxy()),
-    maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Spec).
+    parse(Map, get_context_proxy()).
 
 
 %% -----------------------------------------------------------------------------

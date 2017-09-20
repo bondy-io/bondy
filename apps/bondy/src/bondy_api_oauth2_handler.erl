@@ -331,7 +331,7 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
             issue_token(RealmUri, Username, Enc, Req0, St0);
         {error, Error} ->
             _ = lager:info(
-                "Resource Owner login failed, error=invalid_grant, reason=~p", [Error]),
+                "Resource Owner login failed, error=invalid_grant, reason=~p, username=~s, realm_uri=~s, ip=~s", [Error, P, RealmUri, inet_utils:ip_address_to_binary(IP)]),
             Req1 = reply(oauth2_invalid_grant, Enc, Req0),
             {stop, Req1, St0}
     end;
