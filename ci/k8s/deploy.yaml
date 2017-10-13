@@ -5,7 +5,7 @@ metadata:
     app: bondy
     tier: gateway
   name: bondy
-  namespace: magenta
+  namespace: {{ .bondy.namespace }}
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -20,7 +20,7 @@ spec:
       imagePullSecrets:
       - name: gitlab-registry
       containers:
-      - image: registry.gitlab.com/leapsight/bondy:{{.branch}}
+      - image: registry.gitlab.com/leapsight/bondy:{{ .bondy.tag }}
         name: bondy
         imagePullPolicy: Always
         ports:
@@ -65,9 +65,9 @@ spec:
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
-      {{- if eq .name "packet" }}
+      {{- if ne .bondy.nodeSelector "" }}
       nodeSelector:
-        disk: bondy
+        disk: {{ .bondy.nodeSelector }}
       {{- end }}
       volumes:
         - name: datadir
