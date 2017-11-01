@@ -39,6 +39,7 @@
             lager,
             cuttlefish,
             clique,
+            erlang_term,
             exometer_core,
             prometheus,
             cowboy,
