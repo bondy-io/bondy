@@ -146,8 +146,10 @@ start_http(Routes, Name) ->
                 dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
+            metrics_callback => fun prometheus_cowboy2_instrumenter:observe/1,
+            %% cowboy_metrics_h must be first on the list
             stream_handlers => [
-                cowboy_compress_h, cowboy_stream_h
+                cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
             ],
             middlewares => [
                 cowboy_router,
