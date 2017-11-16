@@ -47,6 +47,7 @@ init() ->
     % create_metrics(system_specs()),
     %% create_metrics(bc_specs()),
     %% create_metrics(static_specs()).
+    bondy_cowboy_prometheus:setup(),
     bondy_prometheus:init().
 
 
