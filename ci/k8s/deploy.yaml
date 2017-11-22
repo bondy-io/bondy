@@ -20,7 +20,7 @@ spec:
       imagePullSecrets:
       - name: gitlab-registry
       containers:
-      - image: registry.gitlab.com/leapsight/bondy:{{ .bondy.tag }}
+      - image: registry.gitlab.com/leapsight/bondy:{{ .magenta.tag }}
         name: bondy
         imagePullPolicy: Always
         ports:
