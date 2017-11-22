@@ -104,7 +104,7 @@
 
 
 -record(state, {
-    pool_type = permanent       ::  permanent | transient,
+    pool_type                   ::  permanent | transient,
     event                       ::  event()
 }).
 

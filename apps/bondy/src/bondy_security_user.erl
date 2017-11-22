@@ -170,7 +170,7 @@ remove_source(RealmUri, Username, CIDR) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), binary() | map()) -> ok | {error, unknown_user}.
+-spec remove(uri(), binary() | map()) -> ok | {error, {unknown_user, binary()}}.
 
 remove(RealmUri, #{<<"username">> := Username}) ->
     remove(RealmUri, Username);
@@ -179,8 +179,8 @@ remove(RealmUri, Id) ->
     case bondy_security:del_user(RealmUri, Id) of
         ok ->
             ok;
-        {error, {unknown_user, Id}} ->
-            {error, unknown_user}
+        {error, _} = Error ->
+            Error
     end.
 
 

@@ -416,7 +416,7 @@ issue_token(RealmUri, Username, Enc, Req0, St0) ->
 reply(unknown_realm, Enc, Req) ->
     reply(oauth2_invalid_client, Enc, Req);
 
-reply(unknown_user, Enc, Req) ->
+reply({unknown_user, _}, Enc, Req) ->
     reply(oauth2_invalid_client, Enc, Req);
 
 reply(missing_password, Enc, Req) ->

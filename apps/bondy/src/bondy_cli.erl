@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_cli.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,7 +51,7 @@
 -export([security_enable/1]).
 -export([security_status/1]).
 
-%% API 
+%% API
 -export([load_api/3]).
 
 %% CLIQUE CALLBACKS
@@ -136,14 +136,14 @@ register_all_usage() ->
 register_all_commands() ->
     lists:foreach(
         fun
-            ({Cmd, _, _, undefined, UsageCB}) -> 
+            ({Cmd, _, _, undefined, UsageCB}) ->
                 apply(clique, register_usage, [Cmd, UsageCB]);
-            ({Cmd, KeySpecs, FlagSpecs, CB, UsageCB}) -> 
+            ({Cmd, KeySpecs, FlagSpecs, CB, UsageCB}) ->
                 apply(clique, register_command, [Cmd, KeySpecs, FlagSpecs, CB]),
                 apply(clique, register_usage, [Cmd, UsageCB])
         end,
         lists:append([
-            %% status_register(), 
+            %% status_register(),
             %% router_register(),
             security_commands(),
             api_gateway_commands()
@@ -160,10 +160,10 @@ security_commands() ->
     %% [ {Cmd, KeySpecs, FlagSpecs, CmdCallback, UsageCallback} ]
     [
         {
-            ["bondy-admin", "security", "add-user"], 
-            [], 
-            [], 
-            fun status/3, 
+            ["bondy-admin", "security", "add-user"],
+            [],
+            [],
+            fun status/3,
             fun status_usage/0
         }
     ].
@@ -173,16 +173,16 @@ api_gateway_commands() ->
     %% [Cmd, KeySpecs, FlagSpecs, Callback]
     [
         {
-            ["bondy-admin", "gateway"], 
-            [], 
-            [], 
+            ["bondy-admin", "gateway"],
+            [],
+            [],
             undefined,
             fun gateway_usage/0
         },
         {
-            ["bondy-admin", "gateway", "load-api"], 
-            [{filename, []}], 
-            [], 
+            ["bondy-admin", "gateway", "load-api"],
+            [{filename, []}],
+            [],
             fun load_api/3,
             fun load_api_usage/0
         }
