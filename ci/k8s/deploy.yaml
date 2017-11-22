@@ -5,7 +5,7 @@ metadata:
     app: bondy
     tier: gateway
   name: bondy
-  namespace: {{ .bondy.namespace }}
+  namespace: {{ .magenta.namespace }}
 spec:
   replicas: 1
   revisionHistoryLimit: 3

@@ -14,7 +14,7 @@ spec:
       app: bondy
   namespaceSelector:
     matchNames:
-    - {{ .bondy.namespace }}
+    - {{ .magenta.namespace }}
   endpoints:
   - port: admin
     interval: 120s

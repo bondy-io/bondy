@@ -5,7 +5,7 @@ metadata:
     app: bondy
     tier: gateway
   name: bondy-claim
-  namespace: {{ .bondy.namespace }}
+  namespace: {{ .magenta.namespace }}
   annotations:
     volume.beta.kubernetes.io/storage-class: {{ .bondy.storage.class }}
 spec:

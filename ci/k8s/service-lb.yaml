@@ -3,7 +3,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: bondy
-  namespace: {{ .bondy.namespace }}
+  namespace: {{ .magenta.namespace }}
   labels:
     app: bondy
     tier: gateway
