@@ -48,7 +48,7 @@
 
 
 {mapping, "load_regulation.router.pool.type", "bondy.router_pool.type", [
-  {default, permanent},
+  {default, transient},
   {datatype, {enum, [permanent, transient]}},
   hidden
 ]}.
