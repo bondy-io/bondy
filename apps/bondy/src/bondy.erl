@@ -144,7 +144,7 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
 %% @doc
 %% Acknowledges the reception of a WAMP message. This function should be used by
 %% the peer transport module to acknowledge the reception of a message sent with
-%% {@link send/2,3}.
+%% {@link send/3}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec ack(pid(), reference()) -> ok.

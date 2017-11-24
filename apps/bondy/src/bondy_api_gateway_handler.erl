@@ -451,7 +451,6 @@ init_context(Req) ->
     },
     maps:put(<<"request">>, M, #{}).
 
-%% @private
 
 %% is_multipart_form_body(Req) ->
 %%     case cowboy_req:parse_header(<<"content-type">>, Req) of

@@ -444,55 +444,6 @@ parse_specs(Specs, BaseRoutes) ->
 
 
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Reads all Bondy Gateway Specification files in the provided `specs_path`
-%% configuration option.
-%% @end
-%% -----------------------------------------------------------------------------
-%% specs() ->
-%%     case application:get_env(bondy, api_gateway, undefined) of
-%%         undefined ->
-%%             % specs("./etc");
-%%             [];
-%%         Opts ->
-%%             case lists:keyfind(specs_path, 1, Opts) of
-%%                 false ->
-%%                     % specs("./etc");
-%%                     [];
-%%                 {_, Path} ->
-%%                     % lists:append([specs(Path), specs("./etc")])
-%%                     specs(Path)
-%%             end
-%%     end.
-
-
-
-%% @private
-%% specs(Path) ->
-%%     case filelib:wildcard(filename:join([Path, "*.json"])) of
-%%         [] ->
-%%             [];
-%%         FNames ->
-%%             Fold = fun(FName, Acc) ->
-%%                 try jsx:consult(FName, [return_maps]) of
-%%                     [Spec] ->
-%%                         [Spec|Acc]
-%%                 catch
-%%                     error:badarg ->
-%%                         _ = lager:error(
-%%                             "Error processing API Gateway Specification file, "
-%%                             "type=error, reason=~p, file_name=~p", [invalid_specification_format, FName]),
-%%                         Acc
-%%                 end
-%%             end,
-%%             lists:foldl(Fold, [], FNames)
-%%     end.
-
-
-
 %% @private
 maybe_init_groups(RealmUri) ->
     Gs = [

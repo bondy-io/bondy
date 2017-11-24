@@ -565,13 +565,6 @@ get_realm(St) ->
 %% =============================================================================
 
 
-%% @private
-% transport(#wamp_state{subprotocol = {T, _, _}}) -> T.
-
-
-% %% @private
-% frame_type(#wamp_state{subprotocol = {_, T, _}}) -> T.
-
 
 %% @private
 encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.

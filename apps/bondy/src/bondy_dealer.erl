@@ -41,7 +41,8 @@
 %% Dealer works as a generic router for remote procedure calls
 %% decoupling Callers and Callees.
 %%
-%% Bondy does not provide message transformations to ensure stability and safety.
+%% Bondy does not provide message transformations to ensure stability and
+%% safety.
 %% As such, any required transformations should be handled by Callers and
 %% Callees directly (notice that a Callee can act as a middleman implementing
 %% the required transformations).
@@ -56,31 +57,32 @@
 %%    4.  "UNREGISTERED"
 %%    5.  "ERROR"
 %%
-%%<pre>
+%% <pre>
 %%        ,------.          ,------.               ,------.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `--+---'          `--+---'               `--+---'
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |       REGISTER       |
-%%           |                 | <---------------------
+%%           |                 | &lt;---------------------
 %%           |                 |                      |
 %%           |                 |  REGISTERED or ERROR |
-%%           |                 | --------------------->
+%%           |                 | ---------------------&gt;
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |      UNREGISTER      |
-%%           |                 | <---------------------
+%%           |                 | &lt;---------------------
 %%           |                 |                      |
 %%           |                 | UNREGISTERED or ERROR|
-%%           |                 | --------------------->
+%%           |                 | ---------------------&gt;
 %%        ,--+---.          ,--+---.               ,--+---.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `------'          `------'               `------'
-%%</pre>
+%%
+%% </pre>
 %%
 %% # Calling and Invocations
 %%
@@ -103,20 +105,21 @@
 %%        |Caller|          |Dealer|          |Callee|
 %%        `--+---'          `--+---'          `--+---'
 %%           |       CALL      |                 |
-%%           | ---------------->                 |
+%%           | ----------------&gt;                 |
 %%           |                 |                 |
 %%           |                 |    INVOCATION   |
-%%           |                 | ---------------->
+%%           |                 | ----------------&gt;
 %%           |                 |                 |
 %%           |                 |  YIELD or ERROR |
-%%           |                 | <----------------
+%%           |                 | %lt;----------------
 %%           |                 |                 |
 %%           | RESULT or ERROR |                 |
-%%           | <----------------                 |
+%%           | %lt;----------------                 |
 %%        ,--+---.          ,--+---.          ,--+---.
 %%        |Caller|          |Dealer|          |Callee|
 %%        `------'          `------'          `------'
-%%</pre>
+%%
+%% </pre>
 %%
 %%    The execution of remote procedure calls is asynchronous, and there
 %%    may be more than one call outstanding.  A call is called outstanding

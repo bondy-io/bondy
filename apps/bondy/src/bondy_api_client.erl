@@ -16,6 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_api_client).
 -include_lib("wamp/include/wamp.hrl").
 
@@ -124,7 +128,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Adds an API client to realm RealmUri.
-%% Creates a new user adding it to the `api_clients` group.
+%% Creates a new user adding it to the `api_clients' group.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(uri(), map()) -> {ok, map()} | {error, atom() | map()}.

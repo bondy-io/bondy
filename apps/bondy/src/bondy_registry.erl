@@ -489,7 +489,7 @@ entries(Type, RealmUri, SessionId) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Works like {@link entries/2,3}, but only returns a limited (Limit) number of
+%% Works like {@link entries/3}, but only returns a limited (Limit) number of
 %% entries. Term Continuation can then be used in subsequent calls to entries/1
 %% to get the next chunk of entries.
 %% @end
@@ -859,12 +859,14 @@ do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
 %% TODO move to wamp library
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
+%% @doc Returns the components of an URI.
+%%
 %% Example:
-%%<pre lang="erlang">
-%% > uri_components(<<"com.mycompany.foo.bar">>).
-%% > [<<"com.mycompany">>, <<"foo">>, <<"bar">>].
-%%</pre>
+%%
+%% <pre lang="erlang">
+%% uri_components(&lt;&lt;com.mycompany.foo.bar"&gt;&gt;).
+%% [&lt;&lt;com.mycompany"&gt;&gt;, &lt;&lt;foo"&gt;&gt;, &lt;&lt;bar"&gt;&gt;].
+%% </pre>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri_components(uri()) -> [binary()].
