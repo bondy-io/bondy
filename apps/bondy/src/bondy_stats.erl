@@ -47,6 +47,7 @@ init() ->
     % create_metrics(system_specs()),
     %% create_metrics(bc_specs()),
     %% create_metrics(static_specs()).
+    bondy_cowboy_prometheus:setup(),
     bondy_prometheus:init().
 
 
@@ -299,7 +300,7 @@ do_update({message, Session, Realm, IP, Type, Sz}) ->
         [bondy, node, session, messages, Type, Session], 1, spiral, []).
 
 
-%% @private
+
 %% create_metrics(Stats) ->
 %%     %% We are assumming exometer was started by wamp app.
 %%     %% TODO Process aliases
@@ -317,11 +318,7 @@ do_update({message, Session, Realm, IP, Type, Sz}) ->
 %%     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
+
 %% static_specs() ->
 %%     [
 %%         {[bondy, node, sessions],
@@ -440,14 +437,3 @@ expand_disk_stats([{disk, Stats}]) ->
 %% -----------------------------------------------------------------------------
 disk_stats() ->
     [{disk, disksup:get_disk_data()}].
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% Borrowed from https://github.com/basho/riak_kv/src/riak_kv_stat_bc.erl
-%% -----------------------------------------------------------------------------
-% app_stats() ->
-%     [{list_to_atom(atom_to_list(A) ++ "_version"), list_to_binary(V)}
-%      || {A,_,V} <- application:which_applications()].

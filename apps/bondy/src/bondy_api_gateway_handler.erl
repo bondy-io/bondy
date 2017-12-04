@@ -95,6 +95,11 @@ allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
+%% TODO get from API Conf
+%% languages_provided(Req, St) ->
+%%     {Result, Req, State}.
+
+
 content_types_accepted(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"content_types_accepted">>, Spec), Req, St}.
 
@@ -446,7 +451,6 @@ init_context(Req) ->
     },
     maps:put(<<"request">>, M, #{}).
 
-%% @private
 
 %% is_multipart_form_body(Req) ->
 %%     case cowboy_req:parse_header(<<"content-type">>, Req) of

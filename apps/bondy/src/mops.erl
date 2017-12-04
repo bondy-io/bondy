@@ -21,8 +21,8 @@
 %% @doc
 %% This module implements Mops, a very simple mustache-inspired expression
 %% language.
-%% All expressions in Mops are evaluated against a Context, an erlang `map()`
-%% where all keys are of type `binary()`.
+%% All expressions in Mops are evaluated against a Context, an erlang `map()'
+%% where all keys are of type `binary()'.
 %%
 %% The following are the key characteristics and features:
 %% *
@@ -108,29 +108,29 @@
 %% **Ctxt**.
 %%
 %% The following are example mops expressions and their meanings:
-%% - `<<"{{foo}}">>' - resolve the value for key `<<"foo">>` in the context.
-%% It fails if the context does not have a key named `<<"foo">>'.
-%% - `<<"\"{{foo}}\">>' - return a string by resolving the value for key
-%% `<<"foo">>' in the context. It fails if the context does not have a key
-%% named `<<"foo">>'.
-%% - `<<"{{foo.bar}}">>' - resolve the value for key path in the context.
-%% It fails if the context does not have a key named `<<"foo">>' which has a value that is either a `function()` or a `map()` with a key named `<<"bar">>'.
-%% - `<<"{{foo |> integer}}">>' - resolves the value for key `<<"foo">>' in the
+%% - `&lt;&lt;"{{foo}}"&gt;&gt;' - resolve the value for key `&lt;&lt;"foo"&gt;&gt;` in the context.
+%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;'.
+%% - `&lt;&lt;"\"{{foo}}\"&gt;&gt;' - return a string by resolving the value for key
+%% `&lt;&lt;"foo"&gt;&gt;' in the context. It fails if the context does not have a key
+%% named `&lt;&lt;"foo"&gt;&gt;'.
+%% - `&lt;&lt;"{{foo.bar}}"&gt;&gt;' - resolve the value for key path in the context.
+%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;' which has a value that is either a `function()` or a `map()` with a key named `&lt;&lt;"bar"&gt;&gt;'.
+%% - `&lt;&lt;"{{foo |> integer}}"&gt;&gt;' - resolves the value for key `&lt;&lt;"foo"&gt;&gt;' in the
 %% context and converts the result to an integer. If the result was a
 %% `function()', it returns a function composition.
-%% It fails if the context does not have a key named `<<"foo">>'
+%% It fails if the context does not have a key named `&lt;&lt;"foo"&gt;&gt;'
 %%
 %% Examples:
 %% <pre language="erlang">
-%% > mops:eval(foo, #{<<"foo">> => bar}).
+%% > mops:eval(foo, #{&lt;&lt;"foo"&gt;&gt; => bar}).
 %% > foo
-%% > mops:eval(<<"foo">>, #{<<"foo">> => bar}).
-%% > <<"foo">>
-%% > mops:eval(1, #{<<"foo">> => bar}).
+%% > mops:eval(&lt;&lt;"foo"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => bar}).
+%% > &lt;&lt;"foo"&gt;&gt;
+%% > mops:eval(1, #{&lt;&lt;"foo"&gt;&gt; => bar}).
 %% > 1
-%% > mops:eval(<<"{{foo}}">>, #{<<"foo">> => bar}).
+%% > mops:eval(&lt;&lt;"{{foo}}"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => bar}).
 %% > bar
-%% > mops:eval(<<"{{foo.bar}}">>, #{<<"foo">> => #{<<"bar">> => foobar}}).
+%% > mops:eval(&lt;&lt;"{{foo.bar}}"&gt;&gt;, #{&lt;&lt;"foo"&gt;&gt; => #{&lt;&lt;"bar"&gt;&gt; => foobar}}).
 %% > foobar
 %% </pre>
 %% @end

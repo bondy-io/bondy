@@ -32,7 +32,8 @@
 
 -define(TCP, wamp_tcp).
 -define(TLS, wamp_tls).
--define(TIMEOUT, 60000 * 60). % 1hr
+-define(TIMEOUT, ?PING_TIMEOUT * 2).
+-define(PING_TIMEOUT, 30000). % 30 secs
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -48,22 +49,22 @@
 -define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
-    socket                                      ::  gen_tcp:socket(),
-    transport                                   ::  module(),
-    frame_type                                  ::  frame_type(),
-    encoding                                    ::  atom(),
-    max_len                                     ::  pos_integer(),
-    ping_sent                                   ::  {true, binary()}
-                                                    | false,
-    hibernate = false                           ::  boolean(),
-    start_time = erlang:monotonic_time(second)  ::  integer(),
-    protocol_state                              ::  bondy_wamp_protocol:state()
-                                                    | undefined,
-    buffer = <<>>                               ::  binary()
+    socket                  ::  gen_tcp:socket(),
+    transport               ::  module(),
+    frame_type              ::  frame_type(),
+    encoding                ::  atom(),
+    max_len                 ::  pos_integer(),
+    ping_sent = false       ::  {true, binary(), reference()} | false,
+    ping_attempts = 0       ::  non_neg_integer(),
+    ping_max_attempts = 2   ::  non_neg_integer(),
+    hibernate = false       ::  boolean(),
+    start_time              ::  integer(),
+    protocol_state          ::  bondy_wamp_protocol:state() | undefined,
+    buffer = <<>>           ::  binary()
 }).
 -type state() :: #state{}.
 
--type raw_error()           :: invalid_response
+-type raw_error()           ::  invalid_response
                                 | invalid_socket
                                 | invalid_handshake
                                 | maximum_connection_count_reached
@@ -157,6 +158,7 @@ init({Ref, Socket, Transport, _Opts}) ->
     ok = ranch:accept_ack(Ref),
     Transport:setopts(Socket, [{active, once}, {packet, 0}]),
     St = #state{
+        start_time = erlang:monotonic_time(second),
         socket = Socket,
         transport = Transport
     },
@@ -235,15 +237,27 @@ handle_info({tcp_error, Socket, Reason}, State) ->
     ok = socket_closed(true, State),
 	{stop, Reason, State};
 
-handle_info(timeout, State) ->
+handle_info(timeout, #state{ping_sent = false} = State0) ->
+    _ = log(debug, "Timeout. Sending ping", [], State0),
+    {ok, State1} = send_ping(State0),
+	{noreply, State1};
+
+handle_info(
+    ping_timeout,
+    #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
     _ = log(
-        error,
-        "Connection closing, reason=timeout",
-        [],
+        error, "Connection closing, reason=ping_timeout, attempts=~p", [N],
         State
     ),
-    ok = close_socket(timeout, State),
-	{stop, timeout, State};
+    ok = close_socket(ping_timeout, State),
+	{stop, timeout, State#state{ping_sent = false}};
+
+handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
+    %% We try again until we reach ping_max_attempts
+    _ = log(debug, "Ping timeout. Sending second ping", [], State),
+    {ok, State1} = send_ping(Bin, State),
+    {noreply, State1};
+
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
@@ -331,22 +345,30 @@ when byte_size(Data) >= Len ->
 handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
     %% We received a PING, send a PONG
     <<Payload:Len/binary, Rest/binary>> = Data,
-    ok = send_frame(<<0:5, 2:3, Payload/binary>>, St),
+    ok = send_frame(<<0:5, 2:3, Len:24, Payload/binary>>, St),
     handle_data(Rest, St);
 
 handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
     %% We received a PONG
+    _ = log(debug, "Received pong", [], St),
     <<Payload:Len/binary, Rest/binary>> = Data,
     case St#state.ping_sent of
-        {true, Payload} ->
+        {true, Payload, TimerRef} ->
+            %% We reset the state
+            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             handle_data(Rest, St#state{ping_sent = false});
-        {true, _} ->
-            %% Should we stop instead?
-            _ = log(error, "Unrequested pong message from peer", [], St),
-            handle_data(Rest, St);
+        {true, _, TimerRef} ->
+            ok = erlang:cancel_timer(TimerRef, [{info, false}]),
+            _ = log(
+                error,
+                "Invalid pong message from peer, reason=invalid_payload",
+                [], St
+            ),
+            ok = close_socket(invalid_ping_response, St),
+            {stop, invalid_ping_response, St};
         false ->
-            %% Should we stop instead?
             _ = log(error, "Unrequested pong message from peer", [], St),
+            %% Should we stop instead?
             handle_data(Rest, St)
     end;
 
@@ -465,6 +487,29 @@ send(Bin, St) ->
 
 send_frame(Frame, St) when is_binary(Frame) ->
     (St#state.transport):send(St#state.socket, Frame).
+
+
+%% @private
+send_ping(St) ->
+    send_ping(term_to_binary(make_ref()), St).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Sends a ping message with a reference() as a payload to the client and sent
+%% ourselves a ping_timeout message in the future.
+%% @end
+%% -----------------------------------------------------------------------------
+send_ping(Bin, St0) ->
+    ok = send_frame(<<0:5, 1:3, (byte_size(Bin)):24, Bin/binary>>, St0),
+    Timeout = application:get_env(bondy, ping_timeout, ?PING_TIMEOUT),
+    TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
+    St1 = St0#state{
+        ping_sent = {true, Bin, TimerRef},
+        ping_attempts = St0#state.ping_attempts + 1
+    },
+    {ok, St1}.
 
 
 %% -----------------------------------------------------------------------------

@@ -5,19 +5,17 @@ metadata:
     app: bondy
     tier: gateway
   name: bondy-claim
-  namespace: magenta
-  {{- if ne .name "packet" }}
+  namespace: {{ .magenta.namespace }}
   annotations:
-    volume.beta.kubernetes.io/storage-class: fast
-  {{- end }}
+    volume.beta.kubernetes.io/storage-class: {{ .bondy.storage.class }}
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 10Gi
-  {{- if eq .name "packet" }}
+      storage: {{ .bondy.storage.size }}
+  {{- if ne .bondy.nodeSelector "" }}
   selector:
     matchLabels:
-      app: "bondy"
+      app: {{ .bondy.nodeSelector }}
   {{- end }}

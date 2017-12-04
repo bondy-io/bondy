@@ -171,7 +171,7 @@
 %% @doc Raise the default erlang process limit
 {mapping, "erlang.process_limit", "vm_args.+P", [
   {datatype, integer},
-  {default, 256000},
+  {default, 2000000},
   hidden
 ]}.
 

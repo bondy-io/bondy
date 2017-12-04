@@ -146,8 +146,10 @@ start_http(Routes, Name) ->
                 dispatch => cowboy_router:compile(Routes),
                 max_connections => infinity
             },
+            metrics_callback => fun bondy_cowboy_prometheus:observe/1,
+            %% cowboy_metrics_h must be first on the list
             stream_handlers => [
-                cowboy_compress_h, cowboy_stream_h
+                cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
             ],
             middlewares => [
                 cowboy_router,
@@ -439,55 +441,6 @@ parse_specs(Specs, BaseRoutes) ->
             ],
             bondy_api_gateway_spec_parser:dispatch_table(L, BaseRoutes)
     end.
-
-
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Reads all Bondy Gateway Specification files in the provided `specs_path`
-%% configuration option.
-%% @end
-%% -----------------------------------------------------------------------------
-%% specs() ->
-%%     case application:get_env(bondy, api_gateway, undefined) of
-%%         undefined ->
-%%             % specs("./etc");
-%%             [];
-%%         Opts ->
-%%             case lists:keyfind(specs_path, 1, Opts) of
-%%                 false ->
-%%                     % specs("./etc");
-%%                     [];
-%%                 {_, Path} ->
-%%                     % lists:append([specs(Path), specs("./etc")])
-%%                     specs(Path)
-%%             end
-%%     end.
-
-
-
-%% @private
-%% specs(Path) ->
-%%     case filelib:wildcard(filename:join([Path, "*.json"])) of
-%%         [] ->
-%%             [];
-%%         FNames ->
-%%             Fold = fun(FName, Acc) ->
-%%                 try jsx:consult(FName, [return_maps]) of
-%%                     [Spec] ->
-%%                         [Spec|Acc]
-%%                 catch
-%%                     error:badarg ->
-%%                         _ = lager:error(
-%%                             "Error processing API Gateway Specification file, "
-%%                             "type=error, reason=~p, file_name=~p", [invalid_specification_format, FName]),
-%%                         Acc
-%%                 end
-%%             end,
-%%             lists:foldl(Fold, [], FNames)
-%%     end.
 
 
 

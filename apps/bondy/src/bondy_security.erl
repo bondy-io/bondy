@@ -601,14 +601,14 @@ get_grants(#context{grants=Val}) ->
     Password::binary() | {hash, binary()},
     ConnInfo :: [{atom(), any()}]) ->
         {ok, context()} |
-        {error, unknown_user | missing_password | no_matching_sources }.
+        {error, {unknown_user, binary()} | missing_password | no_matching_sources }.
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
     Uri = to_lowercase_bin(RealmUri),
     Name = to_lowercase_bin(Username),
     case user_details(Uri, Name) of
         undefined ->
-            {error, unknown_user};
+            {error, {unknown_user, Name}};
         Data ->
             M = #{
                 realm_uri => Uri,

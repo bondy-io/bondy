@@ -18,8 +18,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% bondy_router provides the routing logic for all interactions.
+%% @doc bondy_router provides the routing logic for all interactions.
 %%
 %% In general bondy_router tries to handle all messages asynchronously.
 %% It does it by
@@ -43,48 +42,49 @@
 %% delegating the rest to either {@link bondy_broker} or {@link bondy_dealer},
 %% which implement the actual PubSub and RPC logic respectively.
 %%
-%%<pre>
+%% <pre>
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
 %% `--+---'                                    `--+---'
 %%    |                                           |
 %%    |               TCP established             |
-%%    |<----------------------------------------->|
+%%    |&lt;-----------------------------------------&gt;|
 %%    |                                           |
 %%    |               TLS established             |
-%%    |+<--------------------------------------->+|
+%%    |+&lt;---------------------------------------&gt;+|
 %%    |+                                         +|
 %%    |+           WebSocket established         +|
-%%    |+|<------------------------------------->|+|
+%%    |+|&lt;-------------------------------------&gt;|+|
 %%    |+|                                       |+|
 %%    |+|            WAMP established           |+|
-%%    |+|+<----------------------------------->+|+|
+%%    |+|+&lt;-----------------------------------&gt;+|+|
 %%    |+|+                                     +|+|
 %%    |+|+                                     +|+|
 %%    |+|+            WAMP closed              +|+|
-%%    |+|+<----------------------------------->+|+|
+%%    |+|+&lt;-----------------------------------&gt;+|+|
 %%    |+|                                       |+|
 %%    |+|                                       |+|
 %%    |+|            WAMP established           |+|
-%%    |+|+<----------------------------------->+|+|
+%%    |+|+&lt;-----------------------------------&gt;+|+|
 %%    |+|+                                     +|+|
 %%    |+|+                                     +|+|
 %%    |+|+            WAMP closed              +|+|
-%%    |+|+<----------------------------------->+|+|
+%%    |+|+&lt;-----------------------------------&gt;+|+|
 %%    |+|                                       |+|
 %%    |+|           WebSocket closed            |+|
-%%    |+|<------------------------------------->|+|
+%%    |+|&lt;-------------------------------------&gt;|+|
 %%    |+                                         +|
 %%    |+              TLS closed                 +|
-%%    |+<--------------------------------------->+|
+%%    |+&lt;---------------------------------------&gt;+|
 %%    |                                           |
 %%    |               TCP closed                  |
-%%    |<----------------------------------------->|
+%%    |&lt;-----------------------------------------&gt;|
 %%    |                                           |
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
-%%</pre>
+%%
+%% </pre>
 %% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
@@ -104,7 +104,7 @@
 
 
 -record(state, {
-    pool_type = permanent       ::  permanent | transient,
+    pool_type                   ::  permanent | transient,
     event                       ::  event()
 }).
 
@@ -189,12 +189,12 @@ start_pool() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Handles a wamp message.
-%% The message might be handled synchronously (performed by the calling
-%% process i.e. the transport handler) or asynchronously (by sending the
-%% message to the router load regulated worker pool).
+%% Forwards a WAMP message to the Dealer or Broker based on message type.
+%% The message might end up being handled synchronously
+%% (performed by the calling process i.e. the transport handler)
+%% or asynchronously (by sending the message to the router load regulated
+%% worker pool).
 %%
-%% Most
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(M :: wamp_message(), Ctxt :: bondy_context:context()) ->
@@ -243,7 +243,7 @@ handle_call(Event, From, State) ->
 
 handle_cast(Event, State) ->
     try
-        ok = route_event(Event),
+        ok = sync_forward(Event),
         {noreply, State}
     catch
         Error:Reason ->
@@ -259,7 +259,7 @@ handle_info(timeout, #state{pool_type = transient, event = Event} = State)
 when Event /= undefined ->
     %% We've been spawned to handle this single event,
     %% so we should stop right after we do it
-    ok = route_event(Event),
+    ok = sync_forward(Event),
     {stop, normal, State};
 
 handle_info(Info, State) ->
@@ -326,54 +326,6 @@ acknowledge_message(_) ->
 %% =============================================================================
 
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Asynchronously handles a message by either sending it to an
-%% existing worker or spawning a new one depending on the bondy_broker_pool_type
-%% type.
-%% @end.
-%% -----------------------------------------------------------------------------
--spec async_route_event(wamp_message(), bondy_context:context()) ->
-    ok | {error, overload}.
-
-async_route_event(M, Ctxt) ->
-    %% Todo either fix pool_type based on stats or use mochiweb to compile
-    %% bondy_config to avoid bottlenecks.
-    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
-    case async_route_event(PoolType, router_pool, M, Ctxt) of
-        ok ->
-            ok;
-        {ok, _} ->
-            ok;
-        overload ->
-            {error, overload}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Helper function for {@link async_route_event/2}
-%% @end
-%% -----------------------------------------------------------------------------
-async_route_event(permanent, PoolName, M, Ctxt) ->
-    %% We send a request to an existing permanent worker
-    %% using bondy_router acting as a sidejob_worker
-    sidejob:cast(PoolName, {M, Ctxt});
-
-async_route_event(transient, PoolName, M, Ctxt) ->
-    %% We spawn a transient worker using sidejob_supervisor
-    sidejob_supervisor:start_child(
-        PoolName,
-        gen_server,
-        start_link,
-        [?MODULE, [{M, Ctxt}], []]
-    ).
-
-
-
 %% @private
 do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message, we stop.
@@ -430,7 +382,7 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
     %% between two processes even when in different nodes (when using
     %% distributed Erlang).
-    ok = route_event({M, Ctxt0}),
+    ok = sync_forward({M, Ctxt0}),
     %% The invocation is always async,
     %% so the response will be delivered asynchronously by the dealer
     {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
@@ -443,7 +395,7 @@ do_forward(M, Ctxt0) ->
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
     %% We asynchronously handle the message by sending it to the router pool
-    try async_route_event(M, Ctxt0) of
+    try async_forward(M, Ctxt0) of
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
@@ -451,7 +403,7 @@ do_forward(M, Ctxt0) ->
             %% TODO publish metaevent and stats
             %% TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
-            ok = route_event({M, Ctxt0}),
+            ok = sync_forward({M, Ctxt0}),
             {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
@@ -476,37 +428,88 @@ do_forward(M, Ctxt0) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%% Synchronously handles a message in the calling process.
+%% Synchronously forwards a message in the calling process.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec route_event(event()) -> ok.
-route_event({#subscribe{} = M, Ctxt}) ->
+-spec sync_forward(event()) -> ok.
+
+sync_forward({#subscribe{} = M, Ctxt}) ->
     bondy_broker:handle_message(M, Ctxt);
 
-route_event({#unsubscribe{} = M, Ctxt}) ->
+sync_forward({#unsubscribe{} = M, Ctxt}) ->
     bondy_broker:handle_message(M, Ctxt);
 
-route_event({#publish{} = M, Ctxt}) ->
+sync_forward({#publish{} = M, Ctxt}) ->
     bondy_broker:handle_message(M, Ctxt);
 
-route_event({#register{} = M, Ctxt}) ->
+sync_forward({#register{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#unregister{} = M, Ctxt}) ->
+sync_forward({#unregister{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#call{} = M, Ctxt}) ->
+sync_forward({#call{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#cancel{} = M, Ctxt}) ->
+sync_forward({#cancel{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#yield{} = M, Ctxt}) ->
+sync_forward({#yield{} = M, Ctxt}) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({#error{request_type = Type} = M, Ctxt})
+sync_forward({#error{request_type = Type} = M, Ctxt})
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     bondy_dealer:handle_message(M, Ctxt);
 
-route_event({M, _Ctxt}) ->
+sync_forward({M, _Ctxt}) ->
     error({unexpected_message, M}).
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Asynchronously forwards a message by either sending it to an
+%% existing worker or spawning a new one depending on the bondy_broker_pool_type
+%% type.
+%% @end.
+%% -----------------------------------------------------------------------------
+-spec async_forward(wamp_message(), bondy_context:context()) ->
+    ok | {error, overload}.
+
+async_forward(M, Ctxt) ->
+    %% Todo either fix pool_type based on stats or use mochiweb to compile
+    %% bondy_config to avoid bottlenecks.
+    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
+    case async_forward(PoolType, router_pool, M, Ctxt) of
+        ok ->
+            ok;
+        {ok, _} ->
+            ok;
+        overload ->
+            {error, overload}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Helper function for {@link async_forward/2}
+%% @end
+%% -----------------------------------------------------------------------------
+async_forward(permanent, PoolName, M, Ctxt) ->
+    %% We send a request to an existing permanent worker
+    %% using bondy_router acting as a sidejob_worker
+    sidejob:cast(PoolName, {M, Ctxt});
+
+async_forward(transient, PoolName, M, Ctxt) ->
+    %% We spawn a transient worker using sidejob_supervisor
+    sidejob_supervisor:start_child(
+        PoolName,
+        gen_server,
+        start_link,
+        [?MODULE, [{M, Ctxt}], []]
+    ).
+
+

@@ -113,7 +113,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Adds a resource owner (end-user or system) to realm RealmUri.
-%% Creates a new user adding it to the s` group.
+%% Creates a new user adding it to the `resource_owners' group.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(uri(), map()) ->

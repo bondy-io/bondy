@@ -1,115 +1,51 @@
-# API GATEWAY & NETWORKING PLATFORM FOR DISTRIBUTED AND MICROSERVICES APPLICATIONS
 
-BONDY is an open source networking platform for distributed and MicroServices and IoT applications written in Erlang, implementing primarily the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC).
 
-## Compailing Bondy
+# The bondy application #
 
-```bash
-cd bondy
-rebar3 as dev release
-```
 
-## Running Bondy
+## Modules ##
 
-```bash
-_build/dev/rel/bondy/bin/bondy console
-```
 
-## Configuration
-On the first startup Bondy creates the root realm called "com.leapsight.bondy" and user with username `admin` and password `bondy` with local network access.
-
-## Create a Realm
-In order tu use `bondy` you will first need a _realm_ in place:
-
-```bash
-curl -X "POST" "http://localhost:18081/realms" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     -d $'{
-  "uri": "com.myapi"
-}'
-```
-
-This will create a new realm `com.myapi` ready to use.
-
-## Add an API Client
-
-If you want to define your own `client_id` and `client_secret` for a realm called `com.myapi` do:
-```bash
-curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     -d $'{
-  "client_id": "1234",
-  "client_secret": "4567",
-  "meta" : {"description": "A test client"}
-}'
-```
-
-To generate random `client_id` and `client_secret` do:
-```bash
-curl -X "POST" "http://localhost:18081/realms/com.myapi/clients" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     -d $'{
-  "description": "A test client"
-}'
-```
-
-An example return will be the following JSON object:
-
-```json
-{
-    "client_id": "6aoztZ9SUM65RZhBiNQXmEWbCJgWCdoBeYVPB4KSwgE8eEK3",
-    "client_secret": "RdfuJNEEhS6eUSxDMcdIrLZcUz4NMgg49ImZ6XWwNDyId0LCADQkjsNiGh0nm8r2",
-    "description": "A test client"
-}
-```
-
-## Disable Realm Security
-Do this if your wamp client does not support TICKET based or WAMPCRA authentication methods.
-
-```bash
-curl -X "DELETE" "http://localhost:18081/realms/com.myapi/security_enabled" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8"
-```
-
-## Add a Resource Owner (end-user)
-```bash
-curl -X "POST" "http://localhost:18081/realms/com.myapi/resource_owners" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     -d $'{
-  "username": "ale",
-  "password": "1234",
-  "meta" :{
-    "user_id": 2,
-    "account_id": 1
-  }
-}'
-```
-
-## Update a Resource Owner (end-user)
-```bash
-curl -X "PUT" "http://localhost:18081/realms/com.myapi/resource_owners" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     -d $'{
-  "username": "ale",
-  "password": "1234",
-  "meta" :{
-    "user_id": 2,
-    "account_id": 1
-  }
-}'
-```
-
-## Adding an Api Spec
-```bash
-curl -X "POST" "http://localhost:18081/services/load_api_spec" \
-     -H "Content-Type: application/json; charset=utf-8" \
-     -H "Accept: application/json; charset=utf-8" \
-     --data-binary "@/Volumes/Lojack/magenta_bondy_specs/magenta_api.bondy.json"
-```
+<table width="100%" border="0" summary="list of modules">
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy.md" class="module">bondy</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_client.md" class="module">bondy_api_client</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_gateway.md" class="module">bondy_api_gateway</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_gateway_handler.md" class="module">bondy_api_gateway_handler</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_gateway_spec_parser.md" class="module">bondy_api_gateway_spec_parser</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_oauth2_handler.md" class="module">bondy_api_oauth2_handler</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_resource_owner.md" class="module">bondy_api_resource_owner</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_api_utils.md" class="module">bondy_api_utils</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_app.md" class="module">bondy_app</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_broker.md" class="module">bondy_broker</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_cache.md" class="module">bondy_cache</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_cli.md" class="module">bondy_cli</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_config.md" class="module">bondy_config</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_console_table.md" class="module">bondy_console_table</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_context.md" class="module">bondy_context</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_cowboy_prometheus.md" class="module">bondy_cowboy_prometheus</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_dealer.md" class="module">bondy_dealer</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_dealer_meta.md" class="module">bondy_dealer_meta</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_error.md" class="module">bondy_error</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_event.md" class="module">bondy_event</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_json_utils.md" class="module">bondy_json_utils</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_oauth2.md" class="module">bondy_oauth2</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_prometheus.md" class="module">bondy_prometheus</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_prometheus_collector.md" class="module">bondy_prometheus_collector</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_realm.md" class="module">bondy_realm</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_registry.md" class="module">bondy_registry</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_router.md" class="module">bondy_router</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security.md" class="module">bondy_security</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security_group.md" class="module">bondy_security_group</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security_pw.md" class="module">bondy_security_pw</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security_source.md" class="module">bondy_security_source</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security_user.md" class="module">bondy_security_user</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_security_utils.md" class="module">bondy_security_utils</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_session.md" class="module">bondy_session</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_stats.md" class="module">bondy_stats</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_sup.md" class="module">bondy_sup</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_utils.md" class="module">bondy_utils</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_wamp_protocol.md" class="module">bondy_wamp_protocol</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_wamp_raw_handler.md" class="module">bondy_wamp_raw_handler</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/bondy_ws_handler.md" class="module">bondy_ws_handler</a></td></tr>
+<tr><td><a href="https://gitlab.com/leapsight/bondy/blob/develop/doc/mops.md" class="module">mops</a></td></tr></table>
 

@@ -26,6 +26,8 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(SEND_TIMEOUT, 20000).
+-define(CALL_TIMEOUT, 20000).
 
 -type wamp_error_map() :: #{
     error_uri => uri(),
@@ -49,37 +51,50 @@
 %% API
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Starts bondy
+%% @end
+%% -----------------------------------------------------------------------------
 start() ->
     application:ensure_all_started(bondy).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Sends a message to a peer.
-%% It calls `send/3' with a timeout option set to 5 secs.
+%% Sends a message to a WAMP peer.
+%% It calls `send/3' with a an empty map for Options.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message()) -> ok.
 
 send(PeerId, M) ->
-    send(PeerId, M, #{timeout => 5000}).
+    send(PeerId, M, #{}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sends a message to a peer.
 %% If the transport is not open it fails with an exception.
-%% This function is used by the router (dealer | broker) to send wamp messages
+%% This function is used by the router (dealer | broker) to send WAMP messages
 %% to peers.
+%% Opts is a map with the following keys:
+%%
+%% * timeout - timeout in milliseconds (defaults to 10000)
+%% * enqueue (boolean) - if the peer is not reachable and this value is true,
+%% bondy will enqueue the message so that the peer can resume the session and
+%% consume all enqueued messages.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
 send({SessionId, Pid} = P, M, Opts)
 when is_integer(SessionId), Pid =:= self() ->
+    %% This is a sync message so we resolve this sequentially
     wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
     Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
+    %% We will not get an ack, it is implicit
     ok;
 
 send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
@@ -87,7 +102,7 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     Opts1 = maps_utils:validate(Opts0, #{
         timeout => #{
             required => true,
-            default => 20000,
+            default => ?SEND_TIMEOUT,
             datatype => timeout
         },
         enqueue => #{
@@ -110,13 +125,16 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
+            %% The peer no longer exists
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
-            demonitor(MonitorRef, [flush]),
+            %% The peer received the message and acked it
+            %% using ack/2
+            true = demonitor(MonitorRef, [flush]),
             ok
     after
         Timeout ->
-            demonitor(MonitorRef, [flush]),
+            true = demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
 
@@ -124,11 +142,15 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Acknowledges the reception of a WAMP message. This function should be used by
+%% the peer transport module to acknowledge the reception of a message sent with
+%% {@link send/3}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec ack(pid(), reference()) -> ok.
 
 ack(Pid, _) when Pid =:= self()  ->
+    %% We do not need to send an ack (implicit ack send case)
     ok;
 
 ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
@@ -176,13 +198,15 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
+    %% TODO we need to fix the wamp.hrl timeout default value
+    Timeout = case maps:get(timeout, Opts, ?CALL_TIMEOUT) of
+        0 -> ?CALL_TIMEOUT;
+        Val -> Val
+    end,
     ReqId = bondy_utils:get_id(global),
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
-            %% Timeout = bondy_utils:timeout(Opts),
-            %% @TODO Take this from Opts map
-            Timeout = 20000,
             receive
                 {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
@@ -199,7 +223,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                     Error = #{
                         error_uri => ?BONDY_ERROR_TIMEOUT,
                         details => #{},
-                        arguments => [<<"The operation could not be completed in the time specified.">>],
+                        arguments => [
+                            <<"The operation could not be completed in the time specified (~p milliseconds).">>,
+                            ?CALL_TIMEOUT
+                        ],
                         arguments_kw => #{}
                     },
                     {error, Error, Ctxt1}
