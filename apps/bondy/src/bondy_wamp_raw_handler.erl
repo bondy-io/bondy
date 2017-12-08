@@ -46,7 +46,7 @@
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
 -define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:20>>).
--define(RAW_FRAME(Bin), <<0:5, 0:3, (byte_size(Bin)):24, Bin/binary>>).
+-define(RAW_FRAME(Bin), <<(?RAW_MSG_PREFIX)/binary, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
     socket                  ::  gen_tcp:socket(),
@@ -240,6 +240,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
 handle_info(timeout, #state{ping_sent = false} = State0) ->
     _ = log(debug, "Timeout. Sending ping", [], State0),
     {ok, State1} = send_ping(State0),
+    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
 	{noreply, State1};
 
 handle_info(
@@ -256,6 +257,7 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
     _ = log(debug, "Ping timeout. Sending second ping", [], State),
     {ok, State1} = send_ping(Bin, State),
+    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {noreply, State1};
 
 
@@ -266,12 +268,12 @@ handle_info(Info, State) ->
 
 handle_call(Msg, From, State) ->
     _ = lager:info("Received unknown call, message=~p, from=~p", [Msg, From]),
-	{noreply, State}.
+	{noreply, State, ?TIMEOUT}.
 
 
 handle_cast(Msg, State) ->
     _ = lager:info("Received unknown cast, message=~p", [Msg]),
-	{noreply, State}.
+	{noreply, State, ?TIMEOUT}.
 
 
 terminate(Reason, St) ->
@@ -356,7 +358,7 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
         {true, Payload, TimerRef} ->
             %% We reset the state
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            handle_data(Rest, St#state{ping_sent = false});
+            handle_data(Rest, St#state{ping_sent = false, ping_attempts = 0});
         {true, _, TimerRef} ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             _ = log(
@@ -398,6 +400,9 @@ handle_data(Data, St) ->
 
 
 
+-spec handle_outbound(any(), state()) ->
+    {noreply, state(), timeout()}
+    | {stop, normal, state()}.
 
 handle_outbound(M, St0) ->
     case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
