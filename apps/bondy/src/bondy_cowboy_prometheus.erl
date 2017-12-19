@@ -249,6 +249,9 @@ label_value(status_class, #{resp_status:=undefined}) ->
   undefined;
 label_value(status_class, #{resp_status:=Status}) ->
   prometheus_http:status_class(Status);
+label_value(status_class, _) ->
+  %% prometheus_http:status_class fails if status value is undefined
+  <<"unknown">>;
 label_value(reason, #{reason:=Reason}) ->
   case Reason of
     _ when is_atom(Reason) -> Reason;
