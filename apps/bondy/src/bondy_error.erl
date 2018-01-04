@@ -179,6 +179,23 @@ map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
         <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
+map({request_error, Key, Desc}) when is_atom(Key), is_atom(Desc) ->
+    %% Cowboy error
+    #{
+        <<"code">> => <<"invalid_request">>,
+        <<"status_code">> => 400,
+        <<"message">> => <<"The request is malformed.">>,
+        <<"description">> => <<>>
+    };
+
+map({request_error, {Key, _}, Desc}) when is_atom(Key), is_atom(Desc) ->
+    %% Cowboy error
+    #{
+        <<"code">> => <<"invalid_request">>,
+        <<"status_code">> => 400,
+        <<"message">> => <<"The request is malformed.">>,
+        <<"description">> => Desc
+    };
 
 map({Code, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
     #{

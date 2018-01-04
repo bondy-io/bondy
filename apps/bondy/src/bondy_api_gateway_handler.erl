@@ -123,54 +123,30 @@ options(Req, #{api_spec := Spec} = St) ->
     {ok, cowboy_req:set_resp_headers(Headers2, Req), St}.
 
 
-is_authorized(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
-    %% TODO get auth method and status from St and validate
-    %% check scopes vs action requirements
+is_authorized(Req0, St) ->
     case cowboy_req:method(Req0) of
         <<"OPTIONS">> ->
-            {true, Req0, St0};
+            {true, Req0, St};
         _ ->
-            Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-            Realm = maps:get(realm_uri, St0),
-            Peer = cowboy_req:peer(Req0),
-            case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
-                {ok, Claims} when is_map(Claims) ->
-                    %% The token claims
-                    Ctxt = update_context(
-                        {security, Claims}, maps:get(api_context, St0)),
-                    St1 = maps:update(api_context, Ctxt, St0),
-                    {true, Req0, St1};
-                {ok, AuthCtxt} ->
-                    %% TODO Here we need the token or the session withe the
-                    %% token grants and not the AuthCtxt
-                    St1 = St0#{
-                        user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
-                    },
-                    %% TODO update context
-                    {true, Req0, St1};
-                {error, unknown_realm} ->
+            try
+                do_is_authorised(Req0, St)
+            catch
+                Class:Reason ->
+                    _ = log(
+                        error,
+                        "type=~p, reason=~p, stacktrace=~p",
+                        [Class, Reason, erlang:get_stacktrace()],
+                        St
+                    ),
                     Response = #{
-                        <<"body">> => maps:put(
-                            <<"status_code">>, 401, bondy_error:map(unknown_realm)),
-                        <<"headers">> => eval_headers(Req0, St0)
+                        <<"body">> => bondy_error:map(Reason),
+                        <<"headers">> => #{}
                     },
-                    Req2 = reply(401, json, Response, Req0),
-                    {stop, Req2, St0};
-                {error, Reason} ->
-                    Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
-                    Req2 = reply_auth_error(
-                        Reason, <<"Bearer">>, Realm, json, Req1),
-                    {stop, Req2, St0}
+                    Req1 = reply(
+                        get_status_code(Response, 500), json, Response, Req0),
+                    {stop, Req1, St}
             end
-    end;
-
-is_authorized(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
-    %% TODO get auth method and status from St and validate
-    %% check scopes vs action requirements
-    {true, Req, St};
-
-is_authorized(Req, #{security := _} = St)  ->
-    {true, Req, St}.
+    end.
 
 
 resource_exists(Req, #{api_spec := Spec} = St) ->
@@ -254,7 +230,50 @@ from_form_urlencoded(Req, St) ->
 %% PRIVATE
 %% =============================================================================
 
+%% @private
+do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
+    %% TODO get auth method and status from St and validate
+    %% check scopes vs action requirements
+    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
+    Realm = maps:get(realm_uri, St0),
+    Peer = cowboy_req:peer(Req0),
+    case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
+        {ok, Claims} when is_map(Claims) ->
+            %% The token claims
+            Ctxt = update_context(
+                {security, Claims}, maps:get(api_context, St0)),
+            St1 = maps:update(api_context, Ctxt, St0),
+            {true, Req0, St1};
+        {ok, AuthCtxt} ->
+            %% TODO Here we need the token or the session withe the
+            %% token grants and not the AuthCtxt
+            St1 = St0#{
+                user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
+            },
+            %% TODO update context
+            {true, Req0, St1};
+        {error, unknown_realm} ->
+            Response = #{
+                <<"body">> => maps:put(
+                    <<"status_code">>, 401, bondy_error:map(unknown_realm)),
+                <<"headers">> => eval_headers(Req0, St0)
+            },
+            Req2 = reply(401, json, Response, Req0),
+            {stop, Req2, St0};
+        {error, Reason} ->
+            Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
+            Req2 = reply_auth_error(
+                Reason, <<"Bearer">>, Realm, json, Req1),
+            {stop, Req2, St0}
+    end;
 
+do_is_authorised(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+    %% TODO get auth method and status from St and validate
+    %% check scopes vs action requirements
+    {true, Req, St};
+
+do_is_authorised(Req, #{security := _} = St)  ->
+    {true, Req, St}.
 
 
 %% -----------------------------------------------------------------------------

@@ -69,7 +69,7 @@
 
 -define(REFRESH_TOKEN_LEN, 46).
 -define(DEFAULT_TTL, 900). % 15mins
--define(DEFAULT_REFRESH_TTL, 86400). % 1d
+-define(DEFAULT_REFRESH_TTL, 2592000). % 1month
 -define(EXP_LEEWAY, 2*60). % 2mins
 
 -type error()      ::   oauth2_invalid_grant | unknown_realm.
