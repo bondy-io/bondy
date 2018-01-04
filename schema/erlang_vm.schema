@@ -175,6 +175,20 @@
   hidden
 ]}.
 
+%% @doc Enable or disable time correction
+{mapping, "erlang.time_correction", "vm_args.+c", [
+  {default, on},
+  {datatype, flag},
+  hidden
+]}.
+
+%% @doc Sets the Erlang Time Warp Mode
+{mapping, "erlang.time_warp_mode", "vm_args.+C", [
+  {default, multi_time_warp},
+  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}},
+  hidden
+]}.
+
 %% @doc For nodes with many busy_dist_port events, Basho recommends
 %% raising the sender-side network distribution buffer size.
 %% 32MB may not be sufficient for some workloads and is a suggested
