@@ -9,6 +9,12 @@ metadata:
     tier: gateway
 spec:
   ports:
+    - name: api
+      port: 80
+      targetPort: 18080
+    - name: admin
+      port: 8081
+      targetPort: 18081
     - name: wamp
       port: 8080
       targetPort: 18082

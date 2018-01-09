@@ -15,12 +15,6 @@ spec:
       {{- if eq .bondy.exportType "NodePort" }}
       nodePort: 32500
       {{- end }}
-    - name: admin
-      port: 8081
-      targetPort: 18081
-      {{- if eq .bondy.exportType "NodePort" }}
-      nodePort: 32501
-      {{- end }}
   type: {{ .bondy.exportType }}
   selector:
     app: bondy
