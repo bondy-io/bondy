@@ -62,6 +62,13 @@ spec:
         volumeMounts:
           - mountPath: "/opt/app/data"
             name: datadir
+        resources:
+          limits:
+            memory: {{ .bondy.resources.limits.memory }}
+            cpu: {{ .bondy.resources.limits.cpu }}
+          requests:
+            memory: {{ .bondy.resources.requests.memory }}
+            cpu: {{ .bondy.resources.requests.cpu }}
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
