@@ -573,6 +573,25 @@ apply_op(Bin, Val, Ctxt) ->
 
 %% @private
 
+apply_custom_op(<<"nth(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
+when is_function(F, 1) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
+    };
+
+apply_custom_op(<<"nth(", Rest/binary>> = Op, Val, Ctxt) when is_list(Val)->
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+
+        [{'$mops_proxy', F} = N] when is_function(F, 1) ->
+            {'$mops_proxy', fun(X) -> lists:nth(maybe_eval(N, X), Val) end};
+
+        [N] ->
+            lists:nth(binary_to_integer(N), Val);
+
+        _ ->
+            error({invalid_expression, Op})
+    end;
+
 apply_custom_op(<<"get(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->
     {'$mops_proxy',

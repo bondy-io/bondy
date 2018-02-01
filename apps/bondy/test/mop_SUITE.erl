@@ -38,19 +38,19 @@ groups() ->
 % mops:eval(<<"{{fullname}}">>, #{<<"fullname">> => <<"{{name}}">>, <<"name">> => <<"Alejandro">>, <<"surname">> => <<"Ramallo">>}).
 
 simple_1_test(_) ->
-   3 =:= mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
+   3 = mops:eval(<<"{{foo}}">>, #{<<"foo">> => 3}).
 
 simple_2_0_test(_) ->
-   <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
+   <<"3">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_2_1_test(_) ->
-    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => "3"}).
+    <<"\"3\"">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => "3"}).
 
 simple_2_2_test(_) ->
-    <<"3">> =:= mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => <<"3">>}).
+    <<"3">> = mops:eval(<<"\"{{foo}}\"">>, #{<<"foo">> => <<"3">>}).
 
 simple_3_test(_) ->
-   <<"The number is 3">> =:= mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
+   <<"The number is 3">> = mops:eval(<<"\"The number is {{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_4_test(_) ->
     try mops:eval(<<"The number is {{foo}}">>, #{<<"foo">> => 3})
@@ -60,7 +60,7 @@ simple_4_test(_) ->
     end.
 
 simple_5_test(_) ->
-   <<"3 3">> =:= mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
+   <<"3 3">> = mops:eval(<<"\"{{foo}} {{foo}}\"">>, #{<<"foo">> => 3}).
 
 simple_future_1_test(_) ->
     Proxy = mops:proxy(),
@@ -78,13 +78,13 @@ simple_future_2_test(_) ->
     <<"The number is 3 or 4">> = F2(#{<<"bar">> => 4}).
 
 pipe_1_test(_) ->
-   3 =:= mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3}).
+   3 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3}).
 
 pipe_2_test(_) ->
-   3 =:= mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3.0}).
+   3 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3.0}).
 
 pipe_3_test(_) ->
-   3.0 =:= mops:eval(<<"{{foo |> integer |> float}}">>, #{<<"foo">> => 3.0}).
+   3.0 = mops:eval(<<"{{foo |> integer |> float}}">>, #{<<"foo">> => 3.0}).
 
 recursive_1_test(_) ->
     Ctxt = #{
@@ -92,8 +92,9 @@ recursive_1_test(_) ->
         <<"lastname">> => <<"{{surname}}">>,
         <<"surname">> => <<"Ramallo">>
     },
-    true = mops:eval(<<"{{surname}}">>, Ctxt) =:= mops:eval(<<"{{lastname}}">>, Ctxt),
-    <<"Ramallo">> =:= mops:eval(<<"{{name}}">>, Ctxt).
+    <<"Ramallo">> = mops:eval(<<"{{surname}}">>, Ctxt),
+    <<"Ramallo">> = mops:eval(<<"{{lastname}}">>, Ctxt),
+    <<"Ramallo">> = mops:eval(<<"{{name}}">>, Ctxt).
 
 recursive_2_test(_) ->
     Ctxt = #{
@@ -101,7 +102,7 @@ recursive_2_test(_) ->
         <<"name">> => <<"Alejandro">>,
         <<"surname">> => <<"Ramallo">>
     },
-    <<"Alejandro Ramallo">> =:= mops:eval(<<"{{fullname}}">>, Ctxt).
+    <<"Alejandro Ramallo">> = mops:eval(<<"{{fullname}}">>, Ctxt).
 
 recursive_3_test(_) ->
     Ctxt = #{
@@ -109,7 +110,7 @@ recursive_3_test(_) ->
         <<"name">> => <<"Alejandro">>,
         <<"surname">> => <<"Ramallo">>
     },
-    <<"\"Alejandro Ramallo\"">> =:= mops:eval(<<"\"{{fullname}}\"">>, Ctxt).
+    <<"Alejandro Ramallo">> = mops:eval(<<"\"{{fullname}}\"">>, Ctxt).
 
 funny_1_test(_) ->
     Ctxt = #{
@@ -121,7 +122,7 @@ funny_1_test(_) ->
             <<"foobar">> => <<"{{variables.foo}}">>
         }
     },
-    200 =:= mops:eval(<<"{{defaults.foobar}}">>, Ctxt).
+    200 = mops:eval(<<"{{defaults.foobar}}">>, Ctxt).
 
 funny_2_test(_) ->
     Ctxt = #{
@@ -135,7 +136,7 @@ funny_2_test(_) ->
             }
         }
     },
-    200 =:= mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
+    200 = mops:eval(<<"{{defaults.foobar.value}}">>, Ctxt).
 
 
 with_1_test(_) ->
@@ -148,7 +149,7 @@ with_1_test(_) ->
             }
         }
     },
-    [<<"x">>] =:= maps:keys(
+    [<<"x">>] = maps:keys(
         mops:eval(<<"{{foo.bar |> with([x])}}">>, Ctxt)).
 
 
@@ -162,7 +163,7 @@ without_1_test(_) ->
             }
         }
     },
-    [<<"x">>] =:= maps:keys(
+    [<<"x">>] = maps:keys(
         mops:eval(<<"{{foo.bar |> without([_y,z])}}">>, Ctxt)).
 
 without_2_test(_) ->
@@ -186,50 +187,62 @@ without_3_test(_) ->
         }
     },
     Res = mops:eval(<<"{{foo.bar |> without([a,b,c])}}">>, Ctxt),
-    maps:size(Res) =:= 0.
+    0 = maps:size(Res).
 
 
 lists_1_test(_) ->
     Ctxt = #{<<"foo">> => [1,2,3]},
-    1 =:= mops:eval(<<"{{foo |> head}}">>, Ctxt).
+    1 = mops:eval(<<"{{foo |> head}}">>, Ctxt).
 
 lists_2_test(_) ->
     Ctxt = #{<<"foo">> => [1,2,3]},
-    [2,3] =:= mops:eval(<<"{{foo |> tail}}">>, Ctxt).
+    [2,3] = mops:eval(<<"{{foo |> tail}}">>, Ctxt).
 
 lists_3_test(_) ->
     Ctxt = #{<<"foo">> => [1,2,3]},
-    [3] =:= mops:eval(<<"{{foo |> last}}">>, Ctxt).
+    3 = mops:eval(<<"{{foo |> last}}">>, Ctxt).
+
+lists_4_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    1 = mops:eval(<<"{{foo |> nth(1)}}">>, Ctxt).
+
+lists_5_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    2 = mops:eval(<<"{{foo |> nth(2)}}">>, Ctxt).
+
+lists_6_test(_) ->
+    Ctxt = #{<<"foo">> => [1,2,3]},
+    3 = mops:eval(<<"{{foo |> nth(3)}}">>, Ctxt).
 
 maps_get_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1, <<"key">> => <<"bar">>}},
-    1 =:= mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
+    1 = mops:eval(<<"{{foo |> get({{foo.key}})}}">>, Ctxt).
 
 
 maps_get_2_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"key">> => <<"bar">>}},
-    1 =:= mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
+    <<"1">> = mops:eval(<<"{{foo |> get({{foo.key}}, 1)}}">>, Ctxt).
 
 
 maps_get_string_1_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
-    1 =:= mops:eval(<<"{{foo |> get('bar')}}">>, Ctxt).
+    1 = mops:eval(<<"{{foo |> get('bar')}}">>, Ctxt).
 
 maps_get_string_2_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"bar">> => 1}},
-    1 =:= mops:eval(<<"{{foo |> get(bar)}}">>, Ctxt).
+    1 = mops:eval(<<"{{foo |> get(bar)}}">>, Ctxt).
 
 maps_get_string_3_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
-    1 =:= mops:eval(<<"{{foo |> get(bar, 1) |> integer}}">>, Ctxt).
+    1 = mops:eval(<<"{{foo |> get(bar, 1) |> integer}}">>, Ctxt).
 
 maps_get_string_4_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
-    <<>> =:= mops:eval(<<"{{foo |> get(bar, '')}}">>, Ctxt).
+    <<>> = mops:eval(<<"{{foo |> get(bar, '')}}">>, Ctxt).
 
 maps_get_string_5_test(_) ->
     Ctxt = #{<<"foo">> => #{<<"a">> => 100}},
-    <<>> =:= mops:eval(<<"{{foo |> get(bar, '' )}}">>, Ctxt).
+    <<>> = mops:eval(<<"{{foo |> get(bar, '' )}}">>, Ctxt).
 
 
 merge_left_1_test(_) ->
@@ -237,21 +250,21 @@ merge_left_1_test(_) ->
         <<"foo">> => #{<<"a">> => 1},
         <<"bar">> => #{<<"a">> => 10}
     },
-    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge({{bar}})}}">>, Ctxt).
+    #{<<"a">> := 10} = mops:eval(<<"{{foo |> merge({{bar}})}}">>, Ctxt).
 
 merge_left_2_test(_) ->
     Ctxt = #{
         <<"foo">> => #{<<"a">> => 1},
         <<"bar">> => #{<<"a">> => 10}
     },
-    #{<<"a">> => 10} =:= mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
+    #{<<"a">> := 10} = mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
 
 merge_right_test(_) ->
     Ctxt = #{
         <<"foo">> => #{<<"a">> => 1},
         <<"bar">> => #{<<"a">> => 10}
     },
-    #{<<"a">> => 1} =:= mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).
+    #{<<"a">> := 1} = mops:eval(<<"{{foo |> merge({{bar}}, _)}}">>, Ctxt).
 
 merge_right_2_test(_) ->
     Ctxt0 = #{
