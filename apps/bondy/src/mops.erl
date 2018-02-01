@@ -506,6 +506,8 @@ when is_function(F, 1) andalso (
     Op == <<"head">> orelse
     Op == <<"tail">> orelse
     Op == <<"last">> orelse
+    Op == <<"min">> orelse
+    Op == <<"max">> orelse
     Op == <<"length">> orelse
     Op == <<"size">>
     ) ->
@@ -559,6 +561,18 @@ apply_op(<<"last">>, [], _) ->
 
 apply_op(<<"last">>, Val, _) when is_list(Val) ->
     lists:last(Val);
+
+apply_op(<<"min">>, [], _) ->
+    <<>>;
+
+apply_op(<<"min">>, Val, _) when is_list(Val) ->
+    lists:min(Val);
+
+apply_op(<<"max">>, [], _) ->
+    <<>>;
+
+apply_op(<<"max">>, Val, _) when is_list(Val) ->
+    lists:max(Val);
 
 apply_op(<<"length">>, Val, _) when is_list(Val) ->
     length(Val);
