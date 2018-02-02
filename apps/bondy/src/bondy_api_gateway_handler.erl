@@ -138,12 +138,10 @@ is_authorized(Req0, St) ->
                         [Class, Reason, erlang:get_stacktrace()],
                         St
                     ),
-                    Response = #{
-                        <<"body">> => bondy_error:map(Reason),
-                        <<"headers">> => #{}
-                    },
-                    Req1 = reply(
-                        get_status_code(Response, 500), json, Response, Req0),
+                    {StatusCode, Body} = take_status_code(
+                        bondy_error:map(Reason), 500),
+                    Response = #{<<"body">> => Body, <<"headers">> => #{}},
+                    Req1 = reply(StatusCode, json, Response, Req0),
                     {stop, Req1, St}
             end
     end.
@@ -184,16 +182,17 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
             {true, Req1, St2};
 
-        {ok, HTTPCode, Response, St2} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {ok, StatusCode, Response, St2} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St2};
 
-        {error, Response, St2} ->
-            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
+        {error, Response0, St2} ->
+            {StatusCode, Response1} = take_status_code(Response0, 500),
+            Req1 = reply(StatusCode, Enc, Response1, Req0),
             {stop, Req1, St2};
 
-        {error, HTTPCode, Response, St2} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {error, StatusCode, Response, St2} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St2}
     end.
 
@@ -254,8 +253,7 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             {true, Req0, St1};
         {error, unknown_realm} ->
             Response = #{
-                <<"body">> => maps:put(
-                    <<"status_code">>, 401, bondy_error:map(unknown_realm)),
+                <<"body">> => bondy_error:map(unknown_realm),
                 <<"headers">> => eval_headers(Req0, St0)
             },
             Req2 = reply(401, json, Response, Req0),
@@ -294,24 +292,23 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
             {maybe_encode(Enc, Body, Spec), Req1, St1};
 
-        {ok, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {ok, StatusCode, Response, St1} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St1};
 
-        {error, Response, St1} ->
-            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
+        {error, Response0, St1} ->
+            {StatusCode, Response1} = take_status_code(Response0, 500),
+            Req1 = reply(StatusCode, Enc, Response1, Req0),
             {stop, Req1, St1};
 
-        {error, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {error, StatusCode, Response, St1} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Response = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St0};
         Class:Reason ->
             _ = log(
@@ -320,11 +317,9 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 [Class, Reason, erlang:get_stacktrace()],
                 St0
             ),
-            Response = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St0}
     end.
 
@@ -352,9 +347,9 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             {ok, HTTPCode, Response, St2} ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
-            {error, Response, St2} ->
-                Req2 = reply(
-                    get_status_code(Response), Enc, Response, Req1),
+            {error, Response0, St2} ->
+                {StatusCode, Response1} = take_status_code(Response0, 500),
+                Req2 = reply(StatusCode, Enc, Response1, Req1),
                 {stop, Req2, St2};
             {error, HTTPCode, Response, St2} ->
 
@@ -362,11 +357,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
         end
     catch
         throw:Reason ->
-            ErrResp = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req = reply(get_status_code(ErrResp, 400), Enc, ErrResp, Req0),
+            {StatusCode1, Body} = take_status_code(
+                bondy_error:map(Reason), 400),
+            ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
+            Req = reply(StatusCode1, Enc, ErrResp, Req0),
             {stop, Req, St0};
         Class:Reason ->
             _ = log(
@@ -375,11 +369,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 [Class, Reason, erlang:get_stacktrace()],
                 St0
             ),
-            ErrResp = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req = reply(get_status_code(ErrResp, 500), Enc, ErrResp, Req0),
+            {StatusCode1, Body} = take_status_code(
+                bondy_error:map(Reason), 500),
+            ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
+            Req = reply(StatusCode1, Enc, ErrResp, Req0),
             {stop, Req, St0}
     end.
 
@@ -391,30 +384,33 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 %% =============================================================================
 
 
-get_status_code(Term) ->
-    get_status_code(Term, 500).
+
+take_status_code(Term) ->
+    take_status_code(Term, 500).
 
 
 %% @private
-get_status_code(#{<<"status_code">> := Code}, _) ->
-    Code;
+-spec take_status_code(map(), pos_integer()) -> {pos_integer(), map()}.
 
-get_status_code(#{<<"body">> := ErrorBody}, _) ->
-    get_status_code(ErrorBody);
+take_status_code(#{<<"status_code">> := _} = Map, _) ->
+    maps:take(<<"status_code">>, Map);
 
-get_status_code(ErrorBody, Default) ->
-    case maps:find(<<"status_code">>, ErrorBody) of
-        {ok, Val} ->
-            Val;
-        _ ->
-            case maps:find(<<"code">>, ErrorBody) of
+take_status_code(#{<<"body">> := ErrorBody}, Default) ->
+    take_status_code(ErrorBody, Default);
+
+take_status_code(ErrorBody, Default) ->
+    case maps:take(<<"status_code">>, ErrorBody) of
+        error ->
+            StatusCode = case maps:find(<<"code">>, ErrorBody) of
                 {ok, Val} ->
                     uri_to_status_code(Val);
                 _ ->
                     Default
-            end
+            end,
+            {StatusCode, ErrorBody};
+        Res ->
+            Res
     end.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -574,7 +570,7 @@ perform_action(
     {ok, Response, St2};
 
 perform_action(
-    Method,
+    Method0,
     #{<<"action">> := #{<<"type">> := <<"forward">>} = Act} = Spec,
     St0) ->
     %% At the moment we just do not decode it and asume upstream accepts
@@ -594,7 +590,8 @@ perform_action(
         % <<"retries">> := R,
         % <<"retry_timeout">> := RT,
         <<"body">> := Body
-    } = mops:eval(Act, Ctxt0),
+    } = Act1 = mops:eval(Act, Ctxt0),
+
 
     Opts = [
         {connect_timeout, CT},
@@ -610,10 +607,12 @@ perform_action(
     ),
     RSpec = maps:get(<<"response">>, Spec),
 
-    case hackney:request(
-        method_to_atom(Method), Url, maps:to_list(Headers), Body, Opts)
+    AtomMethod = method_to_atom(maps:get(<<"http_method">>, Act1, Method0)),
+
+    case
+        hackney:request(AtomMethod, Url, maps:to_list(Headers), Body, Opts)
     of
-        {ok, StatusCode, RespHeaders} when Method =:= <<"HEAD">> ->
+        {ok, StatusCode, RespHeaders} when AtomMethod =:= head ->
             from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
 
         {ok, StatusCode, RespHeaders, ClientRef} ->
@@ -623,7 +622,6 @@ perform_action(
         {error, Reason} ->
             Error = #{
                 <<"code">> => <<"com.leapsight.bondy.bad_gateway">>,
-                <<"status_code">> => 502,
                 <<"message">> => <<"Error while connecting with upstream URL">>,
                 <<"description">> => Reason %% TODO convert to string
             },
@@ -682,14 +680,14 @@ perform_action(
             St2 = maps:update(api_context, Ctxt1, St1),
             {ok, Response, St2};
         {error, WampError0, _WampCtxt1} ->
-            StatusCode = uri_to_status_code(maps:get(error_uri, WampError0)),
+            StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
-            Error = maps:put(<<"status_code">>, StatusCode, WampError1),
+            Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response = mops:eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
+            Response0 = mops:eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
-            Code = maps:get(<<"status_code">>, Response, 500),
-            {error, Code, Response, St2}
+            {StatusCode1, Response1} = take_status_code(Response0, 500),
+            {error, StatusCode1, Response1, St2}
     end.
 
 
@@ -704,15 +702,16 @@ when StatusCode >= 400 andalso StatusCode < 600->
         <<"headers">> => RespHeaders
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
-    Response = mops:eval(maps:get(<<"on_error">>, Spec), Ctxt1),
+    Response0 = mops:eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {error, StatusCode, Response, St1};
+    {FinalCode, Response1} = take_status_code(Response0),
+    {error, FinalCode, Response1, St1};
 
-from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
+from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
     % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Result0 = #{
-        <<"status_code">> => StatusCode,
+        <<"status_code">> => StatusCode0,
         <<"body">> => RespBody,
         <<"headers">> => RespHeaders
     },
@@ -723,9 +722,10 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
             maps:put(<<"uri">>, <<>>, Result0)
     end,
     Ctxt1 = update_context({result, Result1}, Ctxt0),
-    Response = mops:eval(maps:get(<<"on_result">>, Spec), Ctxt1),
+    Response0 = mops:eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {ok, StatusCode, Response, St1}.
+    {StatusCode1, Response1} = take_status_code(Response0),
+    {ok, StatusCode1, Response1, St1}.
 
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
@@ -741,7 +741,6 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
         " description=", $", Desc/binary, $"
     >>,
     Resp = #{
-        <<"status_code">> => 401,
         <<"body">> => Body,
         <<"headers">> => #{
             <<"www-authenticate">> => Auth
@@ -837,6 +836,7 @@ maybe_encode(Enc, Body, _) ->
 
 %% @private
 uri_to_status_code(timeout) ->                                     504;
+uri_to_status_code(<<"com.leapsight.bondy.bad_gateway">>) ->       503;
 uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                        504;
 uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
 uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;

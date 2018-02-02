@@ -126,21 +126,6 @@ load(FName) ->
     end.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
-rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
-    _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
-    ],
-    ok.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -351,7 +336,7 @@ load_dispatch_tables() ->
             catch
                 _:_ ->
                     _ = delete(K),
-                    lager:info(
+                    lager:warning(
                         "Removed invalid API Gateway specification from store"),
                     []
             end
@@ -362,6 +347,23 @@ load_dispatch_tables() ->
     ]),
     bondy_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @private
+%% Loads all configured API specs from the metadata store and rebuilds the
+%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
+%% environment.
+%% @end
+%% -----------------------------------------------------------------------------
+rebuild_dispatch_tables() ->
+    %% We get a dispatch table per scheme
+    _ = [
+        rebuild_dispatch_table(Scheme, Routes) ||
+        {Scheme, Routes} <- load_dispatch_tables()
+    ],
+    ok.
 
 
 %% -----------------------------------------------------------------------------

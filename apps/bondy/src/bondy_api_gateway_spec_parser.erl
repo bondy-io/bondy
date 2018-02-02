@@ -654,6 +654,15 @@
         allow_null => false,
         datatype => {in, [<<"forward">>]}
     },
+    <<"http_method">> => #{
+        alias => host,
+        required => false,
+        allow_null => false,
+        datatype => {in, [
+            <<"delete">>, <<"get">>, <<"head">>, <<"options">>,
+            <<"patch">>, <<"post">>, <<"put">>
+        ]}
+    },
     <<"host">> => #{
         alias => host,
         required => true,
