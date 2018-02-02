@@ -751,8 +751,11 @@ end).
         alias => procedure,
         required => true,
         allow_null => false,
-        datatype => binary,
-        validator => fun wamp_uri:is_valid/1
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
+        validator => fun
+            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) -> mops:is_proxy(X)
+        end
     },
     <<"options">> => #{
         alias => options,
