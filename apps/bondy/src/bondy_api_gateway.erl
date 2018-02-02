@@ -39,7 +39,6 @@
 
 
 %% API
--export([add/2]).
 -export([delete/1]).
 -export([dispatch_table/1]).
 -export([list/0]).
@@ -90,6 +89,124 @@ start_admin_listeners() ->
         start_admin_listener({Scheme, Routes})
         || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
     ok.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Parses the provided Spec, stores it in the metadata store and calls
+%% rebuild_dispatch_tables/0.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec load(file:filename() | map()) ->
+    ok | {error, invalid_specification_format | any()}.
+
+load(Map) when is_map(Map) ->
+    case validate_spec(Map) of
+        {ok, #{<<"id">> := Id} = Spec} ->
+            %% We store the source specification, see add/2 for an explanation
+            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
+            ok = add(
+                Id,
+                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
+            ),
+            %% We rebuild the dispatch table
+            rebuild_dispatch_tables();
+        {error, _} = Error ->
+            Error
+    end;
+
+load(FName) ->
+    try jsx:consult(FName, [return_maps]) of
+        [Spec] ->
+            load(Spec)
+    catch
+        error:badarg ->
+            {error, invalid_specification_format}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Loads all configured API specs from the metadata store and rebuilds the
+%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
+%% environment.
+%% @end
+%% -----------------------------------------------------------------------------
+rebuild_dispatch_tables() ->
+    %% We get a dispatch table per scheme
+    _ = [
+        rebuild_dispatch_table(Scheme, Routes) ||
+        {Scheme, Routes} <- load_dispatch_tables()
+    ],
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dispatch_table(listener()) -> any().
+
+dispatch_table(Listener) ->
+    Map = ranch:get_protocol_options(Listener),
+    maps_utils:get_path([env, dispatch], Map).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(binary()) -> map() | {error, not_found}.
+
+lookup(Id) ->
+    case plumtree_metadata:get(?PREFIX, Id)  of
+        Spec when is_map(Spec) ->
+            Spec;
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec list() -> [ParsedSpec :: map()].
+
+list() ->
+    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(binary()) -> ok.
+
+delete(Id) when is_binary(Id) ->
+    plumtree_metadata:delete(?PREFIX, Id),
+    ok.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% We store the API Spec in the metadata store. Notice that we store the JSON
+%% and not the parsed spec as the parsed spec might contain mops proxy
+%% functions.  In case we upgrade the code of the mops.erl module those funs
+%% will no longer be valid and will fail with a badfun exception.
+%% @end
+%% -----------------------------------------------------------------------------
+add(Id, Spec) when is_binary(Id), is_map(Spec) ->
+    plumtree_metadata:put(?PREFIX, Id, Spec).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -194,128 +311,14 @@ start_https(Routes, Name) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses the provided Spec, stores it in the metadata store and calls
-%% rebuild_dispatch_tables/0.
-%% @end
-%% -----------------------------------------------------------------------------
--spec load(file:filename() | map()) ->
-    ok | {error, invalid_specification_format | any()}.
-
-load(Map) when is_map(Map) ->
-    case parse_spec(Map) of
-        {ok, #{<<"id">> := Id} = Spec} ->
-            %% We store the parsed Spec in the MD store
-            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
-            ok = add(
-                Id,
-                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
-            ),
-            %% We rebuild the dispatch table
-            rebuild_dispatch_tables();
-        {error, _} = Error ->
-            Error
-    end;
-
-load(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
-            load(Spec)
-    catch
-        error:badarg ->
-            {error, invalid_specification_format}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
-rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
-    _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
-    ],
-    ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec dispatch_table(listener()) -> any().
-
-dispatch_table(Listener) ->
-    Map = ranch:get_protocol_options(Listener),
-    maps_utils:get_path([env, dispatch], Map).
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% We store the API Spec in the metadata store. Notice that we store the JSON
-%% and not the parsed spec as the parsed spec might contain mops proxy
-%% functions.  In case we upgrade the code of the mops.erl module those funs
-%% will no longer be valid and will fail with a badfun exception.
-%% @end
-%% -----------------------------------------------------------------------------
-add(Id, Spec) when is_binary(Id), is_map(Spec) ->
-    plumtree_metadata:put(?PREFIX, Id, Spec).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(binary()) -> map() | {error, not_found}.
-
-lookup(Id) ->
-    case plumtree_metadata:get(?PREFIX, Id)  of
-        Spec when is_map(Spec) ->
-            Spec;
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec list() -> [ParsedSpec :: map()].
-
-list() ->
-    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(binary()) -> ok.
-
-delete(Id) when is_binary(Id) ->
-    plumtree_metadata:delete(?PREFIX, Id),
-    ok.
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-parse_spec(Map) ->
-    try bondy_api_gateway_spec_parser:parse(Map) of
-        Spec ->
-            {ok, Spec}
+validate_spec(Map) ->
+    try
+        Spec = bondy_api_gateway_spec_parser:parse(Map),
+        %% We compile it to validate the spec, if it is not valid it fill
+        %% fail with badarg
+        SchemeTables = bondy_api_gateway_spec_parser:dispatch_table(Spec),
+        [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
+        {ok, Spec}
     catch
         error:Reason ->
             {error, Reason}
@@ -404,6 +407,7 @@ admin_base_routes() ->
     [
         {'_', [
             {"/ws", bondy_ws_handler, #{}},
+            {"/ping", bondy_http_ping_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}
     ].
