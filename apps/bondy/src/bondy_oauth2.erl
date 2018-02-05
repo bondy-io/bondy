@@ -170,7 +170,7 @@ issue_token(GrantType, RealmUri, Data0) ->
 %% -----------------------------------------------------------------------------
 refresh_token(RealmUri, Issuer, RefreshToken) ->
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
-    Now = erlang:monotonic_time(seconds),
+    Now = erlang:system_time(seconds),
     Secs = ?REFRESH_TOKEN_TTL,
     case plumtree_metadata:get(Prefix, RefreshToken) of
         #bondy_oauth2_token{issued_at = Ts}
@@ -181,9 +181,10 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
         #bondy_oauth2_token{} = Data0 ->
             %% Issue new tokens
             %% TODO Refresh grants by querying the User data
-            case issue_token(RealmUri, Data0, true) of
+            case do_issue_token(bondy_realm:fetch(RealmUri), Data0, true) of
                 {ok, _, _, _} = OK ->
                     %% We revoke the existing refresh token
+                    %% The user/devoice_id index was updated by issue_token/3
                     ok = plumtree_metadata:delete(Prefix, RefreshToken),
                     OK;
                 {error, _} = Error ->
@@ -306,7 +307,7 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     Iss = Data0#bondy_oauth2_token.issuer,
     Sub = Data0#bondy_oauth2_token.username,
     Meta = Data0#bondy_oauth2_token.meta,
-    Now = erlang:monotonic_time(seconds),
+    Now = erlang:system_time(seconds),
     Secs = ?PASSWORD_GRANT_TTL,
 
     %% We generate and sign the JWT
@@ -323,8 +324,6 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     },
     %% We create the JWT used as access token
     JWT = sign(Key, Claims),
-
-
     RefreshToken = maybe_issue_refresh_token(RefreshTokenFlag, Uri, Now, Data0),
     ok = bondy_cache:put(
         Uri, JWT, Claims ,#{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
@@ -408,7 +407,7 @@ do_verify_jwt(JWT, Match) ->
 %% @private
 maybe_cache({ok, Claims} = OK, JWT) ->
     #{<<"aud">> := RealmUri, <<"exp">> := Secs} = Claims,
-    Now = erlang:monotonic_time(seconds),
+    Now = erlang:system_time(seconds),
     ok = bondy_cache:put(
         RealmUri, JWT, Claims ,#{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
     OK;
@@ -419,7 +418,7 @@ maybe_cache(Error, _) ->
 
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, JWT) ->
-    Now = erlang:monotonic_time(seconds),
+    Now = erlang:system_time(seconds),
     case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
         true ->
             ok = bondy_cache:remove(JWT),
@@ -524,3 +523,5 @@ revoke_user_refresh_tokens(RealmUri, Issuer, Username) ->
         end || {DeviceId, Tokens} <- DeviceTokens
     ],
     ok.
+
+
