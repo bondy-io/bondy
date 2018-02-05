@@ -48,28 +48,6 @@
 %     algorithm               ::  binary() %% HS256 RS256 ES256
 % }).
 
--define(REFRESH_TOKENS_PREFIX(Realm, Issuer),
-    {<<Realm/binary, $., Issuer/binary>>, <<"refresh_tokens">>}
-).
-
--define(ISS_ACCESS_TOKENS_PREFIX(Realm, Issuer),
-    {<<Realm/binary, $., Issuer/binary>>, <<"access_tokens">>}
-).
-
--define(SUB_ACCESS_TOKENS_PREFIX(Realm, Sub),
-    {<<Realm/binary, $., Sub/binary>>, <<"access_tokens">>}
-).
-
--record(bondy_oauth2_token, {
-    issuer                  ::  binary(), %% aka client_id
-    username                ::  binary(),
-    groups = []             ::  [binary()],
-    meta = #{}              ::  map(),
-    expires_in              ::  pos_integer(),
-    issued_at               ::  pos_integer(),
-    is_active = true        ::  boolean
-}).
-
 -define(ENV, element(2, application:get_env(bondy, oauth2))).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
     element(2, lists:keyfind(client_credentials_grant_duration, 1, ?ENV))
@@ -87,7 +65,33 @@
     element(2, lists:keyfind(refresh_token_length, 1, ?ENV))
 ).
 -define(LEEWAY_SECS, 2*60). % 2mins
+
 -define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
+
+
+%% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, RefreshToken} ->
+%% #bondy_oauth2_token{}
+%% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, Sub} ->
+%% #bondy_oauth2_token{}
+-define(REFRESH_TOKENS_PREFIX(Realm, Issuer),
+    {<<Realm/binary, $., Issuer/binary>>, <<"refresh_tokens">>}
+).
+
+-define(REFRESH_TOKENS_PREFIX(Realm, Issuer, Sub),
+    {<<Realm/binary, $., Issuer/binary, $., Sub/binary>>, <<"refresh_tokens">>}
+).
+
+
+-record(bondy_oauth2_token, {
+    issuer                  ::  binary(), %% aka client_id
+    username                ::  binary(),
+    groups = []             ::  [binary()],
+    meta = #{}              ::  map(),
+    expires_in              ::  pos_integer(),
+    issued_at               ::  pos_integer(),
+    is_active = true        ::  boolean
+}).
+
 
 -type grant_type()      ::   client_credentials | password | authorization_code.
 -type error()           ::   oauth2_invalid_grant | unknown_realm.
@@ -98,9 +102,8 @@
 -export([issue_token/6]).
 -export([refresh_token/3]).
 -export([revoke_token/4]).
--export([revoke_refresh_token/3]).
--export([revoke_access_token/3]).
--export([revoke_all_tokens/2]).
+-export([revoke_user_token/5]).
+-export([revoke_user_tokens/4]).
 -export([decode_jwt/1]).
 -export([verify_jwt/2]).
 -export([verify_jwt/3]).
@@ -168,8 +171,9 @@ issue_token(GrantType, RealmUri, Data0) ->
 refresh_token(RealmUri, Issuer, RefreshToken) ->
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
     Now = erlang:monotonic_time(seconds),
+    Secs = ?REFRESH_TOKEN_TTL,
     case plumtree_metadata:get(Prefix, RefreshToken) of
-        #bondy_oauth2_token{issued_at = Ts, expires_in = Secs}
+        #bondy_oauth2_token{issued_at = Ts}
         when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
@@ -199,56 +203,48 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
     Issuer :: binary(),
-    Token :: binary()) -> ok.
+    TokenOrUsername :: binary()) -> ok | {error, unsupported_operation}.
 
-revoke_token(_Hint, RealmUri, Issuer, Token) ->
-    Len = ?REFRESH_TOKEN_LEN,
-    case byte_size(Token) =:= Len of
-        true ->
-            %% At the moment we do not use the provided Type Hint
-            %% we decided based on token length
-            revoke_refresh_token(RealmUri, Issuer, Token);
-        false ->
-            %% At the moment we do not use the provided Type Hint
-            %% we decided based on token length
-            revoke_access_token(RealmUri, Issuer, Token)
-    end.
+revoke_token(refresh_token, RealmUri, Issuer, Token) ->
+    revoke_refresh_token(RealmUri, Issuer, Token);
+
+revoke_token(access_token, _, _, _) ->
+    {error, unsupported_operation}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-revoke_refresh_token(RealmUri, Issuer, Token) ->
-    %% From https://tools.ietf.org/html/rfc7009#page-3
-    %% The authorization server responds with HTTP status code
-    %% 200 if the token has been revoked successfully or if the
-    %% client submitted an invalid token.
-    plumtree_metadata:delete(?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token).
+-spec revoke_user_token(
+    Hint :: token_type() | undefined,
+    bondy_realm:uri(),
+    Issuer :: binary(),
+    Username :: binary(),
+    DeviceId :: non_neg_integer()) -> ok | {error, unsupported_operation}.
+
+revoke_user_token(refresh_token, RealmUri, Issuer, Username, DeviceId) ->
+    revoke_user_refresh_token(RealmUri, Issuer, Username, DeviceId);
+
+revoke_user_token(access_token, _, _, _, _) ->
+    {error, unsupported_operation}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec revoke_access_token(
-    bondy_realm:uri(), Issuer :: binary(), JWT :: binary()) -> ok.
+-spec revoke_user_tokens(
+    Hint :: token_type() | undefined,
+    bondy_realm:uri(),
+    Issuer :: binary(),
+    Username :: binary()) -> ok | {error, unsupported_operation}.
 
-revoke_access_token(RealmUri, Issuer, JWT) ->
-    %% From https://tools.ietf.org/html/rfc7009#page-3
-    %% The authorization server responds with HTTP status code
-    %% 200 if the token has been revoked successfully or if the
-    %% client submitted an invalid token.
-    plumtree_metadata:delete(
-        ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), JWT).
+revoke_user_tokens(refresh_token, RealmUri, Issuer, Username) ->
+    revoke_user_refresh_tokens(RealmUri, Issuer, Username);
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-revoke_all_tokens(_RealmUri, _Username) ->
-    error(not_implemented).
+revoke_user_tokens(access_token, _RealmUri, _Issuer, _Username) ->
+    {error, unsupported_operation}.
 
 
 %% -----------------------------------------------------------------------------
@@ -309,6 +305,7 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     Key = bondy_realm:get_private_key(Realm, Kid),
     Iss = Data0#bondy_oauth2_token.issuer,
     Sub = Data0#bondy_oauth2_token.username,
+    Meta = Data0#bondy_oauth2_token.meta,
     Now = erlang:monotonic_time(seconds),
     Secs = ?PASSWORD_GRANT_TTL,
 
@@ -322,14 +319,13 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
         <<"iss">> => Iss,
         <<"aud">> => Uri,
         <<"groups">> => Data0#bondy_oauth2_token.groups,
-        <<"meta">> => Data0#bondy_oauth2_token.meta
+        <<"meta">> => Meta
     },
     %% We create the JWT used as access token
     JWT = sign(Key, Claims),
 
 
-    RefreshToken = maybe_issue_refresh_token(
-        RefreshTokenFlag, Uri, Iss, Sub, Now, Data0),
+    RefreshToken = maybe_issue_refresh_token(RefreshTokenFlag, Uri, Now, Data0),
     ok = bondy_cache:put(
         Uri, JWT, Claims ,#{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
     {ok, JWT, RefreshToken, Claims}.
@@ -338,38 +334,40 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
 %% @private
 %% @TODO Commented to avoid breaking current apps, we will activate
 %% this in next major release
-maybe_issue_refresh_token(false, _, _, _, _, _) ->
+maybe_issue_refresh_token(false, _, _, _) ->
     %% The client credentials flow should not return a refresh token
     undefined;
 
-maybe_issue_refresh_token(true, Uri, Iss, Sub, IssuedAt, Data0) ->
+maybe_issue_refresh_token(true, Uri, IssuedAt, Data0) ->
     %% We create the refresh token data by cloning the access token
     %% and changing only the expires_in property
-    RefreshToken = generate_fragment(?REFRESH_TOKEN_LEN),
+    Iss = Data0#bondy_oauth2_token.issuer,
+    Sub = Data0#bondy_oauth2_token.username,
+    Meta = Data0#bondy_oauth2_token.meta,
     Data1 = Data0#bondy_oauth2_token{
         expires_in = ?REFRESH_TOKEN_TTL,
         issued_at = IssuedAt
     },
+    RToken = generate_fragment(?REFRESH_TOKEN_LEN),
     %% We store various indices to be able to implement the revoke action with
     %% different arguments
-    %% * {realm_uri(), issuer(), id()} -> #bondy_oauth2_token{} - to be able to
-    %% implement
-    %% * {realm_uri(), issuer(), refresh_token()} -> #bondy_oauth2_token{}  - to be able to implement
-    %% refresh_token/3
-    %% * {Realm, Iss, Sub} -> Id
-    ok = plumtree_metadata:put(
-        ?REFRESH_TOKENS_PREFIX(Uri, Iss), RefreshToken, Data1),
-    ok = plumtree_metadata:put(
-        ?ISS_ACCESS_TOKENS_PREFIX(Uri, Iss), RefreshToken, Data1),
-    ok = plumtree_metadata:put(
-        ?SUB_ACCESS_TOKENS_PREFIX(Uri, Sub), RefreshToken, Data1),
-    RefreshToken.
+    ok = plumtree_metadata:put(?REFRESH_TOKENS_PREFIX(Uri, Iss), RToken, Data1),
+    ok = case maps:get(<<"client_device_id">>, Meta, undefined) of
+        undefined ->
+            ok;
+        <<>> ->
+            ok;
+        DeviceId ->
+            plumtree_metadata:put(
+                ?REFRESH_TOKENS_PREFIX(Uri, Iss, Sub), DeviceId, RToken)
+    end,
+    RToken.
 
 
 %% @private
-supports_refresh_token(client_credentials) -> false;
-supports_refresh_token(application_code) -> false;
-supports_refresh_token(password) -> false;
+supports_refresh_token(client_credentials) -> true; %% should be false
+supports_refresh_token(application_code) -> true;
+supports_refresh_token(password) -> true;
 supports_refresh_token(Grant) -> error({oauth2_unsupported_grant_type, Grant}).
 
 
@@ -468,3 +466,61 @@ is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;
 is_alphanum(_)                                    -> false.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+revoke_refresh_token(RealmUri, Issuer, Token) ->
+    Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
+    case plumtree_metadata:get(Prefix, Token) of
+        undefined ->
+            {error, oauth2_invalid_grant};
+        #bondy_oauth2_token{username = Username, meta = Meta} ->
+            _ = plumtree_metadata:delete(Prefix, Token),
+            case maps:get(<<"client_device_id">>, Meta, <<>>) of
+                <<>> ->
+                    ok;
+                DeviceId ->
+                    plumtree_metadata:delete(
+                        ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
+                        DeviceId
+                    )
+            end
+    end.
+
+
+revoke_user_refresh_token(RealmUri, Issuer, Username, DeviceId) ->
+    UserPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
+    case plumtree_metadata:get(UserPrefix, DeviceId) of
+        undefined ->
+            {error, oauth2_invalid_grant};
+        Token ->
+            _ = plumtree_metadata:delete(
+                ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token),
+            plumtree_metadata:delete(UserPrefix, DeviceId)
+    end.
+
+
+revoke_user_refresh_tokens(RealmUri, Issuer, Username) ->
+    Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
+    UserPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
+    Get = fun
+        ({_, '$deleted'}, Acc) ->
+            Acc;
+        ({DeviceId, Siblings0}, Acc) when is_list(Siblings0) ->
+            Siblings1 = [X || X <- Siblings0, X =/= '$deleted'],
+            %% We will delete them just in case
+            [{DeviceId, Siblings1} | Acc];
+        ({DeviceId, Token}, Acc) ->
+            [{DeviceId, [Token]} | Acc]
+    end,
+    DeviceTokens = plumtree_metadata:fold(Get, [], UserPrefix),
+    _ = [
+        begin
+            _ = plumtree_metadata:delete(UserPrefix, DeviceId),
+            [plumtree_metadata:delete(Prefix, Token) || Token <- Tokens]
+        end || {DeviceId, Tokens} <- DeviceTokens
+    ],
+    ok.

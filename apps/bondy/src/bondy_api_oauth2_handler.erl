@@ -29,12 +29,6 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
--define(ALLOWED_METHODS, [
-    <<"HEAD">>,
-    <<"OPTIONS">>,
-    <<"POST">>
-]).
-
 -define(CORS_HEADERS, #{
     <<"access-control-allow-origin">> => <<"*">>,
     <<"access-control-allow-credentials">> => <<"true">>,
@@ -76,7 +70,6 @@
 }).
 
 
-
 %% Resource Owner Password Credentials Grant
 
 % curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
@@ -104,6 +97,13 @@
         allow_null => false,
         datatype => binary,
         default => <<"all">>
+    },
+    <<"client_device_id">> => #{
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        default => <<>>
     }
 }).
 
@@ -162,15 +162,22 @@
         datatype => binary
     },
     <<"token_type_hint">> => #{
-        required => false,
+        required => true,
         allow_null => false,
-        allow_undefined => false,
-        default => <<"refresh_token">>,
-        datatype => {in, [<<"access_token">>, <<"refresh_token">>]}
+        allow_undefined => true,
+        default => undefined,
+        validator => fun
+            (<<"access_token">>) ->
+                {ok, access_token};
+            (<<"refresh_token">>) ->
+                {ok, refresh_token};
+            (_) ->
+                error
+        end
     }
 }).
 
--define(STATE_SPEC, #{
+-define(OPTS_SPEC, #{
     realm_uri => #{
         required => true,
         allow_null => false,
@@ -182,12 +189,13 @@
     }
 }).
 
--type state() :: #{
-    realm_uri => binary(),
-    client_id => binary()
-}.
+-record(state, {
+    realm_uri           ::  binary(),
+    client_id           ::  binary() | undefined,
+    device_id           ::  binary() | undefined
+}).
 
--export_type([state/0]).
+
 
 -export([init/2]).
 -export([allowed_methods/2]).
@@ -197,9 +205,8 @@
 -export([is_authorized/2]).
 -export([resource_exists/2]).
 -export([resource_existed/2]).
--export([to_json/2]).
--export([to_msgpack/2]).
 -export([accept/2]).
+-export([provide/2]).
 
 
 
@@ -209,12 +216,17 @@
 
 
 
-init(Req, St) ->
-    {cowboy_rest, Req, maps_utils:validate(St, ?STATE_SPEC)}.
+init(Req, Opts0) ->
+    Opts1 = maps_utils:validate(Opts0, ?OPTS_SPEC),
+    St = #state{
+        realm_uri = maps:get(realm_uri, Opts1),
+        client_id = maps:get(client_id, Opts1, undefined)
+    },
+    {cowboy_rest, Req, St}.
 
 
 allowed_methods(Req, St) ->
-    {?ALLOWED_METHODS, Req, St}.
+    {[<<"HEAD">>, <<"OPTIONS">>, <<"POST">>], Req, St}.
 
 
 content_types_accepted(Req, St) ->
@@ -226,8 +238,7 @@ content_types_accepted(Req, St) ->
 
 content_types_provided(Req, St) ->
     L = [
-        {{<<"application">>, <<"json">>, '*'}, to_json},
-        {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack}
+        {{<<"application">>, <<"json">>, '*'}, provide}
     ],
     {L, Req, St}.
 
@@ -244,19 +255,20 @@ is_authorized(Req0, St0) ->
             {true, Req0, St0};
         _ ->
             Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-            Realm = maps:get(realm_uri, St0),
             Peer = cowboy_req:peer(Req0),
-            case bondy_security_utils:authenticate(basic, Val, Realm, Peer) of
+            case
+                bondy_security_utils:authenticate(
+                    basic, Val, St0#state.realm_uri, Peer)
+            of
                 {ok, AuthCtxt} ->
-                    St1 = St0#{
-                        client_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
-                    },
-                    {true, Req0, St1};
+                    ClientId = ?CHARS2BIN(
+                        bondy_security:get_username(AuthCtxt)),
+                    {true, Req0, St0#state{client_id = ClientId}};
                 {error, Reason} ->
                     _ = lager:info(
                         "API Client login failed due to invalid client, "
                         "reason=~p", [Reason]),
-                    Req1 = reply(oauth2_invalid_client, json, Req0),
+                    Req1 = reply(oauth2_invalid_client, Req0),
                     {stop, Req1, St0}
             end
     end.
@@ -270,13 +282,29 @@ resource_existed(Req, St) ->
     {false, Req, St}.
 
 
-to_json(Req, St) ->
-    provide(json, Req, St).
+provide(Req, St) ->
+    %% This is just to support OPTIONS
+    {ok, cowboy_req:set_resp_header(?CORS_HEADERS, Req), St}.
 
 
-to_msgpack(Req, St) ->
-    provide(msgpack, Req, St).
-
+accept(Req0, St) ->
+    try
+        {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
+        Data = maps:from_list(PList),
+        case cowboy_req:path(Req1) of
+            <<"/oauth/token", _/binary>> ->
+                token_flow(Data, Req1, St);
+            <<"/oauth/revoke", _/binary>> ->
+                revoke_token_flow(Data, Req1, St)
+        end
+    catch
+        error:Reason ->
+            _ = lager:error(
+                "type=error, reason=~p, stacktrace:~p",
+                [Reason, erlang:get_stacktrace()]),
+            Req2 = reply(Reason, Req0),
+            {false, Req2, St}
+    end.
 
 
 
@@ -284,191 +312,184 @@ to_msgpack(Req, St) ->
 %% PRIVATE
 %% =============================================================================
 
-provide(_, Req, St) ->
-    {ok, cowboy_req:set_resp_header(?CORS_HEADERS, Req), St}.
-
-
-%% @private
-accept(Req0, St) ->
-    try
-        {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
-        Data = maps:from_list(PList),
-        case cowboy_req:path(Req1) of
-            <<"/oauth/token", _/binary>> ->
-                token_flow(Data, json, Req1, St);
-            <<"/oauth/revoke", _/binary>> ->
-                revoke_token_flow(Data, json, Req1, St)
-        end
-    catch
-        error:Reason ->
-            _ = lager:error(
-                "type=error, reason=~p, stacktrace:~p",
-                [Reason, erlang:get_stacktrace()]),
-            Req2 = reply(Reason, json, Req0),
-            {false, Req2, St}
-    end.
 
 
 %% @private
 
-token_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Enc, Req, St) ->
-    RealmUri = maps:get(realm_uri, St),
-    Username = maps:get(client_id, St),
-    issue_token(RealmUri, Username, Enc, Req, St);
+token_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Req, St) ->
+    issue_token(client_credentials, St#state.client_id, Req, St);
 
-token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Enc, Req0, St0) ->
-    RealmUri = maps:get(realm_uri, St0),
+token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     #{
         <<"username">> := U,
         <<"password">> := P,
-        <<"scope">> := _Scope
+        <<"scope">> := _Scope,
+        <<"client_device_id">> := DeviceId
     } = maps_utils:validate(Map, ?RESOURCE_OWNER_SPEC),
 
+    RealmUri = St0#state.realm_uri,
     {IP, _Port} = cowboy_req:peer(Req0),
+    St1 = St0#state{device_id = DeviceId},
+
     case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
         {ok, AuthCtxt} ->
+            %% Username in right case
             Username = bondy_security:get_username(AuthCtxt),
-            issue_token(RealmUri, Username, Enc, Req0, St0);
+            issue_token(password, Username, Req0, St1);
         {error, Error} ->
             _ = lager:info(
-                "Resource Owner login failed, error=invalid_grant, reason=~p, username=~s, realm_uri=~s, ip=~s", [Error, P, RealmUri, inet_utils:ip_address_to_binary(IP)]),
-            Req1 = reply(oauth2_invalid_grant, Enc, Req0),
-            {stop, Req1, St0}
+                "Resource Owner login failed, error=invalid_grant, reason=~p, username=~s, client_device_id=~s, realm_uri=~s, ip=~s",
+                [Error, U, DeviceId, RealmUri, inet_utils:ip_address_to_binary(IP)]
+            ),
+            {stop, reply(oauth2_invalid_grant, Req0), St1}
     end;
 
-token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Enc, Req0, St0) ->
+token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
+    %% According to RFC6749:
+    %% The authorization server MAY issue a new refresh token, in which case
+    %% the client MUST discard the old refresh token and replace it with the
+    %% new refresh token.  The authorization server MAY revoke the old
+    %% refresh token after issuing a new refresh token to the client.  If a
+    %% new refresh token is issued, the refresh token scope MUST be
+    %% identical to that of the refresh token included by the client in the
+    %% request.
     #{
         <<"refresh_token">> := RT0
     } = maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC),
-    Realm = maps:get(realm_uri, St0),
-    ClientId = maps:get(client_id, St0),
-    case bondy_oauth2:refresh_token(Realm, ClientId, RT0) of
+    Realm = St0#state.realm_uri,
+    Issuer = St0#state.client_id,
+    case bondy_oauth2:refresh_token(Realm, Issuer, RT0) of
         {ok, JWT, RT1, Claims} ->
-            Req1 = token_response(JWT, RT1, Claims, Enc, Req0),
+            Req1 = token_response(JWT, RT1, Claims, Req0),
             {true, Req1, St0};
         {error, Error} ->
-            Req1 = reply(Error, Enc, Req0),
+            Req1 = reply(Error, Req0),
             {stop, Req1, St0}
     end;
 
-token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _, _) ->
+token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
     %% TODO
     error({oauth2_unsupported_grant_type, <<"authorization_code">>});
 
-token_flow(Map, _, _, _) ->
+token_flow(Map, _, _) ->
     error({oauth2_invalid_request, Map}).
 
 
 %% @private
-revoke_token_flow(Data0, Enc, Req0, St) ->
-    %% We do not use the token_type_hint
-    try
-        Data1 = maps_utils:validate(Data0, ?REVOKE_TOKEN_SPEC),
-        case maps:get(<<"token_type_hint">>, Data1) of
-            <<"access_token">> ->
-                Req1 = reply(unsupported_token_type, Enc, Req0),
-                {stop, Req1, St};
-            _ ->
-                RealmUri = maps:get(realm_uri, St),
-                Issuer = maps:get(client_id, St),
-                RefreshToken = maps:get(<<"token">>, Data1),
-                case bondy_oauth2:revoke_token(RealmUri, Issuer, RefreshToken) of
-                    ok ->
-                        %% From https://tools.ietf.org/html/rfc7009#page-3
-                        %% The authorization server responds with HTTP status code
-                        %% 200 if the token has been revoked successfully or if the
-                        %% client submitted an invalid token.
-                        {true, cowboy_req:set_resp_body(<<"true">>, Req0), St};
-                    {error, Reason} ->
-                        {stop, reply(Reason, Enc, Req0), St}
-                end
-        end
-    catch
-        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
-            {stop, reply(unsupported_token_type, Enc, Req0), St}
-    end.
-
-
-
-
-%% @private
-issue_token(RealmUri, Username, Enc, Req0, St0) ->
-    Issuer = maps:get(client_id, St0),
+issue_token(Type, Username, Req0, St0) ->
+    RealmUri = St0#state.realm_uri,
+    Issuer = St0#state.client_id,
     User = bondy_security_user:fetch(RealmUri, Username),
-    Meta = maps:get(<<"meta">>, User, #{}),
     Gs = bondy_security_user:groups(User),
+    Meta = prepare_meta(Type, maps:get(<<"meta">>, User, #{}), St0),
 
-    case bondy_oauth2:issue_token(RealmUri, Issuer, Username, Gs, Meta) of
+    case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Username, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
-            Req1 = token_response(JWT, RefreshToken, Claims, Enc, Req0),
+            Req1 = token_response(JWT, RefreshToken, Claims, Req0),
             {true, Req1, St0};
         {error, Reason} ->
-            Req1 = reply(Reason, Enc, Req0),
+            Req1 = reply(Reason, Req0),
             {stop, Req1, St0}
     end.
 
 
+%% @private
+revoke_token_flow(Data0, Req0, St) ->
+    try
+        Data1 = maps_utils:validate(Data0, ?REVOKE_TOKEN_SPEC),
+        RealmUri = St#state.realm_uri,
+        Issuer = St#state.client_id,
+        Token = maps:get(<<"token">>, Data1),
+        Type = maps:get(<<"token_type_hint">>, Data1),
+        %% From https://tools.ietf.org/html/rfc7009#page-3
+        %% The authorization server responds with HTTP status
+        %% code 200 if the token has been revoked successfully
+        %% or if the client submitted an invalid token.
+        %% We set a body as Cowboy will otherwise use 204 code
+        _ = bondy_oauth2:revoke_token(Type, RealmUri, Issuer, Token),
+        {true, cowboy_req:set_resp_body(<<"true">>, Req0), St}
+    catch
+        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
+            {stop, reply(unsupported_token_type, Req0), St}
+    end.
+
 
 %% @private
--spec reply(integer(), atom(), cowboy_req:req()) ->
-    cowboy_req:req().
+prepare_meta(password, Meta, St) ->
+     maps:put(<<"client_device_id">>, St#state.device_id, Meta);
 
-reply(unknown_realm, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+prepare_meta(_, Meta, _) ->
+    Meta.
 
-reply({unknown_user, _}, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
 
-reply(missing_password, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+%% @private
+-spec reply(integer(), cowboy_req:req()) -> cowboy_req:req().
 
-reply(bad_password, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+reply(unknown_realm, Req) ->
+    reply(oauth2_invalid_client, Req);
 
-reply(unknown_source, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+reply({unknown_user, _}, Req) ->
+    reply(oauth2_invalid_client, Req);
 
-reply(no_common_name, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+reply(missing_password, Req) ->
+    reply(oauth2_invalid_client, Req);
 
-reply(common_name_mismatch, Enc, Req) ->
-    reply(oauth2_invalid_client, Enc, Req);
+reply(bad_password, Req) ->
+    reply(oauth2_invalid_client, Req);
 
-reply(oauth2_invalid_client = Error, Enc, Req) ->
+reply(unknown_source, Req) ->
+    reply(oauth2_invalid_client, Req);
+
+reply(no_common_name, Req) ->
+    reply(oauth2_invalid_client, Req);
+
+reply(common_name_mismatch, Req) ->
+    reply(oauth2_invalid_client, Req);
+
+reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     cowboy_req:reply(
-        401, prepare_request(Enc, bondy_error:map(Error), Headers, Req));
+        401, prepare_request(bondy_error:map(Error), Headers, Req));
 
-reply(unsupported_token_type = Error, Enc, Req) ->
+reply(unsupported_token_type = Error, Req) ->
     #{<<"status_code">> := Code} = Map = bondy_error:map(Error),
-    cowboy_req:reply(Code, prepare_request(Enc, Map, #{}, Req));
+    cowboy_req:reply(Code, prepare_request(Map, #{}, Req));
 
-reply(Error, Enc, Req) ->
+reply(Error, Req) ->
     Map =  bondy_error:map(Error),
     Status = maps:get(<<"status_code">>, Map, 400),
-    cowboy_req:reply(
-        Status, prepare_request(Enc, Map, #{}, Req)).
+    cowboy_req:reply(Status, prepare_request(Map, #{}, Req)).
 
 
 
 %% @private
--spec prepare_request(atom(), map(), map(), cowboy_req:req()) ->
-    cowboy_req:req().
+-spec prepare_request(map(), map(), cowboy_req:req()) -> cowboy_req:req().
 
-prepare_request(Enc, Body, Headers, Req0) ->
+prepare_request(Body, Headers, Req0) ->
     Req1 = cowboy_req:set_resp_headers(
         maps:merge(?CORS_HEADERS, Headers), Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
 
 
-token_response(JWT, RefreshToken, Claims, Enc, Req0) ->
-    Body = #{
+token_response(JWT, RefreshToken, Claims, Req0) ->
+    Scope = iolist_to_binary(
+        lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
+    Exp = maps:get(<<"exp">>, Claims),
+
+    Body0 = #{
         <<"token_type">> => <<"bearer">>,
         <<"access_token">> => JWT,
-        <<"refresh_token">> => RefreshToken,
-        <<"scope">> => iolist_to_binary(
-            lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
-        <<"expires_in">> => maps:get(<<"exp">>, Claims)
+        <<"scope">> => Scope,
+        <<"expires_in">> => Exp
     },
+
+    Body1 = case RefreshToken =:= undefined of
+        true ->
+            Body0;
+        false ->
+            Body0#{
+                <<"refresh_token">> => RefreshToken
+            }
+    end,
     Req1 = cowboy_req:set_resp_headers(?CORS_HEADERS, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body1), Req1).
