@@ -101,9 +101,9 @@
     <<"client_device_id">> => #{
         required => true,
         allow_null => false,
-        allow_undefined => false,
+        allow_undefined => true,
         datatype => binary,
-        default => <<>>
+        default => undefined
     }
 }).
 
@@ -415,8 +415,10 @@ revoke_token_flow(Data0, Req0, St) ->
 
 
 %% @private
-prepare_meta(password, Meta, St) ->
-     maps:put(<<"client_device_id">>, St#state.device_id, Meta);
+
+prepare_meta(password, Meta, #state{device_id = DeviceId})
+when DeviceId =/= undefined ->
+     maps:put(<<"client_device_id">>, DeviceId, Meta);
 
 prepare_meta(_, Meta, _) ->
     Meta.
