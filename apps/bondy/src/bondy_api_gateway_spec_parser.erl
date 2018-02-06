@@ -654,6 +654,15 @@
         allow_null => false,
         datatype => {in, [<<"forward">>]}
     },
+    <<"http_method">> => #{
+        alias => host,
+        required => false,
+        allow_null => false,
+        datatype => {in, [
+            <<"delete">>, <<"get">>, <<"head">>, <<"options">>,
+            <<"patch">>, <<"post">>, <<"put">>
+        ]}
+    },
     <<"host">> => #{
         alias => host,
         required => true,
@@ -751,8 +760,11 @@ end).
         alias => procedure,
         required => true,
         allow_null => false,
-        datatype => binary,
-        validator => fun wamp_uri:is_valid/1
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
+        validator => fun
+            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) -> mops:is_proxy(X)
+        end
     },
     <<"options">> => #{
         alias => options,

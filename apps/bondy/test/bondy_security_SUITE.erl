@@ -24,7 +24,8 @@ all() ->
     [
         {group, api_client},
         {group, resource_owner},
-        {group, user}
+        {group, user},
+        {group, oauth}
     ].
 
 groups() ->
@@ -59,6 +60,10 @@ groups() ->
             user_auth2,
             user_auth3,
             user_delete
+        ]},
+        {oauth, [sequence], [
+            password_token_crud_1,
+            password_token_crud_2
         ]}
     ].
 
@@ -73,7 +78,6 @@ end_per_suite(Config) ->
 
 create_realm(Config) ->
     Realm = bondy_realm:add(?config(realm_uri, Config)),
-    realm = element(1, Realm),
     {save_config, [{realm, Realm} | Config]}.
 
 enable_security(Config) ->
@@ -331,3 +335,54 @@ user_delete(Config) ->
     ok = bondy_security_user:remove(
         ?config(realm_uri, Config), ?config(username, Prev)),
     {save_config, Prev}.
+
+
+
+
+
+%% =============================================================================
+%% OAUTH
+%% =============================================================================
+
+
+password_token_crud_1(Config) ->
+    Uri = ?config(realm_uri, Config),
+    {ok, #{
+        <<"client_id">> := C
+    }} = bondy_api_client:add(Uri, #{}),
+    R = #{
+        username => <<"ale">>,
+        password => <<"1234">>,
+        meta => #{},
+        groups => []
+    },
+    {ok, #{
+        <<"username">> := U
+    }} = bondy_api_resource_owner:add(Uri, R),
+
+    {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
+        password, Uri, C, U, [], #{}
+    ),
+    {ok, _JWT1, RToken1, _Claims1} = bondy_oauth2:refresh_token(
+        Uri, C, RToken0),
+    {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(refresh_token, Uri, C, RToken0),
+    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, RToken1),
+    {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(
+        refresh_token, Uri, C, RToken1),
+
+    {save_config, [{client_id, C}, {username, U} | Config]}.
+
+
+    password_token_crud_2(Config) ->
+        {password_token_crud_1, Prev} = ?config(saved_config, Config),
+        Uri = ?config(realm_uri, Prev),
+        C = ?config(client_id, Prev),
+        U = ?config(username, Prev),
+        D = <<"1">>,
+
+        {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
+            password, Uri, C, U, [], #{<<"client_device_id">> => D}
+        ),
+        ok = bondy_oauth2:revoke_user_token(refresh_token, Uri, C, U, D),
+        {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(
+            refresh_token, Uri, C, RToken0).

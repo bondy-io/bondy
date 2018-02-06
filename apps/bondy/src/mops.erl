@@ -506,6 +506,8 @@ when is_function(F, 1) andalso (
     Op == <<"head">> orelse
     Op == <<"tail">> orelse
     Op == <<"last">> orelse
+    Op == <<"min">> orelse
+    Op == <<"max">> orelse
     Op == <<"length">> orelse
     Op == <<"size">>
     ) ->
@@ -560,6 +562,18 @@ apply_op(<<"last">>, [], _) ->
 apply_op(<<"last">>, Val, _) when is_list(Val) ->
     lists:last(Val);
 
+apply_op(<<"min">>, [], _) ->
+    <<>>;
+
+apply_op(<<"min">>, Val, _) when is_list(Val) ->
+    lists:min(Val);
+
+apply_op(<<"max">>, [], _) ->
+    <<>>;
+
+apply_op(<<"max">>, Val, _) when is_list(Val) ->
+    lists:max(Val);
+
 apply_op(<<"length">>, Val, _) when is_list(Val) ->
     length(Val);
 
@@ -572,6 +586,25 @@ apply_op(Bin, Val, Ctxt) ->
 
 
 %% @private
+
+apply_custom_op(<<"nth(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
+when is_function(F, 1) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
+    };
+
+apply_custom_op(<<"nth(", Rest/binary>> = Op, Val, Ctxt) when is_list(Val)->
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+
+        [{'$mops_proxy', F} = N] when is_function(F, 1) ->
+            {'$mops_proxy', fun(X) -> lists:nth(maybe_eval(N, X), Val) end};
+
+        [N] ->
+            lists:nth(binary_to_integer(N), Val);
+
+        _ ->
+            error({invalid_expression, Op})
+    end;
 
 apply_custom_op(<<"get(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->

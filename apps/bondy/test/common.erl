@@ -20,6 +20,12 @@
 -include_lib("common_test/include/ct.hrl").
 
 -define(BONDY,[
+    {oauth2,
+          [{refresh_token_length,40},
+           {refresh_token_duration,2592000},
+           {code_grant_duration,600},
+           {client_credentials_grant_duration,900},
+           {password_grant_duration,900}]},
     {platform_log_dir,"./data/bondy/log"},
     {platform_lib_dir,"./lib"},
     %% {platform_etc_dir,"./etc"},
@@ -214,3 +220,5 @@ start_bondy() ->
 
 stop_bondy() ->
     application:stop(bondy).
+
+

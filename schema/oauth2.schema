@@ -1,25 +1,31 @@
 %%-*- mode: erlang -*-
 
-{mapping, "oauth2.password_credentials.expiry_time", "oauth2.password_credentials.expiry_time",
- [
-  {default, "2h"},
-  {datatype, {duration, s}}
- ]}.
+{mapping, "oauth2.password_grant.duration", "bondy.oauth2.password_grant_duration",
+[
+{default, "15m"},
+{datatype, {duration, s}}
+]}.
 
-{mapping, "oauth2.client_credentials.expiry_time", "oauth2.client_credentials.expiry_time",
- [
-  {default, "1d"},
-  {datatype, {duration, s}}
- ]}.
+{mapping, "oauth2.client_credentials_grant.duration", "bondy.oauth2.client_credentials_grant_duration",
+[
+{default, "15m"},
+{datatype, {duration, s}}
+]}.
 
-{mapping, "oauth2.refresh_token.expiry_time", "oauth2.refresh_token.expiry_time",
- [
-  {default, "30d"},
-  {datatype, {duration, s}}
- ]}.
+{mapping, "oauth2.code_grant.duration", "bondy.oauth2.code_grant_duration",
+[
+{default, "10m"},
+{datatype, {duration, s}}
+]}.
 
-{mapping, "oauth2.code_grant.expiry_time", "oauth2.code_grant.expiry_time",
- [
-  {default, "10m"},
-  {datatype, {duration, s}}
- ]}.
+{mapping, "oauth2.refresh_token.duration", "bondy.oauth2.refresh_token_duration",
+[
+{default, "30d"},
+{datatype, {duration, s}}
+]}.
+
+{mapping, "oauth2.refresh_token.length", "bondy.oauth2.refresh_token_length",
+[
+{default, "40"},
+{datatype, bytesize}
+]}.

@@ -124,7 +124,7 @@ map(oauth2_invalid_grant) ->
         <<"code">> => <<"invalid_grant">>,
         <<"status_code">> => 400,
         <<"message">> => <<"The access or refresh token provided is expired, revoked, malformed, or invalid.">>,
-        <<"description">> => <<"The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does wamp_ match the redirection URI used in the authorization request, or was issued to another client. The client MAY request a new access token and retry the protected resource request.">>
+        <<"description">> => <<"The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client. The client MAY request a new access token and retry the protected resource request.">>
     };
 
 map(oauth2_unauthorized_client) ->
