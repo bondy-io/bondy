@@ -422,7 +422,7 @@ maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, JWT) ->
     Now = erlang:system_time(seconds),
     case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
         true ->
-            ok = bondy_cache:remove(JWT),
+            %% ok = bondy_cache:remove(RealmUri, JWT),
             {error, oauth2_invalid_grant};
         false ->
             {ok, Claims}
