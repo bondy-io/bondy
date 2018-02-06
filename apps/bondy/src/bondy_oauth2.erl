@@ -239,7 +239,8 @@ revoke_user_token(access_token, _, _, _, _) ->
     Hint :: token_type() | undefined,
     bondy_realm:uri(),
     Issuer :: binary(),
-    Username :: binary()) -> ok | {error, unsupported_operation}.
+    Username :: binary()) ->
+        ok | {error, unsupported_operation | oauth2_invalid_grant}.
 
 revoke_user_tokens(refresh_token, RealmUri, Issuer, Username) ->
     revoke_user_refresh_tokens(RealmUri, Issuer, Username);
