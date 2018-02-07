@@ -418,7 +418,7 @@ maybe_cache(Error, _) ->
 
 
 %% @private
-maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, JWT) ->
+maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
     Now = erlang:system_time(seconds),
     case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
         true ->
