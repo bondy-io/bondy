@@ -52,7 +52,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /ping
-            port: 18082
+            port: 18081
             scheme: HTTP
           initialDelaySeconds: 15
           timeoutSeconds: 5
