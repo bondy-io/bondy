@@ -1414,15 +1414,17 @@ security_scheme_rules(
     S, Host, BasePath, Realm,
     #{
         <<"type">> := <<"oauth2">>,
-        <<"flow">> := <<"resource_owner_password_credentials">>
+        <<"flow">> := _Any
     } = Sec) ->
 
-    #{
-        <<"token_path">> := Token,
-        <<"revoke_token_path">> := Revoke
-    } = Sec,
+    Token = get_token_path(Sec),
+    Revoke = get_revoke_path(Sec),
 
-    St = #{realm_uri => Realm},
+    St = #{
+        realm_uri => Realm,
+        token_path => Token,
+        revoke_path => Revoke
+    },
 
     Mod = bondy_api_oauth2_handler,
     [
@@ -1435,6 +1437,37 @@ security_scheme_rules(_, _, _, _, _) ->
     %% TODO for other types
     [].
 
+
+%% @private
+get_token_path(#{<<"token_path">> := Token}) ->
+    validate_rel_path(Token);
+
+get_token_path(_) ->
+    <<"/oauth/token">>.
+
+
+%% @private
+get_revoke_path(#{<<"revoke_token">> := Token}) ->
+    validate_rel_path(Token);
+
+get_revoke_path(_) ->
+    <<"/oauth/revoke">>.
+
+
+%% @private
+validate_rel_path(<<$/, _Rest/binary>> = Val) ->
+    remove_trailing_slash(Val);
+
+validate_rel_path(Val) ->
+    error({invalid_path, Val}).
+
+
+%% @private
+remove_trailing_slash(Bin) ->
+    case binary:last(Bin) of
+        $/ -> binary:part(Bin, 0, byte_size(Bin) - 1);
+        _ -> Bin
+    end.
 
 
 %% @private
