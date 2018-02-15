@@ -186,6 +186,14 @@
     client_id => #{
         required  => false,
         datatype => binary
+    },
+    token_path => #{
+        required  => true,
+        datatype => binary
+    },
+    revoke_path => #{
+        required  => true,
+        datatype => binary
     }
 }).
 
@@ -223,8 +231,8 @@ init(Req, Opts0) ->
     St = #state{
         realm_uri = maps:get(realm_uri, Opts1),
         client_id = maps:get(client_id, Opts1, undefined),
-        token_path = maps:get(token_path, Opts1, <<"/oauth/token">>),
-        revoke_path = maps:get(revoke_path, Opts1, <<"/oauth/revoke">>)
+        token_path = maps:get(token_path, Opts1),
+        revoke_path = maps:get(revoke_path, Opts1)
     },
     {cowboy_rest, Req, St}.
 
