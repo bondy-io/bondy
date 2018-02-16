@@ -509,7 +509,9 @@ when is_function(F, 1) andalso (
     Op == <<"min">> orelse
     Op == <<"max">> orelse
     Op == <<"length">> orelse
-    Op == <<"size">>
+    Op == <<"size">> orelse
+    Op == <<"base64:encode">> orelse
+    Op == <<"base64:decode">>
     ) ->
     {'$mops_proxy', fun(X) -> apply_op(Op, maybe_eval(Val, X), X) end};
 
@@ -579,6 +581,12 @@ apply_op(<<"length">>, Val, _) when is_list(Val) ->
 
 apply_op(<<"size">>, Val, _) when is_map(Val) ->
     maps:size(Val);
+
+apply_op(<<"base64:encode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
+    base64:encode(Val);
+
+apply_op(<<"base64:decode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
+    base64:decode(Val);
 
 %% Custom ops
 apply_op(Bin, Val, Ctxt) ->

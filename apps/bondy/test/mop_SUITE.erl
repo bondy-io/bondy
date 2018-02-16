@@ -86,6 +86,10 @@ pipe_2_test(_) ->
 pipe_3_test(_) ->
    3.0 = mops:eval(<<"{{foo |> integer |> float}}">>, #{<<"foo">> => 3.0}).
 
+pipe_4_test(_) ->
+    <<"Hello!">> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<"Hello!">>}).
+
+
 recursive_1_test(_) ->
     Ctxt = #{
         <<"name">> => <<"{{lastname}}">>,
