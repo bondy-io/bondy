@@ -1470,8 +1470,8 @@ remove_trailing_slash(Bin) ->
     end.
 
 
-%% @private
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns a context where all keys have been assigned funs that take
 %% a context as an argument.
