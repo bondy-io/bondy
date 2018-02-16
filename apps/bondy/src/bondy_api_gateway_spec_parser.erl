@@ -201,7 +201,6 @@
     }
 }).
 
-
 -define(DEFAULTS_SPEC, #{
     <<"schemes">> => #{
         alias => schemes,
@@ -274,7 +273,6 @@
         default => ?DEFAULT_HEADERS
     }
 }).
-
 
 -define(BASIC, #{
     <<"type">> => #{
@@ -359,7 +357,6 @@
     }
 }).
 
-
 -define(DEFAULT_PATH, #{
     <<"variables">> => #{},
     <<"defaults">> => #{},
@@ -377,7 +374,6 @@
     <<"retries">> => <<"{{defaults.retries}}">>,
     <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
 }).
-
 
 -define(API_PATH, #{
     <<"is_collection">> => #{
@@ -401,23 +397,13 @@
         alias => accepts,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [
-                <<"application/json">>,
-                <<"application/msgpack">>
-            ]}
-        }
+        datatype => {list, binary}
     },
     <<"provides">> => #{
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [
-                <<"application/json">>,
-                <<"application/msgpack">>
-            ]}
-        }
+        datatype => {list, binary}
     },
     <<"schemes">> => #{
         alias => schemes,
@@ -478,7 +464,6 @@
     }
 }).
 
-
 -define(PATH_DEFAULTS, #{
     <<"schemes">> => #{
         alias => schemes,
@@ -533,15 +518,13 @@
         alias => accepts,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+        datatype => {list, binary}
     },
     <<"provides">> => #{
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+        datatype => {list, binary}
     },
     <<"headers">> => #{
         alias => headers,
@@ -818,7 +801,6 @@ end).
     }
 }).
 
-
 -define(API_PARAMS, #{
     <<"name">> => #{
         alias => name,
@@ -853,6 +835,7 @@ end).
 }).
 
 -define(VAR(Term), {var, Term}).
+
 -define(SCHEME_HEAD,
     {
         ?VAR(scheme),
@@ -1503,7 +1486,11 @@ content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
     {
         {<<"application">>, <<"x-www-form-urlencoded">>, '*'},
         from_form_urlencoded
-    }.
+    };
+
+content_types_accepted(Bin) ->
+    {Bin, accept}.
+
 
 %% @private
 content_types_provided(L) when is_list(L) ->
@@ -1515,14 +1502,17 @@ content_types_provided(<<"application/json">>) ->
         {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
         to_json
     },
-    %% We force JSON to have the prioirty as Cowboy chooses based on the order
+    %% We force JSON to have the priority as Cowboy chooses based on the order
     %% when no content-type was requested by the user
     {1, T};
 
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
     T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
-    {2, T}.
+    {2, T};
+
+content_types_provided(Bin) ->
+    {3, {Bin, provide}}.
 
 
 % @TODO Avoid doing this and require the user to setup the environment first!

@@ -46,7 +46,7 @@
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
-    encoding => json | msgpack
+    encoding => dynamic | json | msgpack
 }.
 
 
@@ -60,9 +60,11 @@
 -export([previously_existed/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
+-export([provide/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
 -export([from_form_urlencoded/2]).
+-export([accept/2]).
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
@@ -86,7 +88,8 @@ init(Req, St0) ->
         session => Session,
         body_evaluated => false,
         api_context => init_context(Req),
-        session => Session
+        session => Session,
+        encoding => dynamic
     },
     {cowboy_rest, Req, St1}.
 
@@ -244,7 +247,7 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             St1 = maps:update(api_context, Ctxt, St0),
             {true, Req0, St1};
         {ok, AuthCtxt} ->
-            %% TODO Here we need the token or the session withe the
+            %% TODO Here we need the token or the session with the
             %% token grants and not the AuthCtxt
             St1 = St0#{
                 user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
@@ -766,7 +769,7 @@ prepare_request(Enc, Response, Req0) ->
     Body = maps:get(<<"body">>, Response),
     Headers = maps:get(<<"headers">>, Response),
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(maybe_encode(Enc, Body), Req1).
 
 
 %% @private
@@ -824,11 +827,24 @@ method_to_atom(<<"put">>) -> put.
 
 
 %% @private
+maybe_encode(dynamic, Body) ->
+    Body;
+
+maybe_encode(Enc, Body) ->
+    bondy_utils:maybe_encode(Enc, Body).
+
+
+%% @private
 maybe_encode(_, <<>>, _) ->
     <<>>;
 
+maybe_encode(dynamic, Body, _) ->
+    Body;
+
 maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
     Body;
+
+
 
 maybe_encode(Enc, Body, _) ->
     bondy_utils:maybe_encode(Enc, Body).
