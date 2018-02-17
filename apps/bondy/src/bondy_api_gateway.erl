@@ -327,7 +327,7 @@ load_dispatch_tables() ->
             try
                 Parsed = bondy_api_gateway_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
-                lager:info(
+                _ = lager:info(
                     "Loading and parsing API Gateway specification from store"
                     ", name=~s, id=~s, ts=~p",
                     [maps:get(<<"name">>, V), maps:get(<<"id">>, V), Ts]
@@ -336,7 +336,7 @@ load_dispatch_tables() ->
             catch
                 _:_ ->
                     _ = delete(K),
-                    lager:warning(
+                    _ = lager:warning(
                         "Removed invalid API Gateway specification from store"),
                     []
             end
