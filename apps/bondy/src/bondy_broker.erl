@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_broker.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -90,7 +90,7 @@
 
 
 -spec close_context(bondy_context:context()) -> bondy_context:context().
-close_context(Ctxt) -> 
+close_context(Ctxt) ->
     ok = unsubscribe_all(Ctxt),
     Ctxt.
 
@@ -124,7 +124,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
     SubsId = M#unsubscribe.subscription_id,
     Reply = case unsubscribe(SubsId, Ctxt) of
-        ok -> 
+        ok ->
             wamp_message:unsubscribed(ReqId);
         {error, not_found} ->
             wamp_message:error(
@@ -220,14 +220,14 @@ handle_call(#call{procedure_uri = <<"wamp.subscription.get">>} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), M);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.subscription.list_subscribers">>} = M, 
+    #call{procedure_uri = <<"wamp.subscription.list_subscribers">>} = M,
     Ctxt) ->
     Res = #{},
     M = wamp_message:result(M#call.request_id, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), M);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.subscription.count_subscribers">>} = M, 
+    #call{procedure_uri = <<"wamp.subscription.count_subscribers">>} = M,
     Ctxt) ->
     Res = #{},
     M = wamp_message:result(M#call.request_id, #{}, [], Res),
@@ -262,7 +262,7 @@ subscribe(M, Ctxt) ->
         {ok, #{id := Id}, false} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Id, Ctxt);
-        {error, {already_exists, #{id := Id}}} -> 
+        {error, {already_exists, #{id := Id}}} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id))
     end.
 
@@ -328,7 +328,7 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
             SubsId = bondy_registry:entry_id(Entry),
             ASession = bondy_session:fetch(bondy_registry:session_id(Entry)),
             bondy:send(
-                bondy_session:peer_id(ASession), 
+                bondy_session:peer_id(ASession),
                 wamp_message:event(SubsId, PubId, Details, Args, Payload))
     end,
     ok = publish(Subs, Fun),
@@ -347,7 +347,7 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec subscriptions(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()], 
+        [bondy_registry:entry()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -365,7 +365,7 @@ subscriptions({subscription, _} = Cont) ->
 %% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->       
+-spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->
     [bondy_registry:entry()].
 
 subscriptions(RealmUri, SessionId) ->
@@ -383,7 +383,7 @@ subscriptions(RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
     {
-        [bondy_registry:entry()], 
+        [bondy_registry:entry()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -399,7 +399,7 @@ subscriptions(RealmUri, SessionId, Limit) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), bondy_context:context()) ->
     {
-        [bondy_registry:entry()], 
+        [bondy_registry:entry()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -414,7 +414,7 @@ match_subscriptions(TopicUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), bondy_context:context(), non_neg_integer()) ->
     {
-        [bondy_registry:entry()], 
+        [bondy_registry:entry()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -429,7 +429,7 @@ match_subscriptions(TopicUri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()], 
+        [bondy_registry:entry()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -461,7 +461,7 @@ publish({L, Cont}, Fun ) ->
 %% @private
 on_create(Details, Ctxt) ->
     Map = #{
-        <<"session">> => bondy_context:session_id(Ctxt), 
+        <<"session">> => bondy_context:session_id(Ctxt),
         <<"subscriptionDetails">> => Details
     },
     % TODO Records stats
@@ -491,7 +491,7 @@ on_delete(SubsId, Ctxt) ->
 %% @private
 on_event(Uri, SubsId, Ctxt) ->
     Map = #{
-        <<"session">> => bondy_context:session_id(Ctxt), 
+        <<"session">> => bondy_context:session_id(Ctxt),
         <<"subscription">> => SubsId
     },
     {ok, _} = publish(Uri, #{}, [], Map, Ctxt),

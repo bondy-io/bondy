@@ -186,13 +186,23 @@
     client_id => #{
         required  => false,
         datatype => binary
+    },
+    token_path => #{
+        required  => true,
+        datatype => binary
+    },
+    revoke_path => #{
+        required  => true,
+        datatype => binary
     }
 }).
 
 -record(state, {
     realm_uri           ::  binary(),
     client_id           ::  binary() | undefined,
-    device_id           ::  binary() | undefined
+    device_id           ::  binary() | undefined,
+    token_path          ::  binary(),
+    revoke_path         ::  binary()
 }).
 
 
@@ -220,7 +230,9 @@ init(Req, Opts0) ->
     Opts1 = maps_utils:validate(Opts0, ?OPTS_SPEC),
     St = #state{
         realm_uri = maps:get(realm_uri, Opts1),
-        client_id = maps:get(client_id, Opts1, undefined)
+        client_id = maps:get(client_id, Opts1, undefined),
+        token_path = maps:get(token_path, Opts1),
+        revoke_path = maps:get(revoke_path, Opts1)
     },
     {cowboy_rest, Req, St}.
 
@@ -291,10 +303,14 @@ accept(Req0, St) ->
     try
         {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
         Data = maps:from_list(PList),
+        Token = St#state.token_path,
+        TokenSize = byte_size(Token),
+        Revoke = St#state.revoke_path,
+        RevokeSize = byte_size(Revoke),
         case cowboy_req:path(Req1) of
-            <<"/oauth/token", _/binary>> ->
+            <<Token:TokenSize/binary, _/binary>> ->
                 token_flow(Data, Req1, St);
-            <<"/oauth/revoke", _/binary>> ->
+            <<Revoke:RevokeSize/binary, _/binary>> ->
                 revoke_token_flow(Data, Req1, St)
         end
     catch

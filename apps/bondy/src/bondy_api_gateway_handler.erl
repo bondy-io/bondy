@@ -40,6 +40,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -type state() :: #{
+    api_spec => map(),
     api_context => map(),
     body_evaluated => boolean(),
     session => any(),

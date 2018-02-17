@@ -106,7 +106,7 @@ terminate(St) ->
     {ok, subprotocol()} | {error, invalid_subprotocol}.
 
 validate_subprotocol(T) when is_binary(T) ->
-    {ok, subprotocol(T)};
+    validate_subprotocol(subprotocol(T));
 
 validate_subprotocol({ws, text, json} = S) ->
     {ok, S};
@@ -126,6 +126,8 @@ validate_subprotocol({T, binary, msgpack} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
 validate_subprotocol({T, binary, bert} = S) when ?IS_TRANSPORT(T) ->
     {ok, S};
+validate_subprotocol({error, _} = Error) ->
+    Error;
 validate_subprotocol(_) ->
     {error, invalid_subprotocol}.
 
@@ -565,6 +567,25 @@ get_realm(St) ->
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec subprotocol(binary()) ->
+    bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
+
+subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
+subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
+subprotocol(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
+subprotocol(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
+subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
+subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
+subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
+subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
+subprotocol(_) ->                           {error, invalid_subprotocol}.
+
+
+
 
 %% @private
 encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
@@ -582,25 +603,6 @@ do_init(Subprotocol, Peer, _Opts) ->
 %% @private
 update_context(Ctxt, St) ->
     St#wamp_state{context = Ctxt}.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec subprotocol(binary()) ->
-    bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
-
-subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
-subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
-subprotocol(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
-subprotocol(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
-subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
-subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
-subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
-subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
-subprotocol(_) ->                           {error, invalid_subprotocol}.
 
 
 

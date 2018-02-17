@@ -597,10 +597,10 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     CallerS = bondy_context:session(Ctxt0),
     CallerSId = bondy_session:id(CallerS),
 
-    %% We asume that as with pubsub, the _Caller_ should not receive the
+    %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    case match_registrations(ProcUri, Ctxt0, #{exclude => [CallerSId]}) of
+    case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
             Mssg = <<
                 "There are no registered procedures matching the uri",
