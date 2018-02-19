@@ -32,7 +32,7 @@
     end
 ).
 
--define(USER_SPEC,#{
+-define(USER_SPEC, #{
     <<"username">> => #{
         alias => username,
         key => <<"username">>,
@@ -69,7 +69,7 @@
     }
 }).
 
--define(USER_UPDATE_SPEC,#{
+-define(USER_UPDATE_SPEC, #{
     <<"password">> => #{
         alias => password,
         key => <<"password">>,

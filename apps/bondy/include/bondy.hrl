@@ -62,7 +62,7 @@
 -define(CALLER_FEATURES, #{
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => false,
+    call_timeout => true,
     call_canceling => false,
     caller_identification => false
 }).

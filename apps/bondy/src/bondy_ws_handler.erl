@@ -1,14 +1,14 @@
 %% =============================================================================
 %%  bondy_ws_handler.erl -
-%% 
+%%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
-%% 
+%%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
 %%  You may obtain a copy of the License at
-%% 
+%%
 %%     http://www.apache.org/licenses/LICENSE-2.0
-%% 
+%%
 %%  Unless required by applicable law or agreed to in writing, software
 %%  distributed under the License is distributed on an "AS IS" BASIS,
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,7 +20,7 @@
 %% =============================================================================
 %% @doc
 %% A Cowboy WS handler.
-%% 
+%%
 %% Each WAMP message is transmitted as a separate WebSocket message
 %% (not WebSocket frame)
 %%
@@ -105,7 +105,7 @@ init(Req0, _) ->
                     Opts = #{idle_timeout => ?CONN_TIMEOUT},
                     {cowboy_websocket, Req1, St, Opts};
                 {error, _Reason} ->
-                    %% Returning ok will cause the handler to 
+                    %% Returning ok will cause the handler to
                     %% stop in websocket_handle
                     {ok, Req0, undefined}
             end;
@@ -113,11 +113,11 @@ init(Req0, _) ->
             %% At the moment we only support WAMP, not plain WS
             _ = lager:info(
                 <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
-            %% Returning ok will cause the handler 
+            %% Returning ok will cause the handler
             %% to stop in websocket_handle
             {ok, Req0, undefined};
         {error, _Reason} ->
-            %% Returning ok will cause the handler 
+            %% Returning ok will cause the handler
             %% to stop in websocket_handle
             {ok, Req0, undefined}
     end.
@@ -138,8 +138,8 @@ init(Req0, _) ->
 websocket_init(#state{protocol_state = undefined} = St) ->
     %% This will close the WS connection
     Frame = {
-        close, 
-        1002, 
+        close,
+        1002,
         <<"Missing value for header 'sec-websocket-protocol'.">>
     },
     {reply, Frame, St};
@@ -155,7 +155,7 @@ websocket_init(St) ->
 %% -----------------------------------------------------------------------------
 websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
-    %% TODO This should be handled by the websocket_init callback above, 
+    %% TODO This should be handled by the websocket_init callback above,
     %% review and eliminate.
     _ = lager:error(<<"Unsupported message ~p">>, [Data]),
     {stop, St};
@@ -172,7 +172,7 @@ websocket_handle({pong, _Msg}, St) ->
 websocket_handle({T, Data}, #state{frame_type = T} = St) ->
     case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
         {ok, PSt} ->
-            {ok, St#state{protocol_state = PSt}}; 
+            {ok, St#state{protocol_state = PSt}};
         {reply, L, PSt} ->
             reply(T, L, St#state{protocol_state = PSt});
         {stop, PSt} ->
@@ -328,20 +328,20 @@ do_terminate(St) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @private 
+%% @private
 %% @doc
 %% The order is undefined
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_subprotocol(list(binary()) | undefined) -> 
-    {ok, bondy_wamp_protocol:subprotocol(), binary()} 
+-spec select_subprotocol(list(binary()) | undefined) ->
+    {ok, bondy_wamp_protocol:subprotocol(), binary()}
     | {error, invalid_subprotocol}.
 
 select_subprotocol(undefined) ->
     {error, invalid_subprotocol};
 
 select_subprotocol(L) when is_list(L) ->
-    try  
+    try
         Fun = fun(X) ->
             case bondy_wamp_protocol:validate_subprotocol(X) of
                 {ok, SP} ->

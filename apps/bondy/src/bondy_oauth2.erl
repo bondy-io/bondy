@@ -327,7 +327,7 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     JWT = sign(Key, Claims),
     RefreshToken = maybe_issue_refresh_token(RefreshTokenFlag, Uri, Now, Data0),
     ok = bondy_cache:put(
-        Uri, JWT, Claims ,#{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
+        Uri, JWT, Claims , #{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
     {ok, JWT, RefreshToken, Claims}.
 
 
@@ -410,7 +410,7 @@ maybe_cache({ok, Claims} = OK, JWT) ->
     #{<<"aud">> := RealmUri, <<"exp">> := Secs} = Claims,
     Now = erlang:system_time(seconds),
     ok = bondy_cache:put(
-        RealmUri, JWT, Claims ,#{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
+        RealmUri, JWT, Claims , #{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
     OK;
 
 maybe_cache(Error, _) ->

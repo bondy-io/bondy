@@ -26,8 +26,8 @@
 -type auth_scheme()                 ::  wampcra | basic | bearer | digest.
 -type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}
                                         | {basic, binary(), binary()}
-	                                    | {bearer, binary()}
-	                                    | {digest, [{binary(), binary()}]}.
+                                        | {bearer, binary()}
+                                        | {digest, [{binary(), binary()}]}.
 
 
 -export([authenticate/4]).

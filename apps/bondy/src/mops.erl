@@ -31,7 +31,7 @@
 -module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
--define(PIPE_OP, <<$|,$>>>).
+-define(PIPE_OP, <<$|, $>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{

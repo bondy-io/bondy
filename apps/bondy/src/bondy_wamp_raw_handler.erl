@@ -235,13 +235,13 @@ handle_info({tcp_error, Socket, Reason}, State) ->
         State
     ),
     ok = socket_closed(true, State),
-	{stop, Reason, State};
+    {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
     _ = log(debug, "Timeout. Sending ping", [], State0),
     {ok, State1} = send_ping(State0),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
-	{noreply, State1};
+    %% Here we do not return a timeout value as send_ping set an ah-hoc timet
+    {noreply, State1};
 
 handle_info(
     ping_timeout,
@@ -251,7 +251,7 @@ handle_info(
         State
     ),
     ok = close_socket(ping_timeout, State),
-	{stop, timeout, State#state{ping_sent = false}};
+    {stop, timeout, State#state{ping_sent = false}};
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
@@ -263,26 +263,26 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
-	{noreply, State}.
+    {noreply, State}.
 
 
 handle_call(Msg, From, State) ->
     _ = lager:info("Received unknown call, message=~p, from=~p", [Msg, From]),
-	{noreply, State, ?TIMEOUT}.
+    {noreply, State, ?TIMEOUT}.
 
 
 handle_cast(Msg, State) ->
     _ = lager:info("Received unknown cast, message=~p", [Msg]),
-	{noreply, State, ?TIMEOUT}.
+    {noreply, State, ?TIMEOUT}.
 
 
 terminate(Reason, St) ->
     _ = lager:info("Terminating, reason=~p", [Reason]),
-	bondy_wamp_protocol:terminate(St#state.protocol_state).
+    bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
 code_change(_OldVsn, State, _Extra) ->
-	{ok, State}.
+    {ok, State}.
 
 
 

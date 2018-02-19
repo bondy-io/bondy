@@ -109,9 +109,9 @@ handle_call(
     Ctxt) when length(L) =:= 1; length(L) =:= 2 ->
     % @TODO: Implement options
     Args = case bondy_registry:match(registration, Proc, Ctxt) of
-        {[],'$end_of_table'} ->
+        {[], '$end_of_table'} ->
             [];
-        {Sessions,'$end_of_table'} ->
+        {Sessions, '$end_of_table'} ->
             [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
@@ -125,9 +125,9 @@ handle_call(
     } = M,
     Ctxt) when length(L) =:= 1 ->
     Args = case bondy_registry:match(registration, Proc, Ctxt) of
-        {[],'$end_of_table'} ->
+        {[], '$end_of_table'} ->
             [];
-        {Sessions,'$end_of_table'} ->
+        {Sessions, '$end_of_table'} ->
             [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,

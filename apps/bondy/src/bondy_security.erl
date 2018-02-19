@@ -144,7 +144,7 @@
 
 %% Avoid whitespace, control characters, comma, semi-colon,
 %% non-standard Windows-only characters, other misc
--define(ILLEGAL, lists:seq(0, 32) ++ [60,62] ++ lists:seq(127, 191)).
+-define(ILLEGAL, lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191)).
 
 -ifdef(TEST).
 -define(REFRESH_TIME, 1).
@@ -807,7 +807,7 @@ alter_user(RealmUri, Username, Options) when is_binary(Username) ->
                                                     lists:sort(UserData)),
 
                     plumtree_metadata:put(
-                        ?USERS_PREFIX(Uri),Name, MergedOptions),
+                        ?USERS_PREFIX(Uri), Name, MergedOptions),
                     ok;
                 Error ->
                     Error
@@ -1235,7 +1235,7 @@ user_groups(RealmUri, {_, Opts}) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
-%% -----------------------------------------------------------------------------
+%% -----------------------------------------------------------------------------©
 user_grants(RealmUri, Username) ->
     accumulate_grants(
         to_lowercase_bin(RealmUri), to_lowercase_bin(Username), user).
@@ -1406,7 +1406,7 @@ accumulate_grants([], Seen, Acc, _Type, _) ->
 accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
     Options = role_details(RealmUri, Role, Type),
     Groups = [G || G <- lookup(?GROUPS, Options, []),
-                        not lists:member(G,Seen),
+                        not lists:member(G, Seen),
                         group_exists(RealmUri, G)],
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
@@ -1542,7 +1542,7 @@ validate_permissions([Perm|T], Known) when is_binary(Perm) ->
 match_source([], _User, _PeerIP) ->
     {error, no_matching_sources};
 
-match_source([{UserName, {IP,Mask}, Source, Options}|Tail], User, PeerIP) ->
+match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
     case (UserName == all orelse
           UserName == User) andalso
         mask_address(IP, Mask) == mask_address(PeerIP, Mask) of
