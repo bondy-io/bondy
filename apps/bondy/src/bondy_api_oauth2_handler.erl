@@ -279,7 +279,7 @@ is_authorized(Req0, St0) ->
                 {error, Reason} ->
                     _ = lager:info(
                         "API Client login failed due to invalid client, "
-                        "reason=~p", [Reason]),
+                        "reason=~p, realm=~p", [Reason, St0#state.realm_uri]),
                     Req1 = reply(oauth2_invalid_client, Req0),
                     {stop, Req1, St0}
             end

@@ -382,26 +382,31 @@ sign(Key, Claims) ->
     {ok, map()} | {error, error()}.
 
 do_verify_jwt(JWT, Match) ->
-    {jose_jwt, Map} = jose_jwt:peek(JWT),
-    #{
-        <<"aud">> := RealmUri,
-        <<"kid">> := Kid
-    } = Map,
-    case bondy_realm:lookup(RealmUri) of
-        {error, not_found} ->
-            {error, unknown_realm};
-        Realm ->
-            case bondy_realm:get_public_key(Realm, Kid) of
-                undefined ->
-                    {error, oauth2_invalid_grant};
-                JWK ->
-                    case jose_jwt:verify(JWK, JWT) of
-                        {true, {jose_jwt, Claims}, _} ->
-                            matches(Claims, Match);
-                        {false, {jose_jwt, _Claims}, _} ->
-                            {error, oauth2_invalid_grant}
-                    end
-            end
+    try
+        {jose_jwt, Map} = jose_jwt:peek(JWT),
+        #{
+            <<"aud">> := RealmUri,
+            <<"kid">> := Kid
+        } = Map,
+        case bondy_realm:lookup(RealmUri) of
+            {error, not_found} ->
+                {error, unknown_realm};
+            Realm ->
+                case bondy_realm:get_public_key(Realm, Kid) of
+                    undefined ->
+                        {error, oauth2_invalid_grant};
+                    JWK ->
+                        case jose_jwt:verify(JWK, JWT) of
+                            {true, {jose_jwt, Claims}, _} ->
+                                matches(Claims, Match);
+                            {false, {jose_jwt, _Claims}, _} ->
+                                {error, oauth2_invalid_grant}
+                        end
+                end
+        end
+    catch
+        error:_ ->
+            {error, oauth2_invalid_grant}
     end.
 
 
