@@ -704,10 +704,10 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
         ok ->
             %% Promise was fulfilled or timed out and garbage collected,
             %% we do nothing
-            ok;
+            {ok, Ctxt};
         {ok, timeout} ->
             %% Promise timed out, we do nothing
-            ok;
+            {ok, Ctxt};
         {ok, #promise{invocation_request_id = ReqId} = P} ->
             #promise{
                 call_request_id = CallId,
