@@ -1,5 +1,29 @@
 %% -*- erlang -*-
-%% complex lager example
+
+{mapping, "log.colored", "lager.colored", [
+  {default, on},
+  {datatype, flag}
+]}.
+
+{mapping, "log.async_threshold.size", "lager.async_threshold", [
+  {default, 500},
+  {datatype, integer}
+]}.
+
+{mapping, "log.async_threshold.window", "lager.async_threshold_window", [
+  {default, 50},
+  {datatype, integer}
+]}.
+
+
+{mapping, "log.console.formatter", "lager.handlers", [
+  {default, lager_default_formatter},
+  {datatype, {enum, [lager_default_formatter]}}
+]}.
+
+
+
+
 %% @doc where do you want the console.log output:
 %% off : nowhere
 %% file: the file specified by log.console.file
@@ -58,9 +82,11 @@
 
     ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
     ConsoleLogFile = cuttlefish:conf_get("log.console.file", Conf),
+    ConsoleLogForm = cuttlefish:conf_get("log.console.formatter", Conf),
 
     ConsoleHandler = {lager_console_handler, ConsoleLogLevel},
     ConsoleFileHandler = {lager_file_backend, [{file, ConsoleLogFile},
+                                                {formatter, ConsoleLogForm},
                                                 {level, ConsoleLogLevel},
                                                 {size, 10485760},
                                                 {date, "$D0"},
