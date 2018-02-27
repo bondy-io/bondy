@@ -14,6 +14,7 @@
   {git,"https://github.com/ninenines/cowlib",
        {ref,"3ef5b48a028bb66f82b452c98ae515903096641c"}},
   1},
+ {<<"ctx">>,{pkg,<<"ctx">>,<<"0.4.1">>},1},
  {<<"cuttlefish">>,{pkg,<<"cuttlefish">>,<<"2.0.11">>},0},
  {<<"eleveldb">>,{pkg,<<"eleveldb">>,<<"2.2.20">>},1},
  {<<"erlang_term">>,{pkg,<<"erlang_term">>,<<"1.7.2">>},0},
@@ -50,6 +51,10 @@
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},1},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.0.2">>},1},
  {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.7.0">>},0},
+ {<<"opencensus">>,
+  {git,"https://github.com/census-instrumentation/opencensus-erlang.git",
+       {ref,"0dd94b19434e4c103c718c64062cc40e4ec85d51"}},
+  0},
  {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.1.0">>},0},
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
  {<<"plumtree">>,
@@ -68,6 +73,7 @@
        {ref,"55c2a9d623454f372a15e99721a37093d8773b48"}},
   1},
  {<<"redbug">>,{pkg,<<"redbug">>,<<"1.1.2">>},0},
+ {<<"rfc3339">>,{pkg,<<"rfc3339">>,<<"0.9.0">>},2},
  {<<"riak_dt">>,{pkg,<<"riak_dt">>,<<"2.1.1">>},1},
  {<<"setup">>,{pkg,<<"setup">>,<<"1.8.4">>},1},
  {<<"sidejob">>,{pkg,<<"sidejob">>,<<"2.1.0">>},0},
@@ -92,7 +98,8 @@
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
        {ref,"64722b07fc3c12402e2e8891cde8c08f51d75674"}},
-  0}]}.
+  0},
+ {<<"wts">>,{pkg,<<"wts">>,<<"0.3.0">>},1}]}.
 [
 {pkg_hash,[
  {<<"accept">>, <<"548EBB6FB2E8B0D170E75BB6123AEA6CEECB0189BB1231EEADF52EAC08384A97">>},
@@ -102,6 +109,7 @@
  {<<"certifi">>, <<"A0C0E475107135F76B8C1D5BC7EFB33CD3815CB3CF3DEA7AEFDD174DABEAD064">>},
  {<<"chash">>, <<"AF02484F2640C653C4B9A8557A14CA0704989DBEDB27E7CCBC442F1903A3BCA7">>},
  {<<"clique">>, <<"8C88F2349C7C550D3A2F44E63C30128782B724B0987084370A120700C3EA7564">>},
+ {<<"ctx">>, <<"E4297DD25CCDE992BC7DE298F514BEACD0A44FAA9126A1F2567306D94C519A13">>},
  {<<"cuttlefish">>, <<"D266AC68BA801803ACE4EF3DEC0FC419F184092E1882E19F7AFC29A6D4334E6A">>},
  {<<"eleveldb">>, <<"1FFF63A5055BBF4BF821F797EF76065882B193F5E8095F95FCD9287187773B58">>},
  {<<"erlang_term">>, <<"316B376106F83864F6078AC5D2A68DEC1FE5AF489302583E8F53CA7CB18486D7">>},
@@ -124,9 +132,11 @@
  {<<"prometheus_httpd">>, <<"8F4B83712FCFF5870F1B6664E6FA4F1C2EE2C72729FB04D46445C77DE65802F6">>},
  {<<"quickrand">>, <<"FF3916C50BC10A8DC62417FC6049FEF5EA56D5DBCFCE546FAABFB6188E3BAEAA">>},
  {<<"redbug">>, <<"CD2ABE4E4AAE6A0EF5069E03B08D9FD7DEA4A103E5821801D8F28C41EE82F5CF">>},
+ {<<"rfc3339">>, <<"2075653DC9407541C84B1E15F8BDA2ABE95FB17C9694025E079583F2D19C1060">>},
  {<<"riak_dt">>, <<"56B1898A543C561994F5D052FDEA972525CA98F46FDB3DCDB7366E4F92EE8F54">>},
  {<<"setup">>, <<"738DB0685DC1741F45C6A9BF78478E0D5877F3D0876C0B50FD02F0210EDB5AA4">>},
  {<<"sidejob">>, <<"5D6A7C9C620778CB1908E46B552D767DF2ED4D77070BB7B5B8773D4FF18D1D37">>},
  {<<"ssl_verify_fun">>, <<"28A4D65B7F59893BC2C7DE786DEC1E1555BD742D336043FE644AE956C3497FBE">>},
- {<<"uuid">>, <<"EB803855E12D57B1CC10522781D1B42064FA2E4C576731700EE48D84A9283292">>}]}
+ {<<"uuid">>, <<"EB803855E12D57B1CC10522781D1B42064FA2E4C576731700EE48D84A9283292">>},
+ {<<"wts">>, <<"5CDF22C775CB1EBAE24C326A5DB6074D753C42F4BD12A9AA47CC62D3E2C71AD1">>}]}
 ].

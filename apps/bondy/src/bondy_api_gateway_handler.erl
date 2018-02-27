@@ -163,6 +163,7 @@ resource_exists(Req, #{api_spec := Spec} = St) ->
             %% This allows Cowboy to return `201 Created` instead of `200 OK`.
             false;
         {true, _} ->
+            %% A collection resource always exists.
             true;
         {false, _} ->
             %% TODO We should check for real here, but we carry on and let
@@ -454,6 +455,7 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
     M = #{
+        <<"id">> => opencensus:generate_trace_id(),
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => Peer,
@@ -901,6 +903,7 @@ trim_trailing_slash(Bin) ->
 log(Level, Prefix, Head, #{api_context := Ctxt} = St)
 when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     #{
+        <<"id">> := TraceId,
         <<"method">> := Method,
         <<"scheme">> := Scheme,
         <<"peername">> := Peername,
@@ -913,6 +916,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
         Prefix,
         <<
+            ", trace_id=~p"
             ", realm_uri=~s"
             ", encoding=~s"
             ", method=~s"
@@ -933,6 +937,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     end,
 
     Tail = [
+        TraceId,
         maps:get(realm_uri, St, undefined),
         maps:get(encoding, St, undefined),
         Method,
