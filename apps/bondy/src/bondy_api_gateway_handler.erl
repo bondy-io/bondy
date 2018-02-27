@@ -193,11 +193,11 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
 
         {error, Response0, St2} ->
             {StatusCode, Response1} = take_status_code(Response0, 500),
-            Req1 = reply(StatusCode, Enc, Response1, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St2};
 
         {error, StatusCode, Response, St2} ->
-            Req1 = reply(StatusCode, Enc, Response, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St2}
     end.
 
@@ -303,17 +303,17 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 
         {error, Response0, St1} ->
             {StatusCode, Response1} = take_status_code(Response0, 500),
-            Req1 = reply(StatusCode, Enc, Response1, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St1};
 
         {error, StatusCode, Response, St1} ->
-            Req1 = reply(StatusCode, Enc, Response, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St1}
     catch
         throw:Reason ->
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
-            Req1 = reply(StatusCode, Enc, Response, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
         Class:Reason ->
             _ = log(
@@ -324,7 +324,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             ),
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
-            Req1 = reply(StatusCode, Enc, Response, Req0),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0}
     end.
 
@@ -354,18 +354,18 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
             {error, Response0, St2} ->
                 {StatusCode, Response1} = take_status_code(Response0, 500),
-                Req2 = reply(StatusCode, Enc, Response1, Req1),
+                Req2 = reply(StatusCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
             {error, HTTPCode, Response, St2} ->
 
-                {stop, reply(HTTPCode, Enc, Response, Req1), St2}
+                {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
         throw:Reason ->
             {StatusCode1, Body} = take_status_code(
                 bondy_error:map(Reason), 400),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
-            Req = reply(StatusCode1, Enc, ErrResp, Req0),
+            Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
         Class:Reason ->
             _ = log(
@@ -377,7 +377,7 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             {StatusCode1, Body} = take_status_code(
                 bondy_error:map(Reason), 500),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
-            Req = reply(StatusCode1, Enc, ErrResp, Req0),
+            Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0}
     end.
 
@@ -752,7 +752,7 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
             <<"www-authenticate">> => Auth
         }
     },
-    reply(401, Enc, Resp, Req).
+    reply(401, error_encoding(Enc), Resp, Req).
 
 
 %% @private
@@ -851,6 +851,12 @@ maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
 
 maybe_encode(Enc, Body, _) ->
     bondy_utils:maybe_encode(Enc, Body).
+
+
+error_encoding(json) -> json;
+error_encoding(msgpack) -> msgpack;
+error_encoding(dynamic) -> json.
+
 
 
 %% @private
