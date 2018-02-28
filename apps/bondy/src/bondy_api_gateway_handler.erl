@@ -454,9 +454,11 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
-    Id = list_to_binary(integer_to_list( opencensus:generate_trace_id())),
-    M = #{
-        <<"id">> => Id,
+    Id = opencensus:generate_trace_id(),
+     M = #{
+        %% Msgpack does not support 128-bit integers,
+        %% so for the time being we encod it as binary string
+        <<"id">> => integer_to_binary(Id),
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => Peer,
@@ -920,10 +922,13 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
         <<"bindings">> := Bindings,
         <<"body_length">> := Len
     } = maps:get(<<"request">>, Ctxt),
+
     Format = iolist_to_binary([
         Prefix,
         <<
-            ", trace_id=~p"
+            %% Right now trace_id is a bin as msgpack does not support
+            %% 128-bit integers
+            ", trace_id=~s"
             ", realm_uri=~s"
             ", encoding=~s"
             ", method=~s"
