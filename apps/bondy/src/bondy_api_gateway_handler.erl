@@ -454,8 +454,9 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
+    Id = list_to_binary(integer_to_list( opencensus:generate_trace_id())),
     M = #{
-        <<"id">> => opencensus:generate_trace_id(),
+        <<"id">> => Id,
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => Peer,
