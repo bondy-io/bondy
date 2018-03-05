@@ -535,10 +535,18 @@ apply_op(<<"integer">>, Val, _) when is_float(Val) ->
     trunc(Val);
 
 apply_op(<<"float">>, Val, _) when is_binary(Val) ->
-    binary_to_float(Val);
+    try binary_to_float(Val)
+    catch
+        error:badarg ->
+            float(binary_to_integer(Val))
+    end;
 
 apply_op(<<"float">>, Val, _) when is_list(Val) ->
-    float(list_to_integer(Val));
+    try list_to_float(Val)
+    catch
+        error:badarg ->
+            float(list_to_integer(Val))
+    end;
 
 apply_op(<<"float">>, Val, _) when is_float(Val) ->
     Val;
