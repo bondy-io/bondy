@@ -502,6 +502,7 @@ apply_op(Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) andalso (
     Op == <<"integer">> orelse
     Op == <<"float">> orelse
+    Op == <<"boolean">> orelse
     Op == <<"abs">> orelse
     Op == <<"head">> orelse
     Op == <<"tail">> orelse
@@ -544,6 +545,30 @@ apply_op(<<"float">>, Val, _) when is_float(Val) ->
 
 apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
+
+apply_op(<<"boolean">>, 0, _) ->
+    false;
+
+apply_op(<<"boolean">>, <<"0">>, _) ->
+    false;
+
+apply_op(<<"boolean">>, false, _) ->
+    false;
+
+apply_op(<<"boolean">>, <<"false">>, _) ->
+    false;
+
+apply_op(<<"boolean">>, 1, _) ->
+    true;
+
+apply_op(<<"boolean">>, <<"1">>, _) ->
+    true;
+
+apply_op(<<"boolean">>, true, _) ->
+    true;
+
+apply_op(<<"boolean">>, <<"true">>, _) ->
+    true;
 
 apply_op(<<"head">>, [], _) ->
     <<>>;

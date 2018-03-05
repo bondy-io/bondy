@@ -290,6 +290,41 @@ merge_right_2_test(_) ->
     Map = mops:eval(<<"{{map3 |> merge({{map1}})}}">>, Ctxt0),
     #{<<"a">> := 1, <<"b">> := 2} = mops:eval(Map, Ctxt1).
 
+boolean_1_test(_) ->
+    Ctxt = #{<<"x">> => 0},
+    false = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_2_test(_) ->
+    Ctxt = #{<<"x">> => <<"0">>},
+    false = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_3_test(_) ->
+    Ctxt = #{<<"x">> => false},
+    false = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_4_test(_) ->
+    Ctxt = #{<<"x">> => <<"false">>},
+    false = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_5_test(_) ->
+    Ctxt = #{<<"x">> => 1},
+    true = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_6_test(_) ->
+    Ctxt = #{<<"x">> => <<"1">>},
+    true = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_7_test(_) ->
+    Ctxt = #{<<"x">> => true},
+    true = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+boolean_8_test(_) ->
+    Ctxt = #{<<"x">> => <<"true">>},
+    true = mops:eval(<<"{{x |> boolean}}">>, Ctxt).
+
+
+
+
 map_test(_) ->
     Ctxt = #{
         <<"defaults">> => #{
