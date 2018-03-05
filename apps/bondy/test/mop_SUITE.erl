@@ -266,6 +266,8 @@ merge_left_2_test(_) ->
     },
     #{<<"a">> := 10} = mops:eval(<<"{{foo |> merge(_,{{bar}})}}">>, Ctxt).
 
+
+
 merge_right_test(_) ->
     Ctxt = #{
         <<"foo">> => #{<<"a">> => 1},
@@ -287,6 +289,29 @@ merge_right_2_test(_) ->
     },
     Map = mops:eval(<<"{{map3 |> merge({{map1}})}}">>, Ctxt0),
     #{<<"a">> := 1, <<"b">> := 2} = mops:eval(Map, Ctxt1).
+
+map_test(_) ->
+    Ctxt = #{
+        <<"defaults">> => #{
+            <<"headers">> => #{<<"a">> => 1}
+        },
+        <<"action">> => #{
+            <<"result">> => #{
+                <<"arguments">> => [#{
+                    <<"content-type">> => <<"image/png">>
+                }]
+            }
+        },
+        <<"variables">> => #{
+            <<"content-type">> => <<"{{action.result.arguments |> head |> get(content-type)}}">>
+        }
+    },
+    Expr = <<"{{ defaults.headers |> put(content-type, {{variables.content-type}}) }}">>,
+
+    #{
+        <<"a">> := 1,
+        <<"content-type">> := <<"image/png">>
+    } = mops:eval(Expr, Ctxt).
 
 
 %% merge_right_3_test(_) ->
