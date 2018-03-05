@@ -466,17 +466,22 @@ reply(common_name_mismatch, Req) ->
 
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
-    cowboy_req:reply(
-        401, prepare_request(bondy_error:map(Error), Headers, Req));
+    ErrorMap = maps:without(<<"status_code">>, bondy_error:map(Error)),
+    cowboy_req:reply(401, prepare_request(ErrorMap, Headers, Req));
 
 reply(unsupported_token_type = Error, Req) ->
-    #{<<"status_code">> := Code} = Map = bondy_error:map(Error),
+    {Code, Map} = maps:take(<<"status_code">>, bondy_error:map(Error)),
     cowboy_req:reply(Code, prepare_request(Map, #{}, Req));
 
 reply(Error, Req) ->
-    Map =  bondy_error:map(Error),
-    Status = maps:get(<<"status_code">>, Map, 400),
-    cowboy_req:reply(Status, prepare_request(Map, #{}, Req)).
+    Map0 = bondy_error:map(Error),
+    {Code, Map1} = case maps:take(<<"status_code">>, Map0) of
+        error ->
+            {400, Map0};
+        Res ->
+            Res
+    end,
+    cowboy_req:reply(Code, prepare_request(Map1, #{}, Req)).
 
 
 

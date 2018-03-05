@@ -257,8 +257,9 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             %% TODO update context
             {true, Req0, St1};
         {error, unknown_realm} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(unknown_realm)),
             Response = #{
-                <<"body">> => bondy_error:map(unknown_realm),
+                <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
             },
             Req2 = reply(401, json, Response, Req0),
@@ -738,7 +739,7 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
 
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    Body = maps:put(<<"status_code">>, 401, bondy_error:map(Error)),
+    {_, Body} = take_status_code(bondy_error:map(Error)),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
     Desc = maps:get(<<"description">>, Body, <<>>),
