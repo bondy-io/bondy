@@ -30,9 +30,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
+-include("bondy.hrl").
+-include("bondy_api_gateway.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
+-define(STATUS_CODES_KEY, <<"status_codes">>).
 -define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
@@ -55,6 +59,32 @@
     <<"post">>,
     <<"put">>
 ]).
+
+-define(DEFAULT_STATUS_CODES, #{
+    ?BONDY_BAD_GATEWAY_ERROR =>                    503,
+    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>       500,
+    ?BONDY_ERROR_TIMEOUT =>                        504,
+    ?WAMP_ERROR_AUTHORIZATION_FAILED =>            403,
+    ?WAMP_ERROR_CANCELLED =>                       400,
+    ?WAMP_ERROR_CLOSE_REALM =>                     500,
+    ?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED =>         400,
+    ?WAMP_ERROR_GOODBYE_AND_OUT =>                 500,
+    ?WAMP_ERROR_INVALID_ARGUMENT =>                400,
+    ?WAMP_ERROR_INVALID_URI =>                     400,
+    ?WAMP_ERROR_NET_FAILURE =>                     502,
+    ?WAMP_ERROR_NOT_AUTHORIZED =>                  401,
+    ?WAMP_ERROR_NO_ELIGIBLE_CALLE =>               502,
+    ?WAMP_ERROR_NO_SUCH_PROCEDURE =>               501,
+    ?WAMP_ERROR_NO_SUCH_REALM =>                   502,
+    ?WAMP_ERROR_NO_SUCH_REGISTRATION =>            502,
+    ?WAMP_ERROR_NO_SUCH_ROLE =>                    400,
+    ?WAMP_ERROR_NO_SUCH_SESSION =>                 500,
+    ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION =>            502,
+    ?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME =>   400,
+    ?WAMP_ERROR_OPTION_NOT_ALLOWED =>              400,
+    ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS =>        400,
+    ?WAMP_ERROR_SYSTEM_SHUTDOWN =>                 500
+}).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
@@ -108,6 +138,14 @@
         default => #{},
         datatype => map,
         validator => ?DEFAULTS_SPEC
+    },
+    ?STATUS_CODES_KEY => #{
+        alias => paths,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
     },
     <<"versions">> => #{
         alias => versions,
@@ -180,6 +218,14 @@
         allow_null => false,
         default => #{},
         datatype => map
+    },
+    ?STATUS_CODES_KEY => #{
+        alias => paths,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
     },
     <<"paths">> => #{
         alias => paths,
@@ -994,17 +1040,19 @@ parse(Spec, Ctxt) ->
 parse_host(Host0, Ctxt0) ->
     {Vars, Host1} = maps:take(?VARS_KEY, Host0),
     {Defs, Host2} = maps:take(?DEFAULTS_KEY, Host1),
+    {Codes, Host3} = maps:take(?STATUS_CODES_KEY, Host2),
     Ctxt1 = Ctxt0#{
         ?VARS_KEY => Vars,
-        ?DEFAULTS_KEY => Defs
+        ?DEFAULTS_KEY => Defs,
+        ?STATUS_CODES_KEY => maps:merge(Codes, ?DEFAULT_STATUS_CODES)
     },
 
     %% parse all versions
-    Vs0 = maps:get(<<"versions">>, Host2),
+    Vs0 = maps:get(<<"versions">>, Host3),
     Fun = fun(_, V) -> parse_version(V, Ctxt1) end,
     Vs1 = maps:map(Fun, Vs0),
-    Host3 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host2),
-    maps:update(<<"versions">>, Vs1, Host3).
+    Host4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host3),
+    maps:update(<<"versions">>, Vs1, Host4).
 
 
 %% @private
@@ -1016,10 +1064,15 @@ parse_version(V0, Ctxt0) ->
     V2 = maps_utils:validate(V1, ?API_VERSION),
     %% We merge again in case the validation added defaults
     {V3, Ctxt2} = merge_eval_vars(V2, Ctxt1),
+    %% We parse the status_codes and merge them into ctxt
+    {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
+    Codes0 = maps:get(?STATUS_CODES_KEY, Ctxt1),
+    Ctxt3 = maps:put(<<"status_codes">>, maps:merge(Codes0, Codes1), Ctxt2),
+
     %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
         try
-            parse_path(P, Ctxt2)
+            parse_path(P, Ctxt3)
         catch
             error:{badkey, Key} ->
                 error({
@@ -1028,9 +1081,9 @@ parse_version(V0, Ctxt0) ->
                 })
         end
     end,
-    V4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V3),
+    V5 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V4),
     maps:update(
-        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V4)), V4).
+        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V5)), V5).
 
 
 %% @private

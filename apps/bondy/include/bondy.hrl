@@ -106,7 +106,7 @@
 -define(BONDY_SESSION_ALREADY_EXISTS, <<"com.leapsight.bondy.error.session_already_exists">>).
 
 -define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
--define(BONDY_ERROR_UNKNOWN, <<"com.leapsight.bondy.error.unknown_error">>).
+-define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
 -type peer_id() :: {integer(), pid()}.
 
 

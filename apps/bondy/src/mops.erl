@@ -498,6 +498,7 @@ apply_ops([], Val, _) ->
 
 
 %% @private
+
 apply_op(Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) andalso (
     Op == <<"integer">> orelse
@@ -557,10 +558,10 @@ apply_op(<<"float">>, Val, _) when is_integer(Val) ->
 apply_op(<<"boolean">>, 0, _) ->
     false;
 
-apply_op(<<"boolean">>, <<"0">>, _) ->
+apply_op(<<"boolean">>, false, _) ->
     false;
 
-apply_op(<<"boolean">>, false, _) ->
+apply_op(<<"boolean">>, <<"0">>, _) ->
     false;
 
 apply_op(<<"boolean">>, <<"false">>, _) ->
@@ -569,10 +570,10 @@ apply_op(<<"boolean">>, <<"false">>, _) ->
 apply_op(<<"boolean">>, 1, _) ->
     true;
 
-apply_op(<<"boolean">>, <<"1">>, _) ->
+apply_op(<<"boolean">>, true, _) ->
     true;
 
-apply_op(<<"boolean">>, true, _) ->
+apply_op(<<"boolean">>, <<"1">>, _) ->
     true;
 
 apply_op(<<"boolean">>, <<"true">>, _) ->
@@ -647,13 +648,17 @@ apply_custom_op(<<"nth(", Rest/binary>> = Op, Val, Ctxt) when is_list(Val)->
             error({invalid_expression, Op})
     end;
 
+
 apply_custom_op(<<"get(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->
     {'$mops_proxy',
         fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
     };
 
-apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+apply_custom_op(<<"get(", _/binary>> = Op, <<"$map">>, Ctxt) ->
+    apply_custom_op(Op, #{}, Ctxt);
+
+apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val) ->
     case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
 
         [{'$mops_proxy', F} = Key] when is_function(F, 1) ->
@@ -685,6 +690,9 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
         _ ->
             error({invalid_expression, Op})
     end;
+
+apply_custom_op(<<"put(", _/binary>> = Op, <<"$map">>, Ctxt) ->
+    apply_custom_op(Op, #{}, Ctxt);
 
 apply_custom_op(<<"put(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->
@@ -720,14 +728,20 @@ apply_custom_op(<<"put(", Rest/binary>> = Op, Map, Ctxt) when is_map(Map)->
     end;
 
 apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
-
+    EmptyMap = <<"$map">>,
     Args = case
         [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)]
     of
+        [EmptyMap] ->
+            {Expr1, #{}};
         [Expr2] ->
             {Expr1, Expr2};
+        [<<"_">>, EmptyMap] ->
+            {Expr1, #{}};
         [<<"_">>, Expr2] ->
             {Expr1, Expr2};
+        [EmptyMap, <<"_">>] ->
+            {#{}, Expr1};
         [Expr2, <<"_">>] ->
             {Expr2, Expr1};
         _ ->
@@ -765,6 +779,12 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
         _ ->
             error({invalid_expression, Op})
     end;
+
+apply_custom_op(<<"with(", _/binary>>, <<"$map">>, _) ->
+    #{};
+
+apply_custom_op(<<"without(", _/binary>>, <<"$map">>, _) ->
+    #{};
 
 apply_custom_op(<<"with(", _/binary>> = Op, {'$mops_proxy', _} = L, _) ->
     {'$mops_proxy',
