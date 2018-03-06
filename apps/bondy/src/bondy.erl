@@ -239,7 +239,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = #{
-                error_uri => ?BONDY_ERROR_UNKNOWN,
+                error_uri => ?BONDY_INCONSISTENCY_ERROR,
                 details => #{},
                 arguments => [<<"Inconsistency error">>],
                 arguments_kw => #{}
@@ -251,7 +251,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = #{
-                error_uri => ?BONDY_ERROR_UNKNOWN,
+                error_uri => ?BONDY_INCONSISTENCY_ERROR,
                 details => #{},
                 arguments => [<<"Inconsistency error">>],
                 arguments_kw => #{}

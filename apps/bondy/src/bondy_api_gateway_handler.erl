@@ -37,6 +37,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
+-include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -type state() :: #{
@@ -575,7 +576,7 @@ perform_action(
     Ctxt0 = maps:get(api_context, St1),
     %% We get the response directly as it should be statically defined
     Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
-    Response = mops:eval(Result, Ctxt0),
+    Response = mops_eval(Result, Ctxt0),
     St2 = maps:update(api_context, Ctxt0, St1),
     {ok, Response, St2};
 
@@ -600,7 +601,7 @@ perform_action(
         % <<"retries">> := R,
         % <<"retry_timeout">> := RT,
         <<"body">> := Body
-    } = Act1 = mops:eval(Act, Ctxt0),
+    } = Act1 = mops_eval(Act, Ctxt0),
 
 
     Opts = [
@@ -631,8 +632,8 @@ perform_action(
 
         {error, Reason} ->
             Error = #{
-                <<"code">> => <<"com.leapsight.bondy.bad_gateway">>,
-                <<"message">> => <<"Error while connecting with upstream URL">>,
+                <<"code">> => ?BONDY_BAD_GATEWAY_ERROR,
+                <<"message">> => <<"Error while connecting with upstream URL '", Url/binary, "'.">>,
                 <<"description">> => Reason %% TODO convert to string
             },
             throw(Error)
@@ -653,7 +654,7 @@ perform_action(
         <<"options">> := Opts,
         <<"retries">> := _R,
         <<"timeout">> := T
-    } = mops:eval(Act, Ctxt0),
+    } = mops_eval(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
@@ -685,7 +686,7 @@ perform_action(
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             Ctxt1 = update_context({result, Result1}, Ctxt0),
-            Response = mops:eval(
+            Response = mops_eval(
                 maps:get(<<"on_result">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             {ok, Response, St2};
@@ -694,7 +695,7 @@ perform_action(
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response0 = mops:eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
+            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             {StatusCode1, Response1} = take_status_code(Response0, 500),
             {error, StatusCode1, Response1, St2}
@@ -712,7 +713,7 @@ when StatusCode >= 400 andalso StatusCode < 600->
         <<"headers">> => RespHeaders
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
-    Response0 = mops:eval(maps:get(<<"on_error">>, Spec), Ctxt1),
+    Response0 = mops_eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {FinalCode, Response1} = take_status_code(Response0),
     {error, FinalCode, Response1, St1};
@@ -732,7 +733,7 @@ from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
             maps:put(<<"uri">>, <<>>, Result0)
     end,
     Ctxt1 = update_context({result, Result1}, Ctxt0),
-    Response0 = mops:eval(maps:get(<<"on_result">>, Spec), Ctxt1),
+    Response0 = mops_eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
     {StatusCode1, Response1} = take_status_code(Response0),
     {ok, StatusCode1, Response1, St1}.
@@ -865,15 +866,15 @@ error_encoding(dynamic) -> json.
 
 %% @private
 uri_to_status_code(timeout) ->                                     504;
-uri_to_status_code(<<"com.leapsight.bondy.bad_gateway">>) ->       503;
+uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->       503;
 uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                        504;
 uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
-uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
+uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       400;
 uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
 uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         400;
 uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
 uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
-uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502;
+uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     400;
 uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502;
 uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401;
 uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502;
@@ -897,7 +898,7 @@ eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
         maps:get(method(Req), Spec),
         #{}
     ),
-    mops:eval(Expr, Ctxt).
+    mops_eval(Expr, Ctxt).
 
 
 trim_trailing_slash(Bin) ->
@@ -906,6 +907,25 @@ trim_trailing_slash(Bin) ->
             binary:part(Bin, 0, byte_size(Bin) -1);
         0 ->
             Bin
+    end.
+
+
+
+mops_eval(Expr, Ctxt) ->
+    try mops:eval(Expr, Ctxt)
+    catch
+        error:{badkey, Key} ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            });
+        error:{badkeypath, Path} ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            })
     end.
 
 
