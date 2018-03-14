@@ -31,7 +31,7 @@
     %% {platform_etc_dir,"./etc"},
     %% /Volumes/Leapsight/bondy/_build/test/logs/ct_run.nonode@nohost.2017-08-25_11.09.05
     {platform_etc_dir,"../../../../priv/specs"},
-    {platform_data_dir,"./data/bondy/db"},
+    {platform_data_dir, "./data/bondy"}.
     {platform_bin_dir,"./bin"},
     {wamp_tls,
         [{pki_files,
@@ -128,7 +128,7 @@
      {tiered_slow_level,0}]},
 {plumtree,
     [{broadcast_mods,
-         [plumtree_metadata_manager,bondy_tuplespace_broadcast_handler]}]},
+         [plum_db,bondy_tuplespace_broadcast_handler]}]},
 {tuplespace,
     [{static_tables,
          [{bondy_session,

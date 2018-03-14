@@ -44,7 +44,7 @@
             lager,
             msgpack,
             opencensus,
-            plumtree,
+            plum_db,
             prometheus,
             redbug,
             sidejob,

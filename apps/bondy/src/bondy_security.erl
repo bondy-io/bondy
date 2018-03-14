@@ -181,7 +181,7 @@ find_user(Realm, Username) ->
 
 -spec find_one_user_by_metadata(binary(), metadata_key(), metadata_value()) -> {Username :: string(), options()} | {error, not_found}.
 find_one_user_by_metadata(Realm, Key, Value) ->
-    plumtree_metadata:fold(
+    plum_db:fold(
       fun(User, _Acc) -> return_if_user_matches_metadata(Key, Value, User) end,
       {error, not_found},
       ?USERS_PREFIX(Realm),
@@ -199,7 +199,7 @@ return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
     {Username :: string(), options()} | {error, not_found | not_unique}.
 find_unique_user_by_metadata(Realm, Key, Value) ->
     R = to_lowercase_bin(Realm),
-    plumtree_metadata:fold(
+    plum_db:fold(
         fun (User, Acc) ->
             accumulate_matching_user(Key, Value, User, Acc)
         end,
@@ -244,7 +244,7 @@ prettyprint_users(Users0, Width) ->
 
 print_sources(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    Sources = plumtree_metadata:fold(
+    Sources = plum_db:fold(
         fun({{Username, CIDR}, [{Source, Options}]}, Acc) ->
                 [{Username, CIDR, Source, Options}|Acc];
             ({{_, _}, [?TOMBSTONE]}, Acc) ->
@@ -287,7 +287,7 @@ print_user(RealmUri, User) ->
 %% -----------------------------------------------------------------------------
 print_users(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    Users = plumtree_metadata:fold(fun({_Username, [?TOMBSTONE]}, Acc) ->
+    Users = plum_db:fold(fun({_Username, [?TOMBSTONE]}, Acc) ->
                                             Acc;
                                         ({Username, Options}, Acc) ->
                                     [{Username, Options}|Acc]
@@ -343,7 +343,7 @@ print_group(RealmUri, Group) ->
 %% -----------------------------------------------------------------------------
 print_groups(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    Groups = plumtree_metadata:fold(fun({_Groupname, [?TOMBSTONE]}, Acc) ->
+    Groups = plum_db:fold(fun({_Groupname, [?TOMBSTONE]}, Acc) ->
                                              Acc;
                                         ({Groupname, Options}, Acc) ->
                                     [{Groupname, Options}|Acc]
@@ -629,7 +629,7 @@ auth_with_data(UserData, M0) ->
         ({{_, _}, [?TOMBSTONE]}, Acc) ->
             Acc
     end,
-    Sources0 = plumtree_metadata:fold(F, [], ?SOURCES_PREFIX(Uri)),
+    Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri)),
     Sources = sort_sources(Sources0),
     IP = proplists:get_value(ip, maps:get(conn_info, M0)),
     case match_source(Sources, maps:get(username, M0), IP) of
@@ -772,7 +772,7 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
                 false ->
                     case validate_options(RealmUri, Options) of
                         {ok, NewOptions} ->
-                            plumtree_metadata:put(Prefix, BinName, NewOptions),
+                            plum_db:put(Prefix, BinName, NewOptions),
                             ok;
                         Error ->
                             Error
@@ -806,7 +806,7 @@ alter_user(RealmUri, Username, Options) when is_binary(Username) ->
                     MergedOptions = lists:ukeymerge(1, lists:sort(NewOptions),
                                                     lists:sort(UserData)),
 
-                    plumtree_metadata:put(
+                    plum_db:put(
                         ?USERS_PREFIX(Uri), Name, MergedOptions),
                     ok;
                 Error ->
@@ -834,7 +834,7 @@ alter_group(RealmUri, Groupname, Options) when is_binary(Groupname) ->
                 {ok, NewOptions} ->
                     MergedOptions = lists:ukeymerge(
                         1, lists:sort(NewOptions), lists:sort(GroupData)),
-                    plumtree_metadata:put(
+                    plum_db:put(
                         ?GROUPS_PREFIX(Uri), Name, MergedOptions),
                     ok;
                 Error ->
@@ -855,14 +855,14 @@ del_user(RealmUri, Username) when is_binary(Username) ->
         false ->
             {error, {unknown_user, Name}};
         true ->
-            plumtree_metadata:delete(?USERS_PREFIX(RealmUri), Name),
+            plum_db:delete(?USERS_PREFIX(RealmUri), Name),
             %% delete any associated grants, so if a user with the same name
             %% is added again, they don't pick up these grants
             Prefix = ?USER_GRANTS_PREFIX(Uri),
-            plumtree_metadata:fold(fun({Key, _Value}, Acc) ->
+            plum_db:fold(fun({Key, _Value}, Acc) ->
                                             %% apparently destructive
                                             %% iteration is allowed
-                                            plumtree_metadata:delete(Prefix, Key),
+                                            plum_db:delete(Prefix, Key),
                                             Acc
                                     end, undefined,
                                     Prefix,
@@ -884,15 +884,15 @@ del_group(RealmUri, Groupname) when is_binary(Groupname) ->
         false ->
             {error, {unknown_group, Name}};
         true ->
-            plumtree_metadata:delete(?GROUPS_PREFIX(Uri),
+            plum_db:delete(?GROUPS_PREFIX(Uri),
                                       Name),
             %% delete any associated grants, so if a user with the same name
             %% is added again, they don't pick up these grants
             Prefix = ?GROUP_GRANTS_PREFIX(Uri),
-            plumtree_metadata:fold(fun({Key, _Value}, Acc) ->
+            plum_db:fold(fun({Key, _Value}, Acc) ->
                                             %% apparently destructive
                                             %% iteration is allowed
-                                            plumtree_metadata:delete(Prefix, Key),
+                                            plum_db:delete(Prefix, Key),
                                             Acc
                                     end, undefined,
                                     Prefix,
@@ -1033,7 +1033,7 @@ add_source(RealmUri, all, CIDR, Source, Options) ->
 
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
-    plumtree_metadata:put(
+    plum_db:put(
         ?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}, {Source, Options}),
     ok;
 
@@ -1067,13 +1067,13 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
 del_source(RealmUri, all, CIDR) ->
     Uri = to_lowercase_bin(RealmUri),
     %% all is always valid
-    plumtree_metadata:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
+    plum_db:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
     ok;
 
 del_source(RealmUri, Users, CIDR) ->
     Uri = to_lowercase_bin(RealmUri),
     UserList = lists:map(fun to_lowercase_bin/1, Users),
-    _ = [plumtree_metadata:delete(
+    _ = [plum_db:delete(
             ?SOURCES_PREFIX(Uri), {User, anchor_mask(CIDR)})
             || User <- UserList],
     ok.
@@ -1081,7 +1081,7 @@ del_source(RealmUri, Users, CIDR) ->
 
 is_enabled(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    case plumtree_metadata:get(?STATUS_PREFIX(Uri), enabled) of
+    case plum_db:get(?STATUS_PREFIX(Uri), enabled) of
         true -> true;
         _ -> false
     end.
@@ -1089,12 +1089,12 @@ is_enabled(RealmUri) ->
 
 enable(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    plumtree_metadata:put(?STATUS_PREFIX(Uri), enabled, true).
+    plum_db:put(?STATUS_PREFIX(Uri), enabled, true).
 
 
 get_ciphers(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    case plumtree_metadata:get(?CONFIG_PREFIX(Uri), ciphers) of
+    case plum_db:get(?CONFIG_PREFIX(Uri), ciphers) of
         undefined ->
             ?DEFAULT_CIPHER_LIST;
         Result ->
@@ -1123,18 +1123,18 @@ set_ciphers(RealmUri, CipherList) ->
             io:format("No known or supported ciphers in list.~n"),
             error;
         _ ->
-            plumtree_metadata:put(?CONFIG_PREFIX(Uri), ciphers,
+            plum_db:put(?CONFIG_PREFIX(Uri), ciphers,
                                    CipherList),
             ok
     end.
 
 disable(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    plumtree_metadata:put(?STATUS_PREFIX(Uri), enabled, false).
+    plum_db:put(?STATUS_PREFIX(Uri), enabled, false).
 
 status(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    Enabled = plumtree_metadata:get(
+    Enabled = plum_db:get(
         ?STATUS_PREFIX(Uri), enabled, [{default, false}]),
     case Enabled of
         true ->
@@ -1155,7 +1155,7 @@ status(RealmUri) ->
 lookup_user(RealmUri, Username) when is_binary(RealmUri), is_binary(Username) ->
     Uri = to_lowercase_bin(RealmUri),
     U = to_lowercase_bin(Username),
-    case plumtree_metadata:get(?USERS_PREFIX(Uri), U) of
+    case plum_db:get(?USERS_PREFIX(Uri), U) of
         undefined -> {error, not_found};
         Val -> {Username, Val}
     end.
@@ -1163,7 +1163,7 @@ lookup_user(RealmUri, Username) when is_binary(RealmUri), is_binary(Username) ->
 -spec lookup_group(binary(), binary()) -> tuple() | {error, not_found}.
 lookup_group(RealmUri, Name) when is_binary(Name), is_binary(Name) ->
     Uri = to_lowercase_bin(RealmUri),
-    case plumtree_metadata:get(?GROUPS_PREFIX(Uri), to_lowercase_bin(Name)) of
+    case plum_db:get(?GROUPS_PREFIX(Uri), to_lowercase_bin(Name)) of
         undefined -> {error, not_found};
         Val -> {Name, Val}
     end.
@@ -1172,7 +1172,7 @@ lookup_group(RealmUri, Name) when is_binary(Name), is_binary(Name) ->
 -spec list(binary(), user | group) -> list().
 list(RealmUri, user) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    plumtree_metadata:fold(
+    plum_db:fold(
         fun
             ({_Username, [?TOMBSTONE]}, Acc) ->
                 Acc;
@@ -1185,7 +1185,7 @@ list(RealmUri, user) when is_binary(RealmUri) ->
 
 list(RealmUri, group) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    plumtree_metadata:fold(
+    plum_db:fold(
         fun
             ({_Groupname, [?TOMBSTONE]}, Acc) ->
                 Acc;
@@ -1198,7 +1198,7 @@ list(RealmUri, group) when is_binary(RealmUri) ->
 
 list(RealmUri, source) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    plumtree_metadata:fold(
+    plum_db:fold(
         fun
             ({{Username, CIDR}, [{Source, Options}]}, Acc) ->
                 [{Username, CIDR, Source, Options}|Acc];
@@ -1214,7 +1214,7 @@ lookup_user_sources(RealmUri, Username)
 when is_binary(RealmUri), is_binary(Username) ->
     R = to_lowercase_bin(RealmUri),
     U = to_lowercase_bin(Username),
-    L = plumtree_metadata:to_list(
+    L = plum_db:to_list(
         ?SOURCES_PREFIX(R), [{match, {to_lowercase_bin(U), '_'}}]),
     Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
     case lists:filter(Pred, L) of
@@ -1280,7 +1280,7 @@ context_to_map(#context{} = Ctxt) ->
 
 
 match_grants(Realm, Match, Type) ->
-    Grants = plumtree_metadata:to_list(metadata_grant_prefix(Realm, Type),
+    Grants = plum_db:to_list(metadata_grant_prefix(Realm, Type),
                                         [{match, Match}]),
     [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
 
@@ -1296,7 +1296,7 @@ add_revoke_int([], _, _, _) ->
 
 add_revoke_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
     Prefix = metadata_grant_prefix(RealmUri, RoleType),
-    RoleGrants = plumtree_metadata:get(Prefix, {Name, Bucket}),
+    RoleGrants = plum_db:get(Prefix, {Name, Bucket}),
 
     %% check if there is currently a GRANT we can revoke
     case RoleGrants of
@@ -1312,9 +1312,9 @@ add_revoke_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
 
             case NewPerms of
                 [] ->
-                    plumtree_metadata:delete(Prefix, {Name, Bucket});
+                    plum_db:delete(Prefix, {Name, Bucket});
                 _ ->
-                    plumtree_metadata:put(Prefix, {Name, Bucket}, NewPerms)
+                    plum_db:put(Prefix, {Name, Bucket}, NewPerms)
             end,
             add_revoke_int(Roles, RealmUri, Bucket, Permissions)
     end.
@@ -1326,7 +1326,7 @@ add_source_int(Users, RealmUri, CIDR, Source, Options) when is_list(RealmUri) ->
     add_source_int(Users, to_lowercase_bin(RealmUri), CIDR, Source, Options);
 
 add_source_int([User|Users], Uri, CIDR, Source, Options) ->
-    plumtree_metadata:put(
+    plum_db:put(
         ?SOURCES_PREFIX(Uri), {User, CIDR}, {Source, Options}),
     add_source_int(Users, Uri, CIDR, Source, Options).
 
@@ -1334,7 +1334,7 @@ add_grant_int([], _, _, _) ->
     ok;
 add_grant_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
     Prefix = metadata_grant_prefix(RealmUri, RoleType),
-    BucketPermissions = case plumtree_metadata:get(Prefix, {Name, Bucket}) of
+    BucketPermissions = case plum_db:get(Prefix, {Name, Bucket}) of
                             undefined ->
                                 [];
                             Perms ->
@@ -1342,7 +1342,7 @@ add_grant_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
                         end,
     NewPerms = lists:umerge(lists:sort(BucketPermissions),
                             lists:sort(Permissions)),
-    plumtree_metadata:put(Prefix, {Name, Bucket}, NewPerms),
+    plum_db:put(Prefix, {Name, Bucket}, NewPerms),
     add_grant_int(Roles, RealmUri, Bucket, Permissions).
 
 match_grant(Bucket, Grants) ->
@@ -1653,7 +1653,7 @@ delete_group_from_roles(RealmUri, Groupname) ->
 
 delete_group_from_roles(RealmUri, Groupname, RoleType) ->
     FP  = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
-    plumtree_metadata:fold(fun({_, [?TOMBSTONE]}, Acc) ->
+    plum_db:fold(fun({_, [?TOMBSTONE]}, Acc) ->
                                     Acc;
                                ({Rolename, [Options]}, Acc) ->
                                     case proplists:get_value(?GROUPS, Options) of
@@ -1664,7 +1664,7 @@ delete_group_from_roles(RealmUri, Groupname, RoleType) ->
                                                               Groups) of
                                                 true ->
                                                     NewGroups = lists:keystore(?GROUPS, 1, Options, {?GROUPS, Groups -- [Groupname]}),
-                                                    plumtree_metadata:put(
+                                                    plum_db:put(
                                                         FP, Rolename, NewGroups),
                                                     Acc;
                                                 false ->
@@ -1677,9 +1677,9 @@ delete_group_from_roles(RealmUri, Groupname, RoleType) ->
 
 delete_user_from_sources(RealmUri, Username) ->
     FP  = ?SOURCES_PREFIX(RealmUri),
-    plumtree_metadata:fold(fun({{User, _CIDR}=Key, _}, Acc)
+    plum_db:fold(fun({{User, _CIDR}=Key, _}, Acc)
                                   when User == Username ->
-                                    plumtree_metadata:delete(FP, Key),
+                                    plum_db:delete(FP, Key),
                                     Acc;
                                ({{_, _}, _}, Acc) ->
                                     Acc
@@ -1697,7 +1697,7 @@ unknown_roles(RealmUri, RoleList, group) ->
 
 unknown_roles(RealmUri, RoleList, RoleType) ->
     FP = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
-    plumtree_metadata:fold(
+    plum_db:fold(
         fun
             ({_, ['$deleted']}, Acc) ->
                 Acc;
@@ -1756,7 +1756,7 @@ role_details(RealmUri, Rolename, group) ->
     role_details(RealmUri, Rolename, ?GROUPS);
 role_details(RealmUri, Rolename, RoleType) ->
     FullPrefix = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
-    plumtree_metadata:get(FullPrefix, to_lowercase_bin(Rolename)).
+    plum_db:get(FullPrefix, to_lowercase_bin(Rolename)).
 
 user_exists(RealmUri, Username) ->
     role_exists(RealmUri, Username, user).

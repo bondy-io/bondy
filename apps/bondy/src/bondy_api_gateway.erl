@@ -145,7 +145,7 @@ dispatch_table(Listener) ->
 -spec lookup(binary()) -> map() | {error, not_found}.
 
 lookup(Id) ->
-    case plumtree_metadata:get(?PREFIX, Id)  of
+    case plum_db:get(?PREFIX, Id)  of
         Spec when is_map(Spec) ->
             Spec;
         undefined ->
@@ -160,7 +160,7 @@ lookup(Id) ->
 -spec list() -> [ParsedSpec :: map()].
 
 list() ->
-    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
+    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
 
 
 
@@ -171,7 +171,7 @@ list() ->
 -spec delete(binary()) -> ok.
 
 delete(Id) when is_binary(Id) ->
-    plumtree_metadata:delete(?PREFIX, Id),
+    plum_db:delete(?PREFIX, Id),
     ok.
 
 
@@ -190,7 +190,7 @@ delete(Id) when is_binary(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
-    plumtree_metadata:put(?PREFIX, Id, Spec).
+    plum_db:put(?PREFIX, Id, Spec).
 
 
 
@@ -342,7 +342,7 @@ load_dispatch_tables() ->
             end
 
         end ||
-        {K, [V]} <- plumtree_metadata:to_list(?PREFIX),
+        {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
     bondy_api_gateway_spec_parser:dispatch_table(
