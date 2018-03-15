@@ -466,7 +466,7 @@ reply(common_name_mismatch, Req) ->
 
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
-    ErrorMap = maps:without(<<"status_code">>, bondy_error:map(Error)),
+    ErrorMap = maps:without([<<"status_code">>], bondy_error:map(Error)),
     cowboy_req:reply(401, prepare_request(ErrorMap, Headers, Req));
 
 reply(unsupported_token_type = Error, Req) ->
