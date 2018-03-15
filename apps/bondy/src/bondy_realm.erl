@@ -52,9 +52,9 @@
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {global, realms}).
 -define(LOCAL_CIDRS, [
-    {{10,0,0,0}, 8},
-    {{172,16,0,0}, 12},
-    {{192,168,0,0}, 16}
+    {{10, 0, 0, 0}, 8},
+    {{172, 16, 0, 0}, 12},
+    {{192, 168, 0, 0}, 16}
 ]).
 
 
@@ -181,7 +181,7 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
 %% -----------------------------------------------------------------------------
 get_random_kid(#realm{private_keys = Map}) ->
     Kids = maps:keys(Map),
-	lists:nth(rand:uniform(length(Kids)), Kids).
+    lists:nth(rand:uniform(length(Kids)), Kids).
 
 
 %% -----------------------------------------------------------------------------
@@ -399,7 +399,7 @@ init(#realm{uri = Uri} = Realm) ->
     %     || CIDR <- ?LOCAL_CIDRS
     % ],
     %TODO remove this once we have the APIs to add sources
-    _ = bondy_security:add_source(Uri, all, {{0,0,0,0}, 0}, password, []),
+    _ = bondy_security:add_source(Uri, all, {{0, 0, 0, 0}, 0}, password, []),
     ok = enable_security(Realm),
     Realm.
 

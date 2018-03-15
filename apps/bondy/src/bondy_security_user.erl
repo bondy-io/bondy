@@ -257,7 +257,7 @@ change_password(RealmUri, Username, New) when is_binary(New) ->
 %% -----------------------------------------------------------------------------
 change_password(RealmUri, Username, New, Old) ->
     case catch password(RealmUri, Username) of
-        {'EXIT',{Reason, _}} ->
+        {'EXIT', {Reason, _}} ->
             {error, Reason};
         Password ->
             case bondy_security_pw:check_password(Old, Password) of

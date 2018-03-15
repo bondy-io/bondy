@@ -597,10 +597,10 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     CallerS = bondy_context:session(Ctxt0),
     CallerSId = bondy_session:id(CallerS),
 
-    %% We asume that as with pubsub, the _Caller_ should not receive the
+    %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
-    case match_registrations(ProcUri, Ctxt0, #{exclude => [CallerSId]}) of
+    case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
             Mssg = <<
                 "There are no registered procedures matching the uri",
@@ -704,10 +704,10 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
         ok ->
             %% Promise was fulfilled or timed out and garbage collected,
             %% we do nothing
-            ok;
+            {ok, Ctxt};
         {ok, timeout} ->
             %% Promise timed out, we do nothing
-            ok;
+            {ok, Ctxt};
         {ok, #promise{invocation_request_id = ReqId} = P} ->
             #promise{
                 call_request_id = CallId,

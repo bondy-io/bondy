@@ -19,6 +19,10 @@ spec:
       subdomain: bondy-fqdn
       imagePullSecrets:
       - name: gitlab-registry
+{{- if .magenta.useNodeSelector }}
+      nodeSelector:
+        magenta_services: "true"
+{{- end }}
       containers:
       - image: registry.gitlab.com/leapsight/bondy:{{ .magenta.tag }}
         name: bondy
@@ -42,33 +46,28 @@ spec:
         - containerPort: 18085
           name: wamp-sec
           protocol: TCP
-        # env:
-        #   - name: WAMP_PORT
-        #     value: 8080
-        readinessProbe:
-          exec:
-            command:
-            - /opt/app/bin/bondy
-            - ping
-          initialDelaySeconds: 30
-          timeoutSeconds: 5
-        livenessProbe:
-          exec:
-            command:
-            - /opt/app/bin/bondy
-            - ping
-          initialDelaySeconds: 30
-          timeoutSeconds: 5
         volumeMounts:
           - mountPath: "/opt/app/data"
             name: datadir
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: 18081
+            scheme: HTTP
+          initialDelaySeconds: 15
+          timeoutSeconds: 5
+{{- if .magenta.enableQos }}
+        resources:
+          limits:
+            memory: {{ .bondy.resources.limits.memory }}
+            cpu: {{ .bondy.resources.limits.cpu }}
+          requests:
+            memory: {{ .bondy.resources.requests.memory }}
+            cpu: {{ .bondy.resources.requests.cpu }}
+{{- end }}
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
-      {{- if ne .bondy.nodeSelector "" }}
-      nodeSelector:
-        disk: {{ .bondy.nodeSelector }}
-      {{- end }}
       volumes:
         - name: datadir
           persistentVolumeClaim:

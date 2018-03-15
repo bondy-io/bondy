@@ -37,16 +37,18 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
 -include("bondy.hrl").
+-include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -type state() :: #{
+    api_spec => map(),
     api_context => map(),
     body_evaluated => boolean(),
     session => any(),
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
-    encoding => json | msgpack
+    encoding => dynamic | json | msgpack
 }.
 
 
@@ -60,9 +62,11 @@
 -export([previously_existed/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
+-export([provide/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
 -export([from_form_urlencoded/2]).
+-export([accept/2]).
 -export([delete_resource/2]).
 -export([delete_completed/2]).
 
@@ -86,7 +90,8 @@ init(Req, St0) ->
         session => Session,
         body_evaluated => false,
         api_context => init_context(Req),
-        session => Session
+        session => Session,
+        encoding => dynamic
     },
     {cowboy_rest, Req, St1}.
 
@@ -138,12 +143,10 @@ is_authorized(Req0, St) ->
                         [Class, Reason, erlang:get_stacktrace()],
                         St
                     ),
-                    Response = #{
-                        <<"body">> => bondy_error:map(Reason),
-                        <<"headers">> => #{}
-                    },
-                    Req1 = reply(
-                        get_status_code(Response, 500), json, Response, Req0),
+                    {StatusCode, Body} = take_status_code(
+                        bondy_error:map(Reason), 500),
+                    Response = #{<<"body">> => Body, <<"headers">> => #{}},
+                    Req1 = reply(StatusCode, json, Response, Req0),
                     {stop, Req1, St}
             end
     end.
@@ -161,6 +164,7 @@ resource_exists(Req, #{api_spec := Spec} = St) ->
             %% This allows Cowboy to return `201 Created` instead of `200 OK`.
             false;
         {true, _} ->
+            %% A collection resource always exists.
             true;
         {false, _} ->
             %% TODO We should check for real here, but we carry on and let
@@ -184,16 +188,17 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
             {true, Req1, St2};
 
-        {ok, HTTPCode, Response, St2} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {ok, StatusCode, Response, St2} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St2};
 
-        {error, Response, St2} ->
-            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
+        {error, Response0, St2} ->
+            {StatusCode, Response1} = take_status_code(Response0, 500),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St2};
 
-        {error, HTTPCode, Response, St2} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {error, StatusCode, Response, St2} ->
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St2}
     end.
 
@@ -245,7 +250,7 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             St1 = maps:update(api_context, Ctxt, St0),
             {true, Req0, St1};
         {ok, AuthCtxt} ->
-            %% TODO Here we need the token or the session withe the
+            %% TODO Here we need the token or the session with the
             %% token grants and not the AuthCtxt
             St1 = St0#{
                 user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
@@ -253,9 +258,9 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             %% TODO update context
             {true, Req0, St1};
         {error, unknown_realm} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(unknown_realm)),
             Response = #{
-                <<"body">> => maps:put(
-                    <<"status_code">>, 401, bondy_error:map(unknown_realm)),
+                <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
             },
             Req2 = reply(401, json, Response, Req0),
@@ -294,24 +299,23 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = cowboy_req:set_resp_headers(Headers, Req0),
             {maybe_encode(Enc, Body, Spec), Req1, St1};
 
-        {ok, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {ok, StatusCode, Response, St1} ->
+            Req1 = reply(StatusCode, Enc, Response, Req0),
             {stop, Req1, St1};
 
-        {error, Response, St1} ->
-            Req1 = reply(get_status_code(Response), Enc, Response, Req0),
+        {error, Response0, St1} ->
+            {StatusCode, Response1} = take_status_code(Response0, 500),
+            Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St1};
 
-        {error, HTTPCode, Response, St1} ->
-            Req1 = reply(HTTPCode, Enc, Response, Req0),
+        {error, StatusCode, Response, St1} ->
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St1}
     catch
         throw:Reason ->
-            Response = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req1 = reply(get_status_code(Response, 400), Enc, Response, Req0),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
         Class:Reason ->
             _ = log(
@@ -320,11 +324,9 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 [Class, Reason, erlang:get_stacktrace()],
                 St0
             ),
-            Response = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req1 = reply(get_status_code(Response, 500), Enc, Response, Req0),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0}
     end.
 
@@ -352,21 +354,20 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
             {ok, HTTPCode, Response, St2} ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
-            {error, Response, St2} ->
-                Req2 = reply(
-                    get_status_code(Response), Enc, Response, Req1),
+            {error, Response0, St2} ->
+                {StatusCode, Response1} = take_status_code(Response0, 500),
+                Req2 = reply(StatusCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
             {error, HTTPCode, Response, St2} ->
 
-                {stop, reply(HTTPCode, Enc, Response, Req1), St2}
+                {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
         throw:Reason ->
-            ErrResp = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req = reply(get_status_code(ErrResp, 400), Enc, ErrResp, Req0),
+            {StatusCode1, Body} = take_status_code(
+                bondy_error:map(Reason), 400),
+            ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
+            Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
         Class:Reason ->
             _ = log(
@@ -375,11 +376,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 [Class, Reason, erlang:get_stacktrace()],
                 St0
             ),
-            ErrResp = #{
-                <<"body">> => bondy_error:map(Reason),
-                <<"headers">> => #{}
-            },
-            Req = reply(get_status_code(ErrResp, 500), Enc, ErrResp, Req0),
+            {StatusCode1, Body} = take_status_code(
+                bondy_error:map(Reason), 500),
+            ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
+            Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0}
     end.
 
@@ -391,30 +391,33 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 %% =============================================================================
 
 
-get_status_code(Term) ->
-    get_status_code(Term, 500).
+
+take_status_code(Term) ->
+    take_status_code(Term, 500).
 
 
 %% @private
-get_status_code(#{<<"status_code">> := Code}, _) ->
-    Code;
+-spec take_status_code(map(), pos_integer()) -> {pos_integer(), map()}.
 
-get_status_code(#{<<"body">> := ErrorBody}, _) ->
-    get_status_code(ErrorBody);
+take_status_code(#{<<"status_code">> := _} = Map, _) ->
+    maps:take(<<"status_code">>, Map);
 
-get_status_code(ErrorBody, Default) ->
-    case maps:find(<<"status_code">>, ErrorBody) of
-        {ok, Val} ->
-            Val;
-        _ ->
-            case maps:find(<<"code">>, ErrorBody) of
+take_status_code(#{<<"body">> := ErrorBody}, Default) ->
+    take_status_code(ErrorBody, Default);
+
+take_status_code(ErrorBody, Default) ->
+    case maps:take(<<"status_code">>, ErrorBody) of
+        error ->
+            StatusCode = case maps:find(<<"code">>, ErrorBody) of
                 {ok, Val} ->
                     uri_to_status_code(Val);
                 _ ->
                     Default
-            end
+            end,
+            {StatusCode, ErrorBody};
+        Res ->
+            Res
     end.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -453,7 +456,11 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
-    M = #{
+    Id = opencensus:generate_trace_id(),
+     M = #{
+        %% Msgpack does not support 128-bit integers,
+        %% so for the time being we encod it as binary string
+        <<"id">> => integer_to_binary(Id),
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
         <<"peer">> => Peer,
@@ -569,12 +576,12 @@ perform_action(
     Ctxt0 = maps:get(api_context, St1),
     %% We get the response directly as it should be statically defined
     Result = maps_utils:get_path([<<"response">>, <<"on_result">>], Spec),
-    Response = mops:eval(Result, Ctxt0),
+    Response = mops_eval(Result, Ctxt0),
     St2 = maps:update(api_context, Ctxt0, St1),
     {ok, Response, St2};
 
 perform_action(
-    Method,
+    Method0,
     #{<<"action">> := #{<<"type">> := <<"forward">>} = Act} = Spec,
     St0) ->
     %% At the moment we just do not decode it and asume upstream accepts
@@ -594,7 +601,8 @@ perform_action(
         % <<"retries">> := R,
         % <<"retry_timeout">> := RT,
         <<"body">> := Body
-    } = mops:eval(Act, Ctxt0),
+    } = Act1 = mops_eval(Act, Ctxt0),
+
 
     Opts = [
         {connect_timeout, CT},
@@ -610,10 +618,12 @@ perform_action(
     ),
     RSpec = maps:get(<<"response">>, Spec),
 
-    case hackney:request(
-        method_to_atom(Method), Url, maps:to_list(Headers), Body, Opts)
+    AtomMethod = method_to_atom(maps:get(<<"http_method">>, Act1, Method0)),
+
+    case
+        hackney:request(AtomMethod, Url, maps:to_list(Headers), Body, Opts)
     of
-        {ok, StatusCode, RespHeaders} when Method =:= <<"HEAD">> ->
+        {ok, StatusCode, RespHeaders} when AtomMethod =:= head ->
             from_http_response(StatusCode, RespHeaders, <<>>, RSpec, St0);
 
         {ok, StatusCode, RespHeaders, ClientRef} ->
@@ -622,9 +632,8 @@ perform_action(
 
         {error, Reason} ->
             Error = #{
-                <<"code">> => <<"com.leapsight.bondy.bad_gateway">>,
-                <<"status_code">> => 502,
-                <<"message">> => <<"Error while connecting with upstream URL">>,
+                <<"code">> => ?BONDY_BAD_GATEWAY_ERROR,
+                <<"message">> => <<"Error while connecting with upstream URL '", Url/binary, "'.">>,
                 <<"description">> => Reason %% TODO convert to string
             },
             throw(Error)
@@ -645,7 +654,7 @@ perform_action(
         <<"options">> := Opts,
         <<"retries">> := _R,
         <<"timeout">> := T
-    } = mops:eval(Act, Ctxt0),
+    } = mops_eval(Act, Ctxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
@@ -677,19 +686,19 @@ perform_action(
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             Ctxt1 = update_context({result, Result1}, Ctxt0),
-            Response = mops:eval(
+            Response = mops_eval(
                 maps:get(<<"on_result">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
             {ok, Response, St2};
         {error, WampError0, _WampCtxt1} ->
-            StatusCode = uri_to_status_code(maps:get(error_uri, WampError0)),
+            StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
-            Error = maps:put(<<"status_code">>, StatusCode, WampError1),
+            Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response = mops:eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
+            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
-            Code = maps:get(<<"status_code">>, Response, 500),
-            {error, Code, Response, St2}
+            {StatusCode1, Response1} = take_status_code(Response0, 500),
+            {error, StatusCode1, Response1, St2}
     end.
 
 
@@ -704,15 +713,16 @@ when StatusCode >= 400 andalso StatusCode < 600->
         <<"headers">> => RespHeaders
     },
     Ctxt1 = update_context({error, Error}, Ctxt0),
-    Response = mops:eval(maps:get(<<"on_error">>, Spec), Ctxt1),
+    Response0 = mops_eval(maps:get(<<"on_error">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {error, StatusCode, Response, St1};
+    {FinalCode, Response1} = take_status_code(Response0),
+    {error, FinalCode, Response1, St1};
 
-from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
+from_http_response(StatusCode0, RespHeaders, RespBody, Spec, St0) ->
     Ctxt0 = maps:get(api_context, St0),
     % HeadersMap = maps:with(?HEADERS, maps:from_list(RespHeaders)),
     Result0 = #{
-        <<"status_code">> => StatusCode,
+        <<"status_code">> => StatusCode0,
         <<"body">> => RespBody,
         <<"headers">> => RespHeaders
     },
@@ -723,13 +733,14 @@ from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0) ->
             maps:put(<<"uri">>, <<>>, Result0)
     end,
     Ctxt1 = update_context({result, Result1}, Ctxt0),
-    Response = mops:eval(maps:get(<<"on_result">>, Spec), Ctxt1),
+    Response0 = mops_eval(maps:get(<<"on_result">>, Spec), Ctxt1),
     St1 = maps:update(api_context, Ctxt1, St0),
-    {ok, StatusCode, Response, St1}.
+    {StatusCode1, Response1} = take_status_code(Response0),
+    {ok, StatusCode1, Response1, St1}.
 
 
 reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
-    Body = maps:put(<<"status_code">>, 401, bondy_error:map(Error)),
+    {_, Body} = take_status_code(bondy_error:map(Error)),
     Code = maps:get(<<"code">>, Body, <<>>),
     Msg = maps:get(<<"message">>, Body, <<>>),
     Desc = maps:get(<<"description">>, Body, <<>>),
@@ -741,13 +752,12 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
         " description=", $", Desc/binary, $"
     >>,
     Resp = #{
-        <<"status_code">> => 401,
         <<"body">> => Body,
         <<"headers">> => #{
             <<"www-authenticate">> => Auth
         }
     },
-    reply(401, Enc, Resp, Req).
+    reply(401, error_encoding(Enc), Resp, Req).
 
 
 %% @private
@@ -767,7 +777,7 @@ prepare_request(Enc, Response, Req0) ->
     Body = maps:get(<<"body">>, Response),
     Headers = maps:get(<<"headers">>, Response),
     Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(Enc, Body), Req1).
+    cowboy_req:set_resp_body(maybe_encode(Enc, Body), Req1).
 
 
 %% @private
@@ -825,26 +835,46 @@ method_to_atom(<<"put">>) -> put.
 
 
 %% @private
+maybe_encode(dynamic, Body) ->
+    Body;
+
+maybe_encode(Enc, Body) ->
+    bondy_utils:maybe_encode(Enc, Body).
+
+
+%% @private
 maybe_encode(_, <<>>, _) ->
     <<>>;
 
+maybe_encode(dynamic, Body, _) ->
+    Body;
+
 maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
     Body;
+
+
 
 maybe_encode(Enc, Body, _) ->
     bondy_utils:maybe_encode(Enc, Body).
 
 
+error_encoding(json) -> json;
+error_encoding(msgpack) -> msgpack;
+error_encoding(dynamic) -> json.
+
+
+
 %% @private
 uri_to_status_code(timeout) ->                                     504;
+uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->       503;
 uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                        504;
 uri_to_status_code(?WAMP_ERROR_AUTHORIZATION_FAILED) ->            403;
-uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       500;
+uri_to_status_code(?WAMP_ERROR_CANCELLED) ->                       400;
 uri_to_status_code(?WAMP_ERROR_CLOSE_REALM) ->                     500;
 uri_to_status_code(?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED) ->         400;
 uri_to_status_code(?WAMP_ERROR_GOODBYE_AND_OUT) ->                 500;
 uri_to_status_code(?WAMP_ERROR_INVALID_ARGUMENT) ->                400;
-uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     502;
+uri_to_status_code(?WAMP_ERROR_INVALID_URI) ->                     400;
 uri_to_status_code(?WAMP_ERROR_NET_FAILURE) ->                     502;
 uri_to_status_code(?WAMP_ERROR_NOT_AUTHORIZED) ->                  401;
 uri_to_status_code(?WAMP_ERROR_NO_ELIGIBLE_CALLE) ->               502;
@@ -868,7 +898,7 @@ eval_headers(Req, #{api_spec := Spec, api_context := Ctxt}) ->
         maps:get(method(Req), Spec),
         #{}
     ),
-    mops:eval(Expr, Ctxt).
+    mops_eval(Expr, Ctxt).
 
 
 trim_trailing_slash(Bin) ->
@@ -880,10 +910,30 @@ trim_trailing_slash(Bin) ->
     end.
 
 
+
+mops_eval(Expr, Ctxt) ->
+    try mops:eval(Expr, Ctxt)
+    catch
+        error:{badkey, Key} ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            });
+        error:{badkeypath, Path} ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            })
+    end.
+
+
 %% @private
 log(Level, Prefix, Head, #{api_context := Ctxt} = St)
 when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     #{
+        <<"id">> := TraceId,
         <<"method">> := Method,
         <<"scheme">> := Scheme,
         <<"peername">> := Peername,
@@ -893,9 +943,13 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
         <<"bindings">> := Bindings,
         <<"body_length">> := Len
     } = maps:get(<<"request">>, Ctxt),
+
     Format = iolist_to_binary([
         Prefix,
         <<
+            %% Right now trace_id is a bin as msgpack does not support
+            %% 128-bit integers
+            ", trace_id=~s"
             ", realm_uri=~s"
             ", encoding=~s"
             ", method=~s"
@@ -916,6 +970,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     end,
 
     Tail = [
+        TraceId,
         maps:get(realm_uri, St, undefined),
         maps:get(encoding, St, undefined),
         Method,

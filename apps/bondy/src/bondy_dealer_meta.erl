@@ -23,52 +23,61 @@
 
 
 
-
+%% -----------------------------------------------------------------------------
+%% com.leapsight.bondy.security
+%% -----------------------------------------------------------------------------
 -define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.user_added">>).
 -define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.user_deleted">>).
 -define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.user_updated">>).
-
-
 -define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.group_added">>).
--define(BONDY_GROUP_ON_DELETE, <<"com.leapsight.bondy.security.group_deleted">>).
--define(BONDY_GROUP_ON_UPDATE, ).
-
-
-
+-define(BONDY_GROUP_ON_DELETE,
+    <<"com.leapsight.bondy.security.group_deleted">>
+).
+-define(BONDY_GROUP_ON_UPDATE,
+    <<"com.leapsight.bondy.security.group_updated">>
+).
 -define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.source_added">>).
--define(BONDY_SOURCE_ON_DELETE, <<"com.leapsight.bondy.security.source_deleted">>).
+-define(BONDY_SOURCE_ON_DELETE,
+    <<"com.leapsight.bondy.security.source_deleted">>
+).
 
+%% -----------------------------------------------------------------------------
+%% com.leapsight.bondy.api_gateway
+%% -----------------------------------------------------------------------------
 -define(BONDY_GATEWAY_CLIENT_LIST,
-    <<"com.leapsight.bondy.api_gateway.list_clients">>).
+    <<"com.leapsight.bondy.api_gateway.list_clients">>
+).
 -define(BONDY_GATEWAY_CLIENT_LOOKUP,
-    <<"com.leapsight.bondy.api_gateway.fetch_client">>).
-
-
+    <<"com.leapsight.bondy.api_gateway.fetch_client">>
+).
 -define(BONDY_GATEWAY_CLIENT_ADDED,
-    <<"com.leapsight.bondy.api_gateway.client_added">>).
+    <<"com.leapsight.bondy.api_gateway.client_added">>
+).
 -define(BONDY_GATEWAY_CLIENT_DELETED,
-    <<"com.leapsight.bondy.api_gateway.client_deleted">>).
+    <<"com.leapsight.bondy.api_gateway.client_deleted">>
+).
 -define(BONDY_GATEWAY_CLIENT_UPDATED,
-    <<"com.leapsight.bondy.api_gateway.client_updated">>).
-
-
+    <<"com.leapsight.bondy.api_gateway.client_updated">>
+).
 -define(BONDY_GATEWAY_LIST_RESOURCE_OWNERS,
-    <<"com.leapsight.bondy.api_gateway.list_resource_owners">>).
+    <<"com.leapsight.bondy.api_gateway.list_resource_owners">>
+).
 -define(BONDY_GATEWAY_FETCH_RESOURCE_OWNER,
-    <<"com.leapsight.bondy.api_gateway.fetch_resource_owner">>).
-
-
+    <<"com.leapsight.bondy.api_gateway.fetch_resource_owner">>
+).
 -define(BONDY_GATEWAY_RESOURCE_OWNER_ADDED,
-    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>).
+    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>
+).
 -define(BONDY_GATEWAY_RESOURCE_OWNER_DELETED,
-    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>).
+    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>
+).
 -define(BONDY_GATEWAY_RESOURCE_OWNER_UPDATED,
-    <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>).
+    <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>
+).
+
 
 
 -export([handle_call/2]).
-
-
 
 
 %% =============================================================================
@@ -92,24 +101,33 @@ handle_call(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
     R = wamp_message:result(ReqId, #{}, [Res]),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{procedure_uri = <<"wamp.registration.lookup">>,
-    arguments = [Proc|_] = L} = M, Ctxt) when length(L) =:= 1; length(L) =:= 2 -> % @TODO: Implement options
+handle_call(
+    #call{
+        procedure_uri = <<"wamp.registration.lookup">>,
+        arguments = [Proc|_] = L
+    } = M,
+    Ctxt) when length(L) =:= 1; length(L) =:= 2 ->
+    % @TODO: Implement options
     Args = case bondy_registry:match(registration, Proc, Ctxt) of
-        {[],'$end_of_table'} ->
+        {[], '$end_of_table'} ->
             [];
-        {Sessions,'$end_of_table'} ->
+        {Sessions, '$end_of_table'} ->
             [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
     R = wamp_message:result(ReqId, #{}, Args),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{procedure_uri = <<"wamp.registration.match">>,
-    arguments = [Proc] = L} = M, Ctxt) when length(L) =:= 1 ->
+handle_call(
+    #call{
+        procedure_uri = <<"wamp.registration.match">>,
+        arguments = [Proc] = L
+    } = M,
+    Ctxt) when length(L) =:= 1 ->
     Args = case bondy_registry:match(registration, Proc, Ctxt) of
-        {[],'$end_of_table'} ->
+        {[], '$end_of_table'} ->
             [];
-        {Sessions,'$end_of_table'} ->
+        {Sessions, '$end_of_table'} ->
             [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
@@ -123,8 +141,8 @@ handle_call(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(#call{
-    procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
+handle_call(
+    #call{procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
@@ -511,6 +529,7 @@ validate_admin_call_args(Call, Ctxt, Min) ->
 validate_admin_call_args(Call, Ctxt, Min, Max) ->
     do_validate_call_args(Call, Ctxt, Min, Max, true).
 
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -529,13 +548,14 @@ validate_admin_call_args(Call, Ctxt, Min, Max) ->
     AdminOnly :: boolean()) ->
         {ok, Args :: list()} | {error, wamp_error()}.
 
-do_validate_call_args(#call{arguments = L} = M, _, Min, _, _) when length(L) + 1 < Min ->
+do_validate_call_args(#call{arguments = L} = M, _, Min, _, _)
+when length(L) + 1 < Min ->
     E = wamp_message:error(
         ?CALL,
         M#call.request_id,
         #{},
         ?WAMP_ERROR_INVALID_ARGUMENT,
-        [<<"At least one argument is missing">>],
+        [<<"Invalid number of arguments.">>],
         #{
             description =>
             <<"The procedure requires at least ",
@@ -573,7 +593,8 @@ do_validate_call_args(#call{arguments = []} = M, Ctxt, _, _, AdminOnly) ->
             {error, unauthorized(M)}
     end;
 
-do_validate_call_args(#call{arguments = [Uri|_] = L} = M, Ctxt, _, _, AdminOnly) ->
+do_validate_call_args(
+    #call{arguments = [Uri|_] = L} = M, Ctxt, _, _, AdminOnly) ->
     %% A call can only proceed if the session's Realm is the one being
     %% modified, unless the session's Realm is the Root Realm in which
     %% case any Realm can be modified
@@ -589,9 +610,13 @@ do_validate_call_args(#call{arguments = [Uri|_] = L} = M, Ctxt, _, _, AdminOnly)
 
 %% @private
 unauthorized(M) ->
-    Mssg = <<"You have no authorisation to perform this operation on this realm.">>,
+    Mssg = <<
+        "You have no authorisation to perform this operation on this realm."
+    >>,
     Description = <<
-        "The operation you've requested is a targeting a Realm that is not your session's realm or the operation is only supported when you are logged into the Bondy realm",
+        "The operation you've requested is a targeting a Realm "
+        "that is not your session's realm or the operation is only "
+        "supported when you are logged into the Bondy realm",
         $\s, $(, $", (?BONDY_REALM_URI)/binary, $", $), $.
     >>,
     wamp_message:error(

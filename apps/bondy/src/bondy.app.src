@@ -19,10 +19,10 @@
 {application, bondy,
  [
      {description, "Leapsight Bondy is an open source networking platform for distributed MicroServices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
-    {vsn, "0.6.5"},
+    {vsn, "0.6.7"},
     {registered, []},
     {mod, {bondy_app, [
-        {vsn, "0.6.5"}
+        {vsn, "0.6.7"}
     ]}},
     {applications,[
             kernel,
@@ -32,25 +32,28 @@
             inets,
             tools,
             runtime_tools,
-            redbug,
-            sidejob,
-            tuplespace,
-            plumtree,
-            lager,
-            cuttlefish,
+            %% Third party
             clique,
+            cowboy,
+            cuttlefish,
             erlang_term,
             exometer_core,
-            prometheus,
-            cowboy,
-            jsx,
-            jose,
-            msgpack,
             hackney,
+            jose,
+            jsx,
+            lager,
+            msgpack,
+            opencensus,
+            plumtree,
+            prometheus,
+            redbug,
+            sidejob,
             uuid,
+            %% Ours
+            tuplespace,
             wamp
         ]},
-    {env,[]},
+    {env, []},
     {modules, []},
     {maintainers, ["Ngineo Limited t/a Leapsight"]},
     {licenses, ["Apache"]},

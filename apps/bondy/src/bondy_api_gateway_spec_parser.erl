@@ -30,9 +30,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
+-include("bondy.hrl").
+-include("bondy_api_gateway.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
+-define(STATUS_CODES_KEY, <<"status_codes">>).
 -define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
@@ -55,6 +59,32 @@
     <<"post">>,
     <<"put">>
 ]).
+
+-define(DEFAULT_STATUS_CODES, #{
+    ?BONDY_BAD_GATEWAY_ERROR =>                    503,
+    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>       500,
+    ?BONDY_ERROR_TIMEOUT =>                        504,
+    ?WAMP_ERROR_AUTHORIZATION_FAILED =>            403,
+    ?WAMP_ERROR_CANCELLED =>                       400,
+    ?WAMP_ERROR_CLOSE_REALM =>                     500,
+    ?WAMP_ERROR_DISCLOSE_ME_NOT_ALLOWED =>         400,
+    ?WAMP_ERROR_GOODBYE_AND_OUT =>                 500,
+    ?WAMP_ERROR_INVALID_ARGUMENT =>                400,
+    ?WAMP_ERROR_INVALID_URI =>                     400,
+    ?WAMP_ERROR_NET_FAILURE =>                     502,
+    ?WAMP_ERROR_NOT_AUTHORIZED =>                  401,
+    ?WAMP_ERROR_NO_ELIGIBLE_CALLE =>               502,
+    ?WAMP_ERROR_NO_SUCH_PROCEDURE =>               501,
+    ?WAMP_ERROR_NO_SUCH_REALM =>                   502,
+    ?WAMP_ERROR_NO_SUCH_REGISTRATION =>            502,
+    ?WAMP_ERROR_NO_SUCH_ROLE =>                    400,
+    ?WAMP_ERROR_NO_SUCH_SESSION =>                 500,
+    ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION =>            502,
+    ?WAMP_ERROR_OPTION_DISALLOWED_DISCLOSE_ME =>   400,
+    ?WAMP_ERROR_OPTION_NOT_ALLOWED =>              400,
+    ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS =>        400,
+    ?WAMP_ERROR_SYSTEM_SHUTDOWN =>                 500
+}).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
 
@@ -108,6 +138,14 @@
         default => #{},
         datatype => map,
         validator => ?DEFAULTS_SPEC
+    },
+    ?STATUS_CODES_KEY => #{
+        alias => paths,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
     },
     <<"versions">> => #{
         alias => versions,
@@ -181,6 +219,14 @@
         default => #{},
         datatype => map
     },
+    ?STATUS_CODES_KEY => #{
+        alias => paths,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => map,
+        default => #{}
+    },
     <<"paths">> => #{
         alias => paths,
         required => true,
@@ -200,7 +246,6 @@
         end
     }
 }).
-
 
 -define(DEFAULTS_SPEC, #{
     <<"schemes">> => #{
@@ -274,7 +319,6 @@
         default => ?DEFAULT_HEADERS
     }
 }).
-
 
 -define(BASIC, #{
     <<"type">> => #{
@@ -359,7 +403,6 @@
     }
 }).
 
-
 -define(DEFAULT_PATH, #{
     <<"variables">> => #{},
     <<"defaults">> => #{},
@@ -377,7 +420,6 @@
     <<"retries">> => <<"{{defaults.retries}}">>,
     <<"retry_timeout">> => <<"{{defaults.retry_timeout}}">>
 }).
-
 
 -define(API_PATH, #{
     <<"is_collection">> => #{
@@ -401,23 +443,13 @@
         alias => accepts,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [
-                <<"application/json">>,
-                <<"application/msgpack">>
-            ]}
-        }
+        datatype => {list, binary}
     },
     <<"provides">> => #{
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [
-                <<"application/json">>,
-                <<"application/msgpack">>
-            ]}
-        }
+        datatype => {list, binary}
     },
     <<"schemes">> => #{
         alias => schemes,
@@ -478,7 +510,6 @@
     }
 }).
 
-
 -define(PATH_DEFAULTS, #{
     <<"schemes">> => #{
         alias => schemes,
@@ -533,15 +564,13 @@
         alias => accepts,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+        datatype => {list, binary}
     },
     <<"provides">> => #{
         alias => provides,
         required => true,
         allow_null => false,
-        datatype => {list,
-            {in, [<<"application/json">>, <<"application/msgpack">>]}}
+        datatype => {list, binary}
     },
     <<"headers">> => #{
         alias => headers,
@@ -654,6 +683,15 @@
         allow_null => false,
         datatype => {in, [<<"forward">>]}
     },
+    <<"http_method">> => #{
+        alias => host,
+        required => false,
+        allow_null => false,
+        datatype => {in, [
+            <<"delete">>, <<"get">>, <<"head">>, <<"options">>,
+            <<"patch">>, <<"post">>, <<"put">>
+        ]}
+    },
     <<"host">> => #{
         alias => host,
         required => true,
@@ -751,8 +789,11 @@ end).
         alias => procedure,
         required => true,
         allow_null => false,
-        datatype => binary,
-        validator => fun wamp_uri:is_valid/1
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE],
+        validator => fun
+            (X) when is_binary(X) -> wamp_uri:is_valid(X);
+            (X) -> mops:is_proxy(X)
+        end
     },
     <<"options">> => #{
         alias => options,
@@ -806,7 +847,6 @@ end).
     }
 }).
 
-
 -define(API_PARAMS, #{
     <<"name">> => #{
         alias => name,
@@ -841,6 +881,7 @@ end).
 }).
 
 -define(VAR(Term), {var, Term}).
+
 -define(SCHEME_HEAD,
     {
         ?VAR(scheme),
@@ -999,17 +1040,19 @@ parse(Spec, Ctxt) ->
 parse_host(Host0, Ctxt0) ->
     {Vars, Host1} = maps:take(?VARS_KEY, Host0),
     {Defs, Host2} = maps:take(?DEFAULTS_KEY, Host1),
+    {Codes, Host3} = maps:take(?STATUS_CODES_KEY, Host2),
     Ctxt1 = Ctxt0#{
         ?VARS_KEY => Vars,
-        ?DEFAULTS_KEY => Defs
+        ?DEFAULTS_KEY => Defs,
+        ?STATUS_CODES_KEY => maps:merge(Codes, ?DEFAULT_STATUS_CODES)
     },
 
     %% parse all versions
-    Vs0 = maps:get(<<"versions">>, Host2),
+    Vs0 = maps:get(<<"versions">>, Host3),
     Fun = fun(_, V) -> parse_version(V, Ctxt1) end,
     Vs1 = maps:map(Fun, Vs0),
-    Host3 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host2),
-    maps:update(<<"versions">>, Vs1, Host3).
+    Host4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], Host3),
+    maps:update(<<"versions">>, Vs1, Host4).
 
 
 %% @private
@@ -1021,10 +1064,15 @@ parse_version(V0, Ctxt0) ->
     V2 = maps_utils:validate(V1, ?API_VERSION),
     %% We merge again in case the validation added defaults
     {V3, Ctxt2} = merge_eval_vars(V2, Ctxt1),
+    %% We parse the status_codes and merge them into ctxt
+    {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
+    Codes0 = maps:get(?STATUS_CODES_KEY, Ctxt1),
+    Ctxt3 = maps:put(<<"status_codes">>, maps:merge(Codes0, Codes1), Ctxt2),
+
     %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
         try
-            parse_path(P, Ctxt2)
+            parse_path(P, Ctxt3)
         catch
             error:{badkey, Key} ->
                 error({
@@ -1033,9 +1081,9 @@ parse_version(V0, Ctxt0) ->
                 })
         end
     end,
-    V4 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V3),
+    V5 = maps:without([?VARS_KEY, ?DEFAULTS_KEY], V4),
     maps:update(
-        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V4)), V4).
+        <<"paths">>, maps:map(Fun, maps:get(<<"paths">>, V5)), V5).
 
 
 %% @private
@@ -1419,15 +1467,17 @@ security_scheme_rules(
     S, Host, BasePath, Realm,
     #{
         <<"type">> := <<"oauth2">>,
-        <<"flow">> := <<"resource_owner_password_credentials">>
+        <<"flow">> := _Any
     } = Sec) ->
 
-    #{
-        <<"token_path">> := Token,
-        <<"revoke_token_path">> := Revoke
-    } = Sec,
+    Token = get_token_path(Sec),
+    Revoke = get_revoke_path(Sec),
 
-    St = #{realm_uri => Realm},
+    St = #{
+        realm_uri => Realm,
+        token_path => Token,
+        revoke_path => Revoke
+    },
 
     Mod = bondy_api_oauth2_handler,
     [
@@ -1441,9 +1491,40 @@ security_scheme_rules(_, _, _, _, _) ->
     [].
 
 
+%% @private
+get_token_path(#{<<"token_path">> := Token}) ->
+    validate_rel_path(Token);
+
+get_token_path(_) ->
+    <<"/oauth/token">>.
+
 
 %% @private
+get_revoke_path(#{<<"revoke_token">> := Token}) ->
+    validate_rel_path(Token);
+
+get_revoke_path(_) ->
+    <<"/oauth/revoke">>.
+
+
+%% @private
+validate_rel_path(<<$/, _Rest/binary>> = Val) ->
+    remove_trailing_slash(Val);
+
+validate_rel_path(Val) ->
+    error({invalid_path, Val}).
+
+
+%% @private
+remove_trailing_slash(Bin) ->
+    case binary:last(Bin) of
+        $/ -> binary:part(Bin, 0, byte_size(Bin) - 1);
+        _ -> Bin
+    end.
+
+
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns a context where all keys have been assigned funs that take
 %% a context as an argument.
@@ -1491,7 +1572,11 @@ content_types_accepted(<<"application/x-www-form-urlencoded">>) ->
     {
         {<<"application">>, <<"x-www-form-urlencoded">>, '*'},
         from_form_urlencoded
-    }.
+    };
+
+content_types_accepted(Bin) ->
+    {Bin, accept}.
+
 
 %% @private
 content_types_provided(L) when is_list(L) ->
@@ -1503,14 +1588,17 @@ content_types_provided(<<"application/json">>) ->
         {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
         to_json
     },
-    %% We force JSON to have the prioirty as Cowboy chooses based on the order
+    %% We force JSON to have the priority as Cowboy chooses based on the order
     %% when no content-type was requested by the user
     {1, T};
 
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
     T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
-    {2, T}.
+    {2, T};
+
+content_types_provided(Bin) ->
+    {3, {Bin, provide}}.
 
 
 % @TODO Avoid doing this and require the user to setup the environment first!

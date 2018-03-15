@@ -198,7 +198,9 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
-    %% TODO we need to fix the wamp.hrl timeout default value
+    %% TODO we need to fix the wamp.hrl timeout
+    %% TODO also, according to WAMP the default is 0 which deactivates
+    %% the Call Timeout Feature
     Timeout = case maps:get(timeout, Opts, ?CALL_TIMEOUT) of
         0 -> ?CALL_TIMEOUT;
         Val -> Val
@@ -237,7 +239,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = #{
-                error_uri => ?BONDY_ERROR_UNKNOWN,
+                error_uri => ?BONDY_INCONSISTENCY_ERROR,
                 details => #{},
                 arguments => [<<"Inconsistency error">>],
                 arguments_kw => #{}
@@ -249,7 +251,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = #{
-                error_uri => ?BONDY_ERROR_UNKNOWN,
+                error_uri => ?BONDY_INCONSISTENCY_ERROR,
                 details => #{},
                 arguments => [<<"Inconsistency error">>],
                 arguments_kw => #{}

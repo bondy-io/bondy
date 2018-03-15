@@ -257,7 +257,7 @@ handle_cast(Event, State) ->
 
 handle_info(timeout, #state{pool_type = transient, event = Event} = State)
 when Event /= undefined ->
-    %% We've been spawned to handle this single event,
+    %% We are a worker that has been spawned to handle this single event,
     %% so we should stop right after we do it
     ok = sync_forward(Event),
     {stop, normal, State};
@@ -377,15 +377,32 @@ do_forward(#register{} = M, Ctxt) ->
     {reply, Reply, Ctxt};
 
 do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
-    %% This is a sync call as it is an easy way to guarantees ordering of
+    %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
     %% between two processes even when in different nodes (when using
     %% distributed Erlang).
+    %% RFC:
+    %% If Callee A has registered endpoints for both Procedure 1 and Procedure
+    %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
+    %% to Procedure 2, and both calls are routed to Callee A, then Callee A
+    %% will first receive an invocation corresponding to Call 1 and then Call
+    %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
     ok = sync_forward({M, Ctxt0}),
     %% The invocation is always async,
     %% so the response will be delivered asynchronously by the dealer
     {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
+
+%% do_forward(#publish{} = M, Ctxt0) ->
+%%     %% RFC:
+%%     %% If Subscriber A is subscribed to both Topic 1 and Topic 2, and Publisher
+%%     %% B first publishes an Event 1 to Topic 1 and then an Event 2 to Topic 2,
+%%     %% then Subscriber A will first receive Event 1 and then Event 2. This also
+%%     %% holds if Topic 1 and Topic 2 are identical.
+%%     %% In other words, WAMP guarantees ordering of events between any given
+%%     %% pair of Publisher and Subscriber.
+%%     ok = sync_forward({M, Ctxt0}),
+%%     {ok, Ctxt0};
 
 do_forward(M, Ctxt0) ->
     %% Client already has a session.
@@ -511,5 +528,3 @@ async_forward(transient, PoolName, M, Ctxt) ->
         start_link,
         [?MODULE, [{M, Ctxt}], []]
     ).
-
-

@@ -24,7 +24,6 @@
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([timeout/1]).
--export([eval_term/2]).
 -export([maybe_encode/2]).
 -export([encode/2]).
 -export([decode/2]).
@@ -178,28 +177,6 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
     maps:fold(fun merge_fun/3, M2, M1).
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec eval_term(any(), map()) -> any().
-
-eval_term(F, Ctxt) when is_function(F, 1) ->
-    F(Ctxt);
-
-eval_term(Map, Ctxt) when is_map(Map) ->
-    F = fun
-        (_, V) ->
-            eval_term(V, Ctxt)
-    end,
-    maps:map(F, Map);
-
-eval_term(L, Ctxt) when is_list(L) ->
-    [eval_term(X, Ctxt) || X <- L];
-
-eval_term(T, Ctxt) ->
-    mops:eval(T, Ctxt).
 
 
 %% =============================================================================

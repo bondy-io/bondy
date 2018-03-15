@@ -31,7 +31,7 @@
 -module(mops).
 -define(START, <<"{{">>).
 -define(END, <<"}}">>).
--define(PIPE_OP, <<$|,$>>>).
+-define(PIPE_OP, <<$|, $>>>).
 -define(DOUBLE_QUOTES, <<$">>).
 
 -define(OPTS_SPEC, #{
@@ -498,16 +498,22 @@ apply_ops([], Val, _) ->
 
 
 %% @private
+
 apply_op(Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) andalso (
     Op == <<"integer">> orelse
     Op == <<"float">> orelse
+    Op == <<"boolean">> orelse
     Op == <<"abs">> orelse
     Op == <<"head">> orelse
     Op == <<"tail">> orelse
     Op == <<"last">> orelse
+    Op == <<"min">> orelse
+    Op == <<"max">> orelse
     Op == <<"length">> orelse
-    Op == <<"size">>
+    Op == <<"size">> orelse
+    Op == <<"base64:encode">> orelse
+    Op == <<"base64:decode">>
     ) ->
     {'$mops_proxy', fun(X) -> apply_op(Op, maybe_eval(Val, X), X) end};
 
@@ -530,16 +536,48 @@ apply_op(<<"integer">>, Val, _) when is_float(Val) ->
     trunc(Val);
 
 apply_op(<<"float">>, Val, _) when is_binary(Val) ->
-    binary_to_float(Val);
+    try binary_to_float(Val)
+    catch
+        error:badarg ->
+            float(binary_to_integer(Val))
+    end;
 
 apply_op(<<"float">>, Val, _) when is_list(Val) ->
-    float(list_to_integer(Val));
+    try list_to_float(Val)
+    catch
+        error:badarg ->
+            float(list_to_integer(Val))
+    end;
 
 apply_op(<<"float">>, Val, _) when is_float(Val) ->
     Val;
 
 apply_op(<<"float">>, Val, _) when is_integer(Val) ->
     float(Val);
+
+apply_op(<<"boolean">>, 0, _) ->
+    false;
+
+apply_op(<<"boolean">>, false, _) ->
+    false;
+
+apply_op(<<"boolean">>, <<"0">>, _) ->
+    false;
+
+apply_op(<<"boolean">>, <<"false">>, _) ->
+    false;
+
+apply_op(<<"boolean">>, 1, _) ->
+    true;
+
+apply_op(<<"boolean">>, true, _) ->
+    true;
+
+apply_op(<<"boolean">>, <<"1">>, _) ->
+    true;
+
+apply_op(<<"boolean">>, <<"true">>, _) ->
+    true;
 
 apply_op(<<"head">>, [], _) ->
     <<>>;
@@ -560,11 +598,29 @@ apply_op(<<"last">>, [], _) ->
 apply_op(<<"last">>, Val, _) when is_list(Val) ->
     lists:last(Val);
 
+apply_op(<<"min">>, [], _) ->
+    <<>>;
+
+apply_op(<<"min">>, Val, _) when is_list(Val) ->
+    lists:min(Val);
+
+apply_op(<<"max">>, [], _) ->
+    <<>>;
+
+apply_op(<<"max">>, Val, _) when is_list(Val) ->
+    lists:max(Val);
+
 apply_op(<<"length">>, Val, _) when is_list(Val) ->
     length(Val);
 
 apply_op(<<"size">>, Val, _) when is_map(Val) ->
     maps:size(Val);
+
+apply_op(<<"base64:encode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
+    base64:encode(Val);
+
+apply_op(<<"base64:decode">>, Val, _) when is_binary(Val) orelse is_list(Val) ->
+    base64:decode(Val);
 
 %% Custom ops
 apply_op(Bin, Val, Ctxt) ->
@@ -573,13 +629,36 @@ apply_op(Bin, Val, Ctxt) ->
 
 %% @private
 
+apply_custom_op(<<"nth(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
+when is_function(F, 1) ->
+    {'$mops_proxy',
+        fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
+    };
+
+apply_custom_op(<<"nth(", Rest/binary>> = Op, Val, Ctxt) when is_list(Val)->
+    case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
+
+        [{'$mops_proxy', F} = N] when is_function(F, 1) ->
+            {'$mops_proxy', fun(X) -> lists:nth(maybe_eval(N, X), Val) end};
+
+        [N] ->
+            lists:nth(binary_to_integer(N), Val);
+
+        _ ->
+            error({invalid_expression, Op})
+    end;
+
+
 apply_custom_op(<<"get(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->
     {'$mops_proxy',
         fun(X) -> apply_custom_op(Op, maybe_eval(Val, X), X) end
     };
 
-apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
+apply_custom_op(<<"get(", _/binary>> = Op, <<"$map">>, Ctxt) ->
+    apply_custom_op(Op, #{}, Ctxt);
+
+apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val) ->
     case [maybe_eval(K, Ctxt) || K <- get_arguments(Rest, Op, <<")">>)] of
 
         [{'$mops_proxy', F} = Key] when is_function(F, 1) ->
@@ -611,6 +690,9 @@ apply_custom_op(<<"get(", Rest/binary>> = Op, Val, Ctxt) when is_map(Val)->
         _ ->
             error({invalid_expression, Op})
     end;
+
+apply_custom_op(<<"put(", _/binary>> = Op, <<"$map">>, Ctxt) ->
+    apply_custom_op(Op, #{}, Ctxt);
 
 apply_custom_op(<<"put(", _/binary>> = Op, {'$mops_proxy', F} = Val, _)
 when is_function(F, 1) ->
@@ -646,14 +728,20 @@ apply_custom_op(<<"put(", Rest/binary>> = Op, Map, Ctxt) when is_map(Map)->
     end;
 
 apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
-
+    EmptyMap = <<"$map">>,
     Args = case
         [maybe_eval(A, Ctxt) || A <- get_arguments(Rest, Op, <<")">>)]
     of
+        [EmptyMap] ->
+            {Expr1, #{}};
         [Expr2] ->
             {Expr1, Expr2};
+        [<<"_">>, EmptyMap] ->
+            {Expr1, #{}};
         [<<"_">>, Expr2] ->
             {Expr1, Expr2};
+        [EmptyMap, <<"_">>] ->
+            {#{}, Expr1};
         [Expr2, <<"_">>] ->
             {Expr2, Expr1};
         _ ->
@@ -691,6 +779,12 @@ apply_custom_op(<<"merge(", Rest/binary>> = Op, Expr1, Ctxt) ->
         _ ->
             error({invalid_expression, Op})
     end;
+
+apply_custom_op(<<"with(", _/binary>>, <<"$map">>, _) ->
+    #{};
+
+apply_custom_op(<<"without(", _/binary>>, <<"$map">>, _) ->
+    #{};
 
 apply_custom_op(<<"with(", _/binary>> = Op, {'$mops_proxy', _} = L, _) ->
     {'$mops_proxy',

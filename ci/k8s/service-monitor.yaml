@@ -1,3 +1,4 @@
+{{- if .magenta.enableMonitoring }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -18,3 +19,4 @@ spec:
   endpoints:
   - port: admin
     interval: 120s
+{{- end }}
