@@ -9,7 +9,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#eval_term-2">eval_term/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_id-1">get_id/1</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#get_id-1">get_id/1</a></td><td>
 IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
 distribution_ over the complete range [0, 2^53].</td></tr><tr><td valign="top"><a href="#get_nonce-0">get_nonce/0</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_string-2">get_random_string/2</a></td><td>
 borrowed from
@@ -21,15 +21,6 @@ is not present in M2.</td></tr><tr><td valign="top"><a href="#timeout-1">timeout
 <a name="functions"></a>
 
 ## Function Details ##
-
-<a name="eval_term-2"></a>
-
-### eval_term/2 ###
-
-<pre><code>
-eval_term(F::any(), Ctxt::#{}) -&gt; any()
-</code></pre>
-<br />
 
 <a name="get_id-1"></a>
 

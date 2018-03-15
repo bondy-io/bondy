@@ -23,7 +23,7 @@ Type: counter.<br />
 Labels: default - `[]`, configured via `early_errors_labels`.<br />
 Total number of Cowboy early errors, i.e. errors that occur before a request is received.
 
-* `cowboy_protocol_upgrades_total`<br />
+* `bondy_protocol_upgrades_total`<br />
 Type: counter.<br />
 Labels: default - `[]`, configured via `protocol_upgrades_labels`.<br />
 Total number of protocol upgrades, i.e. when http connection upgraded to websocket connection.
@@ -71,7 +71,8 @@ Default configuration:
     {cowboy_instrumenter, [{duration_buckets, [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]},
                            {early_error_labels,  []},
                            {request_labels, [method, reason, status_class]},
-                           {error_labels, [method, reason, error]}]
+                           {error_labels, [method, reason, error]},
+                           {registry, default}]}
     ...
   ]}
 ```
