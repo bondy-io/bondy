@@ -99,7 +99,7 @@ status(_Command, [], [{status, Status}]) ->
 
 register_node_finder() ->
     F = fun() ->
-        {ok, Members} = plumtree_peer_service_manager:members(),
+        {ok, Members} = bondy_peer_service_manager:members(),
         Members
     end,
     clique:register_node_finder(F).
@@ -200,7 +200,7 @@ load_api(["bondy-admin", "gateway", "load-api"], [{filename, FName}], []) ->
             %% TODO Also Print table of resulting API/Versions
             [clique_status:text(Text)];
         {error, invalid_specification_format} ->
-            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file is not of a valid API Gateway Specification format.", [FName]),
+            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file does not contain a valid API Gateway Specification format.", [FName]),
             [clique_status:alert([Text])];
         {error, badarg} ->
             Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file was either not found or had the wrong permissions.", [FName]),
