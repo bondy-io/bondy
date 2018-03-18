@@ -55,7 +55,7 @@
         ]},
     {env, []},
     {modules, []},
-    {maintainers, ["Ngineo Limited t/a Leapsight"]},
-    {licenses, ["Apache"]},
-    {links, [{"Github", "https://github.com/leapsight/bondy"}]}
+    {maintainers, ["Alejandro M. Ramallo"]},
+    {licenses, ["Apache 2.0"]},
+    {links, [{"Gitlab", "https://gitlab.com/leapsight/bondy"}]}
  ]}.
