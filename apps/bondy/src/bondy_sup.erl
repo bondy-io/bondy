@@ -30,5 +30,18 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Procs = [],
-    {ok, {{one_for_one, 1, 5}, Procs}}.
+    Children = [
+        #{
+            id => bondy_api_gateway,
+            start => {
+                bondy_api_gateway,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_api_gateway]
+        }
+    ],
+    {ok, {{one_for_one, 1, 5}, Children}}.

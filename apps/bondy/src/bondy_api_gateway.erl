@@ -22,6 +22,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway).
+-behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -46,9 +47,15 @@
 -export([lookup/1]).
 -export([start_admin_listeners/0]).
 -export([start_listeners/0]).
+-export([start_link/0]).
 
-% -export([start_http/1]).
-% -export([start_https/1]).
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
 
 
 
@@ -56,6 +63,10 @@
 %% API
 %% =============================================================================
 
+
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
 %% -----------------------------------------------------------------------------
@@ -67,17 +78,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
-    DTables = case load_dispatch_tables() of
-        [] ->
-            [
-                {<<"http">>, base_routes()},
-                {<<"https">>, base_routes()}
-            ];
-        L ->
-            L
-    end,
-    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
-    ok.
+    gen_server:call(?MODULE, start_listeners).
 
 
 %% -----------------------------------------------------------------------------
@@ -85,11 +86,7 @@ start_listeners() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start_admin_listeners() ->
-    _ = [
-        start_admin_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
-    ok.
-
+    gen_server:call(?MODULE, start_admin_listeners).
 
 
 %% -----------------------------------------------------------------------------
@@ -102,33 +99,11 @@ start_admin_listeners() ->
     ok | {error, invalid_specification_format | any()}.
 
 load(Map) when is_map(Map) ->
-    case validate_spec(Map) of
-        {ok, #{<<"id">> := Id} = Spec} ->
-            %% We store the source specification, see add/2 for an explanation
-            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
-            ok = add(
-                Id,
-                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
-            ),
-            %% We rebuild the dispatch table
-            rebuild_dispatch_tables();
-        {error, _} = Error ->
-            Error
-    end;
-
-load(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
-            load(Spec)
-    catch
-        error:badarg ->
-            {error, invalid_specification_format}
-    end.
-
+    gen_server:call(?MODULE, {load, Map}).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the current dispatch configured in the HTTP server.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table(listener()) -> any().
@@ -139,7 +114,7 @@ dispatch_table(Listener) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the API Specification object identified by `Id'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(binary()) -> map() | {error, not_found}.
@@ -154,7 +129,7 @@ lookup(Id) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the list of all stored API Specification objects.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list() -> [ParsedSpec :: map()].
@@ -165,7 +140,7 @@ list() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Deletes the API Specification object identified by `Id'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(binary()) -> ok.
@@ -176,10 +151,133 @@ delete(Id) when is_binary(Id) ->
 
 
 
+
+%% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    %% We subcribe to change notifications in plum_db_events, so we get updates
+    %% to API Specs coming from another node so that we recompile the Cowboy
+    %% dispatch tables
+    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
+    ok = plum_db_events:subscribe(object_update, MS),
+    {ok, undefined}.
+
+
+handle_call(start_listeners, _From, State) ->
+    Res = do_start_listeners(),
+    {reply, Res, State};
+
+handle_call(start_admin_listeners, _From, State) ->
+    Res = do_start_admin_listeners(),
+    {reply, Res, State};
+
+handle_call({load, Map}, _From, State) ->
+    Res = load_spec(Map),
+    {reply, Res, State};
+
+handle_call(Event, From, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    {noreply, State}.
+
+
+handle_cast(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {noreply, State}.
+
+
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+    %% We've got a notification that an API Spec object has been updated
+    %% in the database via cluster replication, so we need to rebuild the
+    %% Cowboy dispatch tables
+    _ = lager:info(
+        "API Spec object_update received,"
+        " rebuilding HTTP server dispatch tables; key=~p",
+        [Key]
+    ),
+    ok = rebuild_dispatch_tables(),
+    {noreply, State};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    {noreply, State}.
+
+
+terminate(normal, _State) ->
+    ok;
+terminate(shutdown, _State) ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+do_start_listeners() ->
+    DTables = case load_dispatch_tables() of
+        [] ->
+            [
+                {<<"http">>, base_routes()},
+                {<<"https">>, base_routes()}
+            ];
+        L ->
+            L
+    end,
+    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
+    ok.
+
+
+%% @private
+do_start_admin_listeners() ->
+    _ = [
+        start_admin_listener({Scheme, Routes})
+        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
+    ok.
+
+
+
+load_spec(Map) when is_map(Map) ->
+    case validate_spec(Map) of
+        {ok, #{<<"id">> := Id} = Spec} ->
+            %% We store the source specification, see add/2 for an explanation
+            ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
+            ok = add(
+                Id,
+                maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
+            ),
+            %% We rebuild the dispatch table
+            rebuild_dispatch_tables();
+        {error, _} = Error ->
+            Error
+    end;
+
+load_spec(FName) ->
+    try jsx:consult(FName, [return_maps]) of
+        [Spec] ->
+            load(Spec)
+    catch
+        error:badarg ->
+            {error, invalid_specification_format}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -318,7 +416,7 @@ validate_spec(Map) ->
 %% @end
 %% -----------------------------------------------------------------------------
 load_dispatch_tables() ->
-    %% We sorted by time, this is becuase in case api definitions overlap
+    %% We sorted by time, this is because in case api definitions overlap
     %% we want at least try to process them in FIFO order.
     %% @TODO This does not work in a distributed env, since we are relying
     %% on wall clock, to be solve by using a CRDT?

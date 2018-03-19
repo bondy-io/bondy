@@ -23,12 +23,10 @@ snapshot(Path) ->
         {size, infinity},
         {head, #{version => plum_db}}
     ]),
-    It = plum_db:iterator(),
+    It = plum_db:iterator({undefined, undefined}),
     Fun = fun(FullPrefix, ok) ->
-        PAcc1 = plum_db:fold(
+        PAcc1 = plum_db:fold_elements(
             fun
-                ({_, ['$deleted']}, {Cnt, PAcc0}) ->
-                    {Cnt, PAcc0};
                 (E, {Cnt, PAcc0}) ->
                     maybe_log(Cnt, [E | PAcc0], Log)
             end,
