@@ -30,8 +30,8 @@
     {platform_lib_dir,"./lib"},
     %% {platform_etc_dir,"./etc"},
     %% /Volumes/Leapsight/bondy/_build/test/logs/ct_run.nonode@nohost.2017-08-25_11.09.05
-    {platform_etc_dir,"../../../../priv/specs"},
-    {platform_data_dir, "./data/bondy"}.
+    {platform_etc_dir, "../../../../priv/specs"},
+    {platform_data_dir, "./data/bondy"},
     {platform_bin_dir,"./bin"},
     {wamp_tls,
         [{pki_files,
