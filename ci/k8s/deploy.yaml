@@ -24,7 +24,7 @@ spec:
         magenta_services: "true"
 {{- end }}
       containers:
-      - image: registry.gitlab.com/leapsight/testbondy:{{ .magenta.tag }}
+      - image: registry.gitlab.com/leapsight/testbondy:{{ .build.hash }}
         name: testbondy
         imagePullPolicy: Always
         ports:
