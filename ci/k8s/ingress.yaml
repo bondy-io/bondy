@@ -2,10 +2,10 @@
 apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
-  name: bondy
+  name: testbondy
   namespace: {{ .magenta.namespace }}
   labels:
-    app: bondy
+    app: testbondy
     tier: ingress
   annotations:
     kubernetes.io/tls-acme: "true"
@@ -13,7 +13,7 @@ metadata:
     ingress.kubernetes.io/rewrite-target: /
 spec:
   tls:
-  - secretName: bondy-tls
+  - secretName: testbondy-tls
     hosts:
     - {{ .magenta.cluster }}.api.{{ .magenta.domain }}
   rules:
@@ -22,6 +22,6 @@ spec:
       paths:
       - path: /
         backend:
-          serviceName: bondy
+          serviceName: testbondy
           servicePort: 80
 {{- end }}

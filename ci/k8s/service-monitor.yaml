@@ -2,17 +2,17 @@
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: bondy
+  name: testbondy
   namespace: tectonic-system  #needed for prometheus k8s!
   labels:
-    k8s-app: bondy #needed for prometheus k8s!
-    app: bondy
+    k8s-app: testbondy #needed for prometheus k8s!
+    app: testbondy
     tier: store
 spec:
-  jobLabel: bondy
+  jobLabel: testbondy
   selector:
     matchLabels:
-      app: bondy
+      app: testbondy
   namespaceSelector:
     matchNames:
     - {{ .magenta.namespace }}
