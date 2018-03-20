@@ -2,10 +2,10 @@
 kind: Service
 apiVersion: v1
 metadata:
-  name: bondy
+  name: testbondy
   namespace: {{ .magenta.namespace }}
   labels:
-    app: bondy
+    app: testbondy
     tier: gateway
 spec:
   ports:
@@ -20,4 +20,4 @@ spec:
       targetPort: 18082
   type: ClusterIP
   selector:
-    app: bondy
+    app: testbondy

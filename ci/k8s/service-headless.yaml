@@ -1,11 +1,11 @@
-# Servicio headless para tener un fqdn en bondy (Interno a bondy)
+# Servicio headless para tener un fqdn en testbondy (Interno a testbondy)
 kind: Service
 apiVersion: v1
 metadata:
-  name: bondy-fqdn
+  name: testbondy-fqdn
   namespace: {{ .magenta.namespace }}
   labels:
-    app: bondy
+    app: testbondy
     tier: gateway
 spec:
   ports:
@@ -15,4 +15,4 @@ spec:
   type: ClusterIP
   clusterIP: None
   selector:
-    app: bondy
+    app: testbondy
