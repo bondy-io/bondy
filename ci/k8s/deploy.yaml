@@ -2,21 +2,21 @@ apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   labels:
-    app: bondy
+    app: testbondy
     tier: gateway
-  name: bondy
+  name: testbondy
   namespace: {{ .magenta.namespace }}
 spec:
-  replicas: {{ .bondy.replicas }}
+  replicas: {{ .testbondy.replicas }}
   revisionHistoryLimit: {{ .magenta.historyLimit }}
   template:
     metadata:
       labels:
-        app: bondy
+        app: testbondy
         tier: gateway
     spec:
-      hostname: bondy
-      subdomain: bondy-fqdn
+      hostname: testbondy
+      subdomain: testbondy-fqdn
       imagePullSecrets:
       - name: gitlab-registry
 {{- if .magenta.useNodeSelector }}
@@ -24,8 +24,8 @@ spec:
         magenta_services: "true"
 {{- end }}
       containers:
-      - image: registry.gitlab.com/leapsight/bondy:{{ .magenta.tag }}
-        name: bondy
+      - image: registry.gitlab.com/leapsight/testbondy:{{ .build.hash }}
+        name: testbondy
         imagePullPolicy: Always
         ports:
         - containerPort: 18080
@@ -59,11 +59,11 @@ spec:
 {{- if .magenta.enableQos }}
         resources:
           limits:
-            memory: {{ .bondy.resources.limits.memory }}
-            cpu: {{ .bondy.resources.limits.cpu }}
+            memory: {{ .testbondy.resources.limits.memory }}
+            cpu: {{ .testbondy.resources.limits.cpu }}
           requests:
-            memory: {{ .bondy.resources.requests.memory }}
-            cpu: {{ .bondy.resources.requests.cpu }}
+            memory: {{ .testbondy.resources.requests.memory }}
+            cpu: {{ .testbondy.resources.requests.cpu }}
 {{- end }}
       securityContext:
         runAsUser: 1000
@@ -71,4 +71,4 @@ spec:
       volumes:
         - name: datadir
           persistentVolumeClaim:
-            claimName: bondy-claim
+            claimName: testbondy-claim

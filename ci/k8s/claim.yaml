@@ -2,20 +2,20 @@ kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   labels:
-    app: bondy
+    app: testbondy
     tier: gateway
-  name: bondy-claim
+  name: testbondy-claim
   namespace: {{ .magenta.namespace }}
   annotations:
-    volume.beta.kubernetes.io/storage-class: {{ .bondy.storage.class }}
+    volume.beta.kubernetes.io/storage-class: {{ .testbondy.storage.class }}
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .bondy.storage.size }}
-  {{- if ne .bondy.nodeSelector "" }}
+      storage: {{ .testbondy.storage.size }}
+  {{- if ne .testbondy.nodeSelector "" }}
   selector:
     matchLabels:
-      app: {{ .bondy.nodeSelector }}
+      app: {{ .testbondy.nodeSelector }}
   {{- end }}
