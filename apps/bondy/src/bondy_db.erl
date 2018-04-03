@@ -2,6 +2,7 @@
 
 
 -export([snapshot/1]).
+-export([import/1]).
 
 
 
@@ -10,6 +11,28 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+
+import(Filename) ->
+    Res =  disk_log:open([
+        {name, log},
+        {mode, read_only},
+        {file, Filename}
+    ]),
+    Log = case Res of
+        {ok, Log0} ->
+            _ = lager:info("Succesfully opened log; path=~p", [Filename]),
+            Log0;
+        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Succesfully opened log; path=~p, recovered=~p, bad_bytes=~p",
+                [Filename, Rec, Bad]
+            ),
+            Log0
+    end,
+
+    import_chunk(disk_log:chunk(Log, start), Log).
 
 
 
@@ -78,4 +101,42 @@ log(L, Log) ->
 %% @private
 maybe_throw(ok) -> ok;
 maybe_throw({error, Reason}) -> throw(Reason).
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+import_chunk(eof, Log) ->
+    disk_log:close(Log);
+
+import_chunk({error, _} = Error, Log) ->
+    _ = disk_log:close(Log),
+    Error;
+
+import_chunk({Cont, Terms}, Log) ->
+    try
+        io:format("Terms : ~p~n", [Terms]),
+        ok = import_terms(Terms),
+        import_chunk(disk_log:chunk(Log, Cont), Log)
+    catch
+        _:Reason ->
+            _ = lager:error("Error importing snapshot; reason=~p", {Reason}),
+            {error, Reason}
+    end.
+
+
+%% @private
+import_terms([{FPKey, Object}|T]) ->
+    %% We use the server directly as we are importing objects
+    ok = plum_db_partition_server:put(FPKey, Object),
+    import_terms(T);
+
+import_terms([]) ->
+    ok.
 
