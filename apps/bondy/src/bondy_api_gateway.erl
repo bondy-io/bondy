@@ -493,7 +493,7 @@ base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}}
+            {"/ws", bondy_wamp_ws_handler, #{}}
         ]}
     ].
 
@@ -506,7 +506,7 @@ base_routes() ->
 admin_base_routes() ->
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}},
+            {"/ws", bondy_wamp_ws_handler, #{}},
             {"/ping", bondy_http_ping_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}

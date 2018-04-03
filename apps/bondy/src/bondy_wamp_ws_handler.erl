@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_ws_handler.erl -
+%%  bondy_wamp_ws_handler.erl -
 %%
 %%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -46,7 +46,7 @@
 %% WebSocket subprotocol registry.
 %% @end
 %% =============================================================================
--module(bondy_ws_handler).
+-module(bondy_wamp_ws_handler).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -194,10 +194,10 @@ websocket_handle(Data, St) ->
 %% client. See {@link bondy:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_info({?BONDY_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     handle_outbound(St#state.frame_type, M, St);
 
-websocket_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
+websocket_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
     ok = bondy:ack(Pid, Ref),

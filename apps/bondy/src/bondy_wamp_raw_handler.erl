@@ -207,14 +207,14 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
             {stop, Reason, St2}
     end;
 
-handle_info({?BONDY_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_rotuer in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls, so we do not ack
     %% TODO check if we still need this now that bondy:ack seems to handle this case
     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
+handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy:send/2,3 which requires us to ack
     ok = bondy:ack(Pid, Ref),

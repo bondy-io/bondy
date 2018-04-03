@@ -33,7 +33,7 @@
 %% load regulation. Inn case a maximum pool capacity has been reached,
 %% the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
-%% e.g. {@link bondy_ws_handler}).
+%% e.g. {@link bondy_wamp_ws_handler}).
 %%
 %% The router also handles messages synchronously in those
 %% cases where it needs to preserve message ordering guarantees.

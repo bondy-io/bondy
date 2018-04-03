@@ -74,10 +74,10 @@ send(PeerId, M) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Sends a message to a peer.
+%% Sends a message to a local WAMP peer.
 %% If the transport is not open it fails with an exception.
 %% This function is used by the router (dealer | broker) to send WAMP messages
-%% to peers.
+%% to local peers.
 %% Opts is a map with the following keys:
 %%
 %% * timeout - timeout in milliseconds (defaults to 10000)
@@ -93,7 +93,7 @@ send({SessionId, Pid} = P, M, Opts)
 when is_integer(SessionId), Pid =:= self() ->
     %% This is a sync message so we resolve this sequentially
     wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
-    Pid ! {?BONDY_PEER_CALL, Pid, make_ref(), M},
+    Pid ! {?BONDY_PEER_REQUEST, Pid, make_ref(), M},
     %% We will not get an ack, it is implicit
     ok;
 
@@ -122,7 +122,7 @@ send({SessionId, Pid} = P, M, Opts0) when is_pid(Pid), is_integer(SessionId) ->
     %% use erlang:send/3 with the 'noconnect' option so that it
     %% will fail immediately if there is no connection to the
     %% remote node.
-    erlang:send(Pid, {?BONDY_PEER_CALL, self(), MonitorRef, M}, [noconnect]),
+    erlang:send(Pid, {?BONDY_PEER_REQUEST, self(), MonitorRef, M}, [noconnect]),
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
             %% The peer no longer exists
@@ -210,12 +210,12 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
             receive
-                {?BONDY_PEER_CALL, Pid, Ref, #result{} = R} ->
+                {?BONDY_PEER_REQUEST, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
                     Ctxt2 = bondy_context:remove_awaiting_call(
                         Ctxt1, R#result.request_id),
                     {ok, message_to_map(R), Ctxt2};
-                {?BONDY_PEER_CALL, Pid, Ref, #error{} = R} ->
+                {?BONDY_PEER_REQUEST, Pid, Ref, #error{} = R} ->
                     ok = bondy:ack(Pid, Ref),
                     Ctxt2 = bondy_context:remove_awaiting_call(
                         Ctxt1, R#error.request_id),
