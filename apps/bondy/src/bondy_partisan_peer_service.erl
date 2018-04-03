@@ -27,6 +27,9 @@
 
 
 %% bondy_peer_service callbacks
+-export([forward_message/3]).
+-export([forward_message/4]).
+-export([forward_message/5]).
 -export([join/1]).
 -export([join/2]).
 -export([join/3]).
@@ -91,6 +94,33 @@ leave() ->
 %% -----------------------------------------------------------------------------
 leave(Node) ->
     partisan_peer_service:leave(Node).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Forward message to registered process on the remote side.
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, ServerRef, Message) ->
+    Manager = manager(),
+    Manager:forward_message(Name, ServerRef, Message).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, Channel, ServerRef, Message) ->
+    Manager = manager(),
+    Manager:forward_message(Name, Channel, ServerRef, Message).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, Channel, ServerRef, Message, Opts) ->
+    Manager = manager(),
+    Manager:forward_message(Name, Channel, ServerRef, Message, Opts).
 
 
 %% -----------------------------------------------------------------------------

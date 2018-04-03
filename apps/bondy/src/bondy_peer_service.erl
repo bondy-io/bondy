@@ -24,10 +24,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_service).
-
+-include_lib("partisan/include/partisan.hrl").
 -define(DEFAULT_PEER_SERVICE, bondy_partisan_peer_service).
 
 
+-export([forward_message/3]).
+-export([forward_message/4]).
+-export([forward_message/5]).
 -export([join/1]).
 -export([join/2]).
 -export([join/3]).
@@ -46,6 +49,12 @@
 %% =============================================================================
 %% CALLBACKS
 %% =============================================================================
+
+
+%% Forward message to registered process on the remote side.
+-callback forward_message(name(), pid(), message()) -> ok.
+-callback forward_message(name(), channel(), pid(), message()) -> ok.
+-callback forward_message(name(), channel(), pid(), message(), options()) -> ok.
 
 
 %% Attempt to join node.
@@ -126,6 +135,30 @@ join(#{name := _Name, listen_addrs := _ListenAddrs} = Node, Auto) ->
 %% -----------------------------------------------------------------------------
 join(Node, Node, Auto) ->
     do(join, [Node, Node, Auto]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Forward message to registered process on the remote side.
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, ServerRef, Message) ->
+    do(forward_message, [Name, ServerRef, Message]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, Channel, ServerRef, Message) ->
+    do(forward_message, [Name, Channel, ServerRef, Message]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+forward_message(Name, Channel, ServerRef, Message, Opts) ->
+    do(forward_message, [Name, Channel, ServerRef, Message, Opts]).
 
 
 %% -----------------------------------------------------------------------------
