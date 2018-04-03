@@ -18,8 +18,8 @@
 
 %% =============================================================================
 %% @doc
-%% A Session is a transient conversation between two Peers attached to a
-%% Realm and running over a Transport.
+%% A Session (wamp session) is a transient conversation between two
+%% WAMP Peers attached to a Realm and running over a Transport.
 %%
 %% Bondy implementation ties the lifetime of the underlying transport connection
 %% for a WAMP connection to that of a WAMP Session
