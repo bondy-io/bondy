@@ -80,8 +80,8 @@
 -export([match_subscriptions/2]).
 -export([publish/5]).
 -export([subscriptions/1]).
--export([subscriptions/2]).
 -export([subscriptions/3]).
+-export([subscriptions/4]).
 
 
 %% =============================================================================
@@ -325,8 +325,8 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
     Subs = match_subscriptions(TopicUri, Ctxt, #{exclude => [SessionId]}),
     Fun = fun
         (Entry) ->
-            SubsId = bondy_registry:entry_id(Entry),
-            ASession = bondy_session:fetch(bondy_registry:session_id(Entry)),
+            SubsId = bondy_registry_entry:entry_id(Entry),
+            ASession = bondy_session:fetch(bondy_registry_entry:session_id(Entry)),
             bondy:send(
                 bondy_session:peer_id(ASession),
                 wamp_message:event(SubsId, PubId, Details, Args, Payload))
@@ -347,7 +347,7 @@ publish(TopicUri, _Opts, Args, Payload, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec subscriptions(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -365,11 +365,11 @@ subscriptions({subscription, _} = Cont) ->
 %% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->
-    [bondy_registry:entry()].
+-spec subscriptions(RealmUri :: uri(), Node :: atom(), SessionId :: id()) ->
+    [bondy_registry_entry:t()].
 
-subscriptions(RealmUri, SessionId) ->
-    bondy_registry:entries(subscription, RealmUri, SessionId).
+subscriptions(RealmUri, Node, SessionId) ->
+    bondy_registry:entries(subscription, RealmUri, Node, SessionId).
 
 
 %% -----------------------------------------------------------------------------
@@ -381,15 +381,16 @@ subscriptions(RealmUri, SessionId) ->
 %% Use {@link subscriptions/3} to limit the number of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+-spec subscriptions(
+    RealmUri :: uri(), Node :: atom(),SessionId :: id(), non_neg_integer()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
-subscriptions(RealmUri, SessionId, Limit) ->
+subscriptions(RealmUri, Node, SessionId, Limit) ->
     bondy_registry:entries(
-        subscription, RealmUri, SessionId, Limit).
+        subscription, RealmUri, Node, SessionId, Limit).
 
 
 %% -----------------------------------------------------------------------------
@@ -399,7 +400,7 @@ subscriptions(RealmUri, SessionId, Limit) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), bondy_context:context()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -414,7 +415,7 @@ match_subscriptions(TopicUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(uri(), bondy_context:context(), non_neg_integer()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -429,7 +430,7 @@ match_subscriptions(TopicUri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match_subscriptions(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 

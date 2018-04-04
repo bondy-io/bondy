@@ -112,7 +112,7 @@ handle_call(
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->
-            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
     R = wamp_message:result(ReqId, #{}, Args),
@@ -128,7 +128,7 @@ handle_call(
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->
-            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
     R = wamp_message:result(ReqId, #{}, Args),

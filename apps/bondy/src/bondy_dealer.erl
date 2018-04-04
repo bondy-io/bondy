@@ -167,14 +167,7 @@
 
 -define(DEFAULT_LIMIT, 1000).
 -define(INVOCATION_QUEUE, bondy_rpc_promise).
--define(RPC_STATE_TABLE, bondy_rpc_state).
 
-
-
--record(last_invocation, {
-    key     ::  {uri(), uri()},
-    value   ::  id()
-}).
 
 -record(promise, {
     invocation_request_id   ::  id(),
@@ -195,8 +188,8 @@
 -export([is_feature_enabled/1]).
 -export([register/3]).
 -export([registrations/1]).
--export([registrations/2]).
 -export([registrations/3]).
+-export([registrations/4]).
 -export([match_registrations/2]).
 
 
@@ -376,8 +369,8 @@ handle_message(#call{} = M, Ctxt0) ->
         ReqId = bondy_utils:get_id(global),
         Args = M#call.arguments,
         Payload = M#call.arguments_kw,
-        RegId = bondy_registry:entry_id(Entry),
-        RegOpts = bondy_registry:options(Entry),
+        RegId = bondy_registry_entry:id(Entry),
+        RegOpts = bondy_registry_entry:options(Entry),
         CallOpts = M#call.options,
         Uri = M#call.procedure_uri,
         %% TODO check if authorized and if not throw wamp.error.not_authorized
@@ -416,7 +409,7 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% @doc
 %% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
-%% 'procedure_already_exists', '{not_authorized, binary()}' error.
+%% `{not_authorized | procedure_already_exists, binary()}' error.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(uri(), map(), bondy_context:context()) ->
@@ -493,7 +486,7 @@ unregister_all(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -512,11 +505,11 @@ registrations({registration, _} = Cont) ->
 %% number of registrations returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(RealmUri :: uri(), SessionId :: id()) ->
-    [bondy_registry:entry()].
+-spec registrations(RealmUri :: uri(), Node :: atom(), SessionId :: id()) ->
+    [bondy_registry_entry:t()].
 
-registrations(RealmUri, SessionId) ->
-    bondy_registry:entries(registration, RealmUri, SessionId).
+registrations(RealmUri, Node, SessionId) ->
+    bondy_registry:entries(registration, RealmUri, Node, SessionId).
 
 
 %% -----------------------------------------------------------------------------
@@ -527,14 +520,15 @@ registrations(RealmUri, SessionId) ->
 %% Use {@link registrations/3} to limit the number of registrations returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
+-spec registrations(
+    RealmUri :: uri(), Node :: atom(),SessionId :: id(), non_neg_integer()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
-registrations(RealmUri, SessionId, Limit) ->
-    bondy_registry:entries(registration, RealmUri, SessionId, Limit).
+registrations(RealmUri, Node, SessionId, Limit) ->
+    bondy_registry:entries(registration, RealmUri, Node, SessionId, Limit).
 
 
 
@@ -545,7 +539,7 @@ registrations(RealmUri, SessionId, Limit) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), bondy_context:context()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -560,7 +554,7 @@ match_registrations(ProcUri, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(uri(), bondy_context:context(), map()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -575,7 +569,7 @@ match_registrations(ProcUri, Ctxt, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec match_registrations(bondy_registry:continuation()) ->
     {
-        [bondy_registry:entry()],
+        [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
@@ -594,8 +588,8 @@ match_registrations({registration, _} = Cont) ->
 -spec invoke(id(), uri(), function(), map(), bondy_context:context()) -> ok.
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-    CallerS = bondy_context:session(Ctxt0),
-    CallerSId = bondy_session:id(CallerS),
+    CallerSession = bondy_context:session(Ctxt0),
+    CallerSId = bondy_session:id(CallerSession),
 
     %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
@@ -627,7 +621,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
             Template = #promise{
                 procedure_uri = ProcUri,
                 call_request_id = CallId,
-                caller_pid = bondy_session:pid(CallerS),
+                caller_pid = bondy_session:pid(CallerSession),
                 caller_session_id = CallerSId
             },
 
@@ -635,7 +629,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 
             %% We invoke Fun for each entry
             Fun = fun(Entry, Ctxt1) ->
-                CalleeSId = bondy_registry:session_id(Entry),
+                CalleeSId = bondy_registry_entry:session_id(Entry),
                 Callee = bondy_session:pid(bondy_session:fetch(CalleeSId)),
                 {ok, Id, Ctxt2} = UserFun(
                     Entry, {CalleeSId, Callee}, Ctxt1),
@@ -740,8 +734,8 @@ do_invoke(L, Fun, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
     Triples = [{
-        bondy_registry:uri(E),
-        maps:get(invoke, bondy_registry:options(E), ?INVOKE_SINGLE),
+        bondy_registry_entry:uri(E),
+        maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
         E
     } || E <- L],
     do_invoke(Triples, undefined, Fun, Ctxt).
@@ -795,7 +789,7 @@ do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
 do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
     %% We found another Uri so we invoke the previous one
     {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
-    %% The new one is a sigle so we also invoke and continue
+    %% The new one is a single so we also invoke and continue
     {ok, Ctxt2} = apply_invocation_strategy(E, Fun, Ctxt1),
     do_invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
 
@@ -820,103 +814,40 @@ do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
     {ok, bondy_context:context()}.
 
 apply_invocation_strategy({?INVOKE_FIRST, L}, Fun, Ctxt) ->
-    apply_first_available(L, Fun, Ctxt);
+    maybe_invoke(
+        bondy_rpc_load_balancer:get_entry(L, #{strategy => first}),
+        Fun,
+        Ctxt
+    );
 
 apply_invocation_strategy({?INVOKE_LAST, L}, Fun, Ctxt) ->
-    apply_first_available(lists:reverse(L), Fun, Ctxt);
+    maybe_invoke(
+        bondy_rpc_load_balancer:get_entry(L, #{strategy => last}),
+        Fun,
+        Ctxt
+    );
 
 apply_invocation_strategy({?INVOKE_RANDOM, L}, Fun, Ctxt) ->
-    apply_first_available(lists_utils:shuffle(L), Fun, Ctxt);
+    maybe_invoke(
+        bondy_rpc_load_balancer:get_entry(L, #{strategy => random}),
+        Fun,
+        Ctxt
+    );
 
 apply_invocation_strategy({?INVOKE_ROUND_ROBIN, L}, Fun, Ctxt) ->
-    apply_round_robin(L, Fun, Ctxt);
+    maybe_invoke(
+        bondy_rpc_load_balancer:get_entry(L, #{strategy => round_robin}),
+        Fun,
+        Ctxt
+    ).
 
-apply_invocation_strategy(Entry, Fun, Ctxt) ->
+
+%% @private
+maybe_invoke(not_found, _, Ctxt) ->
+    {ok, Ctxt};
+
+maybe_invoke(Entry, Fun, Ctxt) ->
     Fun(Entry, Ctxt).
-
-
-%% @private
-apply_first_available([], _, Ctxt) ->
-    {ok, Ctxt};
-
-apply_first_available([H|T], Fun, Ctxt) ->
-    Pid = bondy_session:pid(bondy_registry:session_id(H)),
-    case process_info(Pid) == undefined of
-        true ->
-            apply_first_available(T, Fun, Ctxt);
-        false ->
-            %% We finish doing the invocation
-            Fun(H, Ctxt)
-    end.
-
-
-%% @private
--spec apply_round_robin(list(), function(), bondy_context:context()) ->
-    {ok, bondy_context:context()}.
-
-apply_round_robin([], _, Ctxt) ->
-    {ok, Ctxt};
-
-apply_round_robin(L, Fun, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Uri = bondy_registry:uri(hd(L)),
-    apply_round_robin(get_last_invocation(RealmUri, Uri), L, Fun, Ctxt).
-
-
-%% @private
-apply_round_robin(_, [], _, Ctxt) ->
-    {ok, Ctxt};
-
-apply_round_robin(undefined, [H|T], Fun, Ctxt) ->
-    %% We never invoke this procedure before or we reordered the round
-    Pid = bondy_session:pid(bondy_registry:session_id(H)),
-    case process_info(Pid) of
-        undefined ->
-            %% The peer connection must have been closed between
-            %% the time we read and now.
-            apply_round_robin(undefined, T, Fun, Ctxt);
-        _ ->
-            %% We update the invocation state
-            ok = update_last_invocation(
-                bondy_context:realm_uri(Ctxt),
-                bondy_registry:uri(H),
-                bondy_registry:entry_id(H)
-            ),
-            %% We do the invocation
-            Fun(H, Ctxt)
-    end;
-
-
-apply_round_robin(#last_invocation{value = LastId}, L0, Fun, Ctxt) ->
-    Pred = fun(E) -> LastId =:= bondy_registry:entry_id(E) end,
-    L1 = lists_utils:rotate_right_with(Pred, L0),
-    apply_round_robin(undefined, L1, Fun, Ctxt).
-
-
-%% @private
-get_last_invocation(RealmUri, Uri) ->
-    case ets:lookup(rpc_state_table(RealmUri, Uri), {RealmUri, Uri}) of
-        [] -> undefined;
-        [Entry] -> Entry
-    end.
-
-update_last_invocation(RealmUri, Uri, Val) ->
-    Entry = #last_invocation{key = {RealmUri, Uri}, value = Val},
-    true = ets:insert(rpc_state_table(RealmUri, Uri), Entry),
-    ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% A table that persists calls and maintains the state of the load
-%% balancing of invocations
-%% @end
-%% -----------------------------------------------------------------------------
-rpc_state_table(RealmUri, Uri) ->
-    tuplespace:locate_table(?RPC_STATE_TABLE, {RealmUri, Uri}).
-
-
 
 
 
