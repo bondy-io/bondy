@@ -86,7 +86,7 @@
         allow_undefined => false,
         datatype => binary,
         default => fun() ->
-            bondy_oauth2:generate_fragment(48)
+            bondy_utils:generate_fragment(48)
         end
     },
     <<"groups">> => #{
