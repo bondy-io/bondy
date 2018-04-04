@@ -40,6 +40,7 @@
     id => id(),
     %% Realm and Session
     realm_uri => uri(),
+    node => atom(),
     session => bondy_session:session() | undefined,
     %% Peer Info
     peer => bondy_session:peer(),
@@ -59,29 +60,30 @@
 -export_type([context/0]).
 
 
+-export([add_awaiting_call/2]).
+-export([awaiting_calls/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
 -export([new/2]).
+-export([node/1]).
 -export([peer/1]).
--export([add_awaiting_call/2]).
--export([awaiting_calls/1]).
+-export([peer_id/1]).
 -export([realm_uri/1]).
+-export([remove_awaiting_call/2]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
 -export([roles/1]).
 -export([session/1]).
 -export([session_id/1]).
--export([peer_id/1]).
 -export([set_peer/2]).
--export([remove_awaiting_call/2]).
--export([set_subprotocol/2]).
--export([subprotocol/1]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_roles/2]).
+-export([set_subprotocol/2]).
+-export([subprotocol/1]).
 -export([set_session/2]).
 
 
@@ -94,6 +96,7 @@
 new() ->
     Ctxt = #{
         id => bondy_utils:get_id(global),
+        node => bondy_peer_service:mynode(),
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => bondy_config:request_timeout(),
@@ -150,6 +153,16 @@ close(Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec peer(context()) -> bondy_session:peer().
 peer(#{peer := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec node(context()) -> atom().
+node(#{node := Val}) -> Val.
+
 
 
 %% -----------------------------------------------------------------------------

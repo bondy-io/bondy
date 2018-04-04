@@ -662,6 +662,7 @@ perform_action(
     RealmUri = maps:get(realm_uri, St1),
     WampCtxt0 = #{
         peer => Peer,
+        node => bondy_peer_service:mynode(),
         subprotocol => {http, text, maps:get(encoding, St0)},
         realm_uri => RealmUri,
         awaiting_calls => sets:new(),
