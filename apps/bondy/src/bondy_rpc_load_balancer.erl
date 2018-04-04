@@ -17,7 +17,18 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This module implements a distributed load balancer, providing the
+%% different load balancing strategies used by bondy_dealer to choose
+%% the Callee and Procedure to invoke when handling a WAMP Call.
+%%
+%% At the moment the load balancing state is local and not replicated
+%% across the nodes in the cluster. However, each node has access to a local
+%% replica of the global registry and thus can load balance between local and
+%% remote Callees.
+%%
+%% In the future we will explore implementing distributed load balancing
+%% algorithms such as Ant Colony, Particle Swarm Optimization and Biased Random
+%% Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976b5c0106e894bd4c41d89.pdf)
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_load_balancer).
@@ -31,6 +42,13 @@
         allow_null => false,
         allow_undefined => false,
         datatype => {in, [first, last, random, round_robin]}
+    },
+    force_locality => #{
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => true,
+        datatype => boolean
     }
 }).
 
@@ -41,7 +59,10 @@
 
 -type entries()             ::  [bondy_registry_entry:t()].
 -type strategy()            ::  first | last | random | round_robin.
--type opts()                ::  #{strategy => strategy()}.
+-type opts()                ::  #{
+    strategy => strategy(),
+    force_locality => boolean()
+}.
 
 
 
@@ -60,8 +81,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_entry(entries(), opts()) -> bondy_registry_entry:t().
-get_entry(Entries, Opts0) when is_list(Entries) ->
-    #{strategy := Strat} = maps_utils:validate(Opts0, ?OPTS_SPEC),
+get_entry(Entries0, Opts0) when is_list(Entries0) ->
+    #{
+        strategy := Strat,
+        force_locality := Loc
+    } = maps_utils:validate(Opts0, ?OPTS_SPEC),
+    Entries = maybe_sort_entries(Loc, Entries0),
     case Strat of
         first ->
             get_first(Entries);
@@ -82,6 +107,19 @@ get_entry(Entries, Opts0) when is_list(Entries) ->
 %% =============================================================================
 
 
+maybe_sort_entries(true, L) ->
+    Node = bondy_peer_service:mynode(),
+    Fun = fun(A, B) ->
+        case {bondy_registry_entry:node(A), bondy_registry_entry:node(B)} of
+            {Node, _} -> true;
+            {_, Node} -> false;
+            _ -> A =< B % to keep order of remaining elements
+        end
+    end,
+    lists:sort(Fun, L);
+
+maybe_sort_entries(false, L) ->
+    L.
 
 get_first([H|T]) ->
     Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
