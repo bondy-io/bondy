@@ -167,14 +167,16 @@ remove(RealmUri, Id) ->
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
-    Groups = [<<"resource_owners">> | maps:get(<<"groups">>, Info1, [])],
+    Groups0 = [<<"resource_owners">> | maps:get(<<"groups">>, Info1, [])],
+    Groups1 = sets:to_list(sets:from_list(Groups0)),
     Opts = [
         {<<"password">>, maps:get(<<"password">>, Info1)},
-        {<<"groups">>, Groups} |
+        {<<"groups">>, Groups1} |
         maps:to_list(maps:with([<<"meta">>], Info1))
     ],
     Username = maps:get(<<"username">>, Info1, undefined),
-    {Username, Opts, Info1}.
+    Info2 = maps:put(<<"groups">>, Groups1, Info1),
+    {Username, Opts, Info2}.
 
 
 

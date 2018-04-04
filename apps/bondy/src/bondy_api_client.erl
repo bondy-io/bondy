@@ -205,8 +205,10 @@ do_add(RealmUri, {Id, Opts, Info}, Retries) ->
 %% @private
 validate(Info0, Spec) ->
     Info1 = maps_utils:validate(Info0, Spec),
-    Groups = [<<"api_clients">> | maps:get(<<"groups">>, Info1, [])],
-    Opts = [{<<"groups">>, Groups} | maps:to_list(maps:with([<<"meta">>], Info1))],
+    Groups0 = [<<"api_clients">> | maps:get(<<"groups">>, Info1, [])],
+    Groups1 = sets:to_list(sets:from_list(Groups0)),
+    Meta = maps:get(<<"meta">>, Info1),
+    Opts = [{<<"groups">>, Groups1} | maps:to_list(Meta)],
     Pass = case maps:find(<<"client_secret">>, Info1) of
         {ok, Val} ->
             [{<<"password">>, Val}];
@@ -214,5 +216,5 @@ validate(Info0, Spec) ->
             []
     end,
     Id = maps:get(<<"client_id">>, Info1, undefined),
-    {Id, lists:append(Pass, Opts), Info1}.
-
+    Info2 = maps:put(<<"groups">>, Groups1, Info1),
+    {Id, lists:append(Pass, Opts), Info2}.
