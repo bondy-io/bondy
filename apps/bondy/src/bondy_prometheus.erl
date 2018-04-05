@@ -24,7 +24,9 @@
 -module(bondy_prometheus).
 -include_lib("wamp/include/wamp.hrl").
 
--define(WAMP_MESSAGE_LABELS, [node, protocol, transport, frame_type, encoding]).
+-define(WAMP_MESSAGE_LABELS, [
+    realm, node, protocol, transport, frame_type, encoding
+]).
 
 -export([init/0]).
 -export([report/0]).
@@ -164,76 +166,76 @@ socket_error(Procotol, Transport) ->
 -spec wamp_message(wamp_message:message(), bondy_context:context()) -> ok.
 
 wamp_message(#abort{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_abort_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_abort_messages_total, M, [], Ctxt);
 
 wamp_message(#authenticate{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_authenticate_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_authenticate_messages_total, M, [], Ctxt);
 
-wamp_message(#call{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_call_messages_total, M, Ctxt);
+wamp_message(#call{procedure_uri = Val} = M, Ctxt) ->
+    wamp_message(bondy_wamp_call_messages_total, M, [Val], Ctxt);
 
 wamp_message(#cancel{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_cancel_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_cancel_messages_total, M, [], Ctxt);
 
 wamp_message(#challenge{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_challenge_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_challenge_messages_total, M, [], Ctxt);
 
-wamp_message(#error{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_error_messages_total, M, Ctxt);
+wamp_message(#error{error_uri = Val} = M, Ctxt) ->
+    wamp_message(bondy_wamp_error_messages_total, M, [Val], Ctxt);
 
 wamp_message(#event{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_event_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_event_messages_total, M, [], Ctxt);
 
 wamp_message(#goodbye{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_goodbye_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_goodbye_messages_total, M, [], Ctxt);
 
 wamp_message(#hello{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_hello_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_hello_messages_total, M, [], Ctxt);
 
 wamp_message(#interrupt{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_interrupt_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_interrupt_messages_total, M, [], Ctxt);
 
 wamp_message(#invocation{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_invocation_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_invocation_messages_total, M, [], Ctxt);
 
-wamp_message(#publish{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_publish_messages_total, M, Ctxt);
+wamp_message(#publish{topic_uri = Val} = M, Ctxt) ->
+    wamp_message(bondy_wamp_publish_messages_total, M, [Val], Ctxt);
 
 wamp_message(#published{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_published_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_published_messages_total, M, [], Ctxt);
 
-wamp_message(#register{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_register_messages_total, M, Ctxt);
+wamp_message(#register{procedure_uri = Val} = M, Ctxt) ->
+    wamp_message(bondy_wamp_register_messages_total, M, [Val], Ctxt);
 
 wamp_message(#registered{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_registered_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_registered_messages_total, M, [], Ctxt);
 
 wamp_message(#result{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_result_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_result_messages_total, M, [], Ctxt);
 
-wamp_message(#subscribe{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_subscribe_messages_total, M, Ctxt);
+wamp_message(#subscribe{topic_uri = Val} = M, Ctxt) ->
+    wamp_message(bondy_wamp_subscribe_messages_total, M, [Val], Ctxt);
 
 wamp_message(#subscribed{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_subscribed_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_subscribed_messages_total, M, [], Ctxt);
 
 wamp_message(#unregister{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unregister_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_unregister_messages_total, M, [], Ctxt);
 
 wamp_message(#unregistered{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unregistered_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_unregistered_messages_total, M, [], Ctxt);
 
 wamp_message(#unsubscribe{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unsubscribe_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_unsubscribe_messages_total, M, [], Ctxt);
 
 wamp_message(#unsubscribed{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unsubscribed_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_unsubscribed_messages_total, M, [], Ctxt);
 
 wamp_message(#welcome{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_welcome_messages_total, M, Ctxt);
+    wamp_message(bondy_wamp_welcome_messages_total, M, [], Ctxt);
 
 wamp_message(#yield{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_yield_messages_total, M, Ctxt).
+    wamp_message(bondy_wamp_yield_messages_total, M, [], Ctxt).
 
 
 
@@ -241,6 +243,28 @@ wamp_message(#yield{} = M, Ctxt) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+
+get_labels(call) ->
+    [procedure_uri | ?WAMP_MESSAGE_LABELS];
+
+get_labels(error) ->
+    [error_uri | ?WAMP_MESSAGE_LABELS];
+
+get_labels(publish) ->
+    [topic_uri | ?WAMP_MESSAGE_LABELS];
+
+get_labels(register) ->
+    [procedure_uri | ?WAMP_MESSAGE_LABELS];
+
+get_labels(subscribe) ->
+    [topic_uri | ?WAMP_MESSAGE_LABELS];
+
+get_labels(_) ->
+   ?WAMP_MESSAGE_LABELS.
+
 
 get_socket_labels(Protocol, Transport) ->
     [
@@ -250,10 +274,10 @@ get_socket_labels(Protocol, Transport) ->
     ].
 
 
-get_wamp_labels(Ctxt) ->
+get_labels_values(Ctxt) ->
     {T, FT, E} = bondy_context:subprotocol(Ctxt),
     [
-        %% bondy_context:session_id(Ctxt),
+        get_realm(Ctxt),
         node_name(),
         wamp,
         T,
@@ -261,12 +285,23 @@ get_wamp_labels(Ctxt) ->
         E
     ].
 
+%% @private
+get_realm(Ctxt) ->
+    try
+        bondy_context:realm_uri(Ctxt)
+    catch
+        _:_ ->
+            undefined
+    end.
 
-wamp_message(Metric, M, Ctxt) ->
+
+
+wamp_message(Metric, M, LabelsValues, Ctxt) ->
     Size = erts_debug:flat_size(M) * 8,
-    Labels = get_wamp_labels(Ctxt),
+    Labels = get_labels_values(Ctxt),
+    AllLabels = lists:append(LabelsValues, Labels),
     ok = prometheus_counter:inc(bondy_wamp_messages_total, Labels),
-    ok = prometheus_counter:inc(Metric, Labels),
+    ok = prometheus_counter:inc(Metric, AllLabels),
     prometheus_histogram:observe(bondy_wamp_message_bytes, Labels, Size).
 
 
@@ -361,122 +396,122 @@ wamp_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_wamp_abort_messages_total},
         {help, <<"The total number of abort messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(abort)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_authenticate_messages_total},
         {help, <<"The total number of authenticate messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(authenticate)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_call_messages_total},
         {help, <<"The total number of call messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(call)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_cancel_messages_total},
         {help, <<"The total number of cancel messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(cancel)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_challenge_messages_total},
         {help, <<"The total number of challenge messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(challenge)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_error_messages_total},
         {help, <<"The total number of error messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(error)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_event_messages_total},
         {help, <<"The total number of event messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(event)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_goodbye_messages_total},
         {help, <<"The total number of goodbye messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(goodbye)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_hello_messages_total},
         {help, <<"The total number of hello messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(hello)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_interrupt_messages_total},
         {help, <<"The total number of interrupt messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(interrupt)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_invocation_messages_total},
         {help, <<"The total number of invocation messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(invocation)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_publish_messages_total},
         {help, <<"The total number of publish messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(publish)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_published_messages_total},
         {help, <<"The total number of published messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(published)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_register_messages_total},
         {help, <<"The total number of register messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(register)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_registered_messages_total},
         {help, <<"The total number of registered messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(registered)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_result_messages_total},
         {help, <<"The total number of result messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(result)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_subscribe_messages_total},
         {help, <<"The total number of subscribe messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(subscribe)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_subscribed_messages_total},
         {help, <<"The total number of subscribed messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(subscribed)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unregister_messages_total},
         {help, <<"The total number of unregister messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(unregister)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unregistered_messages_total},
         {help, <<"The total number of unregistered messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(unregistered)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unsubscribe_messages_total},
         {help, <<"The total number of unsubscribe messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(unsubscribe)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_unsubscribed_messages_total},
         {help, <<"The total number of unsubscribed messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(unsubscribed)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_welcome_messages_total},
         {help, <<"The total number of welcome messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(welcome)}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_wamp_yield_messages_total},
         {help, <<"The total number of yield messages routed by a bondy node since reset.">>},
-        {labels, ?WAMP_MESSAGE_LABELS}
+        {labels, get_labels(yield)}
     ]),
 
     _ = prometheus_histogram:declare([
@@ -491,9 +526,8 @@ wamp_metrics() ->
 
 
 
-
 node_name() ->
-    list_to_binary(atom_to_list(node())).
+    bondy_peer_service:mynode().
 
 
 bytes_bucket() ->
