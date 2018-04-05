@@ -127,7 +127,7 @@ dequeue(call_id, Id, Ctxt) ->
 flush(Ctxt) ->
     try bondy_context:realm_uri(Ctxt) of
         Uri ->
-            Set = bondy_context:awaiting_calls(Ctxt),
+            Set = bondy_context:awaiting_call_set(Ctxt),
             Fun = fun(Id, ICtxt) ->
                 Key = {Uri, Id},
                 _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),

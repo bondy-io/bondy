@@ -62,6 +62,7 @@
 
 -export([add_awaiting_call/2]).
 -export([awaiting_calls/1]).
+-export([awaiting_call_set/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
@@ -329,6 +330,10 @@ is_feature_enabled(#{roles := Roles}, Role, Feature) ->
 awaiting_calls(#{awaiting_calls := S}) ->
     sets:to_list(S).
 
+
+-spec awaiting_call_set(context()) -> [id()].
+awaiting_call_set(#{awaiting_calls := S}) ->
+    S.
 
 %% -----------------------------------------------------------------------------
 %% @doc
