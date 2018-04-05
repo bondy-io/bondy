@@ -17,11 +17,13 @@
 %% =============================================================================
 -module(bondy_registry_entry).
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 %% An entry denotes a registration or a subscription.
 %% Entries are immutable.
 -record(entry, {
     key                     ::  entry_key(),
+    pid                     ::  pid(),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     created                 ::  calendar:date_time() | atom(),
@@ -68,6 +70,7 @@
 -export([to_details_map/1]).
 -export([type/1]).
 -export([uri/1]).
+-export([peer_id/1]).
 
 
 %% =============================================================================
@@ -80,12 +83,11 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), uri(), id(), uri(), map()) -> t().
+-spec new(entry_type(), uri(), peer_id(), uri(), map()) -> t().
 
-new(Type, RealmUri, SessionId, Uri, Options) ->
+new(Type, RealmUri, {Node, SessionId, Pid}, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
     MatchPolicy = validate_match_policy(Options),
-    Node = bondy_peer_service:mynode(),
     Key = #entry_key{
         realm_uri = RealmUri,
         node = Node,
@@ -95,6 +97,7 @@ new(Type, RealmUri, SessionId, Uri, Options) ->
     },
     #entry{
         key = Key,
+        pid = Pid,
         uri = Uri,
         match_policy = MatchPolicy,
         created = calendar:local_time(),
@@ -106,6 +109,8 @@ new(Type, RealmUri, SessionId, Uri, Options) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec pattern(entry_type(), uri(), atom(), id(), uri(), map()) -> t().
+
 pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
     MatchPolicy = try
         validate_match_policy(Options)
@@ -115,6 +120,7 @@ pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
     end,
     #entry{
         key = key_pattern(Type, RealmUri, Node, SessionId, '_'),
+        pid = '_',
         uri = Uri,
         match_policy = MatchPolicy,
         created = '_',
@@ -206,6 +212,20 @@ session_id(#entry{key = Key}) ->
 
 session_id(#entry_key{} = Key) ->
     Key#entry_key.session_id.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the peer_id() of the subscription or registration
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(t() | entry_key()) -> peer_id().
+peer_id(#entry{key = Key} = Entry) ->
+    {
+        Key#entry_key.node,
+        Key#entry_key.session_id,
+        Entry#entry.pid
+    }.
 
 
 %% -----------------------------------------------------------------------------

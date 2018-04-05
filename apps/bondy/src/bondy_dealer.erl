@@ -169,16 +169,6 @@
 -define(INVOCATION_QUEUE, bondy_rpc_promise).
 
 
--record(promise, {
-    invocation_request_id   ::  id(),
-    procedure_uri           ::  uri(),
-    call_request_id         ::  id(),
-    caller                  ::  peer_id(),
-    callee                  ::  peer_id()
-}).
--type promise() :: #promise{}.
-
-
 %% API
 -export([close_context/1]).
 -export([features/0]).
@@ -204,7 +194,7 @@ close_context(Ctxt) ->
     %% Cleanup callee role registrations
     ok = unregister_all(Ctxt),
     %% Cleanup invocations queue
-    cleanup_queue(Ctxt).
+    bondy_rpc_promise:flush(Ctxt).
 
 
 -spec features() -> map().
@@ -587,60 +577,54 @@ match_registrations({registration, _} = Cont) ->
 -spec invoke(id(), uri(), function(), map(), bondy_context:context()) -> ok.
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-    CallerSession = bondy_context:session(Ctxt0),
 
     %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
     case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
-            bondy:send(
-                bondy_context:peer_id(Ctxt0),
-                no_such_procedure(ProcUri, CallId)
-            );
+            reply_error(ProcUri, CallId, Ctxt0);
         Regs ->
-            %%  A promise is used to implement a capability and a feature:
-            %% - the capability to match the callee response
-            %% (wamp_yield() or wamp_error()) back to the originating
-            %% wamp_call() and Caller
-            %% - the call_timeout feature at the dealer level
-            Template = #promise{
-                procedure_uri = ProcUri,
-                call_request_id = CallId,
-                caller = bondy_session:peer_id(CallerSession)
-            },
-
             %% TODO Should we invoke all matching invocations?
 
             %% We invoke Fun for each entry
             Fun = fun
                 ({error, noproc}, Ctxt1) ->
-                    %% The local process associated with an entry
+                    %% The local process associated with the entry
                     %% is no longer alive.
-                    bondy:send(
-                        bondy_context:peer_id(Ctxt1),
-                        no_such_procedure(ProcUri, CallId)
-                    );
+                    reply_error(ProcUri, CallId, Ctxt1);
                 (Entry, Ctxt1) ->
-                    CalleeSId = bondy_registry_entry:session_id(Entry),
-                    %% @TODO Handle remote Callee
-                    Session = bondy_session:fetch(CalleeSId),
-                    Callee = bondy_session:peer_id(Session),
-                    {ok, Id, Ctxt2} = UserFun(Entry, Callee, Ctxt1),
-                    %% We complete the promise with the Callee data
-                    Promise = Template#promise{
-                        invocation_request_id = Id,
-                        callee = Callee
-                    },
+                    Callee = bondy_registry_entry:peer_id(Entry),
+
+                    {ok, InvocationId, Ctxt2} = UserFun(Entry, Callee, Ctxt1),
+
+                    %%  A promise is used to implement a capability and a
+                    %% feature:
+                    %% - the capability to match the callee response
+                    %% (wamp_yield() or wamp_error()) back to the originating
+                    %% wamp_call() and Caller
+                    %% - the call_timeout feature at the dealer level
+                    Promise = bondy_rpc_promise:new(
+                        InvocationId, CallId, ProcUri, Callee, Ctxt1),
+
                     %% We enqueue the promise with a timeout
-                    ok = enqueue_promise(
-                        Id, Promise, bondy_utils:timeout(Opts), Ctxt2),
+                    ok = bondy_rpc_promise:enqueue(
+                        Promise, bondy_utils:timeout(Opts), Ctxt2),
+
                     {ok, Ctxt2}
             end,
             invoke(Regs, Fun, Ctxt0)
     end.
 
 
+%% @private
+-spec reply_error(uri(), id(), bondy_context:t()) -> ok.
+
+reply_error(ProcUri, CallId, Ctxt) ->
+    bondy:send(
+        bondy_context:peer_id(Ctxt),
+        no_such_procedure(ProcUri, CallId)
+    ).
 
 
 
@@ -656,7 +640,7 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     % #{session := S} = Ctxt,
     % Caller = bondy_session:pid(S),
 
-    case dequeue_promise(call_request_id, CallId, Ctxt) of
+    case bondy_rpc_promise:dequeue(call_id, CallId, Ctxt) of
         ok ->
             %% Promises for this call were either interrupted by us,
             %% fulfilled or timed out and garbage collected, we do nothing
@@ -666,10 +650,8 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
             %% timed out or caller died, we do nothing
             {ok, Ctxt};
         {ok, P} ->
-            #promise{
-                invocation_request_id = ReqId,
-                callee = Callee
-            } = P,
+            ReqId = bondy_rpc_promise:invocation_id(P),
+            Callee = bondy_rpc_promise:callee(P),
             {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
             %% We iterate until there are no more pending invocation for the
             %% call_request_id == CallId
@@ -686,7 +668,7 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     {ok, bondy_context:context()}.
 
 dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
-    case dequeue_promise(invocation_request_id, ReqId, Ctxt) of
+    case bondy_rpc_promise:dequeue(invocation_id, ReqId, Ctxt) of
         ok ->
             %% Promise was fulfilled or timed out and garbage collected,
             %% we do nothing
@@ -694,11 +676,9 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
         {ok, timeout} ->
             %% Promise timed out, we do nothing
             {ok, Ctxt};
-        {ok, #promise{invocation_request_id = ReqId} = P} ->
-            #promise{
-                call_request_id = CallId,
-                caller = Caller
-            } = P,
+        {ok, P} ->
+            CallId = bondy_rpc_promise:call_id(P),
+            Caller = bondy_rpc_promise:caller(P),
             Fun(CallId, Caller, Ctxt)
     end.
 
@@ -830,58 +810,6 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 %% PRIVATE: PROMISES
 %% =============================================================================
 
-
-
-
-%% @private
--spec enqueue_promise(
-    id(), promise(), pos_integer(), bondy_context:context()) -> ok.
-
-enqueue_promise(Id, Promise, Timeout, #{realm_uri := Uri}) ->
-    #promise{call_request_id = CallId} = Promise,
-    Key = {Uri, Id, CallId},
-    Opts = #{key => Key, ttl => Timeout},
-    tuplespace_queue:enqueue(?INVOCATION_QUEUE, Promise, Opts).
-
-
-%% @private
-dequeue_promise(invocation_request_id, Id, #{realm_uri := Uri}) ->
-    dequeue_promise({Uri, Id, '_'});
-
-dequeue_promise(call_request_id, Id, #{realm_uri := Uri}) ->
-    dequeue_promise({Uri, '_', Id}).
-
-
-%% @private
--spec dequeue_promise(tuple()) -> ok | {ok, timeout} | {ok, promise()}.
-
-dequeue_promise(Key) ->
-    case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Key}) of
-        empty ->
-            %% The promise might have expired so we GC it.
-            case tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}) of
-                0 -> ok;
-                _ -> {ok, timeout}
-            end;
-        [Promise] ->
-            {ok, Promise}
-    end.
-
-
-%% @private
-cleanup_queue(#{realm_uri := Uri, awaiting_calls := Set} = Ctxt) ->
-    sets:fold(
-        fun(Id, ICtxt) ->
-            Key = {Uri, Id},
-            _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
-            bondy_context:remove_awaiting_call(ICtxt, Id)
-        end,
-        Ctxt,
-        Set
-    );
-
-cleanup_queue(Ctxt) ->
-    Ctxt.
 
 
 %% @private
