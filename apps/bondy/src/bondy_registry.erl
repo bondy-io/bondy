@@ -31,18 +31,20 @@
 -include("bondy.hrl").
 
 
-%% -define(SUBSCRIPTION_DB_PREFIX, {global, bondy_subscription}).
-%% -define(REGISTRATION_DB_PREFIX, {global, bondy_registration}).
+%% -define(SUBSCRIPTION_DB_full_PREFIX, {global, bondy_subscription}).
+%% -define(REGISTRATION_DB_full_PREFIX, {global, bondy_registration}).
 -define(ANY, <<"*">>).
 
-%% -define(DEFAULT_LIMIT, 1000).
+-define(PREFIX, registry).
+-define(FULLPREFIX(RealmUri), {?PREFIX, RealmUri}).
+
+
 -define(SUBSCRIPTION_TABLE_NAME, bondy_subscription).
 -define(SUBSCRIPTION_INDEX_TABLE_NAME, bondy_subscription_index).
 -define(REGISTRATION_TABLE_NAME, bondy_registration).
 -define(REGISTRATION_INDEX_TABLE_NAME, bondy_registration_index).
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
-
 
 
 %% TODO indices should be recomputed based on entry creation/deletion but are
@@ -282,23 +284,45 @@ remove(Type, EntryId, Ctxt, Task) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
-    Tab = partition_table(Type, RealmUri),
     Key = bondy_registry_entry:key_pattern(
         Type, RealmUri, Node, SessionId, EntryId),
+
+    case take_from_tuplespace(Type, Key) of
+        {ok, Entry} ->
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
+            maybe_execute(Task, Entry, Ctxt);
+        {error, not_found} = Error ->
+            Error
+    end.
+
+
+%% @private
+take_from_tuplespace(Type, Key) ->
+    RealmUri = bondy_registry_entry:relam_uri(Key),
+    Tab = partition_table(Type, RealmUri),
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no entries with EntryId.
             {error, not_found};
         [Entry] ->
+            %% We delete the Entry and decrement the Uri count
             Uri = bondy_registry_entry:uri(Entry),
             MP = bondy_registry_entry:match_policy(Entry),
             decr_counter(Tab, {RealmUri, Uri}, 1),
+
             %% Delete indices for entry
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(Entry, MP),
             ets:delete_object(IdxTab, IdxEntry),
-            maybe_execute(Task, Entry, Ctxt)
+
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
+            {ok, Entry}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -470,8 +494,12 @@ init([]) ->
     %% We subcribe to change notifications in plum_db_events, so we get updates
     %% to API Specs coming from another node so that we recompile the Cowboy
     %% dispatch tables
-    %% MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
-    %% ok = plum_db_events:subscribe(object_update, MS),
+
+    MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
+    ok = plum_db_events:subscribe(object_update, MS),
+
+    self() ! load_registry,
+
     {ok, undefined}.
 
 
@@ -487,7 +515,30 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
+handle_info(load_registry, State) ->
+    %% TODO Load
+    {noreply, State};
+
+handle_info(
+    {plum_db_event, object_update, {{{registry, _}, Key}, Object}}, State) ->
+    Node = bondy_registry_entry:node(Key),
+    case Node =:= bondy_peer_service:mynode() of
+        true ->
+            %% This should not be happenning as only we can change our
+            %% registrations. We do nothing.
+            ok;
+        false ->
+            case maybe_resolve(Object) of
+                '$deleted' ->
+                    _ = take_from_tuplespace(registration, Key);
+                Entry ->
+                    add_to_tuplespace(registration, Entry)
+            end
+    end,
+    {noreply, State};
+
 handle_info(Info, State) ->
+    _ = lager:info("Unexpected message, message=~p", [Info]),
     _ = lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
 
@@ -507,9 +558,28 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+maybe_resolve(Object) ->
+    case plum_db_object:value_count(Object) > 1 of
+        true ->
+            %% Entries are immutable so we either get an Entry or a tombstone
+            Resolver = fun
+                ('$deleted', _) -> '$deleted';
+                (_, '$deleted') -> '$deleted'
+            end,
+            Resolved = plum_db_object:resolve(Object, Resolver),
+            plum_db_object:value(Resolved);
+        false ->
+            plum_db_object:value(Object)
+    end.
+
 
 %% @private
 maybe_execute(undefined, _, _) ->
@@ -532,15 +602,24 @@ do_remove_all(Term, ETab, Ctxt, Task) ->
             Uri = bondy_registry_entry:uri(Term),
             Type = bondy_registry_entry:type(Term),
             MatchPolicy = bondy_registry_entry:match_policy(Term),
+
             %% We first delete the index entry associated with this Entry
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(Term, MatchPolicy),
             true = ets:delete_object(IdxTab, IdxEntry),
+
             %% We then delete the Entry and decrement the Uri count
             N = ets:select_delete(ETab, [{Term, [], [true]}]),
             decr_counter(ETab, {RealmUri, Uri}, N),
-            %% We perform the task
+
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            Key = bondy_registry_entry:key(Term),
+            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
+
+            %% Finally, we perform the task if any
             ok = maybe_execute(Task, Term, Ctxt),
+
             %% We continue traversing the ets table
             do_remove_all(ets:next(ETab, Key), ETab, Ctxt, Task);
 
@@ -603,12 +682,20 @@ index_table(registration, RealmUri) ->
     {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}.
 
 do_add(Type, Entry) ->
+    ok = add_to_db(Entry),
+    add_to_tuplespace(Type, Entry).
+
+
+%% @private
+add_to_tuplespace(Type, Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
 
+    %% We insert the entry in tuplespace
     SSTab = partition_table(Type, RealmUri),
     true = ets:insert(SSTab, Entry),
 
+    %% We insert the index in tuplespace
     IdxTab = index_table(Type, RealmUri),
     IdxEntry = index_entry(Entry),
     true = ets:insert(IdxTab, IdxEntry),
@@ -617,6 +704,14 @@ do_add(Type, Entry) ->
     IsFirstEntry = incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1,
     {ok, Map, IsFirstEntry}.
 
+
+%% @private
+add_to_db(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    %% We insert the entry in plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    Key = bondy_registry_entry:key(Entry),
+    plum_db:put(?FULLPREFIX(RealmUri), Key, Entry).
 
 
 index_entry(Entry) ->
