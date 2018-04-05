@@ -417,8 +417,8 @@ do_forward(M, Ctxt0) ->
             {ok, Ctxt0};
         {error, overload} ->
             _ = lager:info("Pool ~p is overloaded.", [?POOL_NAME]),
-            %% TODO publish metaevent and stats
-            %% TODO use throttling and send error to caller conditionally
+            %% @TODO publish metaevent and stats
+            %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
             ok = sync_forward({M, Ctxt0}),
             {ok, Ctxt0}

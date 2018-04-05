@@ -173,10 +173,8 @@
     invocation_request_id   ::  id(),
     procedure_uri           ::  uri(),
     call_request_id         ::  id(),
-    caller_pid              ::  pid(),
-    caller_session_id       ::  id(),
-    callee_pid              ::  pid(),
-    callee_session_id       ::  id()
+    caller                  ::  peer_id(),
+    callee                  ::  peer_id()
 }).
 -type promise() :: #promise{}.
 
@@ -296,9 +294,9 @@ handle_message(#cancel{} = M, Ctxt0) ->
     Opts = M#cancel.options,
 
     %% A response will be send asynchronously by another router process instance
-    Fun = fun(InvocationId, CalleeId, Ctxt1) ->
+    Fun = fun(InvocationId, Callee, Ctxt1) ->
         R = wamp_message:interrupt(InvocationId, Opts),
-        ok = bondy:send(CalleeId, R),
+        ok = bondy:send(Callee, R),
         {ok, Ctxt1}
     end,
     {ok, _Ctxt2} = dequeue_invocations(CallId, Fun, Ctxt0),
@@ -364,20 +362,21 @@ handle_message(#call{} = M, Ctxt0) ->
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-    Fun = fun(Entry, {SId, Pid} = CalleeId, Ctxt1)
+    Fun = fun
+        (Entry, {_Node, SId, Pid} = Callee, Ctxt1)
         when is_integer(SId), is_pid(Pid) ->
-        ReqId = bondy_utils:get_id(global),
-        Args = M#call.arguments,
-        Payload = M#call.arguments_kw,
-        RegId = bondy_registry_entry:id(Entry),
-        RegOpts = bondy_registry_entry:options(Entry),
-        CallOpts = M#call.options,
-        Uri = M#call.procedure_uri,
-        %% TODO check if authorized and if not throw wamp.error.not_authorized
-        Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
-        R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
-        ok = bondy:send(CalleeId, R, Ctxt1),
-        {ok, ReqId, Ctxt1}
+            ReqId = bondy_utils:get_id(global),
+            Args = M#call.arguments,
+            Payload = M#call.arguments_kw,
+            RegId = bondy_registry_entry:id(Entry),
+            RegOpts = bondy_registry_entry:options(Entry),
+            CallOpts = M#call.options,
+            Uri = M#call.procedure_uri,
+            %% TODO check if authorized and if not throw wamp.error.not_authorized
+            Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
+            R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
+            ok = bondy:send(Callee, R, Ctxt1),
+            {ok, ReqId, Ctxt1}
     end,
 
     %% A response will be send asynchronously by another router process instance
@@ -589,29 +588,16 @@ match_registrations({registration, _} = Cont) ->
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     CallerSession = bondy_context:session(Ctxt0),
-    CallerSId = bondy_session:id(CallerSession),
 
     %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
     case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
-            Mssg = <<
-                "There are no registered procedures matching the uri",
-                $\s, $', ProcUri/binary, $', $.
-            >>,
-            Error = wamp_message:error(
-                ?CALL,
-                CallId,
-                #{},
-                ?WAMP_ERROR_NO_SUCH_PROCEDURE,
-                [Mssg],
-                #{
-                    message => Mssg,
-                    description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-                }
-            ),
-            bondy:send(bondy_context:peer_id(Ctxt0), Error);
+            bondy:send(
+                bondy_context:peer_id(Ctxt0),
+                no_such_procedure(ProcUri, CallId)
+            );
         Regs ->
             %%  A promise is used to implement a capability and a feature:
             %% - the capability to match the callee response
@@ -621,30 +607,37 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
             Template = #promise{
                 procedure_uri = ProcUri,
                 call_request_id = CallId,
-                caller_pid = bondy_session:pid(CallerSession),
-                caller_session_id = CallerSId
+                caller = bondy_session:peer_id(CallerSession)
             },
 
             %% TODO Should we invoke all matching invocations?
 
             %% We invoke Fun for each entry
-            Fun = fun(Entry, Ctxt1) ->
-                CalleeSId = bondy_registry_entry:session_id(Entry),
-                Callee = bondy_session:pid(bondy_session:fetch(CalleeSId)),
-                {ok, Id, Ctxt2} = UserFun(
-                    Entry, {CalleeSId, Callee}, Ctxt1),
-                %% We complete the promise with the Callee data
-                Promise = Template#promise{
-                    invocation_request_id = Id,
-                    callee_session_id = CalleeSId,
-                    callee_pid = Callee
-                },
-                %% We enqueue the promise with a timeout
-                ok = enqueue_promise(
-                    Id, Promise, bondy_utils:timeout(Opts), Ctxt2),
-                {ok, Ctxt2}
+            Fun = fun
+                ({error, noproc}, Ctxt1) ->
+                    %% The local process associated with an entry
+                    %% is no longer alive.
+                    bondy:send(
+                        bondy_context:peer_id(Ctxt1),
+                        no_such_procedure(ProcUri, CallId)
+                    );
+                (Entry, Ctxt1) ->
+                    CalleeSId = bondy_registry_entry:session_id(Entry),
+                    %% @TODO Handle remote Callee
+                    Session = bondy_session:fetch(CalleeSId),
+                    Callee = bondy_session:peer_id(Session),
+                    {ok, Id, Ctxt2} = UserFun(Entry, Callee, Ctxt1),
+                    %% We complete the promise with the Callee data
+                    Promise = Template#promise{
+                        invocation_request_id = Id,
+                        callee = Callee
+                    },
+                    %% We enqueue the promise with a timeout
+                    ok = enqueue_promise(
+                        Id, Promise, bondy_utils:timeout(Opts), Ctxt2),
+                    {ok, Ctxt2}
             end,
-            do_invoke(Regs, Fun, Ctxt0)
+            invoke(Regs, Fun, Ctxt0)
     end.
 
 
@@ -675,10 +668,9 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
         {ok, P} ->
             #promise{
                 invocation_request_id = ReqId,
-                callee_pid = Pid,
-                callee_session_id = SessionId
+                callee = Callee
             } = P,
-            {ok, Ctxt1} = Fun(ReqId, {SessionId, Pid}, Ctxt),
+            {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
             %% We iterate until there are no more pending invocation for the
             %% call_request_id == CallId
             dequeue_invocations(CallId, Fun, Ctxt1)
@@ -705,10 +697,9 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
         {ok, #promise{invocation_request_id = ReqId} = P} ->
             #promise{
                 call_request_id = CallId,
-                caller_pid = Pid,
-                caller_session_id = SessionId
+                caller = Caller
             } = P,
-            Fun(CallId, {SessionId, Pid}, Ctxt)
+            Fun(CallId, Caller, Ctxt)
     end.
 
 
@@ -720,17 +711,17 @@ dequeue_call(ReqId, Fun, Ctxt) when is_function(Fun, 3) ->
 
 
 %% @private
-do_invoke({[], ?EOT}, _, _) ->
+invoke({[], ?EOT}, _, _) ->
     ok;
 
-do_invoke({L, ?EOT}, Fun, Ctxt) ->
-    do_invoke(L, Fun, Ctxt);
+invoke({L, ?EOT}, Fun, Ctxt) ->
+    invoke(L, Fun, Ctxt);
 
-do_invoke({L, Cont}, Fun, Ctxt) ->
-    ok = do_invoke(L, Fun, Ctxt),
-    do_invoke(match_registrations(Cont), Fun, Ctxt);
+invoke({L, Cont}, Fun, Ctxt) ->
+    ok = invoke(L, Fun, Ctxt),
+    invoke(match_registrations(Cont), Fun, Ctxt);
 
-do_invoke(L, Fun, Ctxt) when is_list(L) ->
+invoke(L, Fun, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
     Triples = [{
@@ -738,68 +729,76 @@ do_invoke(L, Fun, Ctxt) when is_list(L) ->
         maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
         E
     } || E <- L],
-    do_invoke(Triples, undefined, Fun, Ctxt).
+    invoke(Triples, undefined, Fun, Ctxt).
 
 
 %% @private
--spec do_invoke(
+-spec invoke(
     [{uri(), Strategy :: binary(), Entry :: tuple()}],
     Acc :: tuple() | undefined,
     Fun :: function(),
     Ctxt :: bondy_context:context()) ->
     ok.
 
-do_invoke([], undefined, _, _) ->
+invoke([], undefined, _, _) ->
     ok;
 
-do_invoke([], {_, ?INVOKE_SINGLE, []}, _, _) ->
+invoke([], {_, ?INVOKE_SINGLE, []}, _, _) ->
     ok;
 
-do_invoke([], {_, Invoke, L}, Fun, Ctxt0) ->
-    {ok, _Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+invoke([], {_, Invoke, L}, Fun, Ctxt0) ->
+    {ok, _Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
     ok;
 
-do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Ctxt0) ->
-    {ok, Ctxt1} = apply_invocation_strategy(E, Fun, Ctxt0),
+invoke([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Ctxt0) ->
+    {ok, Ctxt1} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt0),
     %% We add an accummulator to drop any subsequent matching Uris.
-    do_invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt1);
+    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt1);
 
-do_invoke(
+invoke(
     [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last, Fun, Ctxt) ->
     %% A single invocation strategy and we have multiple registrations so we
     %% ignore them
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    do_invoke(T, Last, Fun, Ctxt);
+    invoke(T, Last, Fun, Ctxt);
 
-do_invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
+invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
+    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
 
-do_invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
+invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    do_invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
+    invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
 
-do_invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
-    %% We found another Uri so we invoke the previous one
-    {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+    %% We found a different Uri so we invoke the previous one
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
     %% The new one is a single so we also invoke and continue
-    {ok, Ctxt2} = apply_invocation_strategy(E, Fun, Ctxt1),
-    do_invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
+    {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt1),
+    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
 
-do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
     %% We found another Uri so we invoke the previous one
-    {ok, Ctxt1} = apply_invocation_strategy({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    do_invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
+    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
+
+
+%% @private
+invocation_strategy(?INVOKE_SINGLE) -> single;
+invocation_strategy(?INVOKE_FIRST) -> first;
+invocation_strategy(?INVOKE_LAST) -> last;
+invocation_strategy(?INVOKE_RANDOM) -> random;
+invocation_strategy(?INVOKE_ROUND_ROBIN) -> round_robin.
 
 
 %% -----------------------------------------------------------------------------
@@ -810,44 +809,20 @@ do_invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
 %% procedure
 %% @end
 %% -----------------------------------------------------------------------------
--spec apply_invocation_strategy(term(), function(), bondy_context:context()) ->
+-spec do_invoke(term(), function(), bondy_context:context()) ->
     {ok, bondy_context:context()}.
 
-apply_invocation_strategy({?INVOKE_FIRST, L}, Fun, Ctxt) ->
-    maybe_invoke(
-        bondy_rpc_load_balancer:get_entry(L, #{strategy => first}),
-        Fun,
-        Ctxt
-    );
 
-apply_invocation_strategy({?INVOKE_LAST, L}, Fun, Ctxt) ->
-    maybe_invoke(
-        bondy_rpc_load_balancer:get_entry(L, #{strategy => last}),
-        Fun,
-        Ctxt
-    );
-
-apply_invocation_strategy({?INVOKE_RANDOM, L}, Fun, Ctxt) ->
-    maybe_invoke(
-        bondy_rpc_load_balancer:get_entry(L, #{strategy => random}),
-        Fun,
-        Ctxt
-    );
-
-apply_invocation_strategy({?INVOKE_ROUND_ROBIN, L}, Fun, Ctxt) ->
-    maybe_invoke(
-        bondy_rpc_load_balancer:get_entry(L, #{strategy => round_robin}),
-        Fun,
-        Ctxt
-    ).
+do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
+    Strategy = invocation_strategy(WAMPStrategy),
+    case bondy_rpc_load_balancer:get(L, #{strategy => Strategy}) of
+        {error, noproc} = Error ->
+            Fun(Error, Ctxt);
+        Entry ->
+            Fun(Entry, Ctxt)
+    end.
 
 
-%% @private
-maybe_invoke(not_found, _, Ctxt) ->
-    {ok, Ctxt};
-
-maybe_invoke(Entry, Fun, Ctxt) ->
-    Fun(Entry, Ctxt).
 
 
 
@@ -925,3 +900,21 @@ on_unregister(Map, Ctxt) ->
     Uri = <<"wamp.registration.on_unregister">>,
     {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
     ok.
+
+
+no_such_procedure(ProcUri, CallId) ->
+    Mssg = <<
+        "There are no registered procedures matching the uri",
+        $\s, $', ProcUri/binary, $', $.
+    >>,
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_ERROR_NO_SUCH_PROCEDURE,
+        [Mssg],
+        #{
+            message => Mssg,
+            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
+        }
+    ).

@@ -107,7 +107,7 @@
 
 -define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
 -define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
--type peer_id() :: {integer(), pid()} | {atom(), integer(), pid()}.
+-type peer_id() :: {atom(), integer(), pid()}.
 
 
 

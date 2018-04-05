@@ -81,7 +81,6 @@
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
--export([set_roles/2]).
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
 -export([set_session/2]).
@@ -94,15 +93,14 @@
 %% -----------------------------------------------------------------------------
 -spec new() -> context().
 new() ->
-    Ctxt = #{
+    #{
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         goodbye_initiated => false,
         request_id => undefined,
         request_timeout => bondy_config:request_timeout(),
         awaiting_calls => sets:new()
-    },
-    set_roles(Ctxt, #{}).
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -193,24 +191,15 @@ subprotocol(#{subprotocol := Val}) -> Val.
 set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
     Ctxt#{subprotocol => S}.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the roles of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles(context()) -> map().
-roles(#{roles := Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the roles to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec set_roles(context(), map()) -> context().
-
-set_roles(Ctxt, Roles) when is_map(Ctxt), is_map(Roles) ->
-    Ctxt#{roles => Roles}.
+roles(Ctxt) ->
+    bondy_session:roles(session(Ctxt)).
 
 
 %% -----------------------------------------------------------------------------
@@ -265,7 +254,7 @@ set_session(Ctxt, S) ->
 
 peer_id(#{session := S}) ->
     %% TODO evaluate caching this as it should be immutable
-    {bondy_session:id(S), bondy_session:pid(S)}.
+    bondy_session:peer_id(S).
 
 
 %% -----------------------------------------------------------------------------

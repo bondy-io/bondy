@@ -41,7 +41,7 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => {in, [first, last, random, round_robin]}
+        datatype => {in, [single, first, last, random, round_robin]}
     },
     force_locality => #{
         required => true,
@@ -58,15 +58,20 @@
 }).
 
 -type entries()             ::  [bondy_registry_entry:t()].
--type strategy()            ::  first | last | random | round_robin.
+-type strategy()            ::  single | first | last | random | round_robin.
 -type opts()                ::  #{
     strategy => strategy(),
     force_locality => boolean()
 }.
+-opaque continuation()        ::  {strategy(), entries()}.
 
 
+-export_type([continuation/0]).
 
--export([get_entry/2]).
+
+-export([iterate/1]).
+-export([iterate/2]).
+-export([get/2]).
 
 
 
@@ -75,30 +80,60 @@
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get(entries(), opts()) -> bondy_registry_entry:t() | {error, noproc}.
+
+get(Entries, Opts) when is_list(Entries) ->
+    Node = bondy_peer_service:mynode(),
+    do_get(iterate(Entries, Opts), Node).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_entry(entries(), opts()) -> bondy_registry_entry:t().
-get_entry(Entries0, Opts0) when is_list(Entries0) ->
+-spec iterate(entries(), opts()) ->
+    {bondy_registry_entry:t(), continuation()} | '$end_of_table'.
+
+iterate(Entries0, Opts0) when is_list(Entries0) ->
     #{
         strategy := Strat,
         force_locality := Loc
     } = maps_utils:validate(Opts0, ?OPTS_SPEC),
+
     Entries = maybe_sort_entries(Loc, Entries0),
+
     case Strat of
+        single when length(Entries) == 1 ->
+            next(Entries);
         first ->
-            get_first(Entries);
+            next(Entries);
         last ->
-            get_first(lists:reverse(Entries));
+            next(lists:reverse(Entries));
         random ->
-            get_first(lists_utils:shuffle(Entries));
+            next(lists_utils:shuffle(Entries));
         round_robin ->
-            get_round_robin(Entries)
+            get_round_robin(Entries);
+        _ ->
+            error(badarg)
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec iterate(continuation()) ->
+    {bondy_registry_entry:t(), continuation()} | {error, noproc}.
+
+iterate({round_robin, Entries}) ->
+    get_round_robin(Entries);
+
+iterate({_, Entries}) ->
+    next(Entries).
 
 
 
@@ -107,6 +142,35 @@ get_entry(Entries0, Opts0) when is_list(Entries0) ->
 %% =============================================================================
 
 
+%% @private
+do_get('$end_of_table', _) ->
+    {error, noproc};
+
+do_get({Entry, Cont}, Node) ->
+    case bondy_registry_entry:node(Entry) =:= Node of
+        true ->
+            %% The wamp peer is local
+            SessionId = bondy_registry_entry:session_id(Entry),
+            Pid = bondy_session:pid(SessionId),
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    Entry;
+                false ->
+                    %% This should happen when the WAMP Peer
+                    %% disconnected between the time we read the entry
+                    %% and now. We contine trying with other entries.
+                    do_get(iterate(Cont), Node)
+            end;
+        false ->
+            %% This wamp peer is remote.
+            %% We cannot check the remote node as we might not have
+            %% a direct connection, so we trust we have an uptodate state.
+            %% Any failover strategy should be handled by the user.
+            Entry
+    end.
+
+
+%% @private
 maybe_sort_entries(true, L) ->
     Node = bondy_peer_service:mynode(),
     Fun = fun(A, B) ->
@@ -121,18 +185,29 @@ maybe_sort_entries(true, L) ->
 maybe_sort_entries(false, L) ->
     L.
 
-get_first([H|T]) ->
-    Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
-    case process_info(Pid) == undefined of
-        true ->
-            get_first(T);
-        false ->
-            H
-    end;
 
-get_first([]) ->
-    not_found.
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec next(entries()) ->
+    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
 
+next([H|T]) ->
+    {H, T};
+
+next([]) ->
+    '$end_of_table'.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_round_robin(entries()) ->
+    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
 
 get_round_robin(Entries) ->
     First = hd(Entries),
@@ -156,8 +231,8 @@ get_round_robin(undefined, [H|T]) ->
                 bondy_registry_entry:uri(H),
                 bondy_registry_entry:id(H)
             ),
-            %% We return the entry
-            H
+            %% We return the entry and the remaining ones
+            {H, T}
     end;
 
 get_round_robin(#last_invocation{value = LastId}, Entries0) ->
@@ -166,7 +241,7 @@ get_round_robin(#last_invocation{value = LastId}, Entries0) ->
     get_round_robin(undefined, Entries1);
 
 get_round_robin(undefined, []) ->
-    not_found.
+    '$end_of_table'.
 
 
 %% -----------------------------------------------------------------------------

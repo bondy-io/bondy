@@ -109,6 +109,7 @@
 -record(session, {
     id                              ::  id(),
     realm_uri                       ::  uri(),
+    node                            ::  atom(),
     %% If a WS connection then we have a pid
     pid = self()                    ::  pid() | undefined,
     %% The {IP, Port} of the client
@@ -118,10 +119,7 @@
     %% Sequence number used for ID generation
     seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles
-    caller                          ::  map() | undefined,
-    callee                          ::  map() | undefined,
-    subscriber                      ::  map() | undefined,
-    publisher                       ::  map() | undefined,
+    roles                           ::  map() | undefined,
     %% Auth
     authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
@@ -168,6 +166,7 @@
 -export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
+-export([roles/1]).
 -export([size/0]).
 -export([update/1]).
 -export([to_details_map/1]).
@@ -183,7 +182,10 @@
 %% API
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new transient session (not persisted)
+%% @end
+%% -----------------------------------------------------------------------------
 -spec new(peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
@@ -206,6 +208,7 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
         id = Id,
         peer = Peer,
         realm_uri = RealmUri,
+        node = bondy_peer_service:mynode(),
         created = calendar:local_time()
     },
     parse_details(Opts, S0).
@@ -293,11 +296,23 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
-realm_uri(#session{realm_uri = Uri}) ->
-    Uri;
+realm_uri(#session{realm_uri = Val}) ->
+    Val;
 realm_uri(Id) ->
-    #session{realm_uri = Uri} = fetch(Id),
-    Uri.
+    #session{realm_uri = Val} = fetch(Id),
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec roles(id() | session()) -> uri().
+roles(#session{roles = Val}) ->
+    Val;
+roles(Id) ->
+    #session{roles = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -306,8 +321,8 @@ realm_uri(Id) ->
 %% -----------------------------------------------------------------------------
 -spec peer_id(session()) -> peer_id().
 
-peer_id(#session{id = Id, pid = Pid}) ->
-    {Id, Pid}.
+peer_id(#session{node = Node, id = Id, pid = Pid}) ->
+    {Node, Id, Pid}.
 
 
 %% -----------------------------------------------------------------------------
@@ -440,10 +455,7 @@ list_peers() ->
         peer = '$4',
         agent = '_',
         seq = '_',
-        caller = '_',
-        callee = '_',
-        subscriber = '_',
-        publisher = '_',
+        roles = '_',
         authid = '_',
         created = '_',
         expires_in = '_',
@@ -481,30 +493,15 @@ to_details_map(#session{} = S) ->
 
 %% @private
 parse_details(Opts, Session0)  when is_map(Opts) ->
-    case maps:fold(fun parse_details/3, Session0, Opts) of
-        #session{
-            caller = undefined,
-            callee = undefined,
-            subscriber = undefined,
-            publisher = undefined} ->
-                error({invalid_options, missing_client_role});
-        Session1 ->
-            Session1
-    end.
+    maps:fold(fun parse_details/3, Session0, Opts).
 
 
 %% @private
 
 parse_details(roles, Roles, Session) when is_map(Roles) ->
-    parse_details(Roles, Session);
-parse_details(caller, V, Session) when is_map(V) ->
-    Session#session{caller = V};
-parse_details(callee, V, Session) when is_map(V) ->
-    Session#session{callee = V};
-parse_details(subscriber, V, Session) when is_map(V) ->
-    Session#session{subscriber = V};
-parse_details(publisher, V, Session) when is_map(V) ->
-    Session#session{publisher = V};
+    length(maps:keys(Roles)) > 0 orelse
+    error({invalid_options, missing_client_role}),
+    Session#session{roles = parse_roles(Roles)};
 parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
 parse_details(agent, V, Session) when is_binary(V) ->
@@ -512,6 +509,46 @@ parse_details(agent, V, Session) when is_binary(V) ->
 parse_details(_, _, Session) ->
     Session.
 
+
+
+%% ------------------------------------------------------------------------
+%% private
+%% @doc
+%% Merges the client provided role features with the ones provided by
+%% the router. This will become the feature set used by the router on
+%% every session request.
+%% @end
+%% ------------------------------------------------------------------------
+parse_roles(Roles) ->
+    parse_roles(maps:keys(Roles), Roles).
+
+
+%% @private
+parse_roles([], Roles) ->
+    Roles;
+
+parse_roles([caller|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(caller, Roles), ?CALLER_FEATURES),
+    parse_roles(T, Roles#{caller => F});
+
+parse_roles([callee|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(callee, Roles), ?CALLEE_FEATURES),
+    parse_roles(T, Roles#{callee => F});
+
+parse_roles([subscriber|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
+    parse_roles(T, Roles#{subscriber => F});
+
+parse_roles([publisher|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
+    parse_roles(T, Roles#{publisher => F});
+
+parse_roles([_|T], Roles) ->
+    parse_roles(T, Roles).
 
 %% @private
 table(Id) ->
