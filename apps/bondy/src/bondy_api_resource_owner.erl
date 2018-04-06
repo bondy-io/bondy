@@ -138,12 +138,22 @@ add(RealmUri, Info0) ->
     {ok, map()} | {error, term()} | no_return().
 
 update(RealmUri, Username, Info0) ->
-    {undefined, Opts, Info1} = validate(Info0, ?USER_UPDATE_SPEC),
+    Info1 = case maps:get(<<"groups">>, Info0, undefined) of
+        undefined ->
+            Info0;
+        Groups0 ->
+            Groups1 = sets:to_list(
+                sets:from_list([<<"resource_owners">> | Groups0])),
+            maps:put(<<"groups">>, Groups1, Info0)
+    end,
+    Info2 = maps_utils:validate(Info1, ?USER_UPDATE_SPEC),
+    Opts = maps:to_list(Info2),
+
     case bondy_security:alter_user(RealmUri, Username, Opts) of
         {error, _} = Error ->
             Error;
         ok ->
-            {ok, Info1}
+            {ok, bondy_security_user:fetch(RealmUri, Username)}
     end.
 
 
