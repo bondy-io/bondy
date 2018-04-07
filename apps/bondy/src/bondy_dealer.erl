@@ -596,6 +596,8 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                 (Entry, Ctxt1) ->
                     Callee = bondy_registry_entry:peer_id(Entry),
 
+                    %% We invoke the provided fun which actually makes the
+                    %% invocation
                     {ok, InvocationId, Ctxt2} = UserFun(Entry, Callee, Ctxt1),
 
                     %%  A promise is used to implement a capability and a
