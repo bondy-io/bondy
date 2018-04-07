@@ -87,16 +87,32 @@ send(PeerId, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(local_peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({Node, SessionId, Pid}, M, Opts)
+send({Node, SessionId, Pid} = PeerId, M, Opts0)
 when is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
-    MyNode = bondy_peer_service:mynode(),
-    case MyNode =:= Node of
+    %% We validate the message failing with exception
+    wamp_message:is_message(M) orelse error(invalid_wamp_message),
+
+    %% We validate the opts failing with exception
+    Opts1 = maps_utils:validate(Opts0, #{
+        timeout => #{
+            required => true,
+            datatype => timeout,
+            default => ?SEND_TIMEOUT
+        },
+        enqueue => #{
+            required => true,
+            datatype => boolean,
+            default => false
+        }
+    }),
+
+    case Node =:= bondy_peer_service:mynode() of
         true ->
-            do_send({SessionId, Pid}, M, Opts);
+            do_send(PeerId, M, Opts1);
         false ->
-            error(remote_send_not_implemented)
+            bondy_peer_wamp_forwarder:forward({Node, SessionId}, M, Opts1)
     end.
 
 
@@ -244,31 +260,15 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send({SessionId, Pid} = P, M, Opts)
-when is_integer(SessionId), Pid =:= self() ->
-    %% This is a sync message so we resolve this sequentially
-    wamp_message:is_message(M) orelse error({badarg, [P, M, Opts]}),
+do_send({_, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
     Pid ! {?BONDY_PEER_REQUEST, Pid, make_ref(), M},
-    %% We will not get an ack, it is implicit
+    %% This is a sync message so we resolve this sequentially
+    %% so we will not get an ack, the ack is implicit
     ok;
 
-do_send({SessionId, Pid} = P, M, Opts0)
-when is_pid(Pid), is_integer(SessionId) ->
-    wamp_message:is_message(M) orelse error({badarg, [P, M, Opts0]}),
-    Opts1 = maps_utils:validate(Opts0, #{
-        timeout => #{
-            required => true,
-            default => ?SEND_TIMEOUT,
-            datatype => timeout
-        },
-        enqueue => #{
-            required => true,
-            datatype => boolean,
-            default => false
-        }
-    }),
-    Timeout = maps:get(timeout, Opts1),
-    Enqueue = maps:get(enqueue, Opts1),
+do_send({_, SessionId, Pid}, M, Opts) ->
+    Timeout = maps:get(timeout, Opts),
+    Enqueue = maps:get(enqueue, Opts),
     MonitorRef = monitor(process, Pid),
     %% If the monitor/2 call failed to set up a connection to a
     %% remote node, we don't want the '!' operator to attempt
@@ -293,6 +293,7 @@ when is_pid(Pid), is_integer(SessionId) ->
             true = demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
+
 
 %% @private
 maybe_enqueue(true, _SessionId, _M, _) ->

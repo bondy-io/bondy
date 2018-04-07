@@ -44,6 +44,18 @@ init([]) ->
             modules => [bondy_api_gateway]
         },
         #{
+            id => bondy_peer_wamp_forwarder,
+            start => {
+                bondy_peer_wamp_forwarder,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_peer_wamp_forwarder]
+        }
+        #{
             id => bondy_registry,
             start => {
                 bondy_registry,
