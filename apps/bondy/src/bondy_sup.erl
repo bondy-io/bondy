@@ -54,7 +54,7 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [bondy_peer_wamp_forwarder]
-        }
+        },
         #{
             id => bondy_registry,
             start => {
