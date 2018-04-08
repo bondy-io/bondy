@@ -108,6 +108,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Adds an entry to the registry.
