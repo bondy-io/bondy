@@ -50,7 +50,6 @@
     %% Protocol State
     goodbye_initiated => boolean(),
     challenge_sent => {true, AuthMethod :: any()} | false,
-    awaiting_calls => sets:set(),
     request_id => id(),
     request_timeout => non_neg_integer(),
     request_details => map(),
@@ -60,9 +59,6 @@
 -export_type([context/0]).
 
 
--export([add_awaiting_call/2]).
--export([awaiting_calls/1]).
--export([awaiting_call_set/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
@@ -72,7 +68,6 @@
 -export([peer/1]).
 -export([peer_id/1]).
 -export([realm_uri/1]).
--export([remove_awaiting_call/2]).
 -export([request_id/1]).
 -export([request_timeout/1]).
 -export([reset/1]).
@@ -99,8 +94,7 @@ new() ->
         node => bondy_peer_service:mynode(),
         goodbye_initiated => false,
         request_id => undefined,
-        request_timeout => bondy_config:request_timeout(),
-        awaiting_calls => sets:new()
+        request_timeout => bondy_config:request_timeout()
     }.
 
 
@@ -318,36 +312,3 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 is_feature_enabled(#{roles := Roles}, Role, Feature) ->
     maps_utils:get_path([Role, Feature], Roles, false).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns a list containing the identifiers for the calls the peer performed
-%% and it is still awaiting a response for.  This is used by the internal rpc
-%% mechanism which is based on promises.
-%% @end
-%% -----------------------------------------------------------------------------
--spec awaiting_calls(context()) -> [id()].
-awaiting_calls(#{awaiting_calls := S}) ->
-    sets:to_list(S).
-
-
--spec awaiting_call_set(context()) -> [id()].
-awaiting_call_set(#{awaiting_calls := S}) ->
-    S.
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec add_awaiting_call(context(), id()) -> ok.
-add_awaiting_call(#{awaiting_calls := S} = C, Id) ->
-    C#{awaiting_calls => sets:add_element(Id, S)}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove_awaiting_call(context(), id()) -> ok.
-remove_awaiting_call(#{awaiting_calls := S} = C, Id) ->
-    C#{awaiting_calls => sets:del_element(Id, S)}.

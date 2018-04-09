@@ -161,20 +161,16 @@ handle_inbound(Data, St) ->
     | {stop, binary(), state()}.
 
 handle_outbound(#result{} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#result.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#error.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 

@@ -59,7 +59,7 @@
 -export([is_entry/1]).
 -export([key/1]).
 -export([match_policy/1]).
--export([new/5]).
+-export([new/4]).
 -export([node/1]).
 -export([options/1]).
 -export([pattern/6]).
@@ -83,9 +83,9 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), uri(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), peer_id(), uri(), map()) -> t().
 
-new(Type, RealmUri, {Node, SessionId, Pid}, Uri, Options) ->
+new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
     MatchPolicy = validate_match_policy(Options),
     Key = #entry_key{
@@ -222,6 +222,7 @@ session_id(#entry_key{} = Key) ->
 -spec peer_id(t() | entry_key()) -> peer_id().
 peer_id(#entry{key = Key} = Entry) ->
     {
+        Key#entry_key.realm_uri,
         Key#entry_key.node,
         Key#entry_key.session_id,
         Entry#entry.pid

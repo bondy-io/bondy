@@ -126,8 +126,6 @@
     authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
     authmethod                      ::  binary() | undefined,
-    %%
-    awaiting_calls = sets:new()     ::  sets:set(),
     %% Expiration and Limits
     created                         ::  calendar:date_time(),
     expires_in                      ::  pos_integer() | infinity,
@@ -320,13 +318,18 @@ roles(Id) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the identifier for the owner of this session
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(session()) -> peer_id().
+-spec peer_id(session()) -> local_peer_id().
 
-peer_id(#session{node = Node, id = Id, pid = Pid}) ->
-    {Node, Id, Pid}.
+peer_id(#session{} = S) ->
+    {
+        S#session.realm_uri,
+        S#session.node,
+        S#session.id,
+        S#session.pid
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -506,10 +509,13 @@ parse_details(roles, Roles, Session) when is_map(Roles) ->
     length(maps:keys(Roles)) > 0 orelse
     error({invalid_options, missing_client_role}),
     Session#session{roles = parse_roles(Roles)};
+
 parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
+
 parse_details(agent, V, Session) when is_binary(V) ->
     Session#session{agent = V};
+
 parse_details(_, _, Session) ->
     Session.
 

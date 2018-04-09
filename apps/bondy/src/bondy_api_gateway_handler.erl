@@ -665,7 +665,6 @@ perform_action(
         node => bondy_peer_service:mynode(),
         subprotocol => {http, text, maps:get(encoding, St0)},
         realm_uri => RealmUri,
-        awaiting_calls => sets:new(),
         timeout => T,
         session => bondy_session:new(Peer, RealmUri, #{
             roles => #{

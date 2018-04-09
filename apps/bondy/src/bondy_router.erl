@@ -105,6 +105,7 @@
 %% API
 -export([close_context/1]).
 -export([forward/2]).
+-export([handle_peer_message/1]).
 -export([roles/0]).
 -export([agent/0]).
 %% -export([has_role/2]). ur, ctxt
@@ -176,6 +177,41 @@ forward(M, #{session := _} = Ctxt) ->
     %% for broker or dealer roles
     ok = bondy_stats:update(M, Ctxt),
     do_forward(M, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_peer_message(bondy_peer_message:t()) -> ok | no_return().
+
+handle_peer_message(PM) ->
+    bondy_peer_message:is_message(PM) orelse exit(badarg),
+    Payload = bondy_peer_message:payload(PM),
+    PeerId = bondy_peer_message:peer_id(PM),
+    Opts = bondy_peer_message:options(PM),
+    handle_peer_message(Payload, PeerId, Opts).
+
+
+-spec handle_peer_message(wamp_message(), peer_id(), map()) ->
+    ok | no_return().
+
+handle_peer_message(#event{} = M, PeerId, Opts) ->
+    bondy_broker:handle_peer_message(M, PeerId, Opts);
+
+handle_peer_message(#error{request_type = Type} = M, PeerId, Opts)
+when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
+    bondy_dealer:handle_peer_message(M, PeerId, Opts);
+
+handle_peer_message(#interrupt{} = M, PeerId, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, Opts);
+
+handle_peer_message(#invocation{} = M, PeerId, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, Opts);
+
+handle_peer_message(#result{} = M, PeerId, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, Opts).
+
 
 
 
@@ -255,7 +291,7 @@ do_forward(#register{} = M, Ctxt) ->
     end,
     {reply, Reply, Ctxt};
 
-do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
+do_forward(#call{} = M, Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
@@ -268,9 +304,9 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% will first receive an invocation corresponding to Call 1 and then Call
     %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
     ok = sync_forward({M, Ctxt0}),
-    %% The invocation is always async,
-    %% so the response will be delivered asynchronously by the dealer
-    {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
+    %% The invocation is always async and the result or error will be delivered
+    %% asynchronously by the dealer.
+    {ok, Ctxt0};
 
 %% do_forward(#publish{} = M, Ctxt0) ->
 %%     %% RFC:

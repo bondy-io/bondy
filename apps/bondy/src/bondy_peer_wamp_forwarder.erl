@@ -1,6 +1,6 @@
 %% =============================================================================
 %%  bondy_peer_wamp_forwarder.erl - forwards INVOCATION (their RESULT or
-%%  ERROR), INTERRUPT and EVENT messages between WAMP clients connected to
+%%  ERROR), INTERRUPT and PUBLISH messages between WAMP clients connected to
 %%  different Bondy peers (nodes).
 %%
 %%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
@@ -84,24 +84,18 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--record(peer_message, {
-    id          ::  id(),
-    peer_id     ::  remote_peer_id(),
-    message     ::  wamp_invocation()
-                    | wamp_error()
-                    | wamp_result()
-                    | wamp_interrupt()
-                    | wamp_event(),
-    options     ::  map()
-}).
+
+
 
 -record(peer_ack, {
+    realm_uri   ::  uri(),
     node        ::  atom(),
     session_id  ::  id(),
     id          ::  id()
 }).
 
 -record(peer_error, {
+    realm_uri   ::  uri(),
     node        ::  atom(),
     session_id  ::  id(),
     id          ::  id(),
@@ -111,7 +105,10 @@
 -record(state, {
 }).
 
+
+
 %% API
+-export([start_link/0]).
 -export([forward/3]).
 
 %% GEN_SERVER CALLBACKS
@@ -132,26 +129,54 @@
 
 
 %% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
+
+start_link() ->
+    %% bondy_peer_wamp_forwarder may receive a huge amount of
+    %% messages. Make sure that they are stored off heap to
+    %% avoid exessive GCs. This makes messaging slower though.
+    SpawnOpts = [
+        {spawn_opt, [{message_queue_data, off_heap}]}
+    ],
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], SpawnOpts).
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Forwards a wamp message to a peer (node).
 %% This only works for EVENT, ERROR, INTERRUPT, INVOCATION and RESULT wamp
 %% message types. It will fail with an exception if another type is passed
 %% as the second argument.
 %% @end
 %% -----------------------------------------------------------------------------
-forward(Peer, #event{} = M, Opts) ->
-    do_forward(Peer, M, Opts);
+-spec forward(remote_peer_id(), wamp_message(), map()) ->
+    ok | no_return().
 
-forward(Peer, #error{} = M, Opts) ->
-    do_forward(Peer, M, Opts);
+forward(PeerId, Message, Opts) ->
+    %% Remote monitoring is not possible given no connections are maintained
+    %% directly between nodes.
+    %% If remote monitoring is required, Partisan can additionally connect
+    %% nodes over Distributed Erlang to provide this functionality but this will
+    %% defeat the purpose of using Partisan in the first place.
+    Timeout = maps:get(timeout, Opts),
+    PM = bondy_peer_message:new(PeerId, Message, Opts),
+    Ack = peer_ack(PM),
 
-forward(Peer, #interrupt{} = M, Opts) ->
-    do_forward(Peer, M, Opts);
+    ok = gen_server:cast(?MODULE, {forward, PM}),
 
-forward(Peer, #invocation{} = M, Opts) ->
-    do_forward(Peer, M, Opts);
+    %% Now we need to wait for the remote forwarder to send us an ACK
+    %% to be sure the wamp peer received the message
+    receive
+        Ack ->
+            ok
+    after
+        Timeout ->
+            %% maybe_enqueue(Enqueue, SessionId, M, timeout)
+            exit(timeout)
+    end.
 
-forward(Peer, #result{} = M, Opts) ->
-    do_forward(Peer, M, Opts).
 
 
 
@@ -173,7 +198,7 @@ handle_call(Event, From, State) ->
     {noreply, State}.
 
 
-handle_cast({forward, #peer_message{} = Mssg} = Event, State) ->
+handle_cast({forward, Mssg} = Event, State) ->
     try
         cast_message(Mssg)
     catch
@@ -213,14 +238,17 @@ handle_cast(#peer_ack{} = Ack, State) ->
     end,
     {noreply, State};
 
-handle_cast(#peer_message{} = Mssg, State) ->
+handle_cast(Mssg, State) ->
     %% We are receiving a message from peer
-    try bondy_router_worker:cast(fun() -> send(Mssg) end) of
-        ok ->
-            {noreply, State};
-        {error, overload} ->
-            ok = cast_message(peer_error(overload, Mssg)),
-            {noreply, State}
+    try
+        bondy_peer_message:is_message(Mssg) orelse exit({badarg, [Mssg]}),
+        case bondy_router_worker:cast(fun() -> send(Mssg) end) of
+            ok ->
+                {noreply, State};
+            {error, overload} ->
+                ok = cast_message(peer_error(overload, Mssg)),
+                {noreply, State}
+        end
     catch
         Error:Reason ->
             %% TODO publish metaevent
@@ -258,34 +286,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
-%% @private
-do_forward(PeerId, M, Opts) ->
-    %% Remote monitoring is not possible given no connections are maintained
-    %% directly between nodes.
-    %% If remote monitoring is required, Partisan can additionally connect
-    %% nodes over Distributed Erlang to provide this functionality but this will
-    %% defeat the purpose of using Partisan in the first place.
-    Timeout = maps:get(timeout, Opts),
-    Id = bondy_utils:get_id(global),
-    PM = #peer_message{id = Id, peer_id = PeerId, message = M, options = Opts},
-    Ack = peer_ack(PM),
-
-    ok = gen_server:cast(?MODULE, {forward, PM}),
-
-    %% Now we need to wait for the remote forwarder to send us an ACK
-    %% to be sure the wamp peer received the message
-    receive
-        Ack ->
-            ok
-    after
-        Timeout ->
-            %% maybe_enqueue(Enqueue, SessionId, M, timeout)
-            exit(timeout)
-    end.
-
 
 %% @private
-cast_message(#peer_message{} = Mssg) ->
+cast_message(Mssg) ->
     %% When process identifiers are transmitted between nodes, the process
     %% identifiers are translated based on the receiving nodes membership view.
     %% Supporting process identifiers in Partisan, without changing the
@@ -303,17 +306,23 @@ cast_message(#peer_message{} = Mssg) ->
 
 
 %% @private
-peer_ack(#peer_message{} = Mssg) ->
-    {Node, SessionId} = Mssg#peer_message.peer_id,
-    Id = Mssg#peer_message.id,
-    #peer_ack{node = Node, session_id = SessionId, id = Id}.
+peer_ack(Mssg) ->
+    {RealmUri, Node, SessionId} = bondy_peer_message:peer_id(Mssg),
+    Id = bondy_peer_message:id(Mssg),
+    #peer_ack{
+        realm_uri = RealmUri,
+        node = Node,
+        session_id = SessionId,
+        id = Id
+    }.
 
 
 %% @private
-peer_error(Reason, #peer_message{} = Mssg) ->
-    {Node, SessionId} = Mssg#peer_message.peer_id,
-    Id = Mssg#peer_message.id,
+peer_error(Reason, Mssg) ->
+    {RealmUri, Node, SessionId} = bondy_peer_message:peer_id(Mssg),
+    Id = bondy_peer_message:id(Mssg),
     #peer_error{
+        realm_uri = RealmUri,
         node = Node,
         session_id = SessionId,
         id = Id,
@@ -322,19 +331,23 @@ peer_error(Reason, #peer_message{} = Mssg) ->
 
 
 %% @private
-send(#peer_message{} = Mssg) ->
-    {Node, SessionId} = Mssg#peer_message.peer_id,
-    Opts = Mssg#peer_message.options,
-    Pid = bondy_session:pid(SessionId),
-    PeerId = {Node, SessionId, Pid},
+send(Mssg) ->
+    {RealmUri, Node, SessionId} = bondy_peer_message:peer_id(Mssg),
+    %% We match for extra validation
+    PeerId = bondy_session:peer_id(SessionId),
+    {RealmUri, Node, SessionId, _Pid} = PeerId,
+
+    Opts = bondy_peer_message:options(Mssg),
+    Payload = bondy_peer_message:payload(Mssg),
+
     case Node =:= bondy_peer_service:mynode() of
         true ->
-            ok = bondy:send(PeerId, Mssg#peer_message.message, Opts),
+            ok = bondy:send(PeerId, Payload, Opts),
             %% We send the ack
             cast_message(peer_ack(Mssg));
         false ->
             _ = lager:error(
-                "Received a message targetted at another node; message=~p",
+                "Received a message targeted at another node; message=~p",
                 [Mssg]
             ),
             exit(invalid_node)

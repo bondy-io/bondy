@@ -75,6 +75,7 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
+-export([handle_peer_message/3]).
 -export([handle_call/2]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
@@ -176,6 +177,18 @@ handle_message(#publish{} = M, Ctxt) ->
             ok
     end.
 
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_peer_message(wamp_message(), peer_id(), map()) ->
+    ok | no_return().
+
+handle_peer_message(#event{} = _M, _PeerId, _Opts) ->
+    exit(not_implemented).
 
 
 %% -----------------------------------------------------------------------------

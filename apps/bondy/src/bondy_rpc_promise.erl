@@ -42,7 +42,7 @@
 
 -export([enqueue/3]).
 -export([dequeue/3]).
--export([flush/1]).
+-export([flush/2]).
 
 
 
@@ -87,6 +87,7 @@ call_id(#bondy_rpc_promise{call_id = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec callee(t()) -> peer_id().
 callee(#bondy_rpc_promise{callee = Val}) -> Val.
 
 
@@ -94,6 +95,7 @@ callee(#bondy_rpc_promise{callee = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec caller(t()) -> peer_id().
 caller(#bondy_rpc_promise{caller = Val}) -> Val.
 
 
@@ -108,11 +110,12 @@ procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-enqueue(#bondy_rpc_promise{} = P, Timeout, Ctxt) ->
+enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Key = {RealmUri, InvocationId, CallId},
+    %% We match realm_uri for extra validation
+    {RealmUri, _Node, SessionId, _Pid} = P#bondy_rpc_promise.caller,
+    Key = {RealmUri, InvocationId, CallId, SessionId},
     Opts = #{key => Key, ttl => Timeout},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
 
@@ -123,39 +126,27 @@ enqueue(#bondy_rpc_promise{} = P, Timeout, Ctxt) ->
 %% @doc Dequeues the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue(
-    IdType :: invocation_id | call_id, Id :: id(), Ctxt :: bondy_context:t()) ->
+-spec dequeue( uri(), IdType :: invocation_id | call_id, Id :: id()) ->
     ok | {ok, timeout} | {ok, t()}.
 
-dequeue(invocation_id, Id, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    dequeue_promise({RealmUri, Id, '_'});
+dequeue(RealmUri, invocation_id, Id) ->
+    dequeue_promise({RealmUri, Id, '_', '_'});
 
-dequeue(call_id, Id, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    dequeue_promise({RealmUri, '_', Id}).
+dequeue(RealmUri, call_id, Id) ->
+    dequeue_promise({RealmUri, '_', Id, '_'}).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes all pending promises for the Ctxt's session from the queue.
 %% @end
 %% -----------------------------------------------------------------------------
--spec flush(bondy_context:t()) -> bondy_context:t().
+-spec flush(uri(), id()) -> ok.
 
-flush(Ctxt) ->
-    try bondy_context:realm_uri(Ctxt) of
-        Uri ->
-            Set = bondy_context:awaiting_call_set(Ctxt),
-            Fun = fun(Id, ICtxt) ->
-                Key = {Uri, Id},
-                _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
-                bondy_context:remove_awaiting_call(ICtxt, Id)
-            end,
-            sets:fold(Fun, Ctxt, Set)
-    catch
-        error:_ ->
-            Ctxt
-    end.
+flush(RealmUri, SessionId) ->
+    %% This will match all promises for SessionId
+    Key = {RealmUri, '_', '_', SessionId},
+    _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
+    ok.
 
 
 %% =============================================================================

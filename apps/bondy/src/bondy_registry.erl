@@ -145,15 +145,14 @@ start_link() ->
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
-    Pattern = bondy_registry_entry:new(Type, RealmUri, PeerId, Uri, Options),
+    Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
     Tab = partition_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
-            Entry = bondy_registry_entry:new(
-                Type, RealmUri, PeerId, Uri, Options),
+            Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
             do_add(Type, Entry);
 
         [Entry] when Type == subscription ->
@@ -188,7 +187,7 @@ add(Type, Uri, Options, Ctxt) ->
             case Flag of
                 true ->
                     NewEntry = bondy_registry_entry:new(
-                        Type, RealmUri, PeerId, Uri, Options),
+                        Type, PeerId, Uri, Options),
                     do_add(Type, NewEntry);
                 false ->
                     Map = bondy_registry_entry:to_details_map(Entry),

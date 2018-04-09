@@ -87,10 +87,22 @@ send(PeerId, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(local_peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({Node, SessionId, Pid} = PeerId, M, Opts0)
-when is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
+send({RealmUri, Node, SessionId} = PeerId, M, Opts0)
+when is_binary(RealmUri), is_atom(Node), is_integer(SessionId) ->
+    %% We validate the message failing with exception
+    wamp_message:is_message(M) orelse error(invalid_wamp_message),
+    case Node =:= bondy_peer_service:mynode() of
+        true ->
+            Pid = bondy_session:pid(SessionId),
+            do_send({RealmUri, Node, SessionId, Pid}, M, Opts0);
+        false ->
+            bondy_peer_wamp_forwarder:forward(PeerId, M, Opts0)
+    end;
+
+send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
+when is_binary(RealmUri), is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
     %% We validate the message failing with exception
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
 
@@ -112,7 +124,7 @@ when is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
         true ->
             do_send(PeerId, M, Opts1);
         false ->
-            bondy_peer_wamp_forwarder:forward({Node, SessionId}, M, Opts1)
+            bondy_peer_wamp_forwarder:forward({RealmUri, Node, SessionId}, M, Opts1)
     end.
 
 
@@ -191,14 +203,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
             receive
                 {?BONDY_PEER_REQUEST, Pid, Ref, #result{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    Ctxt2 = bondy_context:remove_awaiting_call(
-                        Ctxt1, R#result.request_id),
-                    {ok, message_to_map(R), Ctxt2};
+                    {ok, message_to_map(R), Ctxt1};
                 {?BONDY_PEER_REQUEST, Pid, Ref, #error{} = R} ->
                     ok = bondy:ack(Pid, Ref),
-                    Ctxt2 = bondy_context:remove_awaiting_call(
-                        Ctxt1, R#error.request_id),
-                    {error, message_to_map(R), Ctxt2}
+                    {error, message_to_map(R), Ctxt1}
             after
                 Timeout ->
                     Error = #{
@@ -260,13 +268,13 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send({_, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
+do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
     Pid ! {?BONDY_PEER_REQUEST, Pid, make_ref(), M},
     %% This is a sync message so we resolve this sequentially
     %% so we will not get an ack, the ack is implicit
     ok;
 
-do_send({_, SessionId, Pid}, M, Opts) ->
+do_send({_, _, SessionId, Pid}, M, Opts) ->
     Timeout = maps:get(timeout, Opts),
     Enqueue = maps:get(enqueue, Opts),
     MonitorRef = monitor(process, Pid),
