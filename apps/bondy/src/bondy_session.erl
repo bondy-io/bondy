@@ -110,7 +110,9 @@
     id                              ::  id(),
     realm_uri                       ::  uri(),
     node                            ::  atom(),
-    %% If a WS connection then we have a pid
+    %% If owner of the session.
+    %% This is either pid of the TCP or WS handler process or
+    %% the cowboy handler.
     pid = self()                    ::  pid() | undefined,
     %% The {IP, Port} of the client
     peer                            ::  peer() | undefined,
@@ -118,12 +120,14 @@
     agent                           ::  binary(),
     %% Sequence number used for ID generation
     seq = 0                         ::  non_neg_integer(),
-    %% Peer WAMP Roles
+    %% Peer WAMP Roles played by peer
     roles                           ::  map() | undefined,
-    %% Auth
+    %% WAMP Auth
     authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
     authmethod                      ::  binary() | undefined,
+    %%
+    awaiting_calls = sets:new()     ::  sets:set(),
     %% Expiration and Limits
     created                         ::  calendar:date_time(),
     expires_in                      ::  pos_integer() | infinity,
