@@ -472,12 +472,15 @@ revoke_refresh_token(RealmUri, Issuer, Token) ->
             end
     end.
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 revoke_user_refresh_token(RealmUri, Issuer, Username, DeviceId) ->
     UserPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
     case plum_db:get(UserPrefix, DeviceId) of
         undefined ->
-            {error, oauth2_invalid_grant};
+            ok;
         Token ->
             _ = plum_db:delete(
                 ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token),
