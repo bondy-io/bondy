@@ -246,7 +246,6 @@ remove_all(_, _, _) ->
 
 lookup(Key) ->
     Type = bondy_registry_entry:type(Key),
-    Key = bondy_registry_entry:key(Key),
     RealmUri = bondy_registry_entry:realm_uri(Key),
     case ets:lookup(partition_table(Type, RealmUri), Key) of
         [] ->
@@ -300,7 +299,7 @@ remove(Type, EntryId, Ctxt, Task) ->
 
 %% @private
 take_from_tuplespace(Type, Key) ->
-    RealmUri = bondy_registry_entry:relam_uri(Key),
+    RealmUri = bondy_registry_entry:realm_uri(Key),
     Tab = partition_table(Type, RealmUri),
     case ets:take(Tab, Key) of
         [] ->

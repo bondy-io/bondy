@@ -22,6 +22,13 @@
 
 -record(peer_message, {
     id          ::  id(),
+    %% Supporting process identifiers in Partisan, without changing the
+    %% internal implementation of Erlang’s process identifiers, is not
+    %% possible without allowing nodes to directly connect to every
+    %% other node.
+    %% We use the pid-to-bin trick since we will be using the pid to generate
+    %% an ACK.
+    from        ::  {uri(), atom()},
     peer_id     ::  remote_peer_id(),
     payload     ::  wamp_invocation()
                     | wamp_error()
@@ -32,18 +39,21 @@
 }).
 
 
--opaque t()    ::  #peer_message{}.
+-opaque t()     ::  #peer_message{}.
 
 -export_type([t/0]).
 
+
+-export([from/1]).
+-export([id/1]).
 -export([is_message/1]).
 -export([new/3]).
--export([id/1]).
--export([peer_id/1]).
+-export([node/1]).
+-export([options/1]).
 -export([payload/1]).
 -export([payload_type/1]).
--export([options/1]).
-
+-export([peer_id/1]).
+-export([realm_uri/1]).
 
 
 %% =============================================================================
@@ -51,15 +61,28 @@
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-new(PeerId, Payload0, Opts) ->
+new({RealmUri, Node} = PeerId, Payload0, Opts) ->
+    Node =/= bondy_peer_service:mynode() orelse error(badarg),
+    Payload1 = validate_payload(Payload0),
+
+    #peer_message{
+        id = bondy_utils:get_id(global),
+        from = {RealmUri, bondy_peer_service:mynode()},
+        peer_id = PeerId,
+        payload = Payload1,
+        options = Opts
+    };
+
+new({RealmUri, Node, _} = PeerId, Payload0, Opts) ->
+    Node =/= bondy_peer_service:mynode() orelse error(badarg),
     Payload1 = validate_payload(Payload0),
     #peer_message{
         id = bondy_utils:get_id(global),
+        from = {RealmUri, bondy_peer_service:mynode()},
         peer_id = PeerId,
         payload = Payload1,
         options = Opts
@@ -79,6 +102,27 @@ is_message(_) -> false.
 %% @end
 %% -----------------------------------------------------------------------------
 id(#peer_message{id = Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+realm_uri(#peer_message{from = {Val, _}}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+node(#peer_message{from = {_, Val}}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+from(#peer_message{from = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -110,18 +154,15 @@ options(#peer_message{options = Val}) -> Val.
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-validate_payload(#publish{} = M) ->
+validate_payload(#call{} = M) ->
     M;
 
 validate_payload(#error{request_type = Type} = M)
-when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
+when Type == ?CALL orelse Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     M;
 
 validate_payload(#interrupt{} = M) ->
@@ -131,6 +172,9 @@ validate_payload(#invocation{} = M) ->
     M;
 
 validate_payload(#result{} = M) ->
+    M;
+
+validate_payload(#publish{} = M) ->
     M;
 
 validate_payload(M) ->

@@ -172,7 +172,7 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
--export([handle_peer_message/3]).
+-export([handle_peer_message/4]).
 -export([is_feature_enabled/1]).
 -export([register/3]).
 -export([registrations/1]).
@@ -287,14 +287,73 @@ handle_message(#cancel{} = M, Ctxt0) ->
     Opts = M#cancel.options,
 
     %% A response will be send asynchronously by another router process instance
-    Fun = fun(InvocationId, Callee, Ctxt1) ->
-        R = wamp_message:interrupt(InvocationId, Opts),
-        ok = bondy:send(Callee, R),
-        {ok, Ctxt1}
-    end,
-    {ok, _Ctxt2} = dequeue_invocations(CallId, Fun, Ctxt0),
-    ok;
 
+    %% If the callee does not support call canceling, then behavior is skip.
+    %% We should check calle but that means we need to broadcast sessions
+    %% another option is to pay the price and ask bondy to fail on the
+    %% remote node after checking the callee does not support it.
+    %% The caller is not affected, only in the kill case will receive an
+    %% error later in the case of a remote callee.
+    case maps:get(mode, Opts, skip) of
+        kill ->
+            %% INTERRUPT is sent to the callee, but ERROR is not returned
+            %% to the caller until after the callee has responded to the
+            %% canceled call. In this case the caller may receive RESULT or
+            %% ERROR depending whether the callee finishes processing the
+            %% invocation or the interrupt first.
+            %% We peek instead of dequeueing.
+            Fun = fun(InvocationId, Callee, Ctxt1) ->
+                R = wamp_message:interrupt(InvocationId, Opts),
+                ok = bondy:send(Callee, R),
+                {ok, Ctxt1}
+            end,
+            _ = peek_invocations(CallId, Fun, Ctxt0),
+            ok;
+        killnowait ->
+            %% The pending call is canceled and ERROR is send immediately
+            %% back to the caller. INTERRUPT is sent to the callee and any
+            %% response to the invocation or interrupt from the callee is
+            %% discarded when received.
+            %% We dequeue, that way the response will be discarded.
+            Fun = fun(InvocationId, Callee, Ctxt1) ->
+                Caller = bondy_context:peer_id(Ctxt1),
+                Mssg = <<"call_cancelled">>,
+                Args = [Mssg],
+                ArgsKw = #{
+                    message => Mssg,
+                    description => <<"The call was cancelled by the user.">>
+                },
+                Error = wamp_message:error(
+                    ?CANCEL, CallId, #{}, ?WAMP_ERROR_CANCELLED, Args, ArgsKw),
+                ok = bondy:send(Caller, Error),
+
+                Interrupt = wamp_message:interrupt(InvocationId, Opts),
+                ok = bondy:send(Callee, Interrupt),
+                {ok, Ctxt1}
+            end,
+            _ = dequeue_invocations(CallId, Fun, Ctxt0),
+            ok;
+        skip ->
+            %% The pending call is canceled and ERROR is sent immediately
+            %% back to the caller. No INTERRUPT is sent to the callee and
+            %% the result is discarded when received.
+            %% We dequeue,
+            Fun = fun(_InvocationId, _Callee, Ctxt1) ->
+                Caller = bondy_context:peer_id(Ctxt1),
+                Mssg = <<"call_cancelled">>,
+                Args = [Mssg],
+                ArgsKw = #{
+                    message => Mssg,
+                    description => <<"The call was cancelled by the user.">>
+                },
+                Error = wamp_message:error(
+                    ?CANCEL, CallId, #{}, ?WAMP_ERROR_CANCELLED, Args, ArgsKw),
+                ok = bondy:send(Caller, Error),
+                {ok, Ctxt1}
+            end,
+            _ = dequeue_invocations(CallId, Fun, Ctxt0),
+            ok
+    end;
 
 handle_message(#yield{} = M, Ctxt0) ->
     %% A Callee is replying to a previous wamp_invocation()
@@ -306,19 +365,20 @@ handle_message(#yield{} = M, Ctxt0) ->
     Fun = fun(CallId, Caller) ->
         R = wamp_message:result(
             CallId,
-            M#yield.options,  %% TODO check if yield.options should be assigned to result.details
+            %% TODO check if yield.options should be assigned to result.details
+            M#yield.options,
             M#yield.arguments,
             M#yield.arguments_kw),
         bondy:send(Caller, R)
     end,
     RealmUri = bondy_context:realm_uri(Ctxt0),
-    dequeue_call(M#yield.request_id, Fun, RealmUri);
+    dequeue_call({invocation_id, M#yield.request_id}, Fun, RealmUri);
 
 handle_message(#error{request_type = Type} = M, Ctxt0)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
-    NewType = case Type of
-        ?INVOCATION -> ?CALL;
-        ?INTERRUPT -> ?CANCEL
+    {NewType, Hint} = case Type of
+        ?INVOCATION -> {?CALL, {invocation_id, M#error.request_id}};
+        ?INTERRUPT -> {?CANCEL, {call_id, M#error.request_id}}
     end,
     Fun = fun(ReqId, Caller) ->
         R = wamp_message:error(
@@ -331,7 +391,7 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
         bondy:send(Caller, R)
     end,
     RealmUri = bondy_context:realm_uri(Ctxt0),
-    dequeue_call(M#error.request_id, Fun, RealmUri);
+    dequeue_call(Hint, Fun, RealmUri);
 
 handle_message(
     #call{procedure_uri = <<"com.leapsight.bondy", _/binary>>} = M, Ctxt) ->
@@ -344,8 +404,6 @@ handle_message(
 handle_message(
     #call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
     bondy_broker:handle_call(M, Ctxt);
-
-
 
 handle_message(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
@@ -378,18 +436,22 @@ handle_message(#call{} = M, Ctxt0) ->
 %% @doc Handles inbound messages received from a peer (node).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_peer_message(wamp_message(), peer_id(), map()) ->
+-spec handle_peer_message(
+    wamp_message(),
+    To :: remote_peer_id(),
+    From :: remote_peer_id(),
+    Opts :: map()) ->
     ok | no_return().
 
-handle_peer_message(#error{request_type = Type} = M, PeerId, _Opts)
+handle_peer_message(#error{request_type = Type} = M, Caller, _From, _Opts)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     %% A CALL or CANCEL we made to a remote callee has failed,
     %% We forward the error back to the local caller.
-    NewType = case Type of
-        ?INVOCATION -> ?CALL;
-        ?INTERRUPT -> ?CANCEL
+    {NewType, Hint} = case Type of
+        ?INVOCATION -> {?CALL, {invocation_id, M#error.request_id}};
+        ?INTERRUPT -> {?CANCEL, {call_id, M#error.request_id}}
     end,
-    Fun = fun(ReqId, Caller) ->
+    Fun = fun(ReqId, LocalCaller) ->
         R = wamp_message:error(
             NewType,
             ReqId,
@@ -397,24 +459,56 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
             M#error.error_uri,
             M#error.arguments,
             M#error.arguments_kw),
-        bondy:send(Caller, R)
+        bondy:send(LocalCaller, R)
     end,
-    {RealmUri, _, _, _} = PeerId,
-    dequeue_call(M#error.request_id, Fun, RealmUri);
+    RealmUri = element(1, Caller),
+    dequeue_call(Hint, Fun, RealmUri);
 
-handle_peer_message(#interrupt{} = _M, _PeerId, _Opts) ->
-    %% A remote caller is cancelling a previous call made to a local callee.
-    exit(not_implemented);
+handle_peer_message(#interrupt{} = M, Callee, _From, _Opts) ->
+    %% A remote caller is cancelling a previous call-invocation
+    %% made to a local callee.
+    Fun = fun(_ReqId, _Caller) ->
+        bondy:send(Callee, M)
+    end,
+    RealmUri = element(1, Callee),
+    Hint = {invocation_id, M#interrupt.request_id},
+    dequeue_call(Hint, Fun, RealmUri);
 
-handle_peer_message(#invocation{} = _M, _PeerId, _Opts) ->
+handle_peer_message(#invocation{} = M, Callee, {_, _} = Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
-    %% Review: I think we need to enqueue this so that we can match it with the
-    %% YIELD or ERROR
-    exit(not_implemented);
 
-handle_peer_message(#result{} = M, PeerId, Opts) ->
+    %% We first need to find the registry entry to get the local callee
+    {RealmUri, Node, SessionId} = Callee,
+    Key = bondy_registry_entry:key_pattern(
+        registration, RealmUri, Node, SessionId, M#invocation.registration_id),
+
+    %% We use lookup because the key is ground
+    case bondy_registry:lookup(Key) of
+        {error, not_found} ->
+            bondy:send(
+                Caller,
+                no_eligible_callee(invocation, M#invocation.registration_id)
+            );
+        Entry ->
+            Callee = bondy_registry_entry:peer_id(Entry),
+            %% We enqueue the invocation so that we can match it with the
+            %% YIELD or ERROR
+            %% handle_message will match this using the {invocation_id, Id} hint
+            Promise = bondy_rpc_promise:new(
+                M#invocation.request_id, Callee, Caller),
+            Timeout = bondy_utils:timeout(Opts),
+            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
+            bondy:send(Caller, M, Opts)
+    end;
+
+handle_peer_message(#result{} = M, Caller, _Callee, _Opts) ->
     %% A remote callee is returning a result to a local caller.
-    bondy:send(PeerId, M, Opts).
+    CallId = M#result.request_id,
+    Fun = fun(Id, LocalCaller) when Id =:= CallId ->
+        bondy:send(LocalCaller, M)
+    end,
+    RealmUri = element(1, Caller),
+    dequeue_call({call_id, CallId}, Fun, RealmUri).
 
 
 
@@ -689,13 +783,9 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     % Caller = bondy_session:pid(S),
     RealmUri = bondy_context:realm_uri(Ctxt),
     case bondy_rpc_promise:dequeue(RealmUri, call_id, CallId) of
-        ok ->
+        empty ->
             %% Promises for this call were either interrupted by us,
             %% fulfilled or timed out and garbage collected, we do nothing
-            {ok, Ctxt};
-        {ok, timeout} ->
-            %% Promises for this call were either interrupted by us or
-            %% timed out or caller died, we do nothing
             {ok, Ctxt};
         {ok, P} ->
             ReqId = bondy_rpc_promise:invocation_id(P),
@@ -707,15 +797,39 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     end.
 
 
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue_call(id(), function(), uri()) -> ok.
+-spec peek_invocations(id(), function(), bondy_context:context()) ->
+    {ok, bondy_context:context()}.
 
-dequeue_call(ReqId, Fun, RealmUri) when is_function(Fun, 2) ->
-    case bondy_rpc_promise:dequeue(RealmUri, invocation_id, ReqId) of
+peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
+    % #{session := S} = Ctxt,
+    % Caller = bondy_session:pid(S),
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    case bondy_rpc_promise:peek(RealmUri, call_id, CallId) of
+        empty ->
+            {ok, Ctxt};
+        {ok, P} ->
+            ReqId = bondy_rpc_promise:invocation_id(P),
+            Callee = bondy_rpc_promise:callee(P),
+            {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
+            %% We iterate until there are no more pending invocation for the
+            %% call_request_id == CallId
+            peek_invocations(CallId, Fun, Ctxt1)
+    end.
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dequeue_call({invocation_id | call_id, id()}, function(), uri()) -> ok.
+
+dequeue_call(Hint, Fun, RealmUri) when is_function(Fun, 2) ->
+    case bondy_rpc_promise:dequeue(RealmUri, Hint) of
         ok ->
             %% Promise was fulfilled or timed out and garbage collected,
             %% we do nothing
@@ -890,6 +1004,31 @@ no_such_procedure(ProcUri, CallId) ->
         [Mssg],
         #{
             message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
+            description => <<"Either no registration exists for the requested procedure,the match policy used did not match any registered procedures.">>
         }
+    ).
+
+
+%% @private
+no_eligible_callee(call, CallId) ->
+    Desc = <<"A call was forwarded throught the router cluster for a callee that is no longer available.">>,
+    no_eligible_callee(?CALL, CallId, Desc);
+
+no_eligible_callee(invocation, CallId) ->
+    Desc = <<"An invocation was forwarded throught the router cluster to a callee that is no longer available.">>,
+    no_eligible_callee(?INVOCATION, CallId, Desc).
+
+
+%% @private
+no_eligible_callee(Type, Id, Desc) ->
+    Mssg = <<
+        "There are no elibible callees for the procedure."
+    >>,
+    wamp_message:error(
+        Type,
+        Id,
+        #{},
+        ?WAMP_ERROR_NO_ELIGIBLE_CALLE,
+        [Mssg],
+        #{ message => Mssg, description => Desc}
     ).

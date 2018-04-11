@@ -24,8 +24,8 @@
 
 -record(bondy_rpc_promise, {
     invocation_id       ::  id(),
-    procedure_uri       ::  uri(),
-    call_id             ::  id(),
+    procedure_uri       ::  uri() | undefined,
+    call_id             ::  id() | undefined,
     caller              ::  peer_id(),
     callee              ::  peer_id()
 }).
@@ -33,6 +33,7 @@
 
 -export_type([t/0]).
 
+-export([new/3]).
 -export([new/5]).
 -export([invocation_id/1]).
 -export([procedure_uri/1]).
@@ -41,7 +42,8 @@
 -export([caller/1]).
 
 -export([enqueue/3]).
--export([dequeue/3]).
+-export([dequeue/2]).
+-export([peek/2]).
 -export([flush/2]).
 
 
@@ -50,8 +52,27 @@
 %% API
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new promise for a remote invocation
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(
+    RequestId :: id(),
+    Callee :: remote_peer_id(),
+    Ctxt :: bondy_context:t()) -> t().
+
+new(ReqId, Callee, Caller) ->
+    #bondy_rpc_promise{
+        invocation_id = ReqId,
+        caller = Caller,
+        callee = Callee
+    }.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new promise for a local call - invocation
+%% @end
+%% -----------------------------------------------------------------------------
 -spec new(
     RequestId :: id(),
     CallId :: id(),
@@ -120,20 +141,34 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Dequeues the promise that matches the Id for the IdType in Ctxt.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dequeue( uri(), {IdType :: invocation_id | call_id, Id :: id()}) ->
+    empty | {ok, t()}.
+
+dequeue(RealmUri, {invocation_id, Id}) ->
+    dequeue_promise({RealmUri, Id, '_', '_'});
+
+dequeue(RealmUri, {call_id, Id}) ->
+    dequeue_promise({RealmUri, '_', Id, '_'}).
+
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Dequeues the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue( uri(), IdType :: invocation_id | call_id, Id :: id()) ->
-    ok | {ok, timeout} | {ok, t()}.
+-spec peek( uri(), {IdType :: invocation_id | call_id, Id :: id()}) ->
+    empty | {ok, t()}.
 
-dequeue(RealmUri, invocation_id, Id) ->
-    dequeue_promise({RealmUri, Id, '_', '_'});
+peek(RealmUri, {invocation_id, Id}) ->
+    peek_promise({RealmUri, Id, '_', '_'});
 
-dequeue(RealmUri, call_id, Id) ->
-    dequeue_promise({RealmUri, '_', Id, '_'}).
+peek(RealmUri, {call_id, Id}) ->
+    peek_promise({RealmUri, '_', Id, '_'}).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -156,17 +191,30 @@ flush(RealmUri, SessionId) ->
 
 
 %% @private
--spec dequeue_promise(tuple()) -> ok | {ok, timeout} | {ok, t()}.
+-spec dequeue_promise(tuple()) -> empty | {ok, t()}.
 
 dequeue_promise(Key) ->
-    case tuplespace_queue:dequeue(?INVOCATION_QUEUE, #{key => Key}) of
+    Opts = #{key => Key},
+    case tuplespace_queue:dequeue(?INVOCATION_QUEUE, Opts) of
         empty ->
             %% The promise might have expired so we GC it.
-            case tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}) of
-                0 -> ok;
-                _ -> {ok, timeout}
+            case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
+                0 -> empty;
+                _ -> empty
             end;
         [#bondy_rpc_promise{} = Promise] ->
             {ok, Promise}
     end.
 
+
+%% @private
+-spec peek_promise(tuple()) -> {ok, t()} | empty.
+
+peek_promise(Key) ->
+    Opts = #{key => Key},
+    case tuplespace_queue:peek(?INVOCATION_QUEUE, Opts) of
+        empty ->
+            empty;
+        [#bondy_rpc_promise{} = P] ->
+            {ok, P}
+    end.
