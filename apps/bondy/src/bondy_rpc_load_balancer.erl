@@ -218,13 +218,26 @@ get_round_robin(Entries) ->
 
 get_round_robin(undefined, [H|T]) ->
     %% We never invoke this procedure before or we reordered the round
-    Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
-    case process_info(Pid) of
-        undefined ->
-            %% The peer connection must have been closed between
-            %% the time we read and now.
-            get_round_robin(undefined, T);
-        _ ->
+    case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
+        true ->
+            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    %% We update the invocation state
+                    ok = set_last_invocation(
+                        bondy_registry_entry:realm_uri(H),
+                        bondy_registry_entry:uri(H),
+                        bondy_registry_entry:id(H)
+                    ),
+                    %% We return the entry and the remaining ones
+                    {H, T};
+                false ->
+                    %% The peer connection must have been closed between
+                    %% the time we read and now.
+                    get_round_robin(undefined, T)
+            end;
+        false ->
+            %% A remote callee
             %% We update the invocation state
             ok = set_last_invocation(
                 bondy_registry_entry:realm_uri(H),
