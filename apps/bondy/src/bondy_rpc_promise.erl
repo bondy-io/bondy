@@ -135,8 +135,12 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
     %% We match realm_uri for extra validation
-    {RealmUri, _Node, SessionId, _Pid} = P#bondy_rpc_promise.caller,
-    Key = {RealmUri, InvocationId, CallId, SessionId},
+    Key = case P#bondy_rpc_promise.caller of
+    {RealmUri, Node} ->
+        {RealmUri, InvocationId, CallId, Node};
+    {RealmUri, _Node, SessionId, _Pid} ->
+        {RealmUri, InvocationId, CallId, SessionId}
+    end,
     Opts = #{key => Key, ttl => Timeout},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
 

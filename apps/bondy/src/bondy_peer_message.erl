@@ -48,7 +48,7 @@
 -export([id/1]).
 -export([is_message/1]).
 -export([new/3]).
--export([node/1]).
+-export([peer_node/1]).
 -export([options/1]).
 -export([payload/1]).
 -export([payload_type/1]).
@@ -108,14 +108,18 @@ id(#peer_message{id = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-realm_uri(#peer_message{from = {Val, _}}) -> Val.
+realm_uri(#peer_message{from = {Val, _}}) -> Val;
+realm_uri(#peer_message{from = {Val, _, _}}) -> Val;
+realm_uri(#peer_message{from = {Val, _, _, _}}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-node(#peer_message{from = {_, Val}}) -> Val.
+peer_node(#peer_message{peer_id = {_, Val}}) -> Val;
+peer_node(#peer_message{peer_id = {_, Val, _}}) -> Val;
+peer_node(#peer_message{peer_id = {_, Val, _, _}}) -> Val.
 
 
 %% -----------------------------------------------------------------------------

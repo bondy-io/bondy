@@ -85,7 +85,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
-
+-define(FORWARD_TIMEOUT, 5000).
 
 -record(peer_ack, {
     from        ::  {uri(), Node :: atom()},
@@ -156,7 +156,7 @@ forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
     %% If remote monitoring is required, Partisan can additionally connect
     %% nodes over Distributed Erlang to provide this functionality but this will
     %% defeat the purpose of using Partisan in the first place.
-    Timeout = maps:get(timeout, Opts),
+    Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
     PeerMssg = bondy_peer_message:new(PeerId, Mssg, Opts),
     Id = bondy_peer_message:id(PeerMssg),
     BinPid = pid_to_bin(self()),
@@ -299,6 +299,12 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
+cast_message(#peer_ack{from = {_, Node}} = Mssg, BinPid) ->
+    do_cast_message(Node, Mssg, BinPid);
+
+cast_message(#peer_error{from = {_, Node}} = Mssg, BinPid) ->
+    do_cast_message(Node, Mssg, BinPid);
+
 cast_message(Mssg, BinPid) ->
     %% When process identifiers are transmitted between nodes, the process
     %% identifiers are translated based on the receiving nodes membership view.
@@ -309,7 +315,12 @@ cast_message(Mssg, BinPid) ->
     %% that processes that wish to receive messages from remote processes
     %% locally register a name that can be used instead of a process identifier
     %% when sending the message.
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_peer_message:peer_node(Mssg),
+    do_cast_message(Node, Mssg, BinPid).
+
+
+%% @private
+do_cast_message(Node, Mssg, BinPid) ->
     Channel = wamp_channel,
     ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
