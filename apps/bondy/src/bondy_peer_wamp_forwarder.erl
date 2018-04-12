@@ -344,30 +344,6 @@ peer_error(Reason, Mssg) ->
     }.
 
 
-%% %% @private
-%% send(Mssg) ->
-%%     {RealmUri, Node, SessionId} = bondy_peer_message:peer_id(Mssg),
-%%     %% We match for extra validation
-%%     LocalPeerId = bondy_session:peer_id(SessionId),
-%%     {RealmUri, Node, SessionId, _Pid} = LocalPeerId,
-
-%%     Opts = bondy_peer_message:options(Mssg),
-%%     Payload = bondy_peer_message:payload(Mssg),
-
-%%     case Node =:= bondy_peer_service:mynode() of
-%%         true ->
-%%             ok = bondy:send(LocalPeerId, Payload, Opts),
-%%             %% We send the ack to the remote node
-%%             cast_message(peer_ack(Mssg));
-%%         false ->
-%%             _ = lager:error(
-%%                 "Received a message targeted at another node; message=~p",
-%%                 [Mssg]
-%%             ),
-%%             exit(invalid_node)
-%%     end.
-
-
 %% @private
 pid_to_bin(Pid) ->
     list_to_binary(pid_to_list(Pid)).

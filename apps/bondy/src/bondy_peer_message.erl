@@ -28,14 +28,15 @@
     %% other node.
     %% We use the pid-to-bin trick since we will be using the pid to generate
     %% an ACK.
-    from        ::  {uri(), atom()},
-    peer_id     ::  remote_peer_id(),
-    payload     ::  wamp_invocation()
-                    | wamp_error()
-                    | wamp_result()
-                    | wamp_interrupt()
-                    | wamp_event(),
-    options     ::  map()
+    from            ::  {uri(), atom()},
+    peer_id         ::  remote_peer_id(),
+    payload         ::  wamp_invocation()
+                        | wamp_error()
+                        | wamp_result()
+                        | wamp_interrupt()
+                        | wamp_event(),
+    hop_count = 0   ::  non_neg_integer(),
+    options         ::  map()
 }).
 
 
