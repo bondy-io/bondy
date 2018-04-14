@@ -32,7 +32,6 @@
 
 
 
-%% bondy_backup:backup("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
 %% -----------------------------------------------------------------------------
 %% @doc Backups up the database in the directory indicated by Path.
 %% @end
@@ -40,28 +39,33 @@
 backup(Path) ->
     Ts = erlang:system_time(second),
     Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
-    {ok, Log} = disk_log:open([
+    Opts = [
         {name, log},
         {file, filename:join([Path, Filename])},
         {type, halt},
         {size, infinity},
         {head, #{
-            vsn => <<"1.0.0">>,
             format => dvvset_log,
-            timestamp => Ts,
             mod => ?MODULE,
             mod_vsn => mod_vsn(),
-            node => erlang:node()
+            node => erlang:node(),
+            timestamp => Ts,
+            vsn => <<"1.0.0">>
         }}
-    ]),
-    try
-        ok = build_backup(Log)
-    catch
-        throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        disk_log:close(Log)
+    ],
+    case disk_log:open(Opts) of
+        {ok, Log} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p", [Filename]),
+            build_backup(Log);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
+                [Filename, Rec, Bad]
+            ),
+            build_backup(Log);
+        {error, _} = Error ->
+            Error
     end.
 
 
@@ -70,33 +74,25 @@ backup(Path) ->
 %% @end
 %% -----------------------------------------------------------------------------
 restore(Filename) ->
-    Res =  disk_log:open([
+    Opts =  [
         {name, log},
         {mode, read_only},
         {file, Filename}
-    ]),
-    Log = case Res of
-        {ok, Log0} ->
+    ],
+
+    case disk_log:open(Opts) of
+        {ok, Log} ->
             _ = lager:info(
                 "Succesfully opened backup log; filename=~p", [Filename]),
-            Log0;
-        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
+            do_restore(Log);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
             _ = lager:info(
                 "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
                 [Filename, Rec, Bad]
             ),
-            Log0
-    end,
-
-    try
-        Counters = #{n => 0, merged => 0},
-        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
-    catch
-        throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        disk_log:close(Log)
+            do_restore(Log);
+        {error, _} = Error ->
+            Error
     end.
 
 
@@ -115,56 +111,19 @@ mod_vsn() ->
     Vsn.
 
 
-%% @private
-restore_chunk(eof, Log, #{n := N, merged := M}) ->
-    _ = lager:info("Backup restore processed ~p records (~p records merged)", [N, M]),
-    disk_log:close(Log);
-
-restore_chunk({error, _} = Error, Log, _) ->
-    _ = disk_log:close(Log),
-    Error;
-
-restore_chunk({head, {Cont, [H|T]}}, Log, Counters) ->
-    ok = validate_head(H),
-    restore_chunk({Cont, T}, Log, Counters);
-
-restore_chunk({Cont, Terms}, Log, Counters0) ->
-    try
-        %% io:format("Terms : ~p~n", [Terms]),
-        {ok, Counters} = restore_terms(Terms, Counters0),
-        restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
-    catch
-        _:Reason ->
-            _ = lager:error("Error restoring backup; reason=~p, ", [Reason]),
-            {error, Reason}
-    end.
-
-
-%% @private
-restore_terms([{PKey, Object}|T], #{n := N, merged := M} = Counters) ->
-    case plumtree_metadata_manager:merge({PKey, undefined}, Object) of
-        true ->
-            restore_terms(T, Counters#{n => N + 1, merged => M + 1});
-        false ->
-            restore_terms(T, Counters#{n => N + 1})
-    end;
-
-restore_terms([], Counters) ->
-    {ok, Counters}.
-
-
-%% @private
-validate_head(#{format := dvvset_log} = Head) ->
-    _ = lager:info("Succesfully validate log head; head=~p", [Head]),
-    ok;
-
-validate_head(H) ->
-    throw({invalid_header, H}).
-
 
 %% @private
 build_backup(Log) ->
-    build_backup(plumtree_metadata_manager:iterator(), Log).
+    try
+        build_backup(plumtree_metadata_manager:iterator(), Log)
+    catch
+        throw:Reason ->
+            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
+    end.
+
 
 
 %% @private
@@ -210,6 +169,69 @@ log([], _) ->
 log(L, Log) ->
     ok = maybe_throw(disk_log:log_terms(Log, L)),
     maybe_throw(disk_log:sync(Log)).
+
+
+%% @private
+do_restore(Log) ->
+    try
+        Counters = #{n => 0, merged => 0},
+        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
+    catch
+        _:Reason ->
+            lager:error(<<"Error restoring backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
+    end.
+
+
+
+%% @private
+restore_chunk(eof, Log, #{n := N, merged := M}) ->
+    _ = lager:info(
+        "Backup restore processed ~p records (~p records merged)", [N, M]),
+    disk_log:close(Log);
+
+restore_chunk({error, _} = Error, Log, _) ->
+    _ = disk_log:close(Log),
+    Error;
+
+restore_chunk({head, {Cont, [H|T]}}, Log, Counters) ->
+    ok = validate_head(H),
+    restore_chunk({Cont, T}, Log, Counters);
+
+restore_chunk({Cont, Terms}, Log, Counters0) ->
+    try
+        %% io:format("Terms : ~p~n", [Terms]),
+        {ok, Counters} = restore_terms(Terms, Counters0),
+        restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
+    catch
+        _:Reason ->
+            _ = lager:error("Error restoring backup; reason=~p, ", [Reason]),
+            {error, Reason}
+    end.
+
+
+%% @private
+restore_terms([{PKey, Object}|T], #{n := N, merged := M} = Counters) ->
+    case plumtree_metadata_manager:merge({PKey, undefined}, Object) of
+        true ->
+            restore_terms(T, Counters#{n => N + 1, merged => M + 1});
+        false ->
+            restore_terms(T, Counters#{n => N + 1})
+    end;
+
+restore_terms([], Counters) ->
+    {ok, Counters}.
+
+
+%% @private
+validate_head(#{format := dvvset_log} = Head) ->
+    _ = lager:info("Succesfully validate log head; head=~p", [Head]),
+    ok;
+
+validate_head(H) ->
+    throw({invalid_header, H}).
 
 
 %% @private
