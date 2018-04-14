@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_db.erl -
+%%  bondy_backup.erl -
 %%
 %%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_db).
+-module(bondy_backup).
 
 
 -export([backup/1]).
@@ -32,38 +32,7 @@
 
 
 
-restore(Filename) ->
-    Res =  disk_log:open([
-        {name, log},
-        {mode, read_only},
-        {file, Filename}
-    ]),
-    Log = case Res of
-        {ok, Log0} ->
-            _ = lager:info("Succesfully opened backup log; path=~p", [Filename]),
-
-            Log0;
-        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
-            _ = lager:info(
-                "Succesfully opened backup log; path=~p, recovered=~p, bad_bytes=~p",
-                [Filename, Rec, Bad]
-            ),
-            Log0
-    end,
-    try
-        Counters = #{n => 0, merged => 0},
-        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
-    catch
-        throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        disk_log:close(Log)
-    end.
-
-
-
-%% bondy_db:backup("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
+%% bondy_backup:backup("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
 %% -----------------------------------------------------------------------------
 %% @doc Backups up the database in the directory indicated by Path.
 %% @end
@@ -96,6 +65,42 @@ backup(Path) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Restores a backup log.
+%% @end
+%% -----------------------------------------------------------------------------
+restore(Filename) ->
+    Res =  disk_log:open([
+        {name, log},
+        {mode, read_only},
+        {file, Filename}
+    ]),
+    Log = case Res of
+        {ok, Log0} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p", [Filename]),
+            Log0;
+        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
+                [Filename, Rec, Bad]
+            ),
+            Log0
+    end,
+
+    try
+        Counters = #{n => 0, merged => 0},
+        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
+    catch
+        throw:Reason ->
+            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
+    end.
+
+
+
 
 
 %% =============================================================================
@@ -104,9 +109,9 @@ backup(Path) ->
 
 
 
-
+%% @private
 mod_vsn() ->
-    {vsn, Vsn} = lists:keyfind(vsn, 1, bondy_db:module_info(attributes)),
+    {vsn, Vsn} = lists:keyfind(vsn, 1, bondy_backup:module_info(attributes)),
     Vsn.
 
 
@@ -149,12 +154,10 @@ restore_terms([], Counters) ->
 
 
 %% @private
-validate_head(#{format := dvvset_log, vsn := Vs}) ->
-    _ = lager:info(
-        "Succesfully validate log head; format=dvvset_log, vsn=~p",
-        [Vs]
-    ),
+validate_head(#{format := dvvset_log} = Head) ->
+    _ = lager:info("Succesfully validate log head; head=~p", [Head]),
     ok;
+
 validate_head(H) ->
     throw({invalid_header, H}).
 
@@ -176,6 +179,7 @@ build_backup(PrefixIt, Log) ->
     end.
 
 
+%% @private
 build_backup(PrefixIt, ObjIt, Log) ->
     case plumtree_metadata_manager:iterator_done(ObjIt) of
         true ->
@@ -197,7 +201,6 @@ build_backup(PrefixIt, ObjIt, Log) ->
                     throw(Reason)
             end
     end.
-
 
 
 %% @private
