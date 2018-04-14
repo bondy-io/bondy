@@ -32,6 +32,7 @@
 
 
 
+%% bondy_backup:backup("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
 %% -----------------------------------------------------------------------------
 %% @doc Backups up the database in the directory indicated by Path.
 %% @end
@@ -39,33 +40,28 @@
 backup(Path) ->
     Ts = erlang:system_time(second),
     Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
-    Opts = [
+    {ok, Log} = disk_log:open([
         {name, log},
         {file, filename:join([Path, Filename])},
         {type, halt},
         {size, infinity},
         {head, #{
-            format => {object, dvvset_log},
+            vsn => <<"1.0.0">>,
+            format => dvvset_log,
+            timestamp => Ts,
             mod => ?MODULE,
             mod_vsn => mod_vsn(),
-            node => erlang:node(),
-            timestamp => Ts,
-            vsn => <<"1.0.0">>
+            node => erlang:node()
         }}
-    ],
-    case disk_log:open(Opts) of
-        {ok, Log} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p", [Filename]),
-            build_backup(Log);
-        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
-                [Filename, Rec, Bad]
-            ),
-            build_backup(Log);
-        {error, _} = Error ->
-            Error
+    ]),
+    try
+        ok = build_backup(Log)
+    catch
+        throw:Reason ->
+            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
     end.
 
 
@@ -74,25 +70,33 @@ backup(Path) ->
 %% @end
 %% -----------------------------------------------------------------------------
 restore(Filename) ->
-    Opts =  [
+    Res =  disk_log:open([
         {name, log},
         {mode, read_only},
         {file, Filename}
-    ],
-
-    case disk_log:open(Opts) of
-        {ok, Log} ->
+    ]),
+    Log = case Res of
+        {ok, Log0} ->
             _ = lager:info(
                 "Succesfully opened backup log; filename=~p", [Filename]),
-            do_restore(Log);
-        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            Log0;
+        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
             _ = lager:info(
                 "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
                 [Filename, Rec, Bad]
             ),
-            do_restore(Log);
-        {error, _} = Error ->
-            Error
+            Log0
+    end,
+
+    try
+        Counters = #{n => 0, merged => 0},
+        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
+    catch
+        throw:Reason ->
+            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
     end.
 
 
@@ -111,104 +115,24 @@ mod_vsn() ->
     Vsn.
 
 
-
 %% @private
-build_backup(Log) ->
-    Iterator = plum_db:iterator({undefined, undefined}),
-
-    Fun = fun(FullPrefix, ok) ->
-        PAcc1 = plum_db:fold_elements(
-            fun
-                (E, {Cnt, PAcc0}) ->
-                    maybe_log(Cnt, [E | PAcc0], Log)
-            end,
-            {0, []},
-            FullPrefix
-        ),
-        log([{FullPrefix, PAcc1}], Log)
-    end,
-
-    try
-        build_backup(Fun, ok, Iterator)
-    catch
-        throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        ok = plum_db:iterator_close(Iterator),
-        disk_log:close(Log)
-    end.
-
-
-%% @private
-build_backup(Fun, Acc, Iterator) ->
-    case plum_db:iterator_done(Iterator) of
-        true ->
-            Acc;
-        false ->
-            Next = Fun(plum_db:iterator_value(Iterator), Acc),
-            build_backup(Fun, Next, plum_db:iterate(Iterator))
-    end.
-
-
-%% @private
-maybe_log(Cnt, Acc, Log) when Cnt >= 1000 ->
-    ok = log(Acc, Log),
-    {0, []};
-
-maybe_log(Cnt, Acc, _) ->
-    {Cnt, Acc}.
-
-%% @private
-log([], _) ->
-    ok;
-
-log(L, Log) ->
-    ok = maybe_throw(disk_log:log_terms(Log, L)),
-    maybe_throw(disk_log:sync(Log)).
-
-
-%% @private
-do_restore(Log) ->
-    try
-        Counters = #{n => 0, merged => 0},
-        restore_chunk(
-            {head, disk_log:chunk(Log, start)}, undefined, Log, Counters)
-    catch
-        _:Reason ->
-            lager:error(<<"Error restoring backup; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        disk_log:close(Log)
-    end.
-
-
-
-%% @private
-restore_chunk(eof, _, Log, #{n := N, merged := M}) ->
-    _ = lager:info(
-        "Backup restore processed ~p records (~p records merged)", [N, M]),
+restore_chunk(eof, Log, #{n := N, merged := M}) ->
+    _ = lager:info("Backup restore processed ~p records (~p records merged)", [N, M]),
     disk_log:close(Log);
 
-restore_chunk({error, _} = Error, _, Log, _) ->
+restore_chunk({error, _} = Error, Log, _) ->
     _ = disk_log:close(Log),
     Error;
 
-restore_chunk({head, {Cont, [H|T]}}, undefined, Log, Counters) ->
+restore_chunk({head, {Cont, [H|T]}}, Log, Counters) ->
     ok = validate_head(H),
-    Translate = case maps:get(format, H) of
-        dvvset_log ->
-            fun({metadata, DvvSet}) -> {object, DvvSet} end;
-        {object, dvvset_log} ->
-            undefined
-    end,
-    restore_chunk({Cont, T}, Translate, Log, Counters);
+    restore_chunk({Cont, T}, Log, Counters);
 
-restore_chunk({Cont, Terms}, Translate, Log, Counters0) ->
+restore_chunk({Cont, Terms}, Log, Counters0) ->
     try
         %% io:format("Terms : ~p~n", [Terms]),
-        {ok, Counters} = restore_terms(Terms, Translate, Counters0),
-        restore_chunk(disk_log:chunk(Log, Cont), Translate, Log, Counters)
+        {ok, Counters} = restore_terms(Terms, Counters0),
+        restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
     catch
         _:Reason ->
             _ = lager:error("Error restoring backup; reason=~p, ", [Reason]),
@@ -217,26 +141,16 @@ restore_chunk({Cont, Terms}, Translate, Log, Counters0) ->
 
 
 %% @private
-restore_terms([{PKey, Object0}|T], Translate, Counters) ->
-    #{n := N, merged := M} = Counters,
-    Object = maybe_translate(Translate, Object0),
-    case plum_db:merge({PKey, undefined}, Object) of
+restore_terms([{PKey, Object}|T], #{n := N, merged := M} = Counters) ->
+    case plumtree_metadata_manager:merge({PKey, undefined}, Object) of
         true ->
-            restore_terms(T, Translate, Counters#{n => N + 1, merged => M + 1});
+            restore_terms(T, Counters#{n => N + 1, merged => M + 1});
         false ->
-            restore_terms(T, Translate, Counters#{n => N + 1})
+            restore_terms(T, Counters#{n => N + 1})
     end;
 
-restore_terms([], _, Counters) ->
+restore_terms([], Counters) ->
     {ok, Counters}.
-
-
-%% @private
-maybe_translate(undefined, Object) ->
-    Object;
-
-maybe_translate(Fun, Object) when is_function(Fun, 1) ->
-    Fun(Object).
 
 
 %% @private
@@ -246,6 +160,56 @@ validate_head(#{format := dvvset_log} = Head) ->
 
 validate_head(H) ->
     throw({invalid_header, H}).
+
+
+%% @private
+build_backup(Log) ->
+    build_backup(plumtree_metadata_manager:iterator(), Log).
+
+
+%% @private
+build_backup(PrefixIt, Log) ->
+    case plumtree_metadata_manager:iterator_done(PrefixIt) of
+        true ->
+            plumtree_metadata_manager:iterator_close(PrefixIt);
+        false ->
+            Prefix = plumtree_metadata_manager:iterator_value(PrefixIt),
+            ObjIt = plumtree_metadata_manager:iterator(Prefix, undefined),
+            build_backup(PrefixIt, ObjIt, Log)
+    end.
+
+
+%% @private
+build_backup(PrefixIt, ObjIt, Log) ->
+    case plumtree_metadata_manager:iterator_done(ObjIt) of
+        true ->
+            plumtree_metadata_manager:iterator_close(ObjIt),
+            build_backup(plumtree_metadata_manager:iterate(PrefixIt), Log);
+        false ->
+            FullPrefix = plumtree_metadata_manager:iterator_prefix(ObjIt),
+            {K, V} = plumtree_metadata_manager:iterator_value(ObjIt),
+            try
+                ok = log([{{FullPrefix, K}, V}], Log),
+                build_backup(
+                    PrefixIt, plumtree_metadata_manager:iterate(ObjIt), Log)
+            catch
+                _:Reason ->
+                    lager:error(
+                        <<"Error creating backup; reason=~p">>, [Reason]),
+                    ok = plumtree_metadata_manager:iterator_close(ObjIt),
+                    ok = plumtree_metadata_manager:iterator_close(PrefixIt),
+                    throw(Reason)
+            end
+    end.
+
+
+%% @private
+log([], _) ->
+    ok;
+
+log(L, Log) ->
+    ok = maybe_throw(disk_log:log_terms(Log, L)),
+    maybe_throw(disk_log:sync(Log)).
 
 
 %% @private
