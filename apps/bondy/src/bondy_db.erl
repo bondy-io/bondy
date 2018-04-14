@@ -64,11 +64,16 @@ restore(Filename) ->
 
 
 %% bondy_db:backup("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
+%% -----------------------------------------------------------------------------
+%% @doc Backups up the database in the directory indicated by Path.
+%% @end
+%% -----------------------------------------------------------------------------
 backup(Path) ->
     Ts = erlang:system_time(second),
+    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
     {ok, Log} = disk_log:open([
         {name, log},
-        {file, Path ++ "/bondy_backup." ++ integer_to_list(Ts) ++ ".log"},
+        {file, filename:join([Path, Filename])},
         {type, halt},
         {size, infinity},
         {head, #{
