@@ -1,4 +1,4 @@
--module(bondy_db).
+-module(bondy_backup).
 
 
 -export([snapshot/1]).
@@ -36,7 +36,7 @@ import(Filename) ->
 
 
 
-%% bondy_db:snapshot("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
+%% bondy_backup:snapshot("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
 snapshot(Path) ->
     Ts = erlang:system_time(second),
     {ok, Log} = disk_log:open([
