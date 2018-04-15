@@ -42,6 +42,7 @@
 %% API
 -export([delete/1]).
 -export([dispatch_table/1]).
+-export([rebuild_dispatch_tables/0]).
 -export([list/0]).
 -export([load/1]).
 -export([lookup/1]).
@@ -114,6 +115,21 @@ dispatch_table(Listener) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc
+%% Loads all configured API specs from the metadata store and rebuilds the
+%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
+%% environment.
+%% @end
+%% -----------------------------------------------------------------------------
+rebuild_dispatch_tables() ->
+    %% We get a dispatch table per scheme
+    _ = [
+        rebuild_dispatch_table(Scheme, Routes) ||
+        {Scheme, Routes} <- load_dispatch_tables()
+    ],
+    ok.
+
+%% -----------------------------------------------------------------------------
 %% @doc Returns the API Specification object identified by `Id'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -159,7 +175,7 @@ delete(Id) when is_binary(Id) ->
 
 
 init([]) ->
-    %% We subcribe to change notifications in plum_db_events, so we get updates
+    %% We subscribe to change notifications in plum_db_events, so we get updates
     %% to API Specs coming from another node so that we recompile the Cowboy
     %% dispatch tables
     MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
@@ -446,22 +462,6 @@ load_dispatch_tables() ->
     bondy_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @private
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
-rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
-    _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
-    ],
-    ok.
 
 
 %% -----------------------------------------------------------------------------
