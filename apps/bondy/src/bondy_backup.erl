@@ -1,8 +1,26 @@
+%% =============================================================================
+%%  bondy_backup.erl -
+%%
+%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, vsn 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 -module(bondy_backup).
 
 
--export([snapshot/1]).
--export([import/1]).
+-export([backup/1]).
+-export([restore/1]).
 
 
 
@@ -14,95 +32,69 @@
 
 
 
-import(Filename) ->
-    Res =  disk_log:open([
+%% -----------------------------------------------------------------------------
+%% @doc Backups up the database in the directory indicated by Path.
+%% @end
+%% -----------------------------------------------------------------------------
+backup(Path) ->
+    Ts = erlang:system_time(second),
+    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
+    Opts = [
+        {name, log},
+        {file, filename:join([Path, Filename])},
+        {type, halt},
+        {size, infinity},
+        {head, #{
+            format => {object, dvvset_log},
+            mod => ?MODULE,
+            mod_vsn => mod_vsn(),
+            node => erlang:node(),
+            timestamp => Ts,
+            vsn => <<"1.0.0">>
+        }}
+    ],
+    case disk_log:open(Opts) of
+        {ok, Log} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p", [Filename]),
+            build_backup(Log);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
+                [Filename, Rec, Bad]
+            ),
+            build_backup(Log);
+        {error, _} = Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Restores a backup log.
+%% @end
+%% -----------------------------------------------------------------------------
+restore(Filename) ->
+    Opts =  [
         {name, log},
         {mode, read_only},
         {file, Filename}
-    ]),
-    Log = case Res of
-        {ok, Log0} ->
-            _ = lager:info("Succesfully opened log; path=~p", [Filename]),
-            Log0;
-        {repaired, Log0, {recovered, Rec}, {badbytes, Bad}} ->
+    ],
+
+    case disk_log:open(Opts) of
+        {ok, Log} ->
             _ = lager:info(
-                "Succesfully opened log; path=~p, recovered=~p, bad_bytes=~p",
+                "Succesfully opened backup log; filename=~p", [Filename]),
+            do_restore(Log);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
                 [Filename, Rec, Bad]
             ),
-            Log0
-    end,
-
-    import_chunk(disk_log:chunk(Log, start), Log).
-
-
-
-%% bondy_backup:snapshot("/Volumes/Macintosh HD/Users/aramallo/Desktop/tmp").
-snapshot(Path) ->
-    Ts = erlang:system_time(second),
-    {ok, Log} = disk_log:open([
-        {name, log},
-        {file, Path ++ "/bondy_snapshot." ++ integer_to_list(Ts) ++ ".log"},
-        {type, halt},
-        {size, infinity},
-        {head, #{version => plum_db}}
-    ]),
-    It = plum_db:iterator(),
-    Fun = fun(FullPrefix, ok) ->
-        PAcc1 = plum_db:fold(
-            fun
-                ({_, ['$deleted']}, {Cnt, PAcc0}) ->
-                    {Cnt, PAcc0};
-                (E, {Cnt, PAcc0}) ->
-                    maybe_log(Cnt, [E | PAcc0], Log)
-            end,
-            {0, []},
-            FullPrefix
-        ),
-        log([{FullPrefix, PAcc1}], Log)
-    end,
-    try
-        fold_it(Fun, ok, It)
-    catch
-        throw:Reason ->
-            lager:error(<<"Error creating snapshot; reason=~p">>, [Reason]),
-            {error, Reason}
-    after
-        ok =  plum_db:iterator_close(It),
-        maybe_throw(disk_log:close(Log))
+            do_restore(Log);
+        {error, _} = Error ->
+            Error
     end.
 
-
-%% @private
-fold_it(Fun, Acc, It) ->
-    case plum_db:iterator_done(It) of
-        true ->
-            Acc;
-        false ->
-            Next = Fun(plum_db:iterator_value(It), Acc),
-            fold_it(Fun, Next, plum_db:iterate(It))
-    end.
-
-%% @private
-maybe_log(Cnt, Acc, Log) when Cnt >= 1000 ->
-    ok = log(Acc, Log),
-    {0, []};
-
-maybe_log(Cnt, Acc, _) ->
-    {Cnt, Acc}.
-
-
-%% @private
-log([], _) ->
-    ok;
-
-log(L, Log) ->
-    ok = maybe_throw(disk_log:log_terms(Log, L)),
-    maybe_throw(disk_log:sync(Log)).
-
-
-%% @private
-maybe_throw(ok) -> ok;
-maybe_throw({error, Reason}) -> throw(Reason).
 
 
 
@@ -114,31 +106,149 @@ maybe_throw({error, Reason}) -> throw(Reason).
 
 
 %% @private
-import_chunk(eof, Log) ->
+mod_vsn() ->
+    {vsn, Vsn} = lists:keyfind(vsn, 1, bondy_backup:module_info(attributes)),
+    Vsn.
+
+
+
+%% @private
+build_backup(Log) ->
+    Iterator = plum_db:iterator({undefined, undefined}),
+
+    Fun = fun(FullPrefix, ok) ->
+        PAcc1 = plum_db:fold_elements(
+            fun
+                (E, {Cnt, PAcc0}) ->
+                    maybe_log(Cnt, [E | PAcc0], Log)
+            end,
+            {0, []},
+            FullPrefix
+        ),
+        log([{FullPrefix, PAcc1}], Log)
+    end,
+
+    try
+        build_backup(Fun, ok, Iterator)
+    catch
+        throw:Reason ->
+            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        ok = plum_db:iterator_close(Iterator),
+        disk_log:close(Log)
+    end.
+
+
+%% @private
+build_backup(Fun, Acc, Iterator) ->
+    case plum_db:iterator_done(Iterator) of
+        true ->
+            Acc;
+        false ->
+            Next = Fun(plum_db:iterator_value(Iterator), Acc),
+            build_backup(Fun, Next, plum_db:iterate(Iterator))
+    end.
+
+
+%% @private
+maybe_log(Cnt, Acc, Log) when Cnt >= 1000 ->
+    ok = log(Acc, Log),
+    {0, []};
+
+maybe_log(Cnt, Acc, _) ->
+    {Cnt, Acc}.
+
+%% @private
+log([], _) ->
+    ok;
+
+log(L, Log) ->
+    ok = maybe_throw(disk_log:log_terms(Log, L)),
+    maybe_throw(disk_log:sync(Log)).
+
+
+%% @private
+do_restore(Log) ->
+    try
+        Counters = #{n => 0, merged => 0},
+        restore_chunk(
+            {head, disk_log:chunk(Log, start)}, undefined, Log, Counters)
+    catch
+        _:Reason ->
+            lager:error(<<"Error restoring backup; reason=~p">>, [Reason]),
+            {error, Reason}
+    after
+        disk_log:close(Log)
+    end.
+
+
+
+%% @private
+restore_chunk(eof, _, Log, #{n := N, merged := M}) ->
+    _ = lager:info(
+        "Backup restore processed ~p records (~p records merged)", [N, M]),
     disk_log:close(Log);
 
-import_chunk({error, _} = Error, Log) ->
+restore_chunk({error, _} = Error, _, Log, _) ->
     _ = disk_log:close(Log),
     Error;
 
-import_chunk({Cont, Terms}, Log) ->
+restore_chunk({head, {Cont, [H|T]}}, undefined, Log, Counters) ->
+    ok = validate_head(H),
+    Translate = case maps:get(format, H) of
+        dvvset_log ->
+            fun({metadata, DvvSet}) -> {object, DvvSet} end;
+        {object, dvvset_log} ->
+            undefined
+    end,
+    restore_chunk({Cont, T}, Translate, Log, Counters);
+
+restore_chunk({Cont, Terms}, Translate, Log, Counters0) ->
     try
-        io:format("Terms : ~p~n", [Terms]),
-        ok = import_terms(Terms),
-        import_chunk(disk_log:chunk(Log, Cont), Log)
+        %% io:format("Terms : ~p~n", [Terms]),
+        {ok, Counters} = restore_terms(Terms, Translate, Counters0),
+        restore_chunk(disk_log:chunk(Log, Cont), Translate, Log, Counters)
     catch
         _:Reason ->
-            _ = lager:error("Error importing snapshot; reason=~p", {Reason}),
+            _ = lager:error("Error restoring backup; reason=~p, ", [Reason]),
             {error, Reason}
     end.
 
 
 %% @private
-import_terms([{FPKey, Object}|T]) ->
-    %% We use the server directly as we are importing objects
-    ok = plum_db_partition_server:put(FPKey, Object),
-    import_terms(T);
+restore_terms([{PKey, Object0}|T], Translate, Counters) ->
+    #{n := N, merged := M} = Counters,
+    Object = maybe_translate(Translate, Object0),
+    case plum_db:merge({PKey, undefined}, Object) of
+        true ->
+            restore_terms(T, Translate, Counters#{n => N + 1, merged => M + 1});
+        false ->
+            restore_terms(T, Translate, Counters#{n => N + 1})
+    end;
 
-import_terms([]) ->
-    ok.
+restore_terms([], _, Counters) ->
+    {ok, Counters}.
+
+
+%% @private
+maybe_translate(undefined, Object) ->
+    Object;
+
+maybe_translate(Fun, Object) when is_function(Fun, 1) ->
+    Fun(Object).
+
+
+%% @private
+validate_head(#{format := dvvset_log} = Head) ->
+    _ = lager:info("Succesfully validate log head; head=~p", [Head]),
+    ok;
+
+validate_head(H) ->
+    throw({invalid_header, H}).
+
+
+%% @private
+maybe_throw(ok) -> ok;
+maybe_throw({error, Reason}) -> throw(Reason).
 
