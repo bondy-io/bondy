@@ -488,7 +488,10 @@ reply(Error, Req) ->
 %% @private
 -spec prepare_request(map(), map(), cowboy_req:req()) -> cowboy_req:req().
 
-prepare_request(Body, Headers, Req0) ->
+prepare_request(Body, Headers0, Req0) ->
+    Headers = Headers0#{
+        <<"content-type">> => <<"application/json; charset=utf-8">>
+    },
     Req1 = cowboy_req:set_resp_headers(
         maps:merge(?CORS_HEADERS, Headers), Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
