@@ -490,14 +490,15 @@ match({Type, Cont}) ->
 
 
 init([]) ->
-    %% We subcribe to change notifications in plum_db_events, so we get updates
+    %% We tell ourselves to load the registry from the db
+    self() ! init_from_db,
+
+    %% We subscribe to change notifications in plum_db_events, so we get updates
     %% to API Specs coming from another node so that we recompile the Cowboy
     %% dispatch tables
 
     MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
     ok = plum_db_events:subscribe(object_update, MS),
-
-    self() ! load_registry,
 
     {ok, undefined}.
 
@@ -513,9 +514,9 @@ handle_cast(Event, State) ->
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
-
-handle_info(load_registry, State) ->
-    %% TODO Load
+handle_info(init_from_db, State0) ->
+    _ = lager:debug("Loading registry from db"),
+    State = init_from_db(State0),
     {noreply, State};
 
 handle_info(
@@ -561,6 +562,31 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+init_from_db(State) ->
+    Opts = [{resolver, lww}],
+    Iterator = plum_db:iterator({?PREFIX, undefined}, Opts),
+    init_from_db(Iterator, State).
+
+init_from_db(Iterator, State) ->
+    case plum_db:iterator_done(Iterator) of
+        true ->
+            ok = plum_db:iterator_close(Iterator),
+            State;
+        false ->
+            ok = case plum_db:iterator_key_value(Iterator) of
+                {_, '$deleted'} ->
+                    ok;
+                {_, Entry} ->
+                    Type = bondy_registry_entry:type(Entry),
+                    _ = add_to_tuplespace(Type, Entry),
+                    ok
+            end,
+            init_from_db(plum_db:iterate(Iterator), State)
+    end.
 
 
 
