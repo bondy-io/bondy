@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(mop_SUITE).
+-module(mops_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -compile(export_all).
 
