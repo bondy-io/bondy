@@ -38,6 +38,7 @@ start(_Type, Args) ->
             ok = bondy_stats:init(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
+            ok = bondy_cli:register(),
             {ok, Pid};
         Other  ->
             Other

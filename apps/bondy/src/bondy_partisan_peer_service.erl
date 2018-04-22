@@ -85,7 +85,7 @@ join(Node, Node, Auto) ->
 %% @end
 %% -----------------------------------------------------------------------------
 leave() ->
-    partisan_peer_service:leave((partisan_peer_service:manager()):mynode()).
+    partisan_peer_service:leave(mynode()).
 
 
 %% -----------------------------------------------------------------------------
