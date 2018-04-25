@@ -3,7 +3,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: testbondy-fqdn
-  namespace: {{ .magenta.namespace }}
+  namespace: {{ .infra.namespace }}
   labels:
     app: testbondy
     tier: gateway

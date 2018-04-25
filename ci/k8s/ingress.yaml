@@ -3,7 +3,7 @@ apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
   name: testbondy
-  namespace: {{ .magenta.namespace }}
+  namespace: {{ .infra.namespace }}
   labels:
     app: testbondy
     tier: ingress

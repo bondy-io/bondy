@@ -4,7 +4,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: testbondy-export
-  namespace: {{ .magenta.namespace }}
+  namespace: {{ .infra.namespace }}
   labels:
     app: testbondy
     tier: gateway
