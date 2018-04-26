@@ -222,14 +222,21 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                     {error, message_to_map(R), Ctxt2}
             after
                 Timeout ->
+                    Mssg = iolist_to_binary(
+                        io_lib:format(
+                            "The operation could not be completed in time "
+                            " (~p milliseconds).",
+                            [Timeout]
+                        )
+                    ),
                     Error = #{
                         error_uri => ?BONDY_ERROR_TIMEOUT,
                         details => #{},
-                        arguments => [
-                            <<"The operation could not be completed in the time specified (~p milliseconds).">>,
-                            ?CALL_TIMEOUT
-                        ],
-                        arguments_kw => #{}
+                        arguments => [Mssg],
+                        arguments_kw => #{
+                            procedure_uri => ProcedureUri,
+                            timeout => Timeout
+                        }
                     },
                     {error, Error, Ctxt1}
             end;
