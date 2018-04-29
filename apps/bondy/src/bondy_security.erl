@@ -1701,7 +1701,8 @@ unknown_roles(RealmUri, RoleList, user) ->
 unknown_roles(RealmUri, RoleList, group) ->
     unknown_roles(RealmUri, RoleList, ?GROUPS);
 
-unknown_roles(RealmUri, RoleList, RoleType) ->
+unknown_roles(RealmUri, RoleList0, RoleType) ->
+    RoleList = sets:to_list(sets:from_list(RoleList0)),
     FP = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
     plumtree_metadata:fold(
         fun
