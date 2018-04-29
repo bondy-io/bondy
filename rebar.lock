@@ -59,7 +59,7 @@
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
  {<<"plumtree">>,
   {git,"https://github.com/Leapsight/plumtree.git",
-       {ref,"30e04ce8fc3e7edf8d0e9ed2ef0ecc3f7169a31b"}},
+       {ref,"238c84d84e10eb9c374e9d8074b9e9c507ba8377"}},
   0},
  {<<"prometheus">>,{pkg,<<"prometheus">>,<<"3.4.6">>},0},
  {<<"prometheus_cowboy">>,
