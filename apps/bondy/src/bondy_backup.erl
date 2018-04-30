@@ -37,11 +37,21 @@
     }
 }).
 
+
 -record(state, {
+    status          ::  status(),
     timestamp       ::  non_neg_integer(),
     pid             ::  pid() | undefined,
     filename        ::  file:filename() | undefined
 }).
+
+
+-type status()      ::  backup_in_progress | restore_in_progress | undefined.
+-type info()        ::  #{
+    filename => file:filename(),
+    timestamp => non_neg_integer()
+}.
+
 
 %% API
 -export([backup/1]).
@@ -75,6 +85,9 @@ start_link() ->
 %% @doc Backups up the database in the directory indicated by Path.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec backup(file:filename_all() | map()) ->
+    {ok, info()} | {error, term()}.
+
 backup(Map0) when is_map(Map0) ->
     try maps_utils:validate(Map0, ?SPEC) of
         Map1 ->
@@ -92,8 +105,8 @@ backup(Path) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec status(file:filename()) ->
-    ok | {in_progress, non_neg_integer()} | {error, unknown}.
+-spec status(file:filename_all() | map()) ->
+    undefined | {status(), non_neg_integer()} | {error, unknown}.
 
 status(Filename) when is_binary(Filename) ->
     status(unicode:characters_to_list(Filename));
@@ -106,27 +119,19 @@ status(Filename) when is_list(Filename) ->
 %% @doc Restores a backup log.
 %% @end
 %% -----------------------------------------------------------------------------
-restore(Filename) ->
-    Opts =  [
-        {name, log},
-        {mode, read_only},
-        {file, Filename}
-    ],
+-spec restore(file:filename_all() | map()) -> {ok, info()} | {error, term()}.
 
-    case disk_log:open(Opts) of
-        {ok, Log} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p", [Filename]),
-            do_restore(Log);
-        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
-                [Filename, Rec, Bad]
-            ),
-            do_restore(Log);
-        {error, _} = Error ->
-            Error
-    end.
+restore(Map0) when is_map(Map0) ->
+    try maps_utils:validate(Map0, ?SPEC) of
+        Map1 ->
+            gen_server:call(?MODULE, {restore, Map1})
+    catch
+        error:Reason ->
+            {error, Reason}
+    end;
+
+restore(Filename) ->
+    restore(#{filename => Filename}).
 
 
 
@@ -140,21 +145,35 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call({backup, Map}, _From, #state{pid = undefined} = State0) ->
-    {ok, State1} = backup_async(Map, State0),
-    Reply = {ok, unicode:characters_to_binary(State1#state.filename)},
-    {reply, Reply, State1};
+handle_call({backup, Map}, _From, #state{status = undefined} = State0) ->
+    {ok, State1} = async_backup(Map, State0),
+    Backup = #{
+        filename => unicode:characters_to_binary(State1#state.filename),
+        timestamp => State1#state.timestamp
+    },
+    {reply, {ok, Backup}, State1};
 
 handle_call({backup, _}, _From, State) ->
-    {reply, {error, in_progress}, State};
+    {reply, {error, State#state.status}, State};
+
+handle_call({restore, Map}, _From, #state{status = undefined} = State0) ->
+    {ok, State1} = async_restore(Map, State0),
+    Restore = #{
+        filename => unicode:characters_to_binary(State1#state.filename),
+        timestamp => State1#state.timestamp
+    },
+    {reply, {ok, Restore}, State1};
+
+handle_call({restore, _}, _From, State) ->
+    {reply, {error, State#state.status}, State};
 
 handle_call({status, Filename}, _From, #state{filename = Filename} = State) ->
-    Reply = case State#state.pid == undefined of
-        true ->
-            ok;
-        false ->
+    Reply = case State#state.status of
+        undefined ->
+            undefined;
+        Status ->
             Secs = erlang:system_time(second) - State#state.timestamp,
-            {in_progress, Secs}
+            {Status, Secs}
     end,
     {reply, Reply, State};
 
@@ -184,6 +203,23 @@ handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     ),
     {noreply, State#state{pid = undefined}};
 
+handle_info({restore_reply, ok, Pid}, #state{pid = Pid} = State) ->
+    Secs = erlang:system_time(second) - State#state.timestamp,
+    _ = lager:info(
+        "Finished restoring backup; filename=~p, elapsed_time_secs=~p",
+        [State#state.filename, Secs]
+    ),
+    {noreply, State#state{pid = undefined}};
+
+handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
+    Secs = erlang:system_time(second) - State#state.timestamp,
+    _ = lager:error(
+        "Error restoring backup; reason=~p, filename=~p, elapsed_time_secs=~p",
+        [Reason, State#state.filename, Secs]
+    ),
+    {noreply, State#state{pid = undefined}};
+
+
 handle_info(Info, State) ->
     _ = lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
@@ -204,7 +240,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
-backup_async(#{path := Path} , State0) ->
+async_backup(#{path := Path} , State0) ->
     Ts = erlang:system_time(second),
     Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".bak",
     File = filename:join([Path, Filename]),
@@ -251,7 +287,6 @@ mod_vsn() ->
     Vsn.
 
 
-
 %% @private
 build_backup(Log) ->
     try
@@ -263,7 +298,6 @@ build_backup(Log) ->
     after
         disk_log:close(Log)
     end.
-
 
 
 %% @private
@@ -321,8 +355,45 @@ log(L, Log) ->
     maybe_throw(disk_log:sync(Log)).
 
 
+async_restore(#{filename := Filename}, State0) ->
+    Ts = erlang:system_time(second),
+    Me = self(),
+    Pid = spawn_link(fun() ->
+        case do_restore(Filename) of
+            ok ->
+                Me ! {restore_reply, ok, self()};
+            {error, _} = Error ->
+                Me ! {restore_reply, Error, self()}
+        end
+    end),
+    {ok, State0#state{filename = Filename, pid = Pid, timestamp = Ts}}.
+
+
 %% @private
-do_restore(Log) ->
+do_restore(Filename) ->
+    Opts =  [
+        {name, log},
+        {mode, read_only},
+        {file, Filename}
+    ],
+
+    case disk_log:open(Opts) of
+        {ok, Log} ->
+            _ = lager:info(
+                "Started restore; filename=~p", [Filename]),
+            do_restore_aux(Log);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            _ = lager:info(
+                "Started restore; filename=~p, recovered=~p, bad_bytes=~p",
+                [Filename, Rec, Bad]
+            ),
+            do_restore_aux(Log);
+        {error, _} = Error ->
+            Error
+    end.
+
+
+do_restore_aux(Log) ->
     try
         Counters = #{n => 0, merged => 0},
         restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
