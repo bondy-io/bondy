@@ -66,6 +66,18 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [bondy_registry]
+        },
+        #{
+            id => bondy_backup,
+            start => {
+                bondy_backup,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_backup]
         }
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.
