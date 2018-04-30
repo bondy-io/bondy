@@ -374,6 +374,8 @@ log(L, Log) ->
 
 
 async_restore(#{filename := Filename}, State0) ->
+    %% @TODO We might want to stop AAE so that (1) we avoid writing the
+    %% hahstree during restore and (2) avoid exchanges too.
     Ts = erlang:system_time(second),
     Me = self(),
     Pid = spawn_link(fun() ->
