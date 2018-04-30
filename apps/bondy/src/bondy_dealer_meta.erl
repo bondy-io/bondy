@@ -471,6 +471,16 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.find_source">>
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 %% =============================================================================
+%% BACKUPS
+%% =============================================================================
+
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.backup.", _/binary>>} = M,
+    Ctxt) ->
+    bondy_backup_wamp_handler:handle_call(M, Ctxt);
+
+
+%% =============================================================================
 %% OAUTH2
 %% =============================================================================
 

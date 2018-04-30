@@ -17,13 +17,45 @@
 %% =============================================================================
 
 -module(bondy_backup).
+-behaviour(gen_server).
 
+-define(SPEC, #{
+    <<"path">> => #{
+        alias => path,
+        key => path,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (X) when is_list(X) ->
+                {ok, X};
+            (X) when is_binary(X) ->
+                {ok, unicode:characters_to_list(X)};
+            (_) ->
+                false
+        end
+    }
+}).
 
+-record(state, {
+    timestamp       ::  non_neg_integer(),
+    pid             ::  pid() | undefined,
+    filename        ::  file:filename() | undefined
+}).
+
+%% API
 -export([backup/1]).
+-export([status/1]).
 -export([restore/1]).
+-export([start_link/0]).
 
-
-
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
 
 
 %% =============================================================================
@@ -31,42 +63,43 @@
 %% =============================================================================
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Backups up the database in the directory indicated by Path.
 %% @end
 %% -----------------------------------------------------------------------------
+backup(Map0) when is_map(Map0) ->
+    try maps_utils:validate(Map0, ?SPEC) of
+        Map1 ->
+            gen_server:call(?MODULE, {backup, Map1})
+    catch
+        error:Reason ->
+            {error, Reason}
+    end;
+
 backup(Path) ->
-    Ts = erlang:system_time(second),
-    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
-    Opts = [
-        {name, log},
-        {file, filename:join([Path, Filename])},
-        {type, halt},
-        {size, infinity},
-        {head, #{
-            format => dvvset_log,
-            mod => ?MODULE,
-            mod_vsn => mod_vsn(),
-            node => erlang:node(),
-            timestamp => Ts,
-            vsn => <<"1.0.0">>
-        }}
-    ],
-    case disk_log:open(Opts) of
-        {ok, Log} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p", [Filename]),
-            build_backup(Log);
-        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
-            _ = lager:info(
-                "Succesfully opened backup log; filename=~p, recovered=~p, bad_bytes=~p",
-                [Filename, Rec, Bad]
-            ),
-            build_backup(Log);
-        {error, _} = Error ->
-            Error
-    end.
+    backup(#{path => Path}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec status(file:filename()) ->
+    ok | {in_progress, non_neg_integer()} | {error, unknown}.
+
+status(Filename) when is_binary(Filename) ->
+    status(unicode:characters_to_list(Filename));
+
+status(Filename) when is_list(Filename) ->
+    gen_server:call(?MODULE, {status, Filename}).
 
 
 %% -----------------------------------------------------------------------------
@@ -100,9 +133,114 @@ restore(Filename) ->
 
 
 %% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+init([]) ->
+    {ok, #state{}}.
+
+
+handle_call({backup, Map}, _From, #state{pid = undefined} = State0) ->
+    {ok, State1} = backup_async(Map, State0),
+    Reply = {ok, unicode:characters_to_binary(State1#state.filename)},
+    {reply, Reply, State1};
+
+handle_call({backup, _}, _From, State) ->
+    {reply, {error, in_progress}, State};
+
+handle_call({status, Filename}, _From, #state{filename = Filename} = State) ->
+    Reply = case State#state.pid == undefined of
+        true ->
+            ok;
+        false ->
+            Elapsed = erlang:system_time(millisecond) - State#state.timestamp,
+            {in_progress, Elapsed}
+    end,
+    {reply, Reply, State};
+
+handle_call({status, _Filename}, _From, State) ->
+    {reply, {error, unknown}, State};
+
+handle_call(_, _, State) ->
+    {reply, ok, State}.
+
+
+handle_cast(_Event, State) ->
+    {noreply, State}.
+
+handle_info({backup_reply, ok, Pid}, #state{pid = Pid} = State) ->
+    _ = lager:info(
+        "Finished creating backup; filename=~p",
+        [State#state.filename]
+    ),
+    {noreply, State#state{pid = undefined}};
+
+handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
+    _ = lager:error(
+        "Error creating backup; reason=~p",
+        [Reason, State#state.filename]
+    ),
+    {noreply, State#state{pid = undefined}};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    {noreply, State}.
+
+
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
+%% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+backup_async(#{path := Path} , State0) ->
+    Ts = erlang:system_time(second),
+    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
+    File = filename:join([Path, Filename]),
+    Me = self(),
+    Pid = spawn_link(fun() ->
+        case do_backup(File, Ts) of
+            ok ->
+                Me ! {backup_reply, ok, self()};
+            {error, _} = Error ->
+                Me ! {backup_reply, Error, self()}
+        end
+    end),
+    {ok, State0#state{filename = File, pid = Pid, timestamp = Ts}}.
+
+
+%% @private
+do_backup(File, Ts) ->
+    Opts = [
+        {name, log},
+        {file, File},
+        {type, halt},
+        {size, infinity},
+        {head, #{
+            format => dvvset_log,
+            mod => ?MODULE,
+            mod_vsn => mod_vsn(),
+            node => erlang:node(),
+            timestamp => Ts,
+            vsn => <<"1.0.0">>
+        }}
+    ],
+    case disk_log:open(Opts) of
+        {ok, Log} ->
+            _ = lager:info("Started backup; filename=~p", [File]),
+            build_backup(Log);
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %% @private
@@ -118,7 +256,7 @@ build_backup(Log) ->
         build_backup(plumtree_metadata_manager:iterator(), Log)
     catch
         throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            lager:error("Error creating backup; reason=~p", [Reason]),
             {error, Reason}
     after
         disk_log:close(Log)
@@ -153,8 +291,7 @@ build_backup(PrefixIt, ObjIt, Log) ->
                     PrefixIt, plumtree_metadata_manager:iterate(ObjIt), Log)
             catch
                 _:Reason ->
-                    lager:error(
-                        <<"Error creating backup; reason=~p">>, [Reason]),
+                    lager:error("Error creating backup; reason=~p", [Reason]),
                     ok = plumtree_metadata_manager:iterator_close(ObjIt),
                     ok = plumtree_metadata_manager:iterator_close(PrefixIt),
                     throw(Reason)
@@ -178,7 +315,7 @@ do_restore(Log) ->
         restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
     catch
         _:Reason ->
-            lager:error(<<"Error restoring backup; reason=~p">>, [Reason]),
+            lager:error("Error restoring backup; reason=~p", [Reason]),
             {error, Reason}
     after
         disk_log:close(Log)
