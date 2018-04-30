@@ -19,10 +19,28 @@
 -module(bondy_backup).
 -behaviour(gen_server).
 
--define(SPEC, #{
+-define(BACKUP_SPEC, #{
     <<"path">> => #{
         alias => path,
         key => path,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (X) when is_list(X) ->
+                {ok, X};
+            (X) when is_binary(X) ->
+                {ok, unicode:characters_to_list(X)};
+            (_) ->
+                false
+        end
+    }
+}).
+
+-define(RESTORE_SPEC, #{
+    <<"filename">> => #{
+        alias => filename,
+        key => filename,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -89,7 +107,7 @@ start_link() ->
     {ok, info()} | {error, term()}.
 
 backup(Map0) when is_map(Map0) ->
-    try maps_utils:validate(Map0, ?SPEC) of
+    try maps_utils:validate(Map0, ?BACKUP_SPEC) of
         Map1 ->
             gen_server:call(?MODULE, {backup, Map1})
     catch
@@ -122,7 +140,7 @@ status(Filename) when is_list(Filename) ->
 -spec restore(file:filename_all() | map()) -> {ok, info()} | {error, term()}.
 
 restore(Map0) when is_map(Map0) ->
-    try maps_utils:validate(Map0, ?SPEC) of
+    try maps_utils:validate(Map0, ?RESTORE_SPEC) of
         Map1 ->
             gen_server:call(?MODULE, {restore, Map1})
     catch
