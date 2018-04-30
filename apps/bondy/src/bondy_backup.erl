@@ -153,8 +153,8 @@ handle_call({status, Filename}, _From, #state{filename = Filename} = State) ->
         true ->
             ok;
         false ->
-            Elapsed = erlang:system_time(millisecond) - State#state.timestamp,
-            {in_progress, Elapsed}
+            Secs = erlang:system_time(second) - State#state.timestamp,
+            {in_progress, Secs}
     end,
     {reply, Reply, State};
 
@@ -169,16 +169,18 @@ handle_cast(_Event, State) ->
     {noreply, State}.
 
 handle_info({backup_reply, ok, Pid}, #state{pid = Pid} = State) ->
+    Secs = erlang:system_time(second) - State#state.timestamp,
     _ = lager:info(
-        "Finished creating backup; filename=~p",
-        [State#state.filename]
+        "Finished creating backup; filename=~p, elapsed_time_secs=~p",
+        [State#state.filename, Secs]
     ),
     {noreply, State#state{pid = undefined}};
 
 handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
+    Secs = erlang:system_time(second) - State#state.timestamp,
     _ = lager:error(
-        "Error creating backup; reason=~p",
-        [Reason, State#state.filename]
+        "Error creating backup; reason=~p, filename=~p, elapsed_time_secs=~p",
+        [Reason, State#state.filename, Secs]
     ),
     {noreply, State#state{pid = undefined}};
 
@@ -204,7 +206,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 backup_async(#{path := Path} , State0) ->
     Ts = erlang:system_time(second),
-    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".log",
+    Filename = "bondy_backup." ++ integer_to_list(Ts) ++ ".bak",
     File = filename:join([Path, Filename]),
     Me = self(),
     Pid = spawn_link(fun() ->
@@ -253,7 +255,7 @@ mod_vsn() ->
 %% @private
 build_backup(Log) ->
     try
-        build_backup(plumtree_metadata_manager:iterator(), Log)
+        build_backup(plumtree_metadata_manager:iterator(), Log, [])
     catch
         throw:Reason ->
             lager:error("Error creating backup; reason=~p", [Reason]),
@@ -265,30 +267,35 @@ build_backup(Log) ->
 
 
 %% @private
-build_backup(PrefixIt, Log) ->
+build_backup(PrefixIt, Log, Acc) ->
     case plumtree_metadata_manager:iterator_done(PrefixIt) of
         true ->
-            plumtree_metadata_manager:iterator_close(PrefixIt);
+            plumtree_metadata_manager:iterator_close(PrefixIt),
+            log(Acc, Log);
         false ->
             Prefix = plumtree_metadata_manager:iterator_value(PrefixIt),
             ObjIt = plumtree_metadata_manager:iterator(Prefix, undefined),
-            build_backup(PrefixIt, ObjIt, Log)
+            build_backup(PrefixIt, ObjIt, Log, Acc)
     end.
 
 
 %% @private
-build_backup(PrefixIt, ObjIt, Log) ->
+build_backup(PrefixIt, ObjIt, Log, Acc0) ->
     case plumtree_metadata_manager:iterator_done(ObjIt) of
         true ->
             plumtree_metadata_manager:iterator_close(ObjIt),
-            build_backup(plumtree_metadata_manager:iterate(PrefixIt), Log);
+            build_backup(
+                plumtree_metadata_manager:iterate(PrefixIt), Log, Acc0);
         false ->
             FullPrefix = plumtree_metadata_manager:iterator_prefix(ObjIt),
             {K, V} = plumtree_metadata_manager:iterator_value(ObjIt),
             try
-                ok = log([{{FullPrefix, K}, V}], Log),
+                Acc1 = maybe_log([{{FullPrefix, K}, V}|Acc0], Log),
                 build_backup(
-                    PrefixIt, plumtree_metadata_manager:iterate(ObjIt), Log)
+                    PrefixIt,
+                    plumtree_metadata_manager:iterate(ObjIt),
+                    Log,
+                    Acc1)
             catch
                 _:Reason ->
                     lager:error("Error creating backup; reason=~p", [Reason]),
@@ -298,6 +305,12 @@ build_backup(PrefixIt, ObjIt, Log) ->
             end
     end.
 
+
+maybe_log(Acc, Log) when length(Acc) == 100 ->
+    ok = log(Acc, Log),
+    [];
+maybe_log(Acc, _) ->
+    Acc.
 
 %% @private
 log([], _) ->
