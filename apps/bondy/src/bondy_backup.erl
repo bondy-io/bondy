@@ -410,7 +410,7 @@ do_restore_aux(Log) ->
 %% @private
 restore_chunk(eof, Log, #{n := N, merged := M}) ->
     _ = lager:info(
-        "Backup restore processed ~p records (~p records merged)", [N, M]),
+        "Finished backup restore; read_count=~p, merged_count=~p", [N, M]),
     disk_log:close(Log);
 
 restore_chunk({error, _} = Error, Log, _) ->
@@ -423,7 +423,6 @@ restore_chunk({head, {Cont, [H|T]}}, Log, Counters) ->
 
 restore_chunk({Cont, Terms}, Log, Counters0) ->
     try
-        %% io:format("Terms : ~p~n", [Terms]),
         {ok, Counters} = restore_terms(Terms, Counters0),
         restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
     catch
@@ -447,8 +446,7 @@ restore_terms([], Counters) ->
 
 
 %% @private
-validate_head(#{format := dvvset_log} = Head) ->
-    _ = lager:info("Succesfully validate log head; head=~p", [Head]),
+validate_head(#{format := dvvset_log}) ->
     ok;
 
 validate_head(H) ->
