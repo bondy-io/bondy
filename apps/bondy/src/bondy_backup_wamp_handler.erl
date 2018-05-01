@@ -20,4 +20,24 @@ handle_call(
         {error, WampError} ->
             WampError
     end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.backup.status">>} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
+        {ok, [Info]} ->
+            bondy_wamp_utils:maybe_error(bondy_backup:status(Info), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.backup.restore">>} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
+        {ok, [Info]} ->
+            bondy_wamp_utils:maybe_error(bondy_backup:restore(Info), M);
+        {error, WampError} ->
+            WampError
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R).
