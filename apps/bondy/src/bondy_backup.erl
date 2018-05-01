@@ -253,7 +253,7 @@ handle_info({backup_reply, ok, Pid}, #state{pid = Pid} = State) ->
         "Finished creating backup; filename=~p, elapsed_time_secs=~p",
         [State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
@@ -261,7 +261,7 @@ handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
         "Error creating backup; reason=~p, filename=~p, elapsed_time_secs=~p",
         [Reason, State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({restore_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
     #{read_count := N, merged_count := M} = Counters,
@@ -270,7 +270,7 @@ handle_info({restore_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
         "Finished restoring backup; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
         [State#state.filename, Secs, N, M]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
@@ -278,7 +278,7 @@ handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
         "Error restoring backup; reason=~p, filename=~p, elapsed_time_secs=~p",
         [Reason, State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 
 handle_info(Info, State) ->
@@ -314,7 +314,13 @@ async_backup(#{path := Path} , State0) ->
                 Me ! {backup_reply, Error, self()}
         end
     end),
-    {ok, State0#state{filename = File, pid = Pid, timestamp = Ts}}.
+    State1 = State0#state{
+        filename = File,
+        pid = Pid,
+        timestamp = Ts,
+        status = backup_in_progress
+    },
+    {ok, State1}.
 
 
 %% @private
@@ -415,7 +421,13 @@ async_restore(#{filename := Filename}, State0) ->
                 Me ! {restore_reply, Error, self()}
         end
     end),
-    {ok, State0#state{filename = Filename, pid = Pid, timestamp = Ts}}.
+    State1 = State0#state{
+        filename = Filename,
+        pid = Pid,
+        timestamp = Ts,
+        status = restore_in_progress
+    },
+    {ok, State1}.
 
 
 %% @private
