@@ -55,6 +55,24 @@
     }
 }).
 
+-define(STATUS_SPEC, #{
+    <<"filename">> => #{
+        alias => filename,
+        key => filename,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (X) when is_list(X) ->
+                {ok, X};
+            (X) when is_binary(X) ->
+                {ok, unicode:characters_to_list(X)};
+            (_) ->
+                false
+        end
+    }
+}).
+
 
 -record(state, {
     status          ::  status(),
@@ -73,6 +91,7 @@
 
 %% API
 -export([backup/1]).
+-export([status/0]).
 -export([status/1]).
 -export([restore/1]).
 -export([start_link/0]).
@@ -123,15 +142,28 @@ backup(Path) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+status() ->
+    status(#{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec status(file:filename_all() | map()) ->
     undefined | {status(), non_neg_integer()} | {error, unknown}.
 
-status(Filename) when is_binary(Filename) ->
-    status(unicode:characters_to_list(Filename));
+status(Map0) when is_map(Map0) ->
+    try maps_utils:validate(Map0, ?STATUS_SPEC) of
+        Map1 ->
+            gen_server:call(?MODULE, {status, Map1})
+    catch
+        error:Reason ->
+            {error, Reason}
+    end;
 
-status(Filename) when is_list(Filename) ->
-    gen_server:call(?MODULE, {status, Filename}).
-
+status(Filename) ->
+    status(#{filename => Filename}).
 
 %% -----------------------------------------------------------------------------
 %% @doc Restores a backup log.
@@ -185,18 +217,24 @@ handle_call({restore, Map}, _From, #state{status = undefined} = State0) ->
 handle_call({restore, _}, _From, State) ->
     {reply, {error, State#state.status}, State};
 
-handle_call({status, Filename}, _From, #state{filename = Filename} = State) ->
+handle_call({status, Map}, _From, State) when map_size(Map) =:= 0 ->
+    {reply, {ok, State#state.status}, State};
+
+handle_call(
+    {status, #{filename := Filename}},
+    _From,
+    #state{filename = Filename} = State) ->
     Reply = case State#state.status of
         undefined ->
-            undefined;
+            read_head(Filename);
         Status ->
             Secs = erlang:system_time(second) - State#state.timestamp,
-            {Status, Secs}
+            {ok, #{status => Status, elapsed_time_secs => Secs}}
     end,
     {reply, Reply, State};
 
-handle_call({status, _Filename}, _From, State) ->
-    {reply, {error, unknown}, State};
+handle_call({status, #{filename := Filename}}, _From, State) ->
+    {reply, read_head(Filename), State};
 
 handle_call(_, _, State) ->
     {reply, ok, State}.
@@ -477,3 +515,52 @@ validate_head(H) ->
 maybe_throw(ok) -> ok;
 maybe_throw({error, Reason}) -> throw(Reason).
 
+
+%% @private
+read_head(Filename) ->
+    Opts =  [
+        {name, log},
+        {mode, read_only},
+        {file, Filename}
+    ],
+    Acc = #{filename => unicode:characters_to_binary(Filename)},
+    case disk_log:open(Opts) of
+        {ok, Log} ->
+            do_read_head(Log, Acc);
+        {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
+            do_read_head(Log, Acc#{recovered => Rec, bad_bytes => Bad});
+        {error, no_such_log} ->
+            {error, not_found};
+        {error, _} = Error ->
+            Error
+    end.
+
+
+%% @private
+do_read_head(Log, Acc0) ->
+    Resp = case disk_log:chunk(Log, start) of
+        {_Cont, [H|_]} ->
+            ok = validate_head(H),
+            Acc1 = Acc0#{
+                status => ok,
+                bad_bytes => 0
+            },
+            {ok, maps:merge(Acc1, H)};
+        {_Cont, [H|_], BadBytes} ->
+            ok = validate_head(H),
+            Acc1 = Acc0#{
+                status => ok,
+                bad_bytes => BadBytes
+            },
+            {ok, maps:merge(Acc1, H)};
+        eof ->
+            {ok, Acc0#{status => invalid_format}};
+        {error, {corrupt_log_file, _}} ->
+           {ok, Acc0#{status => corrupt, bad_bytes => 0}};
+        {error, {blocked_log, _}} ->
+            {ok, Acc0#{status => blocked, bad_bytes => 0}};
+        {error, _} = Error ->
+            Error
+    end,
+    ok = disk_log:close(Log),
+    Resp.
