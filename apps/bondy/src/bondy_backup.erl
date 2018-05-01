@@ -352,7 +352,7 @@ build_backup(Log) ->
             lager:error("Error creating backup; reason=~p", [Reason]),
             {error, Reason}
     after
-        disk_log:close(Log)
+        _ = disk_log:close(Log)
     end.
 
 
@@ -460,7 +460,7 @@ do_restore_aux(Log) ->
             lager:error("Error restoring backup; reason=~p", [Reason]),
             {error, Reason}
     after
-        disk_log:close(Log)
+        _ = disk_log:close(Log)
     end.
 
 
@@ -538,29 +538,34 @@ read_head(Filename) ->
 
 %% @private
 do_read_head(Log, Acc0) ->
-    Resp = case disk_log:chunk(Log, start) of
-        {_Cont, [H|_]} ->
-            ok = validate_head(H),
-            Acc1 = Acc0#{
-                status => ok,
-                bad_bytes => 0
-            },
-            {ok, maps:merge(Acc1, H)};
-        {_Cont, [H|_], BadBytes} ->
-            ok = validate_head(H),
-            Acc1 = Acc0#{
-                status => ok,
-                bad_bytes => BadBytes
-            },
-            {ok, maps:merge(Acc1, H)};
-        eof ->
-            {ok, Acc0#{status => invalid_format}};
-        {error, {corrupt_log_file, _}} ->
-           {ok, Acc0#{status => corrupt, bad_bytes => 0}};
-        {error, {blocked_log, _}} ->
-            {ok, Acc0#{status => blocked, bad_bytes => 0}};
-        {error, _} = Error ->
-            Error
-    end,
-    ok = disk_log:close(Log),
-    Resp.
+    try
+        case disk_log:chunk(Log, start) of
+            {_Cont, [H|_]} ->
+                ok = validate_head(H),
+                Acc1 = Acc0#{
+                    status => ok,
+                    bad_bytes => 0
+                },
+                {ok, maps:merge(Acc1, H)};
+            {_Cont, [H|_], BadBytes} ->
+                ok = validate_head(H),
+                Acc1 = Acc0#{
+                    status => ok,
+                    bad_bytes => BadBytes
+                },
+                {ok, maps:merge(Acc1, H)};
+            eof ->
+                {ok, Acc0#{status => invalid_format}};
+            {error, {corrupt_log_file, _}} ->
+            {ok, Acc0#{status => corrupt, bad_bytes => 0}};
+            {error, {blocked_log, _}} ->
+                {ok, Acc0#{status => blocked, bad_bytes => 0}};
+            {error, _} = Error ->
+                Error
+        end
+    catch
+        _:Reason ->
+            {error, Reason}
+    after
+        _ = disk_log:close(Log)
+    end.
