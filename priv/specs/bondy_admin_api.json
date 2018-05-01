@@ -119,7 +119,7 @@
                             "type" : "wamp_call",
                             "procedure" : "com.leapsight.bondy.backup.status",
                             "options" : {},
-                            "arguments" : ["{{request.body}}"],
+                            "arguments" : ["{{variables.query_match}}"],
                             "arguments_kw" : {}
                         },
                         "response" : {
