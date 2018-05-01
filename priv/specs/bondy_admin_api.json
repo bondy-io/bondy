@@ -67,8 +67,8 @@
                 "timeout" : 20000
             },
             "paths" : {
-                "/backups/" : {
-                    "is_collection" : true,
+                "/services/create_backup" : {
+                    "is_collection" : false,
                     "options": {
                         "action": {},
                         "response": {
@@ -88,6 +88,72 @@
                             "arguments" : [
                                 "{{request.body}}"
                             ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/backup_status" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.backup.status",
+                            "options" : {},
+                            "arguments" : ["{{request.body}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/restore_backup" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.backup.restore",
+                            "options" : {},
+                            "arguments" : ["{{request.body}}"],
+                            "arguments_kw" : {}
                         },
                         "response" : {
                            "on_error" : {
