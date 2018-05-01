@@ -349,48 +349,42 @@ mod_vsn() ->
 
 %% @private
 build_backup(Log) ->
-    It = plum_db:iterator({undefined, undefined}),
-    Fun = fun(FullPrefix, ok) ->
-        PAcc1 = plum_db:fold_elements(
-            fun
-                (E, {Cnt, PAcc0}) ->
-                    maybe_log(Cnt, [E | PAcc0], Log)
-            end,
-            {0, []},
-            FullPrefix
-        ),
-        log([{FullPrefix, PAcc1}], Log)
-    end,
+    Iterator = plum_db:iterator({undefined, undefined}),
     try
-        fold_it(Fun, ok, It)
+        Acc1 = build_backup(Iterator, Log, []),
+        %% We log the remaining elements
+        log(Acc1, Log)
     catch
         throw:Reason ->
             lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
             {error, Reason}
     after
-        ok =  plum_db:iterator_close(It),
-        maybe_throw(disk_log:close(Log))
+        ok = plum_db:iterator_close(Iterator),
+        disk_log:close(Log)
     end.
 
 
 %% @private
-fold_it(Fun, Acc, It) ->
-    case plum_db:iterator_done(It) of
+build_backup(Iterator, Log, Acc0) ->
+    case plum_db:iterator_done(Iterator) of
         true ->
-            Acc;
+            Acc0;
         false ->
-            Next = Fun(plum_db:iterator_value(It), Acc),
-            fold_it(Fun, Next, plum_db:iterate(It))
+            %% iterator_element/1 gets the whole prefixed object without
+            %% resolving conflicts
+            E = plum_db:iterator_element(Iterator),
+            Acc1 = maybe_log([E | Acc0], Log),
+            build_backup(plum_db:iterate(Iterator), Log, Acc1)
     end.
 
 
 %% @private
-maybe_log(Cnt, Acc, Log) when Cnt >= 1000 ->
+maybe_log(Acc, Log) when length(Acc) =:= 100 ->
     ok = log(Acc, Log),
-    {0, []};
+    [];
 
-maybe_log(Cnt, Acc, _) ->
-    {Cnt, Acc}.
+maybe_log(Acc, _) ->
+    Acc.
 
 
 %% @private
