@@ -263,11 +263,12 @@ handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     ),
     {noreply, State#state{pid = undefined}};
 
-handle_info({restore_reply, ok, Pid}, #state{pid = Pid} = State) ->
+handle_info({restore_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
+    #{read_count := N, merged_count := M} = Counters,
     Secs = erlang:system_time(second) - State#state.timestamp,
     _ = lager:info(
-        "Finished restoring backup; filename=~p, elapsed_time_secs=~p",
-        [State#state.filename, Secs]
+        "Finished restoring backup; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
+        [State#state.filename, Secs, N, M]
     ),
     {noreply, State#state{pid = undefined}};
 
@@ -408,8 +409,8 @@ async_restore(#{filename := Filename}, State0) ->
     Me = self(),
     Pid = spawn_link(fun() ->
         case do_restore(Filename) of
-            ok ->
-                Me ! {restore_reply, ok, self()};
+            {ok, _Counters} = OK ->
+                Me ! {restore_reply, OK, self()};
             {error, _} = Error ->
                 Me ! {restore_reply, Error, self()}
         end
@@ -443,8 +444,8 @@ do_restore(Filename) ->
 
 do_restore_aux(Log) ->
     try
-        Counters = #{n => 0, merged => 0},
-        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
+        Counters0 = #{read_count => 0, merged_count => 0},
+        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters0)
     catch
         _:Reason ->
             lager:error("Error restoring backup; reason=~p", [Reason]),
@@ -456,10 +457,9 @@ do_restore_aux(Log) ->
 
 
 %% @private
-restore_chunk(eof, Log, #{n := N, merged := M}) ->
-    _ = lager:info(
-        "Finished backup restore; read_count=~p, merged_count=~p", [N, M]),
-    disk_log:close(Log);
+restore_chunk(eof, Log, Counters) ->
+    ok = disk_log:close(Log),
+    {ok, Counters};
 
 restore_chunk({error, _} = Error, Log, _) ->
     _ = disk_log:close(Log),
@@ -481,12 +481,14 @@ restore_chunk({Cont, Terms}, Log, Counters0) ->
 
 
 %% @private
-restore_terms([{PKey, Object}|T], #{n := N, merged := M} = Counters) ->
+restore_terms(
+    [{PKey, Object}|T], #{read_count := N, merged_count := M} = Counters) ->
     case merge(PKey, Object) of
         true ->
-            restore_terms(T, Counters#{n => N + 1, merged => M + 1});
+            restore_terms(
+                T, Counters#{read_count => N + 1, merged_count => M + 1});
         false ->
-            restore_terms(T, Counters#{n => N + 1})
+            restore_terms(T, Counters#{read_count => N + 1})
     end;
 
 restore_terms([], Counters) ->
