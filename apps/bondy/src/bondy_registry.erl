@@ -19,9 +19,13 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% An in-memory registry for PubSub subscriptions and RPC registrations,
+%% An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 %% providing pattern matching capabilities including support for WAMP's
 %% version 2.0 match policies (exact, prefix and wilcard).
+%%
+%% This is a temporary solution till we finish our
+%% adaptive radix trie implementation. Does no support prefix matching nor
+%% wilcard matching.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry).
@@ -493,10 +497,8 @@ init([]) ->
     %% We tell ourselves to load the registry from the db
     self() ! init_from_db,
 
-    %% We subscribe to change notifications in plum_db_events, so we get updates
-    %% to API Specs coming from another node so that we recompile the Cowboy
-    %% dispatch tables
-
+    %% We subscribe to change notifications in plum_db_events. We get updates
+    %% in handle_info so that we can we recompile the Cowboy dispatch tables
     MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
     ok = plum_db_events:subscribe(object_update, MS),
 
@@ -538,7 +540,6 @@ handle_info(
     {noreply, State};
 
 handle_info(Info, State) ->
-    _ = lager:info("Unexpected message, message=~p", [Info]),
     _ = lager:debug("Unexpected message, message=~p", [Info]),
     {noreply, State}.
 
@@ -571,6 +572,7 @@ init_from_db(State) ->
     Iterator = plum_db:iterator({?PREFIX, undefined}, Opts),
     init_from_db(Iterator, State).
 
+%% @private
 init_from_db(Iterator, State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
@@ -587,8 +589,6 @@ init_from_db(Iterator, State) ->
             end,
             init_from_db(plum_db:iterate(Iterator), State)
     end.
-
-
 
 %% @private
 maybe_resolve(Object) ->

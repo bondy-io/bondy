@@ -147,7 +147,6 @@ add(RealmUri, Info0) ->
         end
 
     catch
-        %% @TODO change for throw when maps_validate is upgraded
         error:Reason when is_map(Reason) ->
             {error, Reason}
     end.

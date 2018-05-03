@@ -717,7 +717,7 @@
         alias => body,
         required => true,
         %% TODO map? a body could be anything!
-        %% TODO Fix this we should not request a datatype
+        %% TODO Review this
         datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
     },
     <<"timeout">> => #{
