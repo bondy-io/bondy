@@ -427,7 +427,8 @@ revoke_token_flow(Data0, Req0, St) ->
         %% or if the client submitted an invalid token.
         %% We set a body as Cowboy will otherwise use 204 code
         _ = bondy_oauth2:revoke_token(Type, RealmUri, Issuer, Token),
-        {true, cowboy_req:set_resp_body(<<"true">>, Req0), St}
+        Req1 = prepare_request(<<"true">>, #{}, Req0),
+        {true, Req1, St}
     catch
         error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
             {stop, reply(unsupported_token_type, Req0), St}
@@ -493,8 +494,7 @@ reply(Error, Req) ->
 -spec prepare_request(map(), map(), cowboy_req:req()) -> cowboy_req:req().
 
 prepare_request(Body, Headers, Req0) ->
-    Req1 = cowboy_req:set_resp_headers(
-        maps:merge(?HEADERS, Headers), Req0),
+    Req1 = cowboy_req:set_resp_headers(maps:merge(?HEADERS, Headers), Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
 
 
@@ -518,5 +518,4 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
                 <<"refresh_token">> => RefreshToken
             }
     end,
-    Req1 = cowboy_req:set_resp_headers(?HEADERS, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body1), Req1).
+    prepare_request(Body1, #{}, Req0).
