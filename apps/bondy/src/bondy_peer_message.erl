@@ -34,7 +34,7 @@
                         | wamp_error()
                         | wamp_result()
                         | wamp_interrupt()
-                        | wamp_event(),
+                        | wamp_publish(),
     hop_count = 0   ::  non_neg_integer(),
     options         ::  map()
 }).
