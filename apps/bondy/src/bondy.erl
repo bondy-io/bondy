@@ -139,8 +139,6 @@ when is_binary(RealmUri), is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
     end.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Acknowledges the reception of a WAMP message. This function should be used by

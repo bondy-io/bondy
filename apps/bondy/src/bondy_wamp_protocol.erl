@@ -340,8 +340,6 @@ handle_inbound_messages(_, St, _) ->
 
 
 
-
-
 %% @private
 maybe_open_session({ok, St}) ->
     open_session(St);
@@ -518,6 +516,7 @@ get_realm(St) ->
             %% Will throw an exception if it does not exist
             bondy_realm:lookup(Uri)
     end.
+
 
 
 %% =============================================================================
