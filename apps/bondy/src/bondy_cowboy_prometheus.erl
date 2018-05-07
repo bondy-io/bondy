@@ -105,7 +105,11 @@
                    inc/3,
                    observe/3]}).
 
--define(DEFAULT_DURATION_BUCKETS, [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]).
+-define(DEFAULT_DURATION_BUCKETS, [
+  10, 25, 50, 100, 250, 500,
+  1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
+  1000000, 2500000, 5000000, 10000000
+]).
 -define(DEFAULT_EARLY_ERROR_LABELS, []).
 -define(DEFAULT_PROTOCOL_UPGRADE_LABELS, []).
 -define(DEFAULT_REQUEST_LABELS, [method, reason, status_class]).
