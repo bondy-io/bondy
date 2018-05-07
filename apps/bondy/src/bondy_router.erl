@@ -331,11 +331,11 @@ do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
     %% The client is replying to our goodbye() message, we stop.
     {stop, Ctxt};
 
-do_forward(#goodbye{} = M, Ctxt) ->
+do_forward(#goodbye{}, Ctxt) ->
     %% Goodbye initiated by client, we reply with goodbye() and stop.
-    _ = lager:error(
-        "Session closed per client request, session=~p, reason=~p",
-        [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
+    %% _ = lager:info(
+    %%     "Session closed per client request, session=~p, reason=~p",
+    %%     [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
     Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 

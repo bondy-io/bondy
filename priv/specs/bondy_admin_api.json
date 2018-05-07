@@ -49,7 +49,7 @@
             "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
             "access-control-max-age": "86400"
         },
-        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}}) |> put(status_code, {{action.error.status_code}})}}"
+        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}})}}"
     },
     "defaults" : {
         "retries" : 0,
@@ -67,6 +67,106 @@
                 "timeout" : 20000
             },
             "paths" : {
+                "/services/create_backup" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.backup.create",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.body}}"
+                            ]
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/backup_status" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.backup.status",
+                            "options" : {},
+                            "arguments" : ["{{variables.query_match}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/services/restore_backup" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.backup.restore",
+                            "options" : {},
+                            "arguments" : ["{{request.body}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
                 "/services/load_api_spec" : {
                     "options": {
                         "action": {},
@@ -88,12 +188,10 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
                            "on_error" : {
-                                // "status_code" : "{{variables.wamp_error_body.status_code}}",
                                 "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
@@ -196,7 +294,6 @@
                             "options" : {},
                             "arguments" : ["{{request.bindings.realm_uri}}"],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -217,7 +314,6 @@
                             "options" : {},
                             "arguments" : ["{{request.bindings.realm_uri}}"],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -255,7 +351,6 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -350,7 +445,6 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -445,7 +539,6 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -468,7 +561,6 @@
                                 "{{request.bindings.realm_uri}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -583,7 +675,6 @@
                                 "{{request.body}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {
@@ -606,7 +697,6 @@
                                 "{{request.bindings.realm_uri}}"
                             ],
                             "arguments_kw" : {
-                                // "security" : "{{security}}"
                             }
                         },
                         "response" : {

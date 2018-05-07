@@ -4,18 +4,18 @@ metadata:
   labels:
     app: testbondy
     tier: gateway
-  name: testbondy-claim
-  namespace: {{ .magenta.namespace }}
+  name: testbondy
+  namespace: {{ .infra.namespace }}
   annotations:
-    volume.beta.kubernetes.io/storage-class: {{ .testbondy.storage.class }}
+    volume.beta.kubernetes.io/storage-class: {{ .bondy.storage.class }}
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .testbondy.storage.size }}
-  {{- if ne .testbondy.nodeSelector "" }}
+      storage: {{ .bondy.storage.size }}
+  {{- if ne .bondy.nodeSelector "" }}
   selector:
     matchLabels:
-      app: {{ .testbondy.nodeSelector }}
+      app: {{ .bondy.nodeSelector }}
   {{- end }}

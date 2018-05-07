@@ -93,6 +93,7 @@
 -define(CONFIG_PREFIX(RealmUri),
     ?FULL_PREFIX(RealmUri, <<"security">>, <<"config">>)
 ).
+-define(FOLD_OPTS, [{resolver, lww}]).
 
 -type uri() :: binary() | string().
 -type cidr() :: {inet:ip_address(), non_neg_integer()}.
@@ -185,7 +186,7 @@ find_one_user_by_metadata(Realm, Key, Value) ->
       fun(User, _Acc) -> return_if_user_matches_metadata(Key, Value, User) end,
       {error, not_found},
       ?USERS_PREFIX(Realm),
-      [{resolver, lww}, {default, []}]).
+      [{default, []} | ?FOLD_OPTS]).
 
 return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
     case lists:member({Key, Value}, Options) of
@@ -205,7 +206,7 @@ find_unique_user_by_metadata(Realm, Key, Value) ->
         end,
         {error, not_found},
         ?USERS_PREFIX(R),
-        [{resolver, lww}, {default, []}]).
+        [{default, []} | ?FOLD_OPTS]).
 
 accumulate_matching_user(Key, Value, {_Username, Options} = User, Acc) ->
     accumulate_matching_user(lists:member({Key, Value}, Options), User, Acc).
@@ -291,7 +292,7 @@ print_users(RealmUri) ->
                                             Acc;
                                         ({Username, Options}, Acc) ->
                                     [{Username, Options}|Acc]
-                            end, [], ?USERS_PREFIX(Uri)),
+                            end, [], ?USERS_PREFIX(Uri), ?FOLD_OPTS),
     do_print_users(Uri, Users).
 
 %% @private
@@ -347,7 +348,7 @@ print_groups(RealmUri) ->
                                              Acc;
                                         ({Groupname, Options}, Acc) ->
                                     [{Groupname, Options}|Acc]
-                            end, [], ?GROUPS_PREFIX(Uri)),
+                            end, [], ?GROUPS_PREFIX(Uri), ?FOLD_OPTS),
     do_print_groups(RealmUri, Groups).
 
 %% @private
@@ -1174,39 +1175,44 @@ list(RealmUri, user) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     plumtree_metadata:fold(
         fun
-            ({_Username, [?TOMBSTONE]}, Acc) ->
+            ({_Username, ?TOMBSTONE}, Acc) ->
                 Acc;
-            ({Username, [Options]}, Acc) ->
-                [{Username, Options}|Acc]
+            ({Username, Values}, Acc) when is_list(Values) ->
+                [{Username, Values}|Acc]
         end,
         [],
-        ?USERS_PREFIX(Uri)
+        ?USERS_PREFIX(Uri),
+        ?FOLD_OPTS
     );
 
 list(RealmUri, group) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     plumtree_metadata:fold(
         fun
-            ({_Groupname, [?TOMBSTONE]}, Acc) ->
+            ({_Groupname, ?TOMBSTONE}, Acc) ->
                 Acc;
-            ({Groupname, [Options]}, Acc) ->
-                [{Groupname, Options}|Acc]
+            ({Groupname, Values}, Acc) when is_list(Values) ->
+                [{Groupname, Values}|Acc]
         end,
         [],
-        ?GROUPS_PREFIX(Uri)
+        ?GROUPS_PREFIX(Uri),
+        ?FOLD_OPTS
     );
 
 list(RealmUri, source) when is_binary(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     plumtree_metadata:fold(
         fun
-            ({{Username, CIDR}, [{Source, Options}]}, Acc) ->
-                [{Username, CIDR, Source, Options}|Acc];
-            ({{_, _}, [?TOMBSTONE]}, Acc) ->
-                Acc
+
+            ({{_, _}, ?TOMBSTONE}, Acc) ->
+                Acc;
+            ({{Username, CIDR}, {Source, Options}}, Acc) ->
+                [{Username,
+                CIDR, Source, Options}|Acc]
         end,
         [],
-        ?SOURCES_PREFIX(Uri)
+        ?SOURCES_PREFIX(Uri),
+        ?FOLD_OPTS
     ).
 
 
@@ -1695,7 +1701,8 @@ unknown_roles(RealmUri, RoleList, user) ->
 unknown_roles(RealmUri, RoleList, group) ->
     unknown_roles(RealmUri, RoleList, ?GROUPS);
 
-unknown_roles(RealmUri, RoleList, RoleType) ->
+unknown_roles(RealmUri, RoleList0, RoleType) ->
+    RoleList = sets:to_list(sets:from_list(RoleList0)),
     FP = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
     plumtree_metadata:fold(
         fun

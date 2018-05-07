@@ -30,5 +30,18 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Procs = [],
+    Procs = [
+        #{
+            id => bondy_backup,
+            start => {
+                bondy_backup,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_backup]
+        }
+    ],
     {ok, {{one_for_one, 1, 5}, Procs}}.

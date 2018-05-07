@@ -37,7 +37,11 @@
     <<"access-control-max-age">> => <<"86400">>
 }).
 
--define(OPTIONS_HEADERS, ?CORS_HEADERS#{
+-define(HEADERS, ?CORS_HEADERS#{
+    <<"content-type">> => <<"application/json; charset=utf-8">>
+}).
+
+-define(OPTIONS_HEADERS, ?HEADERS#{
     <<"access-control-allow">> => <<"HEAD,OPTIONS,POST">>
 }).
 
@@ -296,7 +300,7 @@ resource_existed(Req, St) ->
 
 provide(Req, St) ->
     %% This is just to support OPTIONS
-    {ok, cowboy_req:set_resp_header(?CORS_HEADERS, Req), St}.
+    {ok, cowboy_req:set_resp_header(?HEADERS, Req), St}.
 
 
 accept(Req0, St) ->
@@ -423,7 +427,8 @@ revoke_token_flow(Data0, Req0, St) ->
         %% or if the client submitted an invalid token.
         %% We set a body as Cowboy will otherwise use 204 code
         _ = bondy_oauth2:revoke_token(Type, RealmUri, Issuer, Token),
-        {true, cowboy_req:set_resp_body(<<"true">>, Req0), St}
+        Req1 = prepare_request(<<"true">>, #{}, Req0),
+        {true, Req1, St}
     catch
         error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
             {stop, reply(unsupported_token_type, Req0), St}
@@ -489,8 +494,7 @@ reply(Error, Req) ->
 -spec prepare_request(map(), map(), cowboy_req:req()) -> cowboy_req:req().
 
 prepare_request(Body, Headers, Req0) ->
-    Req1 = cowboy_req:set_resp_headers(
-        maps:merge(?CORS_HEADERS, Headers), Req0),
+    Req1 = cowboy_req:set_resp_headers(maps:merge(?HEADERS, Headers), Req0),
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
 
 
@@ -514,5 +518,4 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
                 <<"refresh_token">> => RefreshToken
             }
     end,
-    Req1 = cowboy_req:set_resp_headers(?CORS_HEADERS, Req0),
-    cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body1), Req1).
+    prepare_request(Body1, #{}, Req0).
