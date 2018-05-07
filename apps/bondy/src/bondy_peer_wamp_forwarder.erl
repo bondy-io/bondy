@@ -106,6 +106,8 @@
 %% API
 -export([start_link/0]).
 -export([forward/3]).
+-export([async_forward/3]).
+-export([receive_ack/2]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -141,29 +143,50 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Forwards a wamp message to a peer (node).
-%% This only works for EVENT, ERROR, INTERRUPT, INVOCATION and RESULT wamp
+%% @doc Forwards a wamp message to a peer (node). It returns ok when the
+%% remote bondy_peer_wamp_forwarder acknoledges the reception of the message,
+%% but it does not imply the message handler has actually received the message.
+%% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
 %% message types. It will fail with an exception if another type is passed
 %% as the second argument.
+%% This is equivalent to call async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(remote_peer_id(), wamp_message(), map()) ->
     ok | no_return().
 
 forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
+    {ok, Id} = async_forward(PeerId, Mssg, Opts),
+    Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
+    receive_ack(Id, Timeout).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec async_forward(remote_peer_id(), wamp_message(), map()) ->
+    {ok, id()} | no_return().
+
+async_forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
     %% Remote monitoring is not possible given no connections are maintained
     %% directly between nodes.
     %% If remote monitoring is required, Partisan can additionally connect
     %% nodes over Distributed Erlang to provide this functionality but this will
     %% defeat the purpose of using Partisan in the first place.
-    Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
     PeerMssg = bondy_peer_message:new(PeerId, Mssg, Opts),
     Id = bondy_peer_message:id(PeerMssg),
     BinPid = pid_to_bin(self()),
 
-
     ok = gen_server:cast(?MODULE, {forward, PeerMssg, BinPid}),
+    {ok, Id}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+receive_ack(Id, Timeout) ->
     %% Now we need to wait for the remote forwarder to send us an ACK
     %% to be sure the wamp peer received the message
     receive
@@ -321,7 +344,7 @@ cast_message(Mssg, BinPid) ->
 
 %% @private
 do_cast_message(Node, Mssg, BinPid) ->
-    Channel = wamp_channel,
+    Channel = wamp_peer_messages,
     ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
     Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
