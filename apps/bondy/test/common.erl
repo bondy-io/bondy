@@ -128,7 +128,7 @@
      {tiered_slow_level,0}]},
 {plumtree,
     [{broadcast_mods,
-         [plum_db,bondy_tuplespace_broadcast_handler]}]},
+         [plum_db]}]},
 {tuplespace,
     [{static_tables,
          [{bondy_session,
