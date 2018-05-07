@@ -39,6 +39,7 @@ start(_Type, Args) ->
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
             ok = bondy_cli:register(),
+            ok = setup_partisan(),
             {ok, Pid};
         Other  ->
             Other
@@ -88,3 +89,9 @@ setup(Args) ->
         false ->
             ok
     end.
+
+
+%% @private
+setup_partisan() ->
+    Channels0 = partisan_config:get(channels, []),
+    partisan_config:set(channels, [wamp_peer_messages | Channels0]).
