@@ -113,7 +113,8 @@ handle_call(
     } = M,
     Ctxt) when length(L) =:= 1; length(L) =:= 2 ->
     % @TODO: Implement options
-    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Args = case bondy_registry:match(registration, Proc, RealmUri) of
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->
@@ -129,7 +130,8 @@ handle_call(
         arguments = [Proc] = L
     } = M,
     Ctxt) when length(L) =:= 1 ->
-    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Args = case bondy_registry:match(registration, Proc, RealmUri) of
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->

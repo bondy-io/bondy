@@ -466,7 +466,6 @@ handle_peer_message(#interrupt{} = M, Callee, _From, _Opts) ->
 
 handle_peer_message(#invocation{} = M, Callee, {_, _} = Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
-
     %% We first need to find the registry entry to get the local callee
     {RealmUri, Node, SessionId} = Callee,
     Key = bondy_registry_entry:key_pattern(
@@ -664,7 +663,8 @@ registrations(RealmUri, Node, SessionId, Limit) ->
     }.
 
 match_registrations(ProcUri, Ctxt) ->
-    bondy_registry:match(registration, ProcUri, Ctxt).
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    bondy_registry:match(registration, ProcUri, RealmUri).
 
 
 %% -----------------------------------------------------------------------------
@@ -679,7 +679,8 @@ match_registrations(ProcUri, Ctxt) ->
     }.
 
 match_registrations(ProcUri, Ctxt, Opts) ->
-    bondy_registry:match(registration, ProcUri, Ctxt, Opts).
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    bondy_registry:match(registration, ProcUri, RealmUri, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -965,18 +966,18 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 %% @private
 on_register(true, Map, Ctxt) ->
     Uri = <<"wamp.registration.on_create">>,
-    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
     ok;
 
 on_register(false, Map, Ctxt) ->
     Uri = <<"wamp.registration.on_register">>,
-    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
     ok.
 
 %% @private
 on_unregister(Map, Ctxt) ->
     Uri = <<"wamp.registration.on_unregister">>,
-    {ok, _} = bondy_broker:publish(Uri, #{}, [], Map, Ctxt),
+    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
     ok.
 
 

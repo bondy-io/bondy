@@ -426,11 +426,11 @@ entries({Type, Cont}) when Type == registration orelse Type == subscription ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(
-    bondy_registry_entry:entry_type(), uri(), bondy_context:context()) ->
+    bondy_registry_entry:entry_type(), uri(), RealmUri :: uri()) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
-match(Type, Uri, Ctxt) ->
-    match(Type, Uri, Ctxt, #{}).
+match(Type, Uri, RealmUri) ->
+    match(Type, Uri, RealmUri, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -444,11 +444,10 @@ match(Type, Uri, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match(
-    bondy_registry_entry:entry_type(), uri(), bondy_context:context(), map()) ->
+    bondy_registry_entry:entry_type(), uri(), RealmUri :: uri(), map()) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
-match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
+match(Type, Uri, RealmUri, #{limit := Limit} = Opts) ->
     MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     case ets:select(Tab, MS, Limit) of
@@ -458,8 +457,7 @@ match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
             lookup_entries(Type, Result)
     end;
 
-match(Type, Uri, Ctxt, Opts) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
+match(Type, Uri, RealmUri, Opts) ->
     MS = index_ms(RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, {ets:select(Tab, MS), ?EOT}).
