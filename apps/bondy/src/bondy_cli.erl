@@ -100,7 +100,7 @@ status(_Command, [], [{status, Status}]) ->
 
 register_node_finder() ->
     F = fun() ->
-        {ok, Members} = bondy_peer_service_manager:members(),
+        {ok, Members} = bondy_peer_service:members(),
         Members
     end,
     clique:register_node_finder(F).
