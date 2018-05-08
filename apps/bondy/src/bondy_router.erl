@@ -196,7 +196,7 @@ handle_peer_message(PM) ->
     handle_peer_message(Payload, PeerId, From, Opts).
 
 
--spec handle_peer_message(wamp_message(), peer_id(), Node :: atom(), map()) ->
+-spec handle_peer_message(wamp_message(), peer_id(), remote_peer_id(), map()) ->
     ok | no_return().
 
 handle_peer_message(#publish{} = M, PeerId, From, Opts) ->

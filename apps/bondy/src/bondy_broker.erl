@@ -75,10 +75,11 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
--export([handle_peer_message/3]).
+-export([handle_peer_message/4]).
 -export([handle_call/2]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
+-export([publish/5]).
 -export([publish/6]).
 -export([subscriptions/1]).
 -export([subscriptions/3]).
@@ -186,10 +187,14 @@ handle_message(#publish{} = M, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_peer_message(wamp_publish(), peer_id(), map()) ->
+-spec handle_peer_message(
+    wamp_publish(),
+    To :: remote_peer_id(),
+    From :: remote_peer_id(),
+    Opts :: map()) ->
     ok | no_return().
 
-handle_peer_message(#publish{} = M, PeerId, Opts) ->
+handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     PubId = maps:get(publication_id, Opts),
     RealmUri = RealmUri = element(1, PeerId),
     TopicUri = M#publish.topic_uri,

@@ -774,7 +774,7 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     % #{session := S} = Ctxt,
     % Caller = bondy_session:pid(S),
     RealmUri = bondy_context:realm_uri(Ctxt),
-    case bondy_rpc_promise:dequeue(RealmUri, call_id, CallId) of
+    case bondy_rpc_promise:dequeue(RealmUri, {call_id, CallId}) of
         empty ->
             %% Promises for this call were either interrupted by us,
             %% fulfilled or timed out and garbage collected, we do nothing
@@ -802,7 +802,7 @@ peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
     % #{session := S} = Ctxt,
     % Caller = bondy_session:pid(S),
     RealmUri = bondy_context:realm_uri(Ctxt),
-    case bondy_rpc_promise:peek(RealmUri, call_id, CallId) of
+    case bondy_rpc_promise:peek(RealmUri, {call_id, CallId}) of
         empty ->
             {ok, Ctxt};
         {ok, P} ->
