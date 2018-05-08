@@ -363,7 +363,7 @@ build_backup(Log) ->
         log(Acc1, Log)
     catch
         throw:Reason ->
-            lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
+            _ = lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
             {error, Reason}
     after
         ok = plum_db:iterator_close(Iterator),
@@ -461,7 +461,7 @@ do_restore_aux(Log) ->
         restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters0)
     catch
         _:Reason ->
-            lager:error("Error restoring backup; reason=~p", [Reason]),
+            _ = lager:error("Error restoring backup; reason=~p", [Reason]),
             {error, Reason}
     after
         _ = disk_log:close(Log)

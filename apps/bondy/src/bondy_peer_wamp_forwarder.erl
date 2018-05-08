@@ -239,7 +239,7 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
     %% We are receving an ACK o Error for a message we have previously forwarded
     {RealmUri, Node} = AckOrError#peer_ack.from,
 
-    case Node =:= bondy_peer_service:mynode() of
+    _ = case Node =:= bondy_peer_service:mynode() of
         true ->
             %% Supporting process identifiers in Partisan, without changing the
             %% internal implementation of Erlang’s process identifiers, is not

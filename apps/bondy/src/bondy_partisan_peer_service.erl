@@ -167,6 +167,6 @@ stop() ->
 %% @end
 %% -----------------------------------------------------------------------------
 stop(Reason) ->
-    lager:notice("Stopping; reason=~p", [Reason]),
+    _ = lager:notice("Stopping; reason=~p", [Reason]),
     partisan_peer_service:stop(Reason).
 

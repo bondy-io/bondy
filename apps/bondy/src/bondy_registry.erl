@@ -522,7 +522,7 @@ handle_info(init_from_db, State0) ->
 handle_info(
     {plum_db_event, object_update, {{{registry, _}, Key}, Object}}, State) ->
     Node = bondy_registry_entry:node(Key),
-    case Node =:= bondy_peer_service:mynode() of
+    _ = case Node =:= bondy_peer_service:mynode() of
         true ->
             %% This should not be happenning as only we can change our
             %% registrations. We do nothing.
