@@ -203,7 +203,7 @@ handle_peer_message(#publish{} = M, PeerId, Opts) ->
         case bondy_registry_entry:node(Entry) of
             Node ->
                 %% We publish to a local subscriber
-                SubsId = bondy_registry_entry:entry_id(Entry),
+                SubsId = bondy_registry_entry:id(Entry),
                 ESessionId = bondy_registry_entry:session_id(Entry),
                 ESession = bondy_session:fetch(ESessionId),
                 Event = wamp_message:event(SubsId, PubId, Opts, Args, ArgsKW),
@@ -314,7 +314,7 @@ publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
         case bondy_registry_entry:node(Entry) of
             Node ->
                 %% We publish to a local subscriber
-                SubsId = bondy_registry_entry:entry_id(Entry),
+                SubsId = bondy_registry_entry:id(Entry),
                 ESessionId = bondy_registry_entry:session_id(Entry),
                 ESession = bondy_session:fetch(ESessionId),
                 Event = wamp_message:event(SubsId, PubId, Opts, Args, Payload),
