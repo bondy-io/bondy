@@ -18,7 +18,7 @@
 
 -define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
 
--define(BONDY_PEER_CALL, '$bondy_call').
+-define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
 
 
@@ -107,7 +107,9 @@
 
 -define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
 -define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
--type peer_id() :: {integer(), pid()}.
+-type local_peer_id()   ::  {binary(), atom(), integer(), pid()}.
+-type remote_peer_id()  ::  {binary(), atom(), integer()} | {binary(), atom()}.
+-type peer_id()         ::  local_peer_id() | remote_peer_id().
 
 
 

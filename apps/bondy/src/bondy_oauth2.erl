@@ -108,8 +108,6 @@
 -export([verify_jwt/2]).
 -export([verify_jwt/3]).
 
--export([generate_fragment/1]).
-
 
 
 
@@ -172,7 +170,7 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
     Now = erlang:system_time(seconds),
     Secs = ?REFRESH_TOKEN_TTL,
-    case plumtree_metadata:get(Prefix, RefreshToken) of
+    case plum_db:get(Prefix, RefreshToken) of
         #bondy_oauth2_token{issued_at = Ts}
         when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
             %% The refresh token expired, the user will need to login again and
@@ -185,7 +183,7 @@ refresh_token(RealmUri, Issuer, RefreshToken) ->
                 {ok, _, _, _} = OK ->
                     %% We revoke the existing refresh token
                     %% The user/devoice_id index was updated by issue_token/3
-                    ok = plumtree_metadata:delete(Prefix, RefreshToken),
+                    ok = plum_db:delete(Prefix, RefreshToken),
                     OK;
                 {error, _} = Error ->
                     Error
@@ -348,17 +346,17 @@ maybe_issue_refresh_token(true, Uri, IssuedAt, Data0) ->
         expires_in = ?REFRESH_TOKEN_TTL,
         issued_at = IssuedAt
     },
-    RToken = generate_fragment(?REFRESH_TOKEN_LEN),
+    RToken = bondy_utils:generate_fragment(?REFRESH_TOKEN_LEN),
     %% We store various indices to be able to implement the revoke action with
     %% different arguments
-    ok = plumtree_metadata:put(?REFRESH_TOKENS_PREFIX(Uri, Iss), RToken, Data1),
+    ok = plum_db:put(?REFRESH_TOKENS_PREFIX(Uri, Iss), RToken, Data1),
     ok = case maps:get(<<"client_device_id">>, Meta, undefined) of
         undefined ->
             ok;
         <<>> ->
             ok;
         DeviceId ->
-            plumtree_metadata:put(
+            plum_db:put(
                 ?REFRESH_TOKENS_PREFIX(Uri, Iss, Sub), DeviceId, RToken)
     end,
     RToken.
@@ -449,27 +447,6 @@ matches(Claims, Match) ->
     end.
 
 
-%% Borrowed from
-%% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
--spec generate_fragment(non_neg_integer()) -> binary().
-
-generate_fragment(0) ->
-    <<>>;
-
-generate_fragment(N) ->
-    Rand = base64:encode(crypto:strong_rand_bytes(N)),
-    Frag = << <<C>> || <<C>> <= <<Rand:N/bytes>>, is_alphanum(C) >>,
-    <<Frag/binary, (generate_fragment(N - byte_size(Frag)))/binary>>.
-
-
-%% @doc Returns true for alphanumeric ASCII characters, false for all others.
--spec is_alphanum(char()) -> boolean().
-
-is_alphanum(C) when C >= 16#30 andalso C =< 16#39 -> true;
-is_alphanum(C) when C >= 16#41 andalso C =< 16#5A -> true;
-is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;
-is_alphanum(_)                                    -> false.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -479,16 +456,16 @@ is_alphanum(_)                                    -> false.
 %% -----------------------------------------------------------------------------
 revoke_refresh_token(RealmUri, Issuer, Token) ->
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
-    case plumtree_metadata:get(Prefix, Token) of
+    case plum_db:get(Prefix, Token) of
         undefined ->
             {error, oauth2_invalid_grant};
         #bondy_oauth2_token{username = Username, meta = Meta} ->
-            _ = plumtree_metadata:delete(Prefix, Token),
+            _ = plum_db:delete(Prefix, Token),
             case maps:get(<<"client_device_id">>, Meta, <<>>) of
                 <<>> ->
                     ok;
                 DeviceId ->
-                    plumtree_metadata:delete(
+                    plum_db:delete(
                         ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
                         DeviceId
                     )
@@ -501,13 +478,13 @@ revoke_refresh_token(RealmUri, Issuer, Token) ->
 %% -----------------------------------------------------------------------------
 revoke_user_refresh_token(RealmUri, Issuer, Username, DeviceId) ->
     UserPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
-    case plumtree_metadata:get(UserPrefix, DeviceId) of
+    case plum_db:get(UserPrefix, DeviceId) of
         undefined ->
             ok;
         Token ->
-            _ = plumtree_metadata:delete(
+            _ = plum_db:delete(
                 ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token),
-            plumtree_metadata:delete(UserPrefix, DeviceId)
+            plum_db:delete(UserPrefix, DeviceId)
     end.
 
 
@@ -524,11 +501,11 @@ revoke_user_refresh_tokens(RealmUri, Issuer, Username) ->
         ({DeviceId, Token}, Acc) ->
             [{DeviceId, [Token]} | Acc]
     end,
-    DeviceTokens = plumtree_metadata:fold(Get, [], UserPrefix),
+    DeviceTokens = plum_db:fold(Get, [], UserPrefix),
     _ = [
         begin
-            _ = plumtree_metadata:delete(UserPrefix, DeviceId),
-            [plumtree_metadata:delete(Prefix, Token) || Token <- Tokens]
+            _ = plum_db:delete(UserPrefix, DeviceId),
+            [plum_db:delete(Prefix, Token) || Token <- Tokens]
         end || {DeviceId, Tokens} <- DeviceTokens
     ],
     ok.

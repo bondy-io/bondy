@@ -25,7 +25,7 @@
 %% only routed within a Realm.
 %%
 %% Realms are persisted to disk and replicated across the cluster using the
-%% plumtree_metadata subsystem.
+%% plum_db subsystem.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
@@ -303,7 +303,7 @@ add(Uri, Opts) ->
 
     case lookup(Uri) of
         {error, not_found} ->
-            ok = plumtree_metadata:put(?PREFIX, Uri, Realm),
+            ok = plum_db:put(?PREFIX, Uri, Realm),
             init(Realm);
         _ ->
             error({already_exist, Uri})
@@ -323,7 +323,7 @@ delete(?BONDY_REALM_URI) ->
 
 delete(Uri) ->
     %% TODO if there are users in the realm, the caller will need to first explicitely delete hthe users so return {error, users_exist} or similar
-    plumtree_metadata:delete(?PREFIX, Uri),
+    plum_db:delete(?PREFIX, Uri),
     % TODO we need to close all sessions for this realm
     ok.
 
@@ -334,7 +334,7 @@ delete(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec list() -> [realm()].
 list() ->
-    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
+    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
 
 
 %% -----------------------------------------------------------------------------
@@ -415,7 +415,7 @@ select_first_available([H|T], I) ->
 %% @private
 -spec do_lookup(uri()) -> realm() | {error, not_found}.
 do_lookup(Uri) ->
-    case plumtree_metadata:get(?PREFIX, Uri)  of
+    case plum_db:get(?PREFIX, Uri)  of
         #realm{} = Realm ->
             Realm;
         undefined ->

@@ -34,10 +34,12 @@ start(_Type, Args) ->
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup(Args),
-            ok = bondy_router:start_pool(),
+            ok = bondy_router_worker:start_pool(),
             ok = bondy_stats:init(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
+            ok = bondy_cli:register(),
+            ok = setup_partisan(),
             {ok, Pid};
         Other  ->
             Other
@@ -87,3 +89,9 @@ setup(Args) ->
         false ->
             ok
     end.
+
+
+%% @private
+setup_partisan() ->
+    Channels0 = partisan_config:get(channels, []),
+    partisan_config:set(channels, [wamp_peer_messages | Channels0]).

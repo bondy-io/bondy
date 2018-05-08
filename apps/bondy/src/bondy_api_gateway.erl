@@ -22,6 +22,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway).
+-behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -41,14 +42,21 @@
 %% API
 -export([delete/1]).
 -export([dispatch_table/1]).
+-export([rebuild_dispatch_tables/0]).
 -export([list/0]).
 -export([load/1]).
 -export([lookup/1]).
 -export([start_admin_listeners/0]).
 -export([start_listeners/0]).
+-export([start_link/0]).
 
-% -export([start_http/1]).
-% -export([start_https/1]).
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
 
 
 
@@ -56,6 +64,10 @@
 %% API
 %% =============================================================================
 
+
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
 %% -----------------------------------------------------------------------------
@@ -67,6 +79,176 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_listeners() ->
+    gen_server:call(?MODULE, start_listeners).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+start_admin_listeners() ->
+    gen_server:call(?MODULE, start_admin_listeners).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Parses the provided Spec, stores it in the metadata store and calls
+%% rebuild_dispatch_tables/0.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec load(file:filename() | map()) ->
+    ok | {error, invalid_specification_format | any()}.
+
+load(Map) when is_map(Map) ->
+    gen_server:call(?MODULE, {load, Map}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the current dispatch configured in the HTTP server.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dispatch_table(listener()) -> any().
+
+dispatch_table(Listener) ->
+    Map = ranch:get_protocol_options(Listener),
+    maps_utils:get_path([env, dispatch], Map).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Loads all configured API specs from the metadata store and rebuilds the
+%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
+%% environment.
+%% @end
+%% -----------------------------------------------------------------------------
+rebuild_dispatch_tables() ->
+    %% We get a dispatch table per scheme
+    _ = [
+        rebuild_dispatch_table(Scheme, Routes) ||
+        {Scheme, Routes} <- load_dispatch_tables()
+    ],
+    ok.
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the API Specification object identified by `Id'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(binary()) -> map() | {error, not_found}.
+
+lookup(Id) ->
+    case plum_db:get(?PREFIX, Id)  of
+        Spec when is_map(Spec) ->
+            Spec;
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of all stored API Specification objects.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec list() -> [ParsedSpec :: map()].
+
+list() ->
+    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Deletes the API Specification object identified by `Id'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(binary()) -> ok.
+
+delete(Id) when is_binary(Id) ->
+    plum_db:delete(?PREFIX, Id),
+    ok.
+
+
+
+
+%% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    %% We subscribe to change notifications in plum_db_events, so we get updates
+    %% to API Specs coming from another node so that we recompile the Cowboy
+    %% dispatch tables
+    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
+    ok = plum_db_events:subscribe(object_update, MS),
+    {ok, undefined}.
+
+
+handle_call(start_listeners, _From, State) ->
+    Res = do_start_listeners(),
+    {reply, Res, State};
+
+handle_call(start_admin_listeners, _From, State) ->
+    Res = do_start_admin_listeners(),
+    {reply, Res, State};
+
+handle_call({load, Map}, _From, State) ->
+    Res = load_spec(Map),
+    {reply, Res, State};
+
+handle_call(Event, From, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    {noreply, State}.
+
+
+handle_cast(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {noreply, State}.
+
+
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+    %% We've got a notification that an API Spec object has been updated
+    %% in the database via cluster replication, so we need to rebuild the
+    %% Cowboy dispatch tables
+    _ = lager:info(
+        "API Spec object_update received,"
+        " rebuilding HTTP server dispatch tables; key=~p",
+        [Key]
+    ),
+    ok = rebuild_dispatch_tables(),
+    {noreply, State};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    {noreply, State}.
+
+
+terminate(normal, _State) ->
+    ok;
+terminate(shutdown, _State) ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+do_start_listeners() ->
     DTables = case load_dispatch_tables() of
         [] ->
             [
@@ -80,11 +262,8 @@ start_listeners() ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-start_admin_listeners() ->
+%% @private
+do_start_admin_listeners() ->
     _ = [
         start_admin_listener({Scheme, Routes})
         || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
@@ -92,16 +271,7 @@ start_admin_listeners() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Parses the provided Spec, stores it in the metadata store and calls
-%% rebuild_dispatch_tables/0.
-%% @end
-%% -----------------------------------------------------------------------------
--spec load(file:filename() | map()) ->
-    ok | {error, invalid_specification_format | any()}.
-
-load(Map) when is_map(Map) ->
+load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{<<"id">> := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
@@ -116,7 +286,7 @@ load(Map) when is_map(Map) ->
             Error
     end;
 
-load(FName) ->
+load_spec(FName) ->
     try jsx:consult(FName, [return_maps]) of
         [Spec] ->
             load(Spec)
@@ -124,62 +294,6 @@ load(FName) ->
         error:badarg ->
             {error, invalid_specification_format}
     end.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec dispatch_table(listener()) -> any().
-
-dispatch_table(Listener) ->
-    Map = ranch:get_protocol_options(Listener),
-    maps_utils:get_path([env, dispatch], Map).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(binary()) -> map() | {error, not_found}.
-
-lookup(Id) ->
-    case plumtree_metadata:get(?PREFIX, Id)  of
-        Spec when is_map(Spec) ->
-            Spec;
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec list() -> [ParsedSpec :: map()].
-
-list() ->
-    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(binary()) -> ok.
-
-delete(Id) when is_binary(Id) ->
-    plumtree_metadata:delete(?PREFIX, Id),
-    ok.
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -190,7 +304,7 @@ delete(Id) when is_binary(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
-    plumtree_metadata:put(?PREFIX, Id, Spec).
+    plum_db:put(?PREFIX, Id, Spec).
 
 
 
@@ -318,7 +432,7 @@ validate_spec(Map) ->
 %% @end
 %% -----------------------------------------------------------------------------
 load_dispatch_tables() ->
-    %% We sorted by time, this is becuase in case api definitions overlap
+    %% We sorted by time, this is because in case api definitions overlap
     %% we want at least try to process them in FIFO order.
     %% @TODO This does not work in a distributed env, since we are relying
     %% on wall clock, to be solve by using a CRDT?
@@ -342,28 +456,12 @@ load_dispatch_tables() ->
             end
 
         end ||
-        {K, [V]} <- plumtree_metadata:to_list(?PREFIX),
+        {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
     bondy_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @private
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
-rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
-    _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
-    ],
-    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -395,7 +493,7 @@ base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}}
+            {"/ws", bondy_wamp_ws_handler, #{}}
         ]}
     ].
 
@@ -408,7 +506,7 @@ base_routes() ->
 admin_base_routes() ->
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}},
+            {"/ws", bondy_wamp_ws_handler, #{}},
             {"/ping", bondy_http_ping_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}

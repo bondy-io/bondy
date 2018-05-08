@@ -161,20 +161,16 @@ handle_inbound(Data, St) ->
     | {stop, binary(), state()}.
 
 handle_outbound(#result{} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#result.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#error.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
@@ -344,8 +340,6 @@ handle_inbound_messages(_, St, _) ->
 
 
 
-
-
 %% @private
 maybe_open_session({ok, St}) ->
     open_session(St);
@@ -401,13 +395,15 @@ open_session(St0) ->
             id := Id,
             request_details := Details
         } = Ctxt0 = St0#wamp_state.context,
+
+        %% We open a session
         Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
-        Ctxt1 = Ctxt0#{
-            session => Session,
-            roles => parse_roles(maps:get(roles, Details))
-        },
+
+        %% We set the session in the context
+        Ctxt1 = Ctxt0#{session => Session},
         St1 = update_context(Ctxt1, St0),
 
+        %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             Id,
             #{
@@ -426,46 +422,6 @@ open_session(St0) ->
                 St0)
     end.
 
-
-
-%% ------------------------------------------------------------------------
-%% private
-%% @doc
-%% Merges the client provided role features with the ones provided by
-%% the router. This will become the feature set used by the router on
-%% every session request.
-%% @end
-%% ------------------------------------------------------------------------
-parse_roles(Roles) ->
-    parse_roles(maps:keys(Roles), Roles).
-
-
-%% @private
-parse_roles([], Roles) ->
-    Roles;
-
-parse_roles([caller|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(caller, Roles), ?CALLER_FEATURES),
-    parse_roles(T, Roles#{caller => F});
-
-parse_roles([callee|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(callee, Roles), ?CALLEE_FEATURES),
-    parse_roles(T, Roles#{callee => F});
-
-parse_roles([subscriber|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
-    parse_roles(T, Roles#{subscriber => F});
-
-parse_roles([publisher|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
-    parse_roles(T, Roles#{publisher => F});
-
-parse_roles([_|T], Roles) ->
-    parse_roles(T, Roles).
 
 
 %% @private
@@ -560,6 +516,7 @@ get_realm(St) ->
             %% Will throw an exception if it does not exist
             bondy_realm:lookup(Uri)
     end.
+
 
 
 %% =============================================================================
