@@ -292,8 +292,16 @@ do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
 
 do_send({_, _, SessionId, Pid}, M, Opts) ->
     Timeout = maps:get(timeout, Opts),
+
+    %% Should we enqueue the message in case the process representing
+    %% the WAMP peer no longer exists?
     Enqueue = maps:get(enqueue, Opts),
+
     MonitorRef = monitor(process, Pid),
+
+    %% The following no longer applies, as the process should be local
+    %% However, we keep it as it is still the right thing to do
+    %% ----------------------
     %% If the monitor/2 call failed to set up a connection to a
     %% remote node, we don't want the '!' operator to attempt
     %% to set up the connection again. (If the monitor/2 call
@@ -303,13 +311,13 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
     %% will fail immediately if there is no connection to the
     %% remote node.
     erlang:send(Pid, {?BONDY_PEER_REQUEST, self(), MonitorRef, M}, [noconnect]),
+
     receive
         {'DOWN', MonitorRef, process, Pid, Reason} ->
             %% The peer no longer exists
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
-            %% The peer received the message and acked it
-            %% using ack/2
+            %% The peer received the message and acked it using ack/2
             true = demonitor(MonitorRef, [flush]),
             ok
     after
@@ -324,8 +332,13 @@ maybe_enqueue(true, _SessionId, _M, _) ->
     %% TODO Enqueue for session resumption
     ok;
 
-maybe_enqueue(false, _, _, Reason) ->
-    exit(Reason).
+maybe_enqueue(false, SessionId, M, Reason) ->
+    _ = lager:info(
+        "Could not deliver message to WAMP peer; "
+        "reason=~p, session_id=~p, message_type=~p",
+        [Reason, SessionId, element(1, M)]
+    ),
+    ok.
 
 
 %% @private
