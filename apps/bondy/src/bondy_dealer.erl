@@ -409,7 +409,7 @@ handle_message(#call{} = M, Ctxt0) ->
     Fun = fun
         (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
         when is_integer(SessionId), is_pid(Pid) ->
-            ReqId = bondy_utils:get_id(global),
+            ReqId = bondy_utils:get_id(session, SessionId),
             Args = M#call.arguments,
             Payload = M#call.arguments_kw,
             RegId = bondy_registry_entry:id(Entry),
