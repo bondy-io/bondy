@@ -136,12 +136,20 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     CallId = P#bondy_rpc_promise.call_id,
     %% We match realm_uri for extra validation
     Key = case P#bondy_rpc_promise.caller of
-    {RealmUri, Node} ->
-        {RealmUri, InvocationId, CallId, Node};
-    {RealmUri, _Node, SessionId, _Pid} ->
-        {RealmUri, InvocationId, CallId, SessionId}
+        {RealmUri, Node} ->
+            {RealmUri, InvocationId, CallId, Node};
+        {RealmUri, _Node, SessionId, _Pid} ->
+            {RealmUri, InvocationId, CallId, SessionId}
     end,
-    Opts = #{key => Key, ttl => Timeout},
+    OnEvict = fun(_) ->
+        _ = lager:debug(
+            "RPC Promise evicted from queue;"
+            " realm_uri=~p, called_session_id=~p, invocation_id=~p, call_id=~p"
+            " ttl=~p",
+            [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
+        )
+    end,
+    Opts = #{key => Key, ttl => Timeout, on_evict => OnEvict},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
 
 
