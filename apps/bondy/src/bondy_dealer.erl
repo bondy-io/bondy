@@ -331,7 +331,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
                 ok = bondy:send(Callee, Interrupt),
                 {ok, Ctxt1}
             end,
-            _ = dequeue_invocations(CallId, Fun, Ctxt0),
+            _ = dequeue_invocations(CallId, M, Fun, Ctxt0),
             ok;
         skip ->
             %% The pending call is canceled and ERROR is sent immediately
@@ -351,7 +351,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
                 ok = bondy:send(Caller, Error),
                 {ok, Ctxt1}
             end,
-            _ = dequeue_invocations(CallId, Fun, Ctxt0),
+            _ = dequeue_invocations(CallId, M, Fun, Ctxt0),
             ok
     end;
 
@@ -361,20 +361,20 @@ handle_message(#yield{} = M, Ctxt0) ->
     %% We match the wamp_yield() with the originating wamp_invocation()
     %% using the request_id, and with that match the wamp_call() request_id
     %% to find the caller pid.
-
-    Fun = fun(Promise) ->
-        CallId = bondy_rpc_promise:call_id(Promise),
-        Caller = bondy_rpc_promise:caller(Promise),
-        Result = wamp_message:result(
-            CallId,
-            %% TODO check if yield.options should be assigned to result.details
-            M#yield.options,
-            M#yield.arguments,
-            M#yield.arguments_kw),
-        bondy:send(Caller, Result)
+    Fun = fun
+        (Promise) ->
+            CallId = bondy_rpc_promise:call_id(Promise),
+            Caller = bondy_rpc_promise:caller(Promise),
+            Result = wamp_message:result(
+                CallId,
+                %% TODO check if yield.options should be assigned to result.details
+                M#yield.options,
+                M#yield.arguments,
+                M#yield.arguments_kw),
+            bondy:send(Caller, Result)
     end,
     RealmUri = bondy_context:realm_uri(Ctxt0),
-    dequeue_call({invocation_id, M#yield.request_id}, Fun, RealmUri);
+    dequeue_call({invocation_id, M#yield.request_id}, M, Fun, RealmUri);
 
 handle_message(#error{request_type = Type} = M, Ctxt0)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
@@ -382,12 +382,13 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
         ?INVOCATION -> {?CALL, {invocation_id, M#error.request_id}};
         ?INTERRUPT -> {?CANCEL, {call_id, M#error.request_id}}
     end,
-    Fun = fun(Promise) ->
-        Caller = bondy_rpc_promise:caller(Promise),
-        bondy:send(Caller, M#error{request_type = NewType})
+    Fun = fun
+        (Promise) ->
+            Caller = bondy_rpc_promise:caller(Promise),
+            bondy:send(Caller, M#error{request_type = NewType})
     end,
     RealmUri = bondy_context:realm_uri(Ctxt0),
-    dequeue_call(Hint, Fun, RealmUri);
+    dequeue_call(Hint, M, Fun, RealmUri);
 
 handle_message(
     #call{procedure_uri = <<"com.leapsight.bondy", _/binary>>} = M, Ctxt) ->
@@ -452,7 +453,7 @@ when Type == ?CALL orelse Type == ?CANCEL ->
         bondy:send(LocalCaller, M)
     end,
     RealmUri = element(1, Caller),
-    dequeue_call(Hint, Fun, RealmUri);
+    dequeue_call(Hint, M, Fun, RealmUri);
 
 handle_peer_message(#interrupt{} = M, Callee, _From, _Opts) ->
     %% A remote caller is cancelling a previous call-invocation
@@ -462,7 +463,7 @@ handle_peer_message(#interrupt{} = M, Callee, _From, _Opts) ->
     end,
     RealmUri = element(1, Callee),
     Hint = {invocation_id, M#interrupt.request_id},
-    dequeue_call(Hint, Fun, RealmUri);
+    dequeue_call(Hint, M, Fun, RealmUri);
 
 handle_peer_message(#invocation{} = M, Callee, {_, _} = Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
@@ -498,7 +499,7 @@ handle_peer_message(#result{} = M, Caller, _Callee, _Opts) ->
         bondy:send(LocalCaller, M)
     end,
     RealmUri = element(1, Caller),
-    dequeue_call({call_id, CallId}, Fun, RealmUri).
+    dequeue_call({call_id, CallId}, M, Fun, RealmUri).
 
 
 
@@ -761,23 +762,27 @@ reply_error(ProcUri, CallId, Ctxt) ->
     ).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue_invocations(id(), function(), bondy_context:context()) ->
+-spec dequeue_invocations(
+    id(), wamp_message(), function(), bondy_context:context()) ->
     {ok, bondy_context:context()}.
 
-dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
+dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
     % #{session := S} = Ctxt,
     % Caller = bondy_session:pid(S),
     RealmUri = bondy_context:realm_uri(Ctxt),
     case bondy_rpc_promise:dequeue(RealmUri, {call_id, CallId}) of
         empty ->
             %% Promises for this call were either interrupted by us,
-            %% fulfilled or timed out and garbage collected, we do nothing
+            %% fulfilled or timed out and/or garbage collected, we do nothing
+            _ = lager:debug(
+                "Message ignored; reason=no_matching_promise, message=~p",
+                [M]
+            ),
             {ok, Ctxt};
         {ok, P} ->
             ReqId = bondy_rpc_promise:invocation_id(P),
@@ -785,9 +790,8 @@ dequeue_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
             {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
             %% We iterate until there are no more pending invocation for the
             %% call_request_id == CallId
-            dequeue_invocations(CallId, Fun, Ctxt1)
+            dequeue_invocations(CallId, M, Fun, Ctxt1)
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -813,27 +817,29 @@ peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
             %% call_request_id == CallId
             peek_invocations(CallId, Fun, Ctxt1)
     end.
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue_call({invocation_id | call_id, id()}, function(), uri()) -> ok.
+-spec dequeue_call(
+    {invocation_id | call_id, id()}, wamp_message(), function(), uri()) -> ok.
 
-dequeue_call(Hint, Fun, RealmUri) when is_function(Fun, 1) ->
+dequeue_call(Hint, M, Fun, RealmUri) when is_function(Fun, 1) ->
     case bondy_rpc_promise:dequeue(RealmUri, Hint) of
-        ok ->
-            %% Promise was fulfilled or timed out and garbage collected,
-            %% we do nothing
-            ok;
-        {ok, timeout} ->
-            %% Promise timed out, it will be GC'd, we do nothing
+        empty ->
+            %% Promise was fulfilled or timed out and/or garbage collected,
+            %% we do nothing.
+            _ = lager:debug(
+                "Message ignored; reason=no_matching_promise, message=~p",
+                [M]
+            ),
             ok;
         {ok, Promise} ->
             Fun(Promise)
     end.
-
-
 
 
 %% =============================================================================
@@ -1020,5 +1026,5 @@ no_eligible_callee(Type, Id, Desc) ->
         #{},
         ?WAMP_ERROR_NO_ELIGIBLE_CALLE,
         [Mssg],
-        #{ message => Mssg, description => Desc}
+        #{message => Mssg, description => Desc}
     ).
