@@ -40,7 +40,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SESSION_TABLE_NAME, ?MODULE).
--define(SESSION_SEQ_POS, 7).
+-define(SESSION_SEQ_POS, #session.seq).
 -define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
 -define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
 
