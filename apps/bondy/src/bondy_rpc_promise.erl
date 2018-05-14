@@ -149,7 +149,8 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
             [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
         )
     end,
-    Opts = #{key => Key, ttl => Timeout, on_evict => OnEvict},
+    Secs = erlang:round(Timeout / 1000),
+    Opts = #{key => Key, ttl => Secs, on_evict => OnEvict},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
 
 
