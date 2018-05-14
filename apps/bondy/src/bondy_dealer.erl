@@ -407,11 +407,10 @@ handle_message(#call{} = M, Ctxt0) ->
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-    CallerSessionId = bondy_context:session_id(Ctxt0),
     Fun = fun
         (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
         when is_integer(SessionId), is_pid(Pid) ->
-            ReqId = bondy_utils:get_id({session, CallerSessionId}),
+            ReqId = bondy_utils:get_id({session, SessionId}),
             Args = M#call.arguments,
             Payload = M#call.arguments_kw,
             RegId = bondy_registry_entry:id(Entry),
