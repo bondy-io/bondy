@@ -365,7 +365,14 @@ do_forward(M, Ctxt0) ->
             ),
             ok = bondy_stats:update(Reply, Ctxt0),
             {reply, Reply, Ctxt0};
-        _:_ ->
+        Class:Reason ->
+            Ctxt = bondy_context:realm_uri(Ctxt0),
+            SessionId = bondy_context:session_id(Ctxt0),
+            _ = lager:error(
+                "Error while routing message; class=~p, reason=~p, message=~p"
+                " realm_uri=~p, session_id=~p, stacktrace=~p",
+                [Class, Reason, M, Ctxt, SessionId, erlang:get_stacktrace()]
+            ),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}
     end.
