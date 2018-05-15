@@ -21,6 +21,7 @@
 
 -export([merge_map_flags/2]).
 -export([get_id/1]).
+-export([get_flake_id/0]).
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([timeout/1]).
@@ -153,12 +154,20 @@ get_id({session, SessionId}) when is_integer(SessionId) ->
     bondy_session:incr_seq(SessionId).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Calls flake_server:id/0 and returns the generated ID.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_flake_id() -> binary().
+get_flake_id() ->
+    {ok, Id} = flake_server:id(),
+    Id.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-
 timeout(#{timeout := T}) when is_integer(T), T > 0 ->
     T;
 timeout(#{timeout := 0}) ->

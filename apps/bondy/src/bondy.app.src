@@ -50,6 +50,7 @@
             sidejob,
             uuid,
             %% Ours
+            flake,
             tuplespace,
             wamp
         ]},

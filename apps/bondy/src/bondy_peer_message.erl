@@ -21,7 +21,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -record(peer_message, {
-    id          ::  id(),
+    id              ::  binary(),
     %% Supporting process identifiers in Partisan, without changing the
     %% internal implementation of Erlang’s process identifiers, is not
     %% possible without allowing nodes to directly connect to every
@@ -71,7 +71,7 @@ new({RealmUri, Node} = PeerId, Payload0, Opts) ->
     Payload1 = validate_payload(Payload0),
 
     #peer_message{
-        id = bondy_utils:get_id(global),
+        id = bondy_utils:get_flake_id(),
         from = {RealmUri, bondy_peer_service:mynode()},
         peer_id = PeerId,
         payload = Payload1,
@@ -82,7 +82,7 @@ new({RealmUri, Node, _} = PeerId, Payload0, Opts) ->
     Node =/= bondy_peer_service:mynode() orelse error(badarg),
     Payload1 = validate_payload(Payload0),
     #peer_message{
-        id = bondy_utils:get_id(global),
+        id = bondy_utils:get_flake_id(),
         from = {RealmUri, bondy_peer_service:mynode()},
         peer_id = PeerId,
         payload = Payload1,
