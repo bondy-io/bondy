@@ -26,14 +26,21 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+
+
 -define(PREFIX, {global, api_specs}).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).
 -define(ADMIN_HTTPS, admin_api_https).
 
+-record(state, {
+    exchange_ref            ::  {pid(), reference()} | undefined,
+    updated_specs = []      ::  list()
+}).
 
--type listener()  ::    api_gateway_http
+
+-type listener()    ::  api_gateway_http
                         | api_gateway_https
                         | admin_api_http
                         | admin_api_https.
@@ -129,6 +136,7 @@ rebuild_dispatch_tables() ->
     ],
     ok.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Returns the API Specification object identified by `Id'.
 %% @end
@@ -178,9 +186,12 @@ init([]) ->
     %% We subscribe to change notifications in plum_db_events, so we get updates
     %% to API Specs coming from another node so that we recompile the Cowboy
     %% dispatch tables
+    ok = plum_db_events:subscribe(exchange_started),
+    ok = plum_db_events:subscribe(exchange_finished),
     MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
     ok = plum_db_events:subscribe(object_update, MS),
-    {ok, undefined}.
+
+    {ok, #state{}}.
 
 
 handle_call(start_listeners, _From, State) ->
@@ -206,30 +217,55 @@ handle_cast(Event, State) ->
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
+handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
+    Ref = erlang:monitor(process, Pid),
+    {noreply, State#state{exchange_ref = {Pid, Ref}}};
+
+handle_info(
+    {plum_db_event, exchange_finished, {Pid, _Reason}},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    true = erlang:demonitor(Ref),
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+    {noreply, State1};
+
+handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
+    %% We are receiving the notification after we recevied a DOWN message
+    %% we do nothing
+    {noreply, State};
+
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{exchange_ref = undefined},
+    {noreply, State1};
 
 handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables
-    _ = lager:info(
-        "API Spec object_update received,"
-        " rebuilding HTTP server dispatch tables; key=~p",
-        [Key]
-    ),
-    ok = rebuild_dispatch_tables(),
-    {noreply, State};
+    %% But since Specs depend on other objects being present and we also want
+    %% to avoid rebuilding the diospatch table multiple times, we just set a
+    %% flag on the state to rebuild the dispatch tables once we received an
+    %% exchange_finished event,
+    _ = lager:info("API Spec object_update received; key=~p", [Key]),
+    Acc = State#state.updated_specs,
+    {noreply, State#state{updated_specs = [Key|Acc]}};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
     {noreply, State}.
 
 
 terminate(normal, _State) ->
-    ok;
+    unsubscribe();
 terminate(shutdown, _State) ->
-    ok;
+    unsubscribe();
 terminate({shutdown, _}, _State) ->
-    ok;
+    unsubscribe();
 terminate(_Reason, _State) ->
     %% TODO publish metaevent
     ok.
@@ -245,7 +281,11 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
-
+unsubscribe() ->
+    _ = plum_db_events:unsubscribe(exchange_started),
+    _ = plum_db_events:unsubscribe(exchange_finished),
+    _ = plum_db_events:unsubscribe(object_update),
+    ok.
 
 %% @private
 do_start_listeners() ->
@@ -482,6 +522,26 @@ rebuild_dispatch_table(<<"http">>, Routes) ->
 
 rebuild_dispatch_table(<<"https">>, Routes) ->
     cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes)).
+
+
+%% @private
+handle_spec_updates(#state{updated_specs = []}) ->
+    ok;
+
+handle_spec_updates(#state{updated_specs = [Key]}) ->
+    _ = lager:info(
+        "API Spec object_update received,"
+        " rebuilding HTTP server dispatch tables; key=~p",
+        [Key]
+    ),
+    rebuild_dispatch_tables();
+
+handle_spec_updates(#state{}) ->
+    _ = lager:info(
+        "Multiple API Spec object_update(s) received,"
+        " rebuilding HTTP server dispatch tables"
+    ),
+    rebuild_dispatch_tables().
 
 
 %% -----------------------------------------------------------------------------
