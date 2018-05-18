@@ -108,19 +108,6 @@
 -export([handle_peer_message/1]).
 -export([roles/0]).
 -export([agent/0]).
-%% -export([has_role/2]). ur, ctxt
-%% -export([add_role/2]). uri, ctxt
-%% -export([remove_role/2]). uri, ctxt
-%% -export([authorise/4]). session, uri, action, ctxt
-%% -export([start_realm/2]). uri, ctxt
-%% -export([stop_realm/2]). uri, ctxt
-
-%% -export([callees/2]).
-%% -export([count_callees/2]).
-%% -export([count_registrations/2]).
-%% -export([lookup_registration/2]).
-%% -export([fetch_registration/2]). % wamp.registration.get
-
 
 
 
@@ -173,6 +160,10 @@ agent() ->
 
 
 forward(M, #{session := _} = Ctxt) ->
+    %% _ = lager:debug(
+    %%     "Forwarding message; peer_id=~p, message=~p",
+    %%     [bondy_context:peer_id(Ctxt), M]
+    %% ),
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = bondy_stats:update(M, Ctxt),
@@ -189,7 +180,7 @@ handle_peer_message(PM) ->
     bondy_peer_message:is_message(PM) orelse exit(badarg),
 
     Payload = bondy_peer_message:payload(PM),
-    PeerId = bondy_peer_message:peer_id(PM),
+    PeerId = bondy_peer_message:to(PM),
     From = bondy_peer_message:from(PM),
     Opts = bondy_peer_message:options(PM),
 
@@ -298,6 +289,13 @@ do_forward(#register{} = M, Ctxt) ->
     end,
     {reply, Reply, Ctxt};
 
+do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    async_forward(M, Ctxt);
+
+do_forward(
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
+    async_forward(M, Ctxt);
+
 do_forward(#call{} = M, Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
@@ -315,18 +313,12 @@ do_forward(#call{} = M, Ctxt0) ->
     %% asynchronously by the dealer.
     {ok, Ctxt0};
 
-%% do_forward(#publish{} = M, Ctxt0) ->
-%%     %% RFC:
-%%     %% If Subscriber A is subscribed to both Topic 1 and Topic 2, and Publisher
-%%     %% B first publishes an Event 1 to Topic 1 and then an Event 2 to Topic 2,
-%%     %% then Subscriber A will first receive Event 1 and then Event 2. This also
-%%     %% holds if Topic 1 and Topic 2 are identical.
-%%     %% In other words, WAMP guarantees ordering of events between any given
-%%     %% pair of Publisher and Subscriber.
-%%     ok = sync_forward({M, Ctxt0}),
-%%     {ok, Ctxt0};
+do_forward(M, Ctxt) ->
+    async_forward(M, Ctxt).
 
-do_forward(M, Ctxt0) ->
+
+%% @private
+async_forward(M, Ctxt0) ->
     %% Client already has a session.
     %% RFC: By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.

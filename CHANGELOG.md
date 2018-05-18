@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.8.0
+## 0.7.0
 - Clustering
     - Completion of clustering implementation using partisan library (at the moment supporting the default peer service only, hyparview to be considered in the future)
     - bondy_router can now route WAMP messages across nodes. The internal load balancer prefers local callees by default, only when a local callee is not found for a procedure the invocation is routed to another node. Load balancer state is local and not replicated. Future global load balancing strategies based on ant-colony optimisation to be considered in the future.

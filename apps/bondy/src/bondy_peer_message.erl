@@ -22,14 +22,15 @@
 
 -record(peer_message, {
     id              ::  binary(),
+    realm_uri       ::  uri(),
     %% Supporting process identifiers in Partisan, without changing the
     %% internal implementation of Erlang’s process identifiers, is not
     %% possible without allowing nodes to directly connect to every
     %% other node.
     %% We use the pid-to-bin trick since we will be using the pid to generate
     %% an ACK.
-    from            ::  {uri(), atom()},
-    peer_id         ::  remote_peer_id(),
+    from            ::  remote_peer_id(),
+    to              ::  remote_peer_id(),
     payload         ::  wamp_invocation()
                         | wamp_error()
                         | wamp_result()
@@ -53,7 +54,7 @@
 -export([options/1]).
 -export([payload/1]).
 -export([payload_type/1]).
--export([peer_id/1]).
+-export([to/1]).
 -export([realm_uri/1]).
 
 
@@ -66,26 +67,17 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-new({RealmUri, Node} = PeerId, Payload0, Opts) ->
-    Node =/= bondy_peer_service:mynode() orelse error(badarg),
-    Payload1 = validate_payload(Payload0),
+new({RealmUri, Node, _, _} = PeerId, Payload0, Opts) ->
+    MyNode = bondy_peer_service:mynode(),
+    Node =/= MyNode orelse error(badarg),
+
+    ForwarderId = {RealmUri, MyNode, undefined, undefined},
 
     #peer_message{
+        payload = validate_payload(Payload0),
         id = bondy_utils:get_flake_id(),
-        from = {RealmUri, bondy_peer_service:mynode()},
-        peer_id = PeerId,
-        payload = Payload1,
-        options = Opts
-    };
-
-new({RealmUri, Node, _} = PeerId, Payload0, Opts) ->
-    Node =/= bondy_peer_service:mynode() orelse error(badarg),
-    Payload1 = validate_payload(Payload0),
-    #peer_message{
-        id = bondy_utils:get_flake_id(),
-        from = {RealmUri, bondy_peer_service:mynode()},
-        peer_id = PeerId,
-        payload = Payload1,
+        to = PeerId,
+        from = ForwarderId,
         options = Opts
     }.
 
@@ -109,18 +101,14 @@ id(#peer_message{id = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-realm_uri(#peer_message{from = {Val, _}}) -> Val;
-realm_uri(#peer_message{from = {Val, _, _}}) -> Val;
-realm_uri(#peer_message{from = {Val, _, _, _}}) -> Val.
+realm_uri(#peer_message{from = Val}) -> element(1, Val).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-peer_node(#peer_message{peer_id = {_, Val}}) -> Val;
-peer_node(#peer_message{peer_id = {_, Val, _}}) -> Val;
-peer_node(#peer_message{peer_id = {_, Val, _, _}}) -> Val.
+peer_node(#peer_message{to = Val}) -> element(2, Val).
 
 
 %% -----------------------------------------------------------------------------
@@ -134,7 +122,7 @@ from(#peer_message{from = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-peer_id(#peer_message{peer_id = Val}) -> Val.
+to(#peer_message{to = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------

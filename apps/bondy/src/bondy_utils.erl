@@ -32,11 +32,49 @@
 -export([is_uuid/1]).
 -export([to_binary_keys/1]).
 -export([generate_fragment/1]).
+-export([log/5]).
+
+
 
 %% =============================================================================
 %%  API
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec log(
+    atom(), binary() | list(), list(), wamp_message(), bondy_context:t()) -> ok.
+
+log(Level, Prefix, Head, WampMessage, Ctxt)
+when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+    Format = iolist_to_binary([
+        Prefix,
+        <<
+            %% Right now trace_id is a bin as msgpack does not support
+            %% 128-bit integers
+            ", trace_id=~s"
+            ", realm_uri=~s"
+            ", session_id=~s"
+            ", message_type=~s"
+            ", message_id=~s"
+            ", encoding=~s"
+        >>
+    ]),
+    TraceId = <<>>,
+    Tail = [
+        TraceId,
+        bondy_context:realm_uri(Ctxt),
+        bondy_context:session_id(Ctxt),
+        element(1, WampMessage), %% add function to wamp_message.erl
+        element(2, WampMessage), %% add function to wamp_message.erl
+        bondy_context:encoding(Ctxt)
+    ],
+    _ = lager:log(Level, self(), Format, lists:append(Head, Tail)),
+    ok.
 
 %% -----------------------------------------------------------------------------
 %% @doc

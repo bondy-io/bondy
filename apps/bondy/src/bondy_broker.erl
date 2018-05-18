@@ -415,15 +415,16 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     %% @TODO stop replicating individual remote subscribers and instead
     %% use a per node reference counter
     RealmUri = bondy_context:realm_uri(Ctxt),
-    Timeout = maps:get(timeout, Opts, 5000),
-    PeerIds = [{RealmUri, Node} || Node <- Nodes],
+    {ok, Good, Bad} = bondy_peer_wamp_forwarder:broadcast(
+        RealmUri, Nodes, M, Opts),
 
-    %% We forward the message to the other nodes
-    Ids = [bondy_peer_wamp_forwarder:async_forward(PeerId, M, Opts)
-    || PeerId <- PeerIds],
+    Nodes =:= Good orelse
+    bondy_utils:log(
+        error,
+        "Publication broadcast failed; good_nodes=~p, bad_nodes=~p",
+        [Good, Bad], M, Ctxt
+    ),
 
-    %% We collected the ackowledgements
-    _ = [bondy_peer_wamp_forwarder:receive_ack(Id, Timeout) || {ok, Id} <- Ids],
     ok.
 
 

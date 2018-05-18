@@ -89,27 +89,37 @@ send(PeerId, M) ->
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({RealmUri, Node} = PeerId, M, Opts0)
+send({RealmUri, Node, undefined, undefined} = ForwarderRef, M, Opts0)
 when is_binary(RealmUri), is_atom(Node) ->
     %% We validate the message failing with exception
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
+
+    %% We've got a remote peer, so if it is malformed we fail
+    %% otherwise we forward the message to the peer
     case Node =:= bondy_peer_service:mynode() of
         true ->
             error(badarg);
         false ->
-            bondy_peer_wamp_forwarder:forward(PeerId, M, Opts0)
+            %% We validate the opts failing with exception
+            Opts1 = validate_send_opts(Opts0),
+            bondy_peer_wamp_forwarder:forward(ForwarderRef, M, Opts1)
     end;
 
-send({RealmUri, Node, SessionId} = PeerId, M, Opts0)
+send({RealmUri, Node, SessionId, undefined} = PeerId, M, Opts0)
 when is_binary(RealmUri), is_atom(Node), is_integer(SessionId) ->
     %% We validate the message failing with exception
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
+
+    %% We validate the opts failing with exception
+    Opts1 = validate_send_opts(Opts0),
+
+    %% If peer is local we send, otherwise we forward
     case Node =:= bondy_peer_service:mynode() of
         true ->
             Pid = bondy_session:pid(SessionId),
-            do_send({RealmUri, Node, SessionId, Pid}, M, Opts0);
+            do_send({RealmUri, Node, SessionId, Pid}, M, Opts1);
         false ->
-            bondy_peer_wamp_forwarder:forward(PeerId, M, Opts0)
+            bondy_peer_wamp_forwarder:forward(PeerId, M, Opts1)
     end;
 
 send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
@@ -118,24 +128,14 @@ when is_binary(RealmUri), is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
 
     %% We validate the opts failing with exception
-    Opts1 = maps_utils:validate(Opts0, #{
-        timeout => #{
-            required => true,
-            datatype => timeout,
-            default => ?SEND_TIMEOUT
-        },
-        enqueue => #{
-            required => true,
-            datatype => boolean,
-            default => false
-        }
-    }),
+    Opts1 = validate_send_opts(Opts0),
 
     case Node =:= bondy_peer_service:mynode() of
         true ->
             do_send(PeerId, M, Opts1);
         false ->
-            bondy_peer_wamp_forwarder:forward({RealmUri, Node, SessionId}, M, Opts1)
+            bondy_peer_wamp_forwarder:forward(
+                {RealmUri, Node, SessionId, pid_to_list(Pid)}, M, Opts1)
     end.
 
 
@@ -277,6 +277,21 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+validate_send_opts(Opts) ->
+    maps_utils:validate(Opts, #{
+        timeout => #{
+            required => true,
+            datatype => timeout,
+            default => ?SEND_TIMEOUT
+        },
+        enqueue => #{
+            required => true,
+            datatype => boolean,
+            default => false
+        }
+    }).
 
 
 %% -----------------------------------------------------------------------------

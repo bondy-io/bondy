@@ -106,6 +106,7 @@
 %% API
 -export([start_link/0]).
 -export([forward/3]).
+-export([broadcast/4]).
 -export([async_forward/3]).
 -export([receive_ack/2]).
 
@@ -143,7 +144,7 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Forwards a wamp message to a peer (node). It returns ok when the
+%% @doc Forwards a wamp message to a cluster peer (node). It returns ok when the
 %% remote bondy_peer_wamp_forwarder acknoledges the reception of the message,
 %% but it does not imply the message handler has actually received the message.
 %% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
@@ -180,6 +181,28 @@ async_forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
 
     ok = gen_server:cast(?MODULE, {forward, PeerMssg, BinPid}),
     {ok, Id}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec broadcast(uri(), [node()], wamp_message(), map()) ->
+    {ok, Good :: [node()], Bad :: [node()]}.
+
+broadcast(RealmUri, Nodes, M, Opts) ->
+    %% We forward the message to the other nodes
+    Ids = [
+        bondy_peer_wamp_forwarder:async_forward({RealmUri, Node}, M, Opts)
+        || Node <- Nodes
+    ],
+
+    Timeout = maps:get(timeout, Opts, 5000),
+
+    %% We collected the ackowledgements
+    _ = [receive_ack(Id, Timeout) || {ok, Id} <- Ids],
+    ok.
+
 
 
 %% -----------------------------------------------------------------------------

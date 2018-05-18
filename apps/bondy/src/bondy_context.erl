@@ -80,6 +80,7 @@
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
 -export([set_session/2]).
+-export([encoding/1]).
 
 
 %% -----------------------------------------------------------------------------
@@ -170,11 +171,21 @@ set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the peer of the provided context.
+%% Returns the subprotocol of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subprotocol(context()) -> subprotocol_2().
 subprotocol(#{subprotocol := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the encoding used by the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encoding(context()) -> encoding().
+encoding(#{subprotocol := {_, _, Val}}) -> Val.
+
 
 
 %% -----------------------------------------------------------------------------
