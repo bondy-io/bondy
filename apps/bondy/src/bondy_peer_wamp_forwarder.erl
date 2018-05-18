@@ -192,16 +192,15 @@ async_forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
 
 broadcast(RealmUri, Nodes, M, Opts) ->
     %% We forward the message to the other nodes
-    Ids = [
-        bondy_peer_wamp_forwarder:async_forward({RealmUri, Node}, M, Opts)
-        || Node <- Nodes
+    IdNodes = [
+        {
+            bondy_peer_wamp_forwarder:async_forward({RealmUri, Node}, M, Opts),
+            Node
+        } || Node <- Nodes
     ],
 
     Timeout = maps:get(timeout, Opts, 5000),
-
-    %% We collected the ackowledgements
-    _ = [receive_ack(Id, Timeout) || {ok, Id} <- Ids],
-    ok.
+    receive_broadcast_acks(IdNodes, Timeout, [], []).
 
 
 
@@ -341,6 +340,20 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+%% @private
+receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
+    try receive_ack(Id, Timeout) of
+        ok ->
+            receive_broadcast_acks(T, Timeout, [Node|Good], Bad)
+    catch
+        _:_ ->
+            receive_broadcast_acks(T, Timeout, Good, [Node|Bad])
+    end;
+
+receive_broadcast_acks([], _, Good, Bad) ->
+    {ok, Good, Bad}.
 
 
 
