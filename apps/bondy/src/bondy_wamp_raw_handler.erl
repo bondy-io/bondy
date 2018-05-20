@@ -256,6 +256,7 @@ handle_info(
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
     _ = log(debug, "Ping timeout. Sending second ping", [], State),
+    %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {noreply, State1};
@@ -359,12 +360,12 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
             %% We reset the state
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             handle_data(Rest, St#state{ping_sent = false, ping_attempts = 0});
-        {true, _, TimerRef} ->
+        {true, Bin, TimerRef} ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             _ = log(
                 error,
-                "Invalid pong message from peer, reason=invalid_payload",
-                [], St
+                "Invalid pong message from peer, reason=invalid_payload, received=~p, expected=~p",
+                [Bin, Payload], St
             ),
             ok = close_socket(invalid_ping_response, St),
             {stop, invalid_ping_response, St};
@@ -454,7 +455,9 @@ init_wamp(Len, Enc, St0) ->
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
-                        "Established connection with peer, protocol=wamp,transport=raw, frame_type=~p, encoding=~p,  message_max_length=~p, peer=~s",
+                        "Established connection with peer, protocol=wamp,"
+                        " transport=raw, frame_type=~p, encoding=~p,"
+                        " message_max_length=~p, peer=~s",
                         [FrameType, EncName, MaxLen, inet_utils:peername_to_binary(Peer)]
                     ),
                     {ok, St1};
@@ -463,13 +466,18 @@ init_wamp(Len, Enc, St0) ->
             end;
         {ok, NonIPAddr} ->
             _ = lager:error(
-                "Unexpected peername when establishing connection, received a non IP address of '~p', reason=invalid_socket, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                "Unexpected peername when establishing connection,"
+                " received a non IP address of '~p', reason=invalid_socket,"
+                " protocol=wamp, transport=raw, frame_type=~p, encoding=~p,"
+                " message_max_length=~p",
                 [NonIPAddr, FrameType, EncName, MaxLen]
             ),
             {stop, invalid_socket, St0};
         {error, Reason} ->
             _ = lager:error(
-                "Invalid peername when establishing connection, reason=~p, description=~p, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                "Invalid peername when establishing connection,"
+                " reason=~p, description=~p, protocol=wamp, transport=raw,"
+                " frame_type=~p, encoding=~p, message_max_length=~p",
                 [Reason, inet:format_error(Reason), FrameType, EncName, MaxLen]
             ),
             {stop, invalid_socket, St0}
@@ -496,7 +504,7 @@ send_frame(Frame, St) when is_binary(Frame) ->
 
 %% @private
 send_ping(St) ->
-    send_ping(term_to_binary(make_ref()), St).
+    send_ping(integer_to_binary(erlang:system_time(microsecond)), St).
 
 
 %% -----------------------------------------------------------------------------
