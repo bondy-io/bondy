@@ -249,7 +249,7 @@ do_forward(#goodbye{}, Ctxt) ->
     %% _ = lager:info(
     %%     "Session closed per client request, session=~p, reason=~p",
     %%     [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
-    Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
+    Reply = wamp_message:goodbye(#{}, ?WAMP_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 
 do_forward(#register{} = M, Ctxt) ->
@@ -275,7 +275,7 @@ do_forward(#register{} = M, Ctxt) ->
             wamp_message:error(
                 ?REGISTER, ReqId,
                 #{},
-                ?WAMP_ERROR_NOT_AUTHORIZED,
+                ?WAMP_NOT_AUTHORIZED,
                 [Mssg]
             );
         {error, {procedure_already_exists, Mssg}} ->
@@ -283,7 +283,7 @@ do_forward(#register{} = M, Ctxt) ->
                 ?REGISTER,
                 ReqId,
                 #{},
-                ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
+                ?WAMP_PROCEDURE_ALREADY_EXISTS,
                 [Mssg]
             )
     end,
@@ -351,7 +351,7 @@ async_forward(M, Ctxt0) ->
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
                 #{},
-                ?WAMP_ERROR_CANCELLED,
+                ?WAMP_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],
                 #{error => ErrorMap}
             ),

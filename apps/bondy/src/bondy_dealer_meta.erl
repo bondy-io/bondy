@@ -500,7 +500,7 @@ handle_call(#call{} = M, Ctxt) ->
         ?CALL,
         M#call.request_id,
         #{},
-        ?WAMP_ERROR_NO_SUCH_PROCEDURE,
+        ?WAMP_NO_SUCH_PROCEDURE,
         [Mssg],
         #{
             message => Mssg,

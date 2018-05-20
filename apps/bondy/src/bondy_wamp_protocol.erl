@@ -257,7 +257,7 @@ handle_inbound_messages(
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_CANCELLED,
         <<"You've sent a HELLO message more than once.">>,
         St);
 
@@ -300,14 +300,14 @@ handle_inbound_messages(
             %% We already stored the authid (username) in the ctxt
             open_session(St);
         {error, Reason} ->
-            abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, St)
+            abort(?WAMP_AUTHORIZATION_FAILED, Reason, St)
     end;
 
 handle_inbound_messages([#authenticate{} = M|_], St, _) ->
     %% Client does not have a session and has not been sent a challenge
     ok = bondy_stats:update(M, St#wamp_state.context),
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_CANCELLED,
         <<"You need to request a session first by sending a HELLO message.">>,
         St);
 
@@ -349,21 +349,21 @@ maybe_open_session({error, {Code, Term}, St}) when is_atom(Term) ->
 
 maybe_open_session({error, {realm_not_found, Uri}, St}) ->
     abort(
-        ?WAMP_ERROR_NO_SUCH_REALM,
+        ?WAMP_NO_SUCH_REALM,
         <<"Realm '", Uri/binary, "' does not exist.">>,
         St
     );
 
 maybe_open_session({error, {missing_param, Param}, St}) ->
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_CANCELLED,
         <<"Missing value for required parameter '", Param/binary, "'.">>,
         St
     );
 
 maybe_open_session({error, {user_not_found, AuthId}, St}) ->
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_CANCELLED,
         <<"User '", AuthId/binary, "' does not exist.">>,
         St
     );

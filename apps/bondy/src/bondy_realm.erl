@@ -276,7 +276,7 @@ add(#{<<"uri">> := Uri} = Map) ->
 -spec add(uri(), map()) -> realm() | no_return().
 
 add(Uri, Opts) ->
-    wamp_uri:is_valid(Uri) orelse error({?WAMP_ERROR_INVALID_URI, Uri}),
+    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
     #{
         description := Desc,
         authmethods := Method

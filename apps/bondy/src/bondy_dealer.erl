@@ -196,7 +196,7 @@
 -spec close_context(bondy_context:context()) -> bondy_context:context().
 
 close_context(Ctxt) ->
-    %% Cleanup callee role registrations
+    %% Cleanup registrations
     ok = unregister_all(Ctxt),
     %% Cleanup invocations queue
     ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
@@ -239,7 +239,7 @@ handle_message(#unregister{} = M, Ctxt) ->
                 ?UNREGISTER,
                 M#unregister.request_id,
                 #{},
-                ?WAMP_ERROR_NOT_AUTHORIZED,
+                ?WAMP_NOT_AUTHORIZED,
                 [Mssg],
                 #{message => Mssg}
             );
@@ -252,7 +252,7 @@ handle_message(#unregister{} = M, Ctxt) ->
                 ?UNREGISTER,
                 M#unregister.request_id,
                 #{},
-                ?WAMP_ERROR_NO_SUCH_REGISTRATION,
+                ?WAMP_NO_SUCH_REGISTRATION,
                 [Mssg],
                 #{
                     message => Mssg,
@@ -305,7 +305,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
-                    ?CANCEL, CallId, #{}, ?WAMP_ERROR_CANCELLED, Args, ArgsKw),
+                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
                 ok = bondy:send(Caller, Error),
 
                 Interrupt = wamp_message:interrupt(InvocationId, Opts),
@@ -328,7 +328,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
-                    ?CANCEL, CallId, #{}, ?WAMP_ERROR_CANCELLED, Args, ArgsKw),
+                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
                 ok = bondy:send(Caller, Error),
                 {ok, Ctxt1}
             end,
@@ -994,7 +994,7 @@ no_such_procedure(ProcUri, CallId) ->
         ?CALL,
         CallId,
         #{},
-        ?WAMP_ERROR_NO_SUCH_PROCEDURE,
+        ?WAMP_NO_SUCH_PROCEDURE,
         [Mssg],
         #{
             message => Mssg,
@@ -1022,7 +1022,7 @@ no_eligible_callee(Type, Id, Desc) ->
         Type,
         Id,
         #{},
-        ?WAMP_ERROR_NO_ELIGIBLE_CALLE,
+        ?WAMP_NO_ELIGIBLE_CALLE,
         [Mssg],
         #{message => Mssg, description => Desc}
     ).

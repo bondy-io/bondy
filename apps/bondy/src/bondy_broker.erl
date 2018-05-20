@@ -130,7 +130,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
             wamp_message:unsubscribed(ReqId);
         {error, not_found} ->
             wamp_message:error(
-                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_ERROR_NO_SUCH_SUBSCRIPTION
+                ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_NO_SUCH_SUBSCRIPTION
             )
     end,
     bondy:send(bondy_context:peer_id(Ctxt), Reply);
@@ -163,15 +163,15 @@ handle_message(#publish{} = M, Ctxt) ->
             ok;
         {error, not_authorized} when Acknowledge == true ->
             Reply = wamp_message:error(
-                ?PUBLISH, ReqId, #{}, ?WAMP_ERROR_NOT_AUTHORIZED),
+                ?PUBLISH, ReqId, #{}, ?WAMP_NOT_AUTHORIZED),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, Reason} when Acknowledge == true ->
-            ErrorMap = bondy_error:map(?WAMP_ERROR_CANCELLED, Reason),
+            ErrorMap = bondy_error:map(?WAMP_CANCELLED, Reason),
             Reply = wamp_message:error(
                 ?PUBLISH,
                 ReqId,
                 #{},
-                ?WAMP_ERROR_CANCELLED,
+                ?WAMP_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],
                 ErrorMap
             ),

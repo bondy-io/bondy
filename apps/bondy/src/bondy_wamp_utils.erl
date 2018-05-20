@@ -62,7 +62,7 @@ when length(L) + 1 < Min ->
         ?CALL,
         M#call.request_id,
         #{},
-        ?WAMP_ERROR_INVALID_ARGUMENT,
+        ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of arguments.">>],
         #{
             description =>
@@ -79,7 +79,7 @@ when length(L) > Max ->
         ?CALL,
         M#call.request_id,
         #{},
-        ?WAMP_ERROR_INVALID_ARGUMENT,
+        ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of arguments.">>],
         #{
             description =>
@@ -131,7 +131,7 @@ unauthorized(M) ->
         ?CALL,
         M#call.request_id,
         #{},
-        ?WAMP_ERROR_NOT_AUTHORIZED,
+        ?WAMP_NOT_AUTHORIZED,
         [Mssg],
         #{description => Description}
     ).
