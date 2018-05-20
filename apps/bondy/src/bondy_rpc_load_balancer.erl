@@ -150,8 +150,7 @@ do_get({Entry, Cont}, Node) ->
     case bondy_registry_entry:node(Entry) =:= Node of
         true ->
             %% The wamp peer is local
-            SessionId = bondy_registry_entry:session_id(Entry),
-            Pid = bondy_session:pid(SessionId),
+            Pid = bondy_registry_entry:pid(Entry),
             case erlang:is_process_alive(Pid) of
                 true ->
                     Entry;
@@ -164,7 +163,7 @@ do_get({Entry, Cont}, Node) ->
         false ->
             %% This wamp peer is remote.
             %% We cannot check the remote node as we might not have
-            %% a direct connection, so we trust we have an uptodate state.
+            %% a direct connection, so we trust we have an up-todate state.
             %% Any failover strategy should be handled by the user.
             Entry
     end.

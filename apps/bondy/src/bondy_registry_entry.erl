@@ -58,19 +58,20 @@
 -export([id/1]).
 -export([is_entry/1]).
 -export([key/1]).
+-export([key_pattern/3]).
+-export([key_pattern/5]).
 -export([match_policy/1]).
 -export([new/4]).
 -export([node/1]).
 -export([options/1]).
 -export([pattern/6]).
--export([key_pattern/3]).
--export([key_pattern/5]).
+-export([peer_id/1]).
+-export([pid/1]).
 -export([realm_uri/1]).
 -export([session_id/1]).
 -export([to_details_map/1]).
 -export([type/1]).
 -export([uri/1]).
--export([peer_id/1]).
 
 
 %% =============================================================================
@@ -198,6 +199,16 @@ node(#entry{key = Key}) ->
 
 node(#entry_key{} = Key) ->
     Key#entry_key.node.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the value of the subscription's or registration's session_id
+%% property.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec pid(t() | entry_key()) -> pid().
+pid(#entry{pid = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
