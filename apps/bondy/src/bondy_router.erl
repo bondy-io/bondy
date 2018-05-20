@@ -249,7 +249,8 @@ do_forward(#goodbye{}, Ctxt) ->
     %% _ = lager:info(
     %%     "Session closed per client request, session=~p, reason=~p",
     %%     [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
-    Reply = wamp_message:goodbye(#{}, ?WAMP_GOODBYE_AND_OUT),
+    Reply = wamp_message:goodbye(
+        #{message => <<"Session closed by client">>}, ?WAMP_GOODBYE_AND_OUT),
     {stop, Reply, Ctxt};
 
 do_forward(#register{} = M, Ctxt) ->

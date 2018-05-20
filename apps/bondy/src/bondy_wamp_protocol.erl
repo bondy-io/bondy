@@ -146,8 +146,20 @@ validate_subprotocol(_) ->
     | {reply, [binary()], state()}.
 
 handle_inbound(Data, St) ->
-    {Messages, <<>>} = wamp_encoding:decode(St#wamp_state.subprotocol, Data),
-    handle_inbound_messages(Messages, St).
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} ->
+            handle_inbound_messages(Messages, St)
+    catch
+        _:{unsupported_encoding, _Format} ->
+            Mssg = <<"Unsopported message encoding">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, St);
+        _:badarg ->
+            Mssg = <<"Error during message decoding">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, St);
+        _:function_clause ->
+            Mssg = <<"Incompatible message">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, St)
+    end.
 
 
 
@@ -247,7 +259,7 @@ handle_inbound_messages(
     %% lifetime of the session and the _Peer_ must fail the session if that
     %% happens
     abort(
-        ?BONDY_SESSION_ALREADY_EXISTS,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
         St);
 
@@ -257,7 +269,7 @@ handle_inbound_messages(
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     abort(
-        ?WAMP_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
         St);
 
@@ -277,7 +289,7 @@ handle_inbound_messages(
     ok = bondy_stats:update(M, St#wamp_state.context),
     %% Client already has a session so is already authenticated.
     abort(
-        ?BONDY_SESSION_ALREADY_EXISTS,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent an AUTHENTICATE message more than once.">>,
         St);
 
@@ -307,7 +319,7 @@ handle_inbound_messages([#authenticate{} = M|_], St, _) ->
     %% Client does not have a session and has not been sent a challenge
     ok = bondy_stats:update(M, St#wamp_state.context),
     abort(
-        ?WAMP_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to request a session first by sending a HELLO message.">>,
         St);
 
@@ -328,7 +340,7 @@ handle_inbound_messages(
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO
     abort(
-        ?BONDY_ERROR_NOT_IN_SESSION,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to establish a session first.">>,
         St).
 
@@ -356,14 +368,14 @@ maybe_open_session({error, {realm_not_found, Uri}, St}) ->
 
 maybe_open_session({error, {missing_param, Param}, St}) ->
     abort(
-        ?WAMP_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"Missing value for required parameter '", Param/binary, "'.">>,
         St
     );
 
 maybe_open_session({error, {user_not_found, AuthId}, St}) ->
     abort(
-        ?WAMP_CANCELLED,
+        ?WAMP_NO_SUCH_ROLE,
         <<"User '", AuthId/binary, "' does not exist.">>,
         St
     );
@@ -417,8 +429,8 @@ open_session(St0) ->
     catch
         error:{invalid_options, missing_client_role} ->
             abort(
-                <<"wamp.error.missing_client_role">>,
-                <<"Please provide at least one client role.">>,
+                ?WAMP_PROTOCOL_VIOLATION,
+                <<"No client roles provided. Please provide at least one client role.">>,
                 St0)
     end.
 
