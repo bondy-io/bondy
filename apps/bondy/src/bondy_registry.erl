@@ -241,8 +241,8 @@ when is_function(Task, 2) orelse Task == undefined ->
                     ok;
                 {[First], _} ->
                     %% Use iterator to remove each one
-                    Fun = fun(Entry) -> Task(Entry, Ctxt) end,
-                    do_remove_all(First, Tab, SessionId, Fun)
+                    MaybeFun = maybe_fun(Task, Ctxt),
+                    do_remove_all(First, Tab, SessionId, MaybeFun)
             end
     end;
 
@@ -348,8 +348,8 @@ remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
             %% We delete the entry from plum_db. This will broadcast the delete
             %% amongst the nodes in the cluster
             ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
-            Fun = fun(E) -> Task(E, Ctxt) end,
-            maybe_execute(Fun, Entry);
+            MaybeFun = maybe_fun(Task, Ctxt),
+            maybe_execute(MaybeFun, Entry);
         {error, not_found} = Error ->
             Error
     end.
@@ -502,7 +502,7 @@ match(Type, Uri, RealmUri) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
 match(Type, Uri, RealmUri, #{limit := Limit} = Opts) ->
-    MS = index_ms(RealmUri, Uri, Opts),
+    MS = index_ms(Type, RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     case ets:select(Tab, MS, Limit) of
         ?EOT ->
@@ -512,7 +512,7 @@ match(Type, Uri, RealmUri, #{limit := Limit} = Opts) ->
     end;
 
 match(Type, Uri, RealmUri, Opts) ->
-    MS = index_ms(RealmUri, Uri, Opts),
+    MS = index_ms(Type, RealmUri, Uri, Opts),
     Tab = index_table(Type, RealmUri),
     lookup_entries(Type, {ets:select(Tab, MS), ?EOT}).
 
@@ -674,6 +674,13 @@ maybe_resolve(Object) ->
         false ->
             plum_db_object:value(Object)
     end.
+
+%% @private
+maybe_fun(undefined, _) ->
+    undefined;
+
+maybe_fun(Fun, Ctxt) when is_function(Fun, 2) ->
+    fun(Entry) -> Fun(Entry, Ctxt) end.
 
 
 %% @private
@@ -842,9 +849,10 @@ index_entry(Entry, Policy) ->
 
 
 %% @private
--spec index_ms(uri(), uri(), map()) -> ets:match_spec().
+-spec index_ms(bondy_registry_entry:entry_type(), uri(), uri(), map()) ->
+    ets:match_spec().
 
-index_ms(RealmUri, Uri, Opts) ->
+index_ms(Type, RealmUri, Uri, Opts) ->
     Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
@@ -863,7 +871,7 @@ index_ms(RealmUri, Uri, Opts) ->
             [list_to_tuple(['andalso', AllConds, ExclConds])]
     end,
     EntryKey = bondy_registry_entry:key_pattern(
-        registration, RealmUri, '$2', '$3', '$4'),
+        Type, RealmUri, '$2', '$3', '$4'),
     MP = #index{
         key = '$1',
         entry_key = EntryKey
