@@ -274,13 +274,15 @@ handle_inbound_messages(
         St);
 
 handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
-    Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
     %% Client is requesting a session
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
+    Ctxt0 = St0#wamp_state.context,
+    ok = bondy_stats:update(M, Ctxt0),
+
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
+
     maybe_open_session(
         maybe_auth_challenge(M#hello.details, get_realm(St1), St1));
 
@@ -404,6 +406,7 @@ open_session(St0) ->
     try
         #{
             realm_uri := Uri,
+            authid := AuthId,
             id := Id,
             request_details := Details
         } = Ctxt0 = St0#wamp_state.context,
@@ -419,6 +422,7 @@ open_session(St0) ->
         Welcome = wamp_message:welcome(
             Id,
             #{
+                authid => AuthId,
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles()
             }
@@ -473,7 +477,8 @@ maybe_auth_challenge(Details, Realm, St0) ->
         {true, _} ->
             {error, {missing_param, authid}, St0};
         {false, _} ->
-            Ctxt1 = Ctxt0#{authid => undefined, request_details => Details},
+            TempId = bondy_utils:uuid(),
+            Ctxt1 = Ctxt0#{authid => TempId, request_details => Details},
             St1 = update_context(Ctxt1, St0),
             {ok, St1}
     end.
