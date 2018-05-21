@@ -309,7 +309,7 @@ realm_uri(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec roles(id() | session()) -> uri().
+-spec roles(id() | session()) -> map().
 roles(#session{roles = Val}) ->
     Val;
 roles(Id) ->
