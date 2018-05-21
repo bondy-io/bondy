@@ -152,7 +152,7 @@ add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
     %% Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
-    Pattern = bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, Options),
+    Pattern = bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_'),
     Tab = partition_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
@@ -176,7 +176,6 @@ add(Type, Uri, Options, Ctxt) ->
                 Ctxt, callee, shared_registration),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-            %% As a default, only a single Callee may register a procedure
             %% for an URI.
             %% Shared Registration (RFC 13.3.9)
             %% When shared registrations are supported, then the first

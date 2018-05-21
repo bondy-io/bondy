@@ -321,9 +321,4 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 -spec is_feature_enabled(context(), atom(), binary()) -> boolean().
 
 is_feature_enabled(Ctxt, Role, Feature) ->
-    case maps:find(roles, roles(Ctxt)) of
-        {ok, Roles} ->
-            maps_utils:get_path([Role, Feature], Roles, false);
-        error ->
-            false
-    end.
+    maps_utils:get_path([Role, Feature], roles(Ctxt), false).

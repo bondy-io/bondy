@@ -341,12 +341,13 @@ to_details_map(#entry{key = Key} = E) ->
 %% @private
 -spec validate_match_policy(map()) -> binary().
 validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(match, Options, ?EXACT_MATCH),
-    P == ?EXACT_MATCH
-    orelse P == ?PREFIX_MATCH
-    orelse P == ?WILDCARD_MATCH
-    orelse error({invalid_match_policy, P}),
-    P.
+    case maps:get(match, Options, ?EXACT_MATCH) of
+        ?EXACT_MATCH = P -> P;
+        ?PREFIX_MATCH = P -> P;
+        ?WILDCARD_MATCH = P -> P;
+        P ->
+            error({invalid_match_policy, P})
+    end.
 
 
 %% @private
