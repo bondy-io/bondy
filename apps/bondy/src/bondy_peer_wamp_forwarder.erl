@@ -194,7 +194,8 @@ broadcast(RealmUri, Nodes, M, Opts) ->
     %% We forward the message to the other nodes
     IdNodes = [
         {
-            bondy_peer_wamp_forwarder:async_forward({RealmUri, Node}, M, Opts),
+            bondy_peer_wamp_forwarder:async_forward(
+                {RealmUri, Node, undefined, undefined}, M, Opts),
             Node
         } || Node <- Nodes
     ],
@@ -259,7 +260,7 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
 handle_cast({'receive', AckOrError, BinPid}, State)
 when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
     %% We are receving an ACK o Error for a message we have previously forwarded
-    {RealmUri, Node} = AckOrError#peer_ack.from,
+    {RealmUri, Node, _, _} = AckOrError#peer_ack.from,
 
     _ = case Node =:= bondy_peer_service:mynode() of
         true ->
@@ -358,10 +359,10 @@ receive_broadcast_acks([], _, Good, Bad) ->
 
 
 %% @private
-cast_message(#peer_ack{from = {_, Node}} = Mssg, BinPid) ->
+cast_message(#peer_ack{from = {_, Node, _, _}} = Mssg, BinPid) ->
     do_cast_message(Node, Mssg, BinPid);
 
-cast_message(#peer_error{from = {_, Node}} = Mssg, BinPid) ->
+cast_message(#peer_error{from = {_, Node, _, _}} = Mssg, BinPid) ->
     do_cast_message(Node, Mssg, BinPid);
 
 cast_message(Mssg, BinPid) ->

@@ -220,7 +220,7 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
         end
     end,
     _Acc1 = publish_fold(Subs, Fun, #{}),
-    {ok, PubId}.
+    ok.
 
 
 
