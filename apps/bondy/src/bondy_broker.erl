@@ -430,7 +430,9 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     bondy_utils:log(
         error,
         "Publication broadcast failed; good_nodes=~p, bad_nodes=~p",
-        [Good, Bad], M, Ctxt
+        [Good, Bad],
+        M,
+        Ctxt
     ),
 
     ok.
