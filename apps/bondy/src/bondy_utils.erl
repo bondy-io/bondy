@@ -58,9 +58,9 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
             %% 128-bit integers
             ", trace_id=~s"
             ", realm_uri=~s"
-            ", session_id=~s"
+            ", session_id=~p"
             ", message_type=~s"
-            ", message_id=~s"
+            ", message_id=~p"
             ", encoding=~s"
         >>
     ]),
