@@ -408,7 +408,9 @@ handle_message(#call{} = M, Ctxt0) ->
     Fun = fun
         (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
         when is_integer(SessionId), is_pid(Pid) ->
-            ReqId = bondy_utils:get_id({session, SessionId}),
+            %% TODO Revert to session Ids
+            %% ReqId = bondy_utils:get_id({session, SessionId}),
+            ReqId = bondy_utils:get_id(global),
             Args = M#call.arguments,
             Payload = M#call.arguments_kw,
             RegId = bondy_registry_entry:id(Entry),
@@ -448,9 +450,10 @@ handle_peer_message(#result{} = M, Caller, _Callee, _Opts) ->
         bondy:send(Caller, M)
     end,
     CallId = M#result.request_id,
-    bondy_rpc_promise:dequeue_call(CallId, Fun, Caller);
+    bondy_rpc_promise:dequeue_call(CallId, Caller, Fun);
 
-handle_peer_message(#error{request_type = ?CALL} = M, _Caller, Callee, _Opts) ->
+handle_peer_message(
+    #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
     %% SHOUDLNT WE RECEIVE A REMOTE INVOCATION ERROR?
     %% A CALL we made to a remote callee has failed,
     %% We forward the error back to the local caller.
@@ -463,7 +466,7 @@ handle_peer_message(#error{request_type = ?CALL} = M, _Caller, Callee, _Opts) ->
     end,
     %% Is this CallId or InvId?
     InvocationId = M#error.request_id,
-    bondy_rpc_promise:dequeue_invocation(InvocationId, Fun, Callee);
+    bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun);
 
 handle_peer_message(
     #error{request_type = ?CANCEL} = M, Caller, _Callee, _Opts) ->
@@ -477,7 +480,7 @@ handle_peer_message(
             bondy:send(Caller, M)
     end,
     CallId = M#error.request_id,
-    bondy_rpc_promise:dequeue_call(CallId, Fun, Caller);
+    bondy_rpc_promise:dequeue_call(CallId, Caller, Fun);
 
 handle_peer_message(#interrupt{} = M, Callee, From, _Opts) ->
     %% A remote caller is cancelling a previous call-invocation
@@ -491,7 +494,7 @@ handle_peer_message(#interrupt{} = M, Callee, From, _Opts) ->
             bondy:send(Callee, M)
     end,
     InvocationId = M#interrupt.request_id,
-    bondy_rpc_promise:dequeue_invocation(InvocationId, Fun, From);
+    bondy_rpc_promise:dequeue_invocation(InvocationId, From, Fun);
 
 handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
