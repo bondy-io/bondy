@@ -295,20 +295,16 @@ lookup(Key) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(bondy_registry_entry:t()) -> ok | {error, not_found}.
+-spec remove(bondy_registry_entry:t()) -> ok.
 
 remove(Entry) ->
     Type = bondy_registry_entry:type(Entry),
     Key = bondy_registry_entry:key(Entry),
-    case take_from_tuplespace(Type, Key) of
-        {ok, Entry} ->
-            %% We delete the entry from plum_db. This will broadcast the delete
-            %% amongst the nodes in the cluster
-            RealmUri = bondy_registry_entry:realm_uri(Entry),
-            plum_db:delete(?FULLPREFIX(RealmUri), Key);
-        {error, not_found} = Error ->
-            Error
-    end.
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    _ = take_from_tuplespace(Type, Key),
+    %% We delete the entry from plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    plum_db:delete(?FULLPREFIX(RealmUri), Key).
 
 
 %% -----------------------------------------------------------------------------
@@ -333,8 +329,7 @@ remove(Type, EntryId, Ctxt) ->
     bondy_registry_entry:entry_type(),
     id(),
     bondy_context:context(),
-    task() | undefined) ->
-    ok | {error, not_found}.
+    task() | undefined) -> ok.
 
 remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -345,14 +340,14 @@ remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
 
     case take_from_tuplespace(Type, Key) of
         {ok, Entry} ->
-            %% We delete the entry from plum_db. This will broadcast the delete
-            %% amongst the nodes in the cluster
-            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
             MaybeFun = maybe_fun(Task, Ctxt),
             maybe_execute(MaybeFun, Entry);
-        {error, not_found} = Error ->
-            Error
-    end.
+        {error, not_found} ->
+            ok
+    end,
+    %% We delete the entry from plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    plum_db:delete(?FULLPREFIX(RealmUri), Key).
 
 
 %% @private
@@ -373,10 +368,6 @@ take_from_tuplespace(Type, Key) ->
             IdxTab = index_table(Type, RealmUri),
             IdxEntry = index_entry(Entry, MP),
             ets:delete_object(IdxTab, IdxEntry),
-
-            %% We delete the entry from plum_db. This will broadcast the delete
-            %% amongst the nodes in the cluster
-            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
             {ok, Entry}
     end.
 
@@ -652,6 +643,7 @@ maybe_add_to_tuplespace(Entry, Now) ->
     case MyNode == Node andalso Created < Now of
         true ->
             %% This entry should have been deleted when node crashed or shutdown
+            _ = lager:debug("removing stale entry ~p", [Entry]),
             _ = remove(Entry),
             ok;
         false ->
