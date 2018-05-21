@@ -88,6 +88,7 @@
 -export([remove/4]).
 -export([remove_all/2]).
 -export([remove_all/3]).
+-export([remove_all/4]).
 -export([start_link/0]).
 
 %% GEN_SERVER CALLBACKS
@@ -223,9 +224,38 @@ remove_all(Type, Ctxt) ->
     task() | undefined) ->
     ok.
 
-remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task) ->
-    SessionId = bondy_context:session_id(Ctxt),
-    Node = bondy_context:node(Ctxt),
+remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
+when is_function(Task, 2) orelse Task == undefined ->
+    case bondy_context:session_id(Ctxt) of
+        undefined ->
+            ok;
+        SessionId ->
+            Node = bondy_context:node(Ctxt),
+            Pattern = bondy_registry_entry:pattern(
+                Type, RealmUri, Node, SessionId, '_', #{}),
+            Tab = partition_table(Type, RealmUri),
+            case ets:match_object(Tab, Pattern, 1) of
+                ?EOT ->
+                    %% There are no entries for this session
+                    ok;
+                {[First], _} ->
+                    %% Use iterator to remove each one
+                    Fun = fun(Entry) -> Task(Entry, Ctxt) end,
+                    do_remove_all(First, Tab, SessionId, Fun)
+            end
+    end;
+
+remove_all(_, _, _) ->
+    ok.
+
+
+-spec remove_all(
+    bondy_registry_entry:entry_type(),
+    RealmUri :: uri(),
+    Node :: atom(),
+    SessionId :: id()) -> [bondy_registry_entry:t()].
+
+remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, SessionId, '_', #{}),
     Tab = partition_table(Type, RealmUri),
@@ -235,11 +265,8 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task) ->
             ok;
         {[First], _} ->
             %% Use iterator to remove each one
-            do_remove_all(First, Tab, Ctxt, Task)
-    end;
-
-remove_all(_, _, _) ->
-    ok.
+            do_remove_all(First, Tab, SessionId, undefined)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -283,7 +310,7 @@ remove(Type, EntryId, Ctxt) ->
     task() | undefined) ->
     ok | {error, not_found}.
 
-remove(Type, EntryId, Ctxt, Task) ->
+remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
@@ -295,7 +322,8 @@ remove(Type, EntryId, Ctxt, Task) ->
             %% We delete the entry from plum_db. This will broadcast the delete
             %% amongst the nodes in the cluster
             ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
-            maybe_execute(Task, Entry, Ctxt);
+            Fun = fun(E) -> Task(E, Ctxt) end,
+            maybe_execute(Fun, Entry);
         {error, not_found} = Error ->
             Error
     end.
@@ -605,11 +633,11 @@ maybe_resolve(Object) ->
 
 
 %% @private
-maybe_execute(undefined, _, _) ->
+maybe_execute(undefined, _) ->
     ok;
 
-maybe_execute(Task, Entry, Ctxt) when is_function(Task, 2) ->
-    _ = Task(bondy_registry_entry:to_details_map(Entry), Ctxt),
+maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
+    _ = Fun(bondy_registry_entry:to_details_map(Entry)),
     ok.
 
 
@@ -617,7 +645,7 @@ maybe_execute(Task, Entry, Ctxt) when is_function(Task, 2) ->
 do_remove_all(?EOT, _, _, _) ->
     ok;
 
-do_remove_all(Term, ETab, Ctxt, Task) ->
+do_remove_all(Term, ETab, SessionId, Fun) ->
     case bondy_registry_entry:is_entry(Term) of
         true ->
             RealmUri = bondy_registry_entry:realm_uri(Term),
@@ -640,17 +668,17 @@ do_remove_all(Term, ETab, Ctxt, Task) ->
             Key = bondy_registry_entry:key(Term),
             ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
 
-            %% Finally, we perform the task if any
-            ok = maybe_execute(Task, Term, Ctxt),
+            %% Finally, we perform the Fun if any
+            ok = maybe_execute(Fun, Term),
 
             %% We continue traversing the ets table
-            do_remove_all(ets:next(ETab, Key), ETab, Ctxt, Task);
+            do_remove_all(ets:next(ETab, Key), ETab, SessionId, Fun);
 
         false ->
             %% Term is entry key
             Sid = bondy_registry_entry:session_id(Term),
-            case bondy_context:session_id(Ctxt) of
-                Sid ->
+            case SessionId =:= Sid orelse SessionId == '_' of
+                true ->
                     case ets:lookup(ETab, Term) of
                         [] ->
                             ok;
@@ -658,9 +686,9 @@ do_remove_all(Term, ETab, Ctxt, Task) ->
                             %% We should not be getting more than one
                             %% with ordered_set and the matching semantics
                             %% we are using
-                            do_remove_all(Entry, ETab, Ctxt, Task)
+                            do_remove_all(Entry, ETab, SessionId, Fun)
                     end;
-                _ ->
+                false ->
                     %% No longer our session
                     ok
             end
