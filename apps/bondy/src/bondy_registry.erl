@@ -151,7 +151,8 @@ start_link() ->
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
-    Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
+    %% Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
+    Pattern = bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, Options),
     Tab = partition_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of

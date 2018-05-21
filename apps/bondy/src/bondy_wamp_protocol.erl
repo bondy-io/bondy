@@ -476,11 +476,13 @@ maybe_auth_challenge(Details, Realm, St0) ->
             end;
         {true, _} ->
             {error, {missing_param, authid}, St0};
+        {false, #{authid := UserId}} ->
+            Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+            {ok, update_context(Ctxt1, St0)};
         {false, _} ->
             TempId = bondy_utils:uuid(),
             Ctxt1 = Ctxt0#{authid => TempId, request_details => Details},
-            St1 = update_context(Ctxt1, St0),
-            {ok, St1}
+            {ok, update_context(Ctxt1, St0)}
     end.
 
 
