@@ -307,11 +307,12 @@ publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
     %% (RFC) Note that the _Publisher_ of an event will never
     %% receive the published event even if the _Publisher_ is
     %% also a _Subscriber_ of the topic published to.
-    Session = bondy_context:session(Ctxt),
-    MatchOpts = #{exclude => [bondy_session:id(Session)]},
+    MatchOpts = case maps:get(exclude_me, Opts, true) of
+        true -> #{exclude => [bondy_context:session_id(Ctxt)]};
+        false -> #{}
+    end,
     RealmUri = bondy_context:realm_uri(Ctxt),
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
-
     Node = bondy_peer_service:mynode(),
     PubId = bondy_utils:get_id(global),
 
@@ -334,11 +335,18 @@ publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
 
     %% We send the event to the subscribers
     Acc1 = publish_fold(Subs, Fun, #{}),
+
+    %% If we have remote subscribers we forward the publication
     Nodes = maps:keys(Acc1) -- [Node],
-    M = wamp_message:publish(ReqId, Opts, TopicUri, Args, Payload),
-    %% We also forward the PubId
-    FOpts = #{publication_id => PubId},
-    ok = forward_publication(Nodes, M, FOpts, Ctxt),
+    ok = case length(Nodes) > 0 of
+        true ->
+            M = wamp_message:publish(ReqId, Opts, TopicUri, Args, Payload),
+            %% We also forward the PubId
+            FOpts = #{publication_id => PubId},
+            forward_publication(Nodes, M, FOpts, Ctxt);
+        false ->
+            ok
+    end,
     {ok, PubId}.
 
 
