@@ -240,7 +240,7 @@ handle_info(
     #state{exchange_ref = {Pid, Ref}} = State0) ->
 
     ok = handle_spec_updates(State0),
-    State1 = State0#state{exchange_ref = undefined},
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
 
 handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
