@@ -84,6 +84,7 @@
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
+-export([remove/1]).
 -export([remove/3]).
 -export([remove/4]).
 -export([remove_all/2]).
@@ -249,6 +250,10 @@ remove_all(_, _, _) ->
     ok.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec remove_all(
     bondy_registry_entry:entry_type(),
     RealmUri :: uri(),
@@ -286,6 +291,25 @@ lookup(Key) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(bondy_registry_entry:t()) -> ok | {error, not_found}.
+
+remove(Entry) ->
+    Type = bondy_registry_entry:type(Entry),
+    Key = bondy_registry_entry:key(Entry),
+    case take_from_tuplespace(Type, Key) of
+        {ok, Entry} ->
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            RealmUri = bondy_registry_entry:realm_uri(Entry),
+            plum_db:delete(?FULLPREFIX(RealmUri), Key);
+        {error, not_found} = Error ->
+            Error
+    end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -297,6 +321,8 @@ lookup(Key) ->
 
 remove(Type, EntryId, Ctxt) ->
     remove(Type, EntryId, Ctxt, undefined).
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -600,6 +626,7 @@ init_from_db(State) ->
 
 %% @private
 init_from_db(Iterator, State) ->
+    Now = calendar:local_time(),
     case plum_db:iterator_done(Iterator) of
         true ->
             ok = plum_db:iterator_close(Iterator),
@@ -609,12 +636,29 @@ init_from_db(Iterator, State) ->
                 {_, '$deleted'} ->
                     ok;
                 {_, Entry} ->
-                    Type = bondy_registry_entry:type(Entry),
-                    _ = add_to_tuplespace(Type, Entry),
-                    ok
+                    maybe_add_to_tuplespace(Entry, Now)
             end,
             init_from_db(plum_db:iterate(Iterator), State)
     end.
+
+
+%% @private
+maybe_add_to_tuplespace(Entry, Now) ->
+    MyNode = bondy_peer_service:mynode(),
+    Type = bondy_registry_entry:type(Entry),
+    Node = bondy_registry_entry:node(Entry),
+    Created = bondy_registry_entry:created(Entry),
+    %% Here we asume nodes keep their names
+    case MyNode == Node andalso Created < Now of
+        true ->
+            %% This entry should have been deleted when node crashed or shutdown
+            _ = remove(Entry),
+            ok;
+        false ->
+            _ = add_to_tuplespace(Type, Entry),
+            ok
+    end.
+
 
 %% @private
 maybe_resolve(Object) ->
