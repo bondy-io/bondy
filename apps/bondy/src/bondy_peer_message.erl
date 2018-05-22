@@ -49,7 +49,7 @@
 -export([from/1]).
 -export([id/1]).
 -export([is_message/1]).
--export([new/3]).
+-export([new/4]).
 -export([peer_node/1]).
 -export([options/1]).
 -export([payload/1]).
@@ -66,18 +66,22 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
-%% -----------------------------------------------------------------------------
-new({RealmUri, Node, _, _} = PeerId, Payload0, Opts) ->
+%% ----------------------------------------------------------------------------
+new(From0, To0, Payload0, Opts) ->
     MyNode = bondy_peer_service:mynode(),
-    Node =/= MyNode orelse error(badarg),
+    element(2, To0) =/= MyNode orelse error(badarg),
 
-    ForwarderId = {RealmUri, MyNode, undefined, undefined},
+    %% FromPid = bondy_utils:pid_to_bin(element(4, From0)),
+    From1 = setelement(4, From0, undefined),
+
+    %% ToPid = bondy_utils:pid_to_bin(element(4, To0)),
+    To1 = setelement(4, To0, undefined),
 
     #peer_message{
         payload = validate_payload(Payload0),
         id = bondy_utils:get_flake_id(),
-        to = PeerId,
-        from = ForwarderId,
+        to = To1,
+        from = From1,
         options = Opts
     }.
 
@@ -164,7 +168,7 @@ validate_payload(#interrupt{} = M) ->
 validate_payload(#invocation{} = M) ->
     M;
 
-validate_payload(#result{} = M) ->
+validate_payload(#yield{} = M) ->
     M;
 
 validate_payload(#publish{} = M) ->

@@ -236,7 +236,7 @@ peek_invocation(InvocationId, Callee) ->
 
 flush(Caller) ->
     %% This will match all promises for SessionId
-    Key = {element(1, Caller), {'_', Caller}, '_'},
+    Key = {element(1, Caller), {'_', setelement(4, Caller, '_')}, '_'},
     _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
     ok.
 
@@ -261,12 +261,14 @@ key(RealmUri, #bondy_rpc_promise{} = P) ->
 
 %% @private
 call_key_pattern(CallId, {RealmUri, _, _, _} = Caller) ->
-    {RealmUri, '_', {CallId, Caller}}.
+    %% We exclude the pid from the match
+    {RealmUri, '_', {CallId, setelement(4, Caller, '_')}}.
 
 
 %% @private
 invocation_key_pattern(InvocationId, {RealmUri, _, _, _} = Callee) ->
-    {RealmUri, {InvocationId, Callee}, '_'}.
+    %% We exclude the pid from the match
+    {RealmUri, {InvocationId, setelement(4, Callee, '_')}, '_'}.
 
 
 %% @private

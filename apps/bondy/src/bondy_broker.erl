@@ -290,13 +290,23 @@ publish(Opts, TopicUri, Args, Payload, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Throws not_authorized
+
 %% @end
 %% -----------------------------------------------------------------------------
 -spec publish(id(), map(), uri(), list(), map(), bondy_context:context()) ->
     {ok, id()}.
 
 publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
+    try
+        do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt)
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
+
+
+%% @private
+do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
 
     %% REVIEW We need to parallelise this based on batches
@@ -422,9 +432,9 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     %% We forward the publication to all cluster peers.
     %% @TODO stop replicating individual remote subscribers and instead
     %% use a per node reference counter
-    RealmUri = bondy_context:realm_uri(Ctxt),
+    Publisher = bondy_context:peer_id(Ctxt),
     {ok, Good, Bad} = bondy_peer_wamp_forwarder:broadcast(
-        RealmUri, Nodes, M, Opts),
+        Publisher, Nodes, M, Opts),
 
     Nodes =:= Good orelse
     bondy_utils:log(

@@ -43,6 +43,7 @@
 -export([call/5]).
 -export([send/2]).
 -export([send/3]).
+-export([send/4]).
 -export([start/0]).
 
 
@@ -89,41 +90,10 @@ send(PeerId, M) ->
 %% -----------------------------------------------------------------------------
 -spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
 
-send({RealmUri, Node, undefined, undefined} = ForwarderRef, M, Opts0)
-when is_binary(RealmUri), is_atom(Node) ->
-    %% We validate the message failing with exception
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-
-    %% We've got a remote peer, so if it is malformed we fail
-    %% otherwise we forward the message to the peer
-    case Node =:= bondy_peer_service:mynode() of
-        true ->
-            error(badarg);
-        false ->
-            %% We validate the opts failing with exception
-            Opts1 = validate_send_opts(Opts0),
-            bondy_peer_wamp_forwarder:forward(ForwarderRef, M, Opts1)
-    end;
-
-send({RealmUri, Node, SessionId, undefined} = PeerId, M, Opts0)
-when is_binary(RealmUri), is_atom(Node), is_integer(SessionId) ->
-    %% We validate the message failing with exception
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-
-    %% We validate the opts failing with exception
-    Opts1 = validate_send_opts(Opts0),
-
-    %% If peer is local we send, otherwise we forward
-    case Node =:= bondy_peer_service:mynode() of
-        true ->
-            Pid = bondy_session:pid(SessionId),
-            do_send({RealmUri, Node, SessionId, Pid}, M, Opts1);
-        false ->
-            bondy_peer_wamp_forwarder:forward(PeerId, M, Opts1)
-    end;
-
 send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
-when is_binary(RealmUri), is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
+when is_binary(RealmUri)
+andalso is_integer(SessionId)
+andalso is_pid(Pid) ->
     %% We validate the message failing with exception
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
 
@@ -134,8 +104,25 @@ when is_binary(RealmUri), is_atom(Node), is_integer(SessionId), is_pid(Pid) ->
         true ->
             do_send(PeerId, M, Opts1);
         false ->
-            bondy_peer_wamp_forwarder:forward(
-                {RealmUri, Node, SessionId, pid_to_list(Pid)}, M, Opts1)
+            error(not_my_node)
+    end.
+
+
+-spec send(peer_id(), peer_id(), wamp_message(), map()) -> ok | no_return().
+
+send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
+when is_binary(RealmUri) ->
+    %% We validate the message failing with exception
+    wamp_message:is_message(M) orelse error(invalid_wamp_message),
+
+    %% We validate the opts failing with exception
+    Opts1 = validate_send_opts(Opts0),
+
+    case Node =:= bondy_peer_service:mynode() of
+        true ->
+            do_send(To, M, Opts1);
+        false ->
+            bondy_peer_wamp_forwarder:forward(From, To, M, Opts1)
     end.
 
 

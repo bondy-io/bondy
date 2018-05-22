@@ -207,7 +207,7 @@ handle_peer_message(#call{} = M, PeerId, From, Opts) ->
 handle_peer_message(#invocation{} = M, PeerId, From, Opts) ->
     bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
 
-handle_peer_message(#result{} = M, PeerId, From, Opts) ->
+handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
     bondy_dealer:handle_peer_message(M, PeerId, From, Opts).
 
 

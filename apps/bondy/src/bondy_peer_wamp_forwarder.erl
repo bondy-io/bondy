@@ -88,12 +88,12 @@
 -define(FORWARD_TIMEOUT, 5000).
 
 -record(peer_ack, {
-    from        ::  {uri(), Node :: atom()},
+    from        ::  peer_id(),
     id          ::  id()
 }).
 
 -record(peer_error, {
-    from        ::  {uri(), Node :: atom()},
+    from        ::  peer_id(),
     id          ::  id(),
     reason      ::  any()
 }).
@@ -105,9 +105,9 @@
 
 %% API
 -export([start_link/0]).
--export([forward/3]).
+-export([forward/4]).
 -export([broadcast/4]).
--export([async_forward/3]).
+-export([async_forward/4]).
 -export([receive_ack/2]).
 
 %% GEN_SERVER CALLBACKS
@@ -153,11 +153,11 @@ start_link() ->
 %% This is equivalent to call async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(remote_peer_id(), wamp_message(), map()) ->
+-spec forward(remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
     ok | no_return().
 
-forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
-    {ok, Id} = async_forward(PeerId, Mssg, Opts),
+forward(From, To, Mssg, Opts) ->
+    {ok, Id} = async_forward(From, To, Mssg, Opts),
     Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
     receive_ack(Id, Timeout).
 
@@ -166,18 +166,19 @@ forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec async_forward(remote_peer_id(), wamp_message(), map()) ->
+-spec async_forward(
+    remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
     {ok, id()} | no_return().
 
-async_forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
+async_forward(From, To, Mssg, Opts) ->
     %% Remote monitoring is not possible given no connections are maintained
     %% directly between nodes.
     %% If remote monitoring is required, Partisan can additionally connect
     %% nodes over Distributed Erlang to provide this functionality but this will
     %% defeat the purpose of using Partisan in the first place.
-    PeerMssg = bondy_peer_message:new(PeerId, Mssg, Opts),
+    PeerMssg = bondy_peer_message:new(From, To, Mssg, Opts),
     Id = bondy_peer_message:id(PeerMssg),
-    BinPid = pid_to_bin(self()),
+    BinPid = bondy_utils:pid_to_bin(self()),
 
     ok = gen_server:cast(?MODULE, {forward, PeerMssg, BinPid}),
     {ok, Id}.
@@ -187,17 +188,18 @@ async_forward(PeerId, Mssg, Opts) when is_tuple(PeerId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec broadcast(uri(), [node()], wamp_message(), map()) ->
+-spec broadcast(peer_id(), [node()], wamp_message(), map()) ->
     {ok, Good :: [node()], Bad :: [node()]}.
 
-broadcast(RealmUri, Nodes, M, Opts) ->
+broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
     %% We forward the message to the other nodes
     IdNodes = [
-        {
-            bondy_peer_wamp_forwarder:async_forward(
-                {RealmUri, Node, undefined, undefined}, M, Opts),
-            Node
-        } || Node <- Nodes
+        begin
+            To = {RealmUri, Node, undefined, undefined},
+            {ok, Id} = async_forward(From, To, M, Opts),
+            {Id, Node}
+        end
+        || Node <- Nodes
     ],
 
     Timeout = maps:get(timeout, Opts, 5000),
@@ -272,7 +274,7 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
             %% We use the pid-to-bin trick since we are just waiting for an ack
             %% in case the process died we are not interested in queueing the
             %% ack on behalf of the session (session_resumption)
-            Pid = bin_to_pid(BinPid),
+            Pid = bondy_utils:bin_to_pid(BinPid),
             Pid ! AckOrError;
         false ->
             _ = lager:error(
@@ -403,12 +405,3 @@ peer_error(Reason, Mssg) ->
         reason = Reason
     }.
 
-
-%% @private
-pid_to_bin(Pid) ->
-    list_to_binary(pid_to_list(Pid)).
-
-
-%% @private
-bin_to_pid(Bin) ->
-    list_to_pid(binary_to_list(Bin)).

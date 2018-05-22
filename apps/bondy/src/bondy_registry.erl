@@ -152,7 +152,17 @@ add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
     %% Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
-    Pattern = bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_'),
+    Pattern = case Type of
+        registration ->
+            %% A session can register a procedure multiple times if
+            %% shared_registration is enabled
+            %% So we do not match SessionId
+            bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_');
+        subscription ->
+            {RealmUri, Node, SessionId, _} = PeerId,
+            bondy_registry_entry:pattern(
+                Type, RealmUri, Node, SessionId, Uri, '_')
+    end,
     Tab = partition_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
@@ -160,7 +170,7 @@ add(Type, Uri, Options, Ctxt) ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
             Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
-            do_add(Type, Entry);
+            do_add(Entry);
 
         [Entry] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
@@ -194,7 +204,7 @@ add(Type, Uri, Options, Ctxt) ->
                 true ->
                     NewEntry = bondy_registry_entry:new(
                         Type, PeerId, Uri, Options),
-                    do_add(Type, NewEntry);
+                    do_add(NewEntry);
                 false ->
                     Map = bondy_registry_entry:to_details_map(Entry),
                     {error, {already_exists, Map}}
@@ -298,10 +308,9 @@ lookup(Key) ->
 -spec remove(bondy_registry_entry:t()) -> ok.
 
 remove(Entry) ->
-    Type = bondy_registry_entry:type(Entry),
     Key = bondy_registry_entry:key(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    _ = take_from_tuplespace(Type, Key),
+    _ = take_from_tuplespace(Key),
     %% We delete the entry from plum_db. This will broadcast the delete
     %% amongst the nodes in the cluster
     plum_db:delete(?FULLPREFIX(RealmUri), Key).
@@ -338,7 +347,7 @@ remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
     Key = bondy_registry_entry:key_pattern(
         Type, RealmUri, Node, SessionId, EntryId),
 
-    case take_from_tuplespace(Type, Key) of
+    case take_from_tuplespace(Key) of
         {ok, Entry} ->
             MaybeFun = maybe_fun(Task, Ctxt),
             maybe_execute(MaybeFun, Entry);
@@ -351,8 +360,9 @@ remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
 
 
 %% @private
-take_from_tuplespace(Type, Key) ->
+take_from_tuplespace(Key) ->
     RealmUri = bondy_registry_entry:realm_uri(Key),
+    Type = bondy_registry_entry:type(Key),
     Tab = partition_table(Type, RealmUri),
     case ets:take(Tab, Key) of
         [] ->
@@ -575,9 +585,9 @@ handle_info(
         false ->
             case maybe_resolve(Object) of
                 '$deleted' ->
-                    _ = take_from_tuplespace(registration, Key);
+                    _ = take_from_tuplespace(Key);
                 Entry ->
-                    add_to_tuplespace(registration, Entry)
+                    add_to_tuplespace(Entry)
             end
     end,
     {noreply, State};
@@ -636,7 +646,6 @@ init_from_db(Iterator, State) ->
 %% @private
 maybe_add_to_tuplespace(Entry, Now) ->
     MyNode = bondy_peer_service:mynode(),
-    Type = bondy_registry_entry:type(Entry),
     Node = bondy_registry_entry:node(Entry),
     Created = bondy_registry_entry:created(Entry),
     %% Here we asume nodes keep their names
@@ -647,7 +656,7 @@ maybe_add_to_tuplespace(Entry, Now) ->
             _ = remove(Entry),
             ok;
         false ->
-            _ = add_to_tuplespace(Type, Entry),
+            _ = add_to_tuplespace(Entry),
             ok
     end.
 
@@ -772,18 +781,19 @@ index_table(registration, RealmUri) ->
 
 
 %% @private
--spec do_add(bondy_registry_entry:entry_type(), bondy_registry_entry:t()) ->
+-spec do_add(bondy_registry_entry:t()) ->
     {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}.
 
-do_add(Type, Entry) ->
+do_add(Entry) ->
     ok = add_to_db(Entry),
-    add_to_tuplespace(Type, Entry).
+    add_to_tuplespace(Entry).
 
 
 %% @private
-add_to_tuplespace(Type, Entry) ->
+add_to_tuplespace(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
+    Type = bondy_registry_entry:type(Entry),
 
     %% We insert the entry in tuplespace
     SSTab = partition_table(Type, RealmUri),
