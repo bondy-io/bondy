@@ -283,6 +283,10 @@ handle_outbound(T, M, St) ->
             {stop, St#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
             self() ! {stop, <<"Router dropped session.">>},
+            reply(T, [Bin], St#state{protocol_state = PSt});
+        {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
+            erlang:send_after(
+                Time, self(), {stop, <<"Router dropped session.">>}),
             reply(T, [Bin], St#state{protocol_state = PSt})
     end.
 

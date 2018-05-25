@@ -57,7 +57,7 @@ start(_Type, Args) ->
 
 
 prep_stop(_State) ->
-    bondy_router:shutdown().
+    stop_router_services().
 
 
 stop(_State) ->
@@ -74,26 +74,6 @@ vsn() ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
-maybe_init_bondy_realm() ->
-    %% TODO Check what happens when we join the cluster and bondy realm was
-    %% already defined in my peers...we should not use LWW here.
-    _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
-    ok.
-
-
-%% @private
-maybe_start_router_services() ->
-    case bondy_config:is_router() of
-        true ->
-            ok = bondy_wamp_raw_handler:start_listeners(),
-            _ = bondy_api_gateway:start_admin_listeners(),
-            _ = bondy_api_gateway:start_listeners();
-        false ->
-            ok
-    end.
 
 
 %% @private
@@ -118,5 +98,52 @@ print_welcome_message() ->
     io:format(
         "******************************************~n"
         "~nLeapsight Bondy v~s~n"
+        "~nDocumentation: http://getbondy.com"
         "******************************************~n",
         [Vsn]).
+
+
+%% @private
+maybe_init_bondy_realm() ->
+    %% TODO Check what happens when we join the cluster and bondy realm was
+    %% already defined in my peers...we should not use LWW here.
+    _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
+    ok.
+
+
+%% @private
+maybe_start_router_services() ->
+    case bondy_config:is_router() of
+        true ->
+            ok = bondy_wamp_raw_handler:start_listeners(),
+            _ = bondy_api_gateway:start_admin_listeners(),
+            _ = bondy_api_gateway:start_listeners();
+        false ->
+            ok
+    end.
+
+
+stop_router_services() ->
+    _ = lager:info("Initiating shutdown"),
+    %% We stop accepting new connections on HTTP/Websockets
+    ok = bondy_api_gateway:suspend_listeners(),
+    %% We stop accepting new connections on TCP/TLS
+    ok = bondy_wamp_raw_handler:suspend_listeners(),
+
+    %% We ask the router to shutdown which will send a goodbye to all sessions
+    ok = bondy_router:shutdown(),
+
+    %% We sleep for a minute to allow all sessions to terminate gracefully
+    Time = 30000,
+    _ = lager:info(
+        "Awaiting for ~p secs for clients gracefull shutdown.",
+        [trunc(Time/1000)]
+    ),
+    ok = timer:sleep(Time),
+    _ = lager:info("Terminating all client connections"),
+
+    %% We force the HTTP/WS connections to stop
+    ok = bondy_api_gateway:stop_listeners(),
+    %% We force the TCP and TLS connections to stop
+    ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.

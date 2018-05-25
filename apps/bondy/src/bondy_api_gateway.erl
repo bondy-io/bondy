@@ -49,13 +49,19 @@
 %% API
 -export([delete/1]).
 -export([dispatch_table/1]).
--export([rebuild_dispatch_tables/0]).
 -export([list/0]).
 -export([load/1]).
 -export([lookup/1]).
+-export([rebuild_dispatch_tables/0]).
+-export([resume_admin_listeners/0]).
+-export([resume_listeners/0]).
 -export([start_admin_listeners/0]).
--export([start_listeners/0]).
 -export([start_link/0]).
+-export([start_listeners/0]).
+-export([stop_admin_listeners/0]).
+-export([stop_listeners/0]).
+-export([suspend_admin_listeners/0]).
+-export([suspend_listeners/0]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -85,8 +91,40 @@ start_link() ->
 %% {@link start_admin_listeners()} for that.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec start_listeners() -> ok.
+
 start_listeners() ->
-    gen_server:call(?MODULE, start_listeners).
+    gen_server:call(?MODULE, {start_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_listeners() -> ok.
+
+suspend_listeners() ->
+    gen_server:call(?MODULE, {suspend_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_listeners() -> ok.
+
+resume_listeners() ->
+    gen_server:call(?MODULE, {resume_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_listeners() -> ok.
+
+stop_listeners() ->
+    gen_server:call(?MODULE, {stop_listeners, public}).
 
 
 %% -----------------------------------------------------------------------------
@@ -94,7 +132,37 @@ start_listeners() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start_admin_listeners() ->
-    gen_server:call(?MODULE, start_admin_listeners).
+    gen_server:call(?MODULE, {start_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_admin_listeners() -> ok.
+
+stop_admin_listeners() ->
+    gen_server:call(?MODULE, {stop_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_admin_listeners() -> ok.
+
+suspend_admin_listeners() ->
+    gen_server:call(?MODULE, {suspend_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_admin_listeners() -> ok.
+
+resume_admin_listeners() ->
+    gen_server:call(?MODULE, {resume_listeners, admin}).
 
 
 %% -----------------------------------------------------------------------------
@@ -194,12 +262,20 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call(start_listeners, _From, State) ->
-    Res = do_start_listeners(),
+handle_call({start_listeners, Type}, _From, State) ->
+    Res = do_start_listeners(Type),
     {reply, Res, State};
 
-handle_call(start_admin_listeners, _From, State) ->
-    Res = do_start_admin_listeners(),
+handle_call({suspend_listeners, Type}, _From, State) ->
+    Res = do_suspend_listeners(Type),
+    {reply, Res, State};
+
+handle_call({resume_listeners, Type}, _From, State) ->
+    Res = do_resume_listeners(Type),
+    {reply, Res, State};
+
+handle_call({stop_listeners, Type}, _From, State) ->
+    Res = do_stop_listeners(Type),
     {reply, Res, State};
 
 handle_call({load, Map}, _From, State) ->
@@ -287,8 +363,9 @@ unsubscribe() ->
     _ = plum_db_events:unsubscribe(object_update),
     ok.
 
+
 %% @private
-do_start_listeners() ->
+do_start_listeners(public) ->
     DTables = case load_dispatch_tables() of
         [] ->
             [
@@ -299,18 +376,51 @@ do_start_listeners() ->
             L
     end,
     _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
+    ok;
+
+do_start_listeners(admin) ->
+    DTables = parse_specs([admin_spec()], admin_base_routes()),
+    _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok.
 
 
 %% @private
-do_start_admin_listeners() ->
-    _ = [
-        start_admin_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
+do_suspend_listeners(public) ->
+    catch ranch:suspend_listener(?HTTP),
+    catch ranch:suspend_listener(?HTTPS),
+    ok;
+
+do_suspend_listeners(admin) ->
+    catch ranch:suspend_listener(?ADMIN_HTTP),
+    catch ranch:suspend_listener(?ADMIN_HTTPS),
     ok.
 
 
+%% @private
+do_resume_listeners(public) ->
+    catch ranch:resume_listener(?HTTP),
+    catch ranch:resume_listener(?HTTPS),
+    ok;
 
+do_resume_listeners(admin) ->
+    catch ranch:resume_listener(?ADMIN_HTTP),
+    catch ranch:resume_listener(?ADMIN_HTTPS),
+    ok.
+
+
+%% @private
+do_stop_listeners(public) ->
+    catch cowboy:stop_listener(?HTTP),
+    catch cowboy:stop_listener(?HTTPS),
+    ok;
+
+do_stop_listeners(admin) ->
+    catch cowboy:stop_listener(?ADMIN_HTTP),
+    catch cowboy:stop_listener(?ADMIN_HTTPS),
+    ok.
+
+
+%% @private
 load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{<<"id">> := Id} = Spec} ->

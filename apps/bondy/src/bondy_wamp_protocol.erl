@@ -26,6 +26,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(SHUTDOWN_TIMEOUT, 5000).
 -define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
 
 -record(wamp_state, {
@@ -177,7 +178,9 @@ handle_inbound(Data, St) ->
 -spec handle_outbound(wamp_message:message(), state()) ->
     {ok, binary(), state()}
     | {stop, state()}
-    | {stop, binary(), state()}.
+    | {stop, binary(), state()}
+    | {stop, binary(), state(), After :: non_neg_integer()}.
+
 
 handle_outbound(#result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
@@ -199,7 +202,7 @@ handle_outbound(#goodbye{} = M, St0) ->
     ok = bondy_stats:update(M, St0#wamp_state.context),
     Bin = wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{state_name = shutting_down},
-    {ok, Bin, St1};
+    {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
 
 handle_outbound(M, St) ->
     case wamp_message:is_message(M) of

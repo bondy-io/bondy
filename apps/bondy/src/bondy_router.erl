@@ -126,7 +126,6 @@
 %% @end
 %% -----------------------------------------------------------------------------
 shutdown() ->
-    _ = lager:info("Shutdown procedure initiated"),
     M = wamp_message:goodbye(
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
@@ -134,12 +133,11 @@ shutdown() ->
     Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
 
     try
-        _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100)),
-        _ = lager:info("Shutdown procedure finished")
+        _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
     catch
         _:Reason ->
-            _ = lager:info(
-                "Shutdown procedure finished with error; reason=~p", [Reason])
+            _ = lager:error(
+                "Error while shutting down router; reason=~p", [Reason])
     end,
 
     ok.

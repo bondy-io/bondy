@@ -73,8 +73,12 @@
                                 | serializer_unsupported
                                 | use_of_reserved_bits.
 
+
 -export([start_link/4]).
 -export([start_listeners/0]).
+-export([suspend_listeners/0]).
+-export([resume_listeners/0]).
+-export([stop_listeners/0]).
 
 
 -export([init/1]).
@@ -104,42 +108,48 @@ start_listeners() ->
     start_listeners([?TCP, ?TLS]).
 
 
-%% @private
-start_listeners([]) ->
-    ok;
 
-start_listeners([H|T]) ->
-    {ok, Opts} = application:get_env(bondy, H),
-    case lists:keyfind(enabled, 1, Opts) of
-        {_, true} ->
-            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-            {_, Port} = lists:keyfind(port, 1, Opts),
-            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
-            TransportOpts = case H == ?TLS of
-                true ->
-                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
-                    Files;
-                false ->
-                    []
-            end,
-            {ok, _} = ranch:start_listener(
-                H,
-                PoolSize,
-                ranch_mod(H),
-                [{port, Port}],
-                bondy_wamp_raw_handler,
-                TransportOpts
-            ),
-            _ = ranch:set_max_connections(H, MaxConns),
-            start_listeners(T);
-        {_, false} ->
-            start_listeners(T)
-    end.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_listeners() -> ok.
+
+stop_listeners() ->
+    catch ranch:stop_listener(?TCP),
+    catch ranch:stop_listener(?TLS),
+    ok.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_listeners() -> ok.
+
+suspend_listeners() ->
+    catch ranch:suspend_listener(?TCP),
+    catch ranch:suspend_listener(?TLS),
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_listeners() -> ok.
+
+resume_listeners() ->
+    catch ranch:resume_listener(?TCP),
+    catch ranch:resume_listener(?TLS),
+    ok.
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
 
@@ -238,7 +248,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
     {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
-    _ = log(debug, "Timeout. Sending ping", [], State0),
+    _ = log(debug, "Timeout. Sending first ping", [], State0),
     {ok, State1} = send_ping(State0),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timet
     {noreply, State1};
@@ -261,6 +271,9 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {noreply, State1};
 
+handle_info({stop, Reason}, State) ->
+    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    {stop, normal, State};
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
@@ -292,6 +305,39 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+start_listeners([]) ->
+    ok;
+
+start_listeners([H|T]) ->
+    {ok, Opts} = application:get_env(bondy, H),
+    case lists:keyfind(enabled, 1, Opts) of
+        {_, true} ->
+            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+            {_, Port} = lists:keyfind(port, 1, Opts),
+            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
+            TransportOpts = case H == ?TLS of
+                true ->
+                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
+                    Files;
+                false ->
+                    []
+            end,
+            {ok, _} = ranch:start_listener(
+                H,
+                PoolSize,
+                ranch_mod(H),
+                [{port, Port}],
+                bondy_wamp_raw_handler,
+                TransportOpts
+            ),
+            _ = ranch:set_max_connections(H, MaxConns),
+            start_listeners(T);
+        {_, false} ->
+            start_listeners(T)
+    end.
 
 
 %% @private
@@ -415,7 +461,12 @@ handle_outbound(M, St0) ->
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
             ok = send(Bin, St0#state{protocol_state = PSt}),
-            {stop, normal, St0#state{protocol_state = PSt}}
+            {stop, normal, St0#state{protocol_state = PSt}};
+        {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
+            erlang:send_after(
+                Time, self(), {stop, <<"Router dropped session.">>}),
+            ok = send(Bin, St0#state{protocol_state = PSt}),
+            {noreply, St0#state{protocol_state = PSt}}
     end.
 
 
