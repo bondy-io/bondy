@@ -108,12 +108,42 @@
 -export([handle_peer_message/1]).
 -export([roles/0]).
 -export([agent/0]).
+-export([shutdown/0]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sends a GOODBYE message to all existing client connections.
+%% The client should reply with another GOODBYE within the configured time and
+%% when it does or on timeout, Bondy will close the connection triggering the
+%% cleanup of all the client sessions.
+%% @end
+%% -----------------------------------------------------------------------------
+shutdown() ->
+    _ = lager:info("Shutdown procedure initiated"),
+    M = wamp_message:goodbye(
+        #{message => <<"Router is shutting down">>},
+        ?WAMP_SYSTEM_SHUTDOWN
+    ),
+    Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
+
+    try
+        _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100)),
+        _ = lager:info("Shutdown procedure finished")
+    catch
+        _:Reason ->
+            _ = lager:info(
+                "Shutdown procedure finished with error; reason=~p", [Reason])
+    end,
+
+    ok.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -240,19 +270,6 @@ acknowledge_message(_) ->
 
 
 %% @private
-do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
-    %% The client is replying to our goodbye() message, we stop.
-    {stop, Ctxt};
-
-do_forward(#goodbye{}, Ctxt) ->
-    %% Goodbye initiated by client, we reply with goodbye() and stop.
-    %% _ = lager:info(
-    %%     "Session closed per client request, session=~p, reason=~p",
-    %%     [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
-    Reply = wamp_message:goodbye(
-        #{message => <<"Session closed by client">>}, ?WAMP_GOODBYE_AND_OUT),
-    {stop, Reply, Ctxt};
-
 do_forward(#register{} = M, Ctxt) ->
     %% This is a sync call as it is an easy way to preserve RPC ordering as
     %% defined by RFC 11.2:

@@ -41,6 +41,7 @@
 -export([mynode/0]).
 -export([myself/0]).
 -export([peer_service/0]).
+-export([peers/0]).
 -export([stop/0]).
 -export([stop/1]).
 
@@ -167,6 +168,17 @@ forward_message(Name, Channel, ServerRef, Message, Opts) ->
 %% -----------------------------------------------------------------------------
 members() ->
     do(members, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The list of cluster members excluding ourselves
+%% @end
+%% -----------------------------------------------------------------------------
+peers() ->
+    case do(members, []) of
+        {ok, [_]} -> {ok, []};
+        {ok, L} -> {ok, L -- [mynode()]}
+    end.
 
 
 %% -----------------------------------------------------------------------------

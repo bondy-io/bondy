@@ -17,30 +17,50 @@
 %% =============================================================================
 
 -module(bondy_utils).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--export([merge_map_flags/2]).
--export([get_id/1]).
+-export([bin_to_pid/1]).
+-export([decode/2]).
+-export([encode/2]).
+-export([foreach/2]).
+-export([generate_fragment/1]).
 -export([get_flake_id/0]).
+-export([get_id/1]).
 -export([get_nonce/0]).
 -export([get_random_string/2]).
--export([timeout/1]).
--export([maybe_encode/2]).
--export([encode/2]).
--export([decode/2]).
--export([uuid/0]).
 -export([is_uuid/1]).
--export([to_binary_keys/1]).
--export([generate_fragment/1]).
 -export([log/5]).
+-export([maybe_encode/2]).
+-export([merge_map_flags/2]).
 -export([pid_to_bin/1]).
--export([bin_to_pid/1]).
+-export([timeout/1]).
+-export([to_binary_keys/1]).
+-export([uuid/0]).
 
 
 
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec foreach(
+    fun((Elem :: term()) -> term()), ?EOT | {[term()], any()} | any()) -> ok.
+
+foreach(_, ?EOT) ->
+    ok;
+
+foreach(Fun, {L, Cont}) ->
+    ok = lists:foreach(Fun, L),
+    foreach(Fun, Cont);
+
+foreach(Fun, Cont) when is_function(Cont, 0) ->
+    foreach(Fun, Cont()).
 
 
 %% -----------------------------------------------------------------------------

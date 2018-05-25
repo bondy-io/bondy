@@ -28,22 +28,36 @@
 
 -export([start/2]).
 -export([stop/1]).
+-export([prep_stop/1]).
 -export([vsn/0]).
 
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
 start(_Type, Args) ->
+    ok = print_welcome_message(),
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = setup(Args),
+            ok = setup_env(Args),
             ok = bondy_router_worker:start_pool(),
             ok = bondy_stats:init(),
-            ok = maybe_init_bondy_realm(),
-            ok = maybe_start_router_services(),
             ok = bondy_cli:register(),
             ok = setup_partisan(),
+            ok = maybe_init_bondy_realm(),
+            ok = maybe_start_router_services(),
             {ok, Pid};
         Other  ->
             Other
     end.
+
+
+prep_stop(_State) ->
+    bondy_router:shutdown().
 
 
 stop(_State) ->
@@ -51,14 +65,15 @@ stop(_State) ->
 
 
 -spec vsn() -> list().
-
 vsn() ->
     application:get_env(bondy, vsn, "undefined").
+
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
 
 
 %% @private
@@ -82,7 +97,7 @@ maybe_start_router_services() ->
 
 
 %% @private
-setup(Args) ->
+setup_env(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->
             application:set_env(bondy, vsn, Vsn);
@@ -95,3 +110,13 @@ setup(Args) ->
 setup_partisan() ->
     Channels0 = partisan_config:get(channels, []),
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
+
+
+%% private
+print_welcome_message() ->
+    {ok, Vsn} = application:get_key(bondy, vsn),
+    io:format(
+        "******************************************~n"
+        "~nLeapsight Bondy v~s~n"
+        "******************************************~n",
+        [Vsn]).

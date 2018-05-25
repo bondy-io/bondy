@@ -39,7 +39,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(SESSION_TABLE_NAME, ?MODULE).
+-define(SESSION_SPACE_NAME, ?MODULE).
 -define(SESSION_SEQ_POS, #session.seq).
 -define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
 -define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
@@ -149,29 +149,28 @@
 
 -export_type([peer/0]).
 
-
-
 -export([close/1]).
 -export([created/1]).
 -export([fetch/1]).
 -export([id/1]).
 -export([incr_seq/1]).
--export([lookup/1]).
 -export([list/0]).
 -export([list/1]).
--export([list_peers/0]).
+-export([list_peer_ids/1]).
+-export([list_peer_ids/2]).
+-export([lookup/1]).
 -export([new/3]).
 -export([new/4]).
 -export([open/3]).
 -export([open/4]).
--export([peer_id/1]).
 -export([peer/1]).
+-export([peer_id/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([roles/1]).
 -export([size/0]).
--export([update/1]).
 -export([to_details_map/1]).
+-export([update/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -375,7 +374,7 @@ incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
-    Tab = tuplespace:locate_table(?SESSION_TABLE_NAME, SessionId),
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, SessionId),
     ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
@@ -387,7 +386,7 @@ incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
 -spec size() -> non_neg_integer().
 
 size() ->
-    tuplespace:size(?SESSION_TABLE_NAME).
+    tuplespace:size(?SESSION_SPACE_NAME).
 
 
 %% -----------------------------------------------------------------------------
@@ -439,11 +438,11 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 list(#{return := details_map}) ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
     [to_details_map(X) || T <- Tabs, X <- ets:tab2list(T)];
 
 list(_) ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
 
@@ -451,26 +450,18 @@ list(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-%% @TODO provide a limit and itereate on each table providing a custom
-%% continuation
-list_peers() ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
-    Head = #session{
-        id = '$1',
-        realm_uri = '$2',
-        pid = '$3',
-        peer = '$4',
-        agent = '_',
-        seq = '_',
-        roles = '_',
-        authid = '_',
-        created = '_',
-        expires_in = '_',
-        rate = '_',
-        quota = '_'
-    },
-    MS = [{ Head, [], [{{'$1', '$2', '$3', '$4'}}] }],
-    lists:append([ets:select(T, MS) || T <- Tabs]).
+list_peer_ids(N) ->
+    list_peer_ids('_', N).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
+    do_list_peer_ids(Tabs, RealmUri, N).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -562,7 +553,7 @@ parse_roles([_|T], Roles) ->
 
 %% @private
 table(Id) ->
-    tuplespace:locate_table(?SESSION_TABLE_NAME, Id).
+    tuplespace:locate_table(?SESSION_SPACE_NAME, Id).
 
 
 %% @private
@@ -577,3 +568,63 @@ do_lookup(Id) ->
             {error, not_found}
     end.
 
+
+
+%% @private
+do_list_peer_ids([], _, _) ->
+    ?EOT;
+
+do_list_peer_ids([Tab | Tabs], RealmUri, N)
+when is_binary(RealmUri) orelse RealmUri == '_' ->
+    Pattern = #session{
+        id = '$3',
+        realm_uri = '$1',
+        node = '$2',
+        pid = '$4',
+        peer = '_',
+        agent = '_',
+        seq = '_',
+        roles = '_',
+        authid = '_',
+        authrole = '_',
+        authmethod = '_',
+        created = '_',
+        expires_in = '_',
+        rate = '_',
+        quota = '_'
+    },
+    Conds = case RealmUri of
+        '_' -> [];
+        _ ->  [{'=:=', '$1', RealmUri}]
+    end,
+    Projection = [{{'$1', '$2', '$3', '$4'}}],
+    MS = [{Pattern, Conds, Projection}],
+
+    case ets:select(Tab, MS, N) of
+        {L, Cont} ->
+            FunCont = fun() ->
+                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+            end,
+           {L, FunCont};
+        ?EOT ->
+            do_list_peer_ids(Tabs, RealmUri, N)
+    end.
+
+
+%% @private
+do_list_peer_ids({continuation, [], _, _, ?EOT}) ->
+    ?EOT;
+
+do_list_peer_ids({continuation, Tabs, RealmUri, N, ?EOT}) ->
+    do_list_peer_ids(Tabs, RealmUri, N);
+
+do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont}) ->
+    case ets:select(Cont) of
+        ?EOT ->
+            ?EOT;
+        {L, Cont} ->
+            FunCont = fun() ->
+                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+            end,
+            {L, FunCont}
+    end.

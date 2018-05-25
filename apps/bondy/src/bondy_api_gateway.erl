@@ -183,9 +183,9 @@ delete(Id) when is_binary(Id) ->
 
 
 init([]) ->
-    %% We subscribe to change notifications in plum_db_events, so we get updates
-    %% to API Specs coming from another node so that we recompile the Cowboy
-    %% dispatch tables
+    %% We subscribe to change notifications in plum_db_events, we are
+    %% interested in updates to API Specs coming from another node so that we
+    %% recompile them and generate the Cowboy dispatch tables
     ok = plum_db_events:subscribe(exchange_started),
     ok = plum_db_events:subscribe(exchange_finished),
     MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],

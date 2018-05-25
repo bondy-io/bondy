@@ -175,8 +175,10 @@ handle_message(#publish{} = M, Ctxt) ->
                 [maps:get(<<"message">>, ErrorMap)],
                 ErrorMap
             ),
+            %% TODO publish metaevent
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         {error, _} ->
+            %% TODO publish metaevent
             ok
     end.
 
@@ -301,6 +303,7 @@ publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
         do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt)
     catch
         _:Reason ->
+            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
             {error, Reason}
     end.
 
@@ -317,10 +320,40 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
     %% (RFC) Note that the _Publisher_ of an event will never
     %% receive the published event even if the _Publisher_ is
     %% also a _Subscriber_ of the topic published to.
-    MatchOpts = case maps:get(exclude_me, Opts, true) of
-        true -> #{exclude => [bondy_context:session_id(Ctxt)]};
-        false -> #{}
+
+    %% An (authorized) Subscriber to topic T will receive an event published to
+    %% T if and only if all of the following statements hold true:
+    %% * if there is an eligible attribute present, the Subscriber's sessionid
+    %% is in this list
+    %% * if there is an eligible_authid attribute present, the
+    %% Subscriber's authid is in this list
+    %% * if there is an eligible_authrole attribute present, the Subscriber's
+    %% authrole is in this list
+    %% * if there is an exclude attribute present, the Subscriber's sessionid is NOT in this list
+    %% * if there is an exclude_authid attribute present, the Subscriber's
+    %% authid is NOT in this list
+    %% * if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list
+
+    %% Subscriber Blacklisting: we only support sessionIds for now
+    Exclusions0 = maps:get(exclude, Opts, []),
+
+    %% Publisher exclusion: enabled by default
+    Exclusions = case maps:get(exclude_me, Opts, true) of
+        true -> [bondy_context:session_id(Ctxt) | Exclusions0];
+        false -> Exclusions0
     end,
+    MatchOpts0 = #{exclude => Exclusions},
+
+    %% Subscriber Whitelisting: we only support sessionIds for now
+    MatchOpts = case maps:find(eligible, Opts) of
+        error ->
+            MatchOpts0;
+        {ok, L} when is_list(L) ->
+            Eligible = sets:subtract(
+                sets:from_list(L), sets:from_list(Exclusions)),
+            MatchOpts0#{eligible => sets:to_list(Eligible)}
+    end,
+
     RealmUri = bondy_context:realm_uri(Ctxt),
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
     Node = bondy_peer_service:mynode(),
@@ -347,17 +380,25 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
     Acc1 = publish_fold(Subs, Fun, #{}),
 
     %% If we have remote subscribers we forward the publication
-    Nodes = maps:keys(Acc1) -- [Node],
-    ok = case length(Nodes) > 0 of
-        true ->
-            M = wamp_message:publish(ReqId, Opts, TopicUri, Args, Payload),
-            %% We also forward the PubId
-            FOpts = #{publication_id => PubId},
-            forward_publication(Nodes, M, FOpts, Ctxt);
-        false ->
-            ok
-    end,
-    {ok, PubId}.
+    case bondy_peer_service:peers() of
+        {ok, []} ->
+            {ok, PubId};
+        {ok, Peers} ->
+            Nodes = maps:keys(Acc1) -- [Node],
+            Set = sets:intersection(
+                sets:from_list(Peers), sets:from_list(Nodes)),
+            ok = case sets:size(Set) > 0 of
+                true ->
+                    M = wamp_message:publish(
+                        ReqId, Opts, TopicUri, Args, Payload),
+                    %% We also forward the PubId
+                    FOpts = #{publication_id => PubId},
+                    forward_publication(sets:to_list(Set), M, FOpts, Ctxt);
+                false ->
+                    ok
+            end,
+            {ok, PubId}
+    end.
 
 
 

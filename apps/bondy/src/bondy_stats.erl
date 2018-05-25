@@ -153,6 +153,7 @@ socket_closed(Protocol, Transport, Duration) ->
 socket_error(Protocol, Transport) ->
     bondy_prometheus:socket_error(Protocol, Transport).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end

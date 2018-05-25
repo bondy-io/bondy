@@ -47,8 +47,6 @@
     authmethod => binary(),
     authid => binary(),
     roles => map(),
-    %% Protocol State
-    goodbye_initiated => boolean(),
     challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
     request_timeout => non_neg_integer(),
@@ -93,7 +91,6 @@ new() ->
     #{
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
-        goodbye_initiated => false,
         request_id => undefined,
         request_timeout => bondy_config:request_timeout()
     }.

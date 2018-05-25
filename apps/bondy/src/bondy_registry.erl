@@ -503,19 +503,29 @@ match(Type, Uri, RealmUri) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
 match(Type, Uri, RealmUri, #{limit := Limit} = Opts) ->
-    MS = index_ms(Type, RealmUri, Uri, Opts),
-    Tab = index_table(Type, RealmUri),
-    case ets:select(Tab, MS, Limit) of
-        ?EOT ->
-            {[], ?EOT};
-        Result ->
-            lookup_entries(Type, Result)
+    try
+        MS = index_ms(Type, RealmUri, Uri, Opts),
+        Tab = index_table(Type, RealmUri),
+        case ets:select(Tab, MS, Limit) of
+            ?EOT ->
+                {[], ?EOT};
+            Result ->
+                lookup_entries(Type, Result)
+        end
+    catch
+        throw:non_eligible_entries ->
+            {[], ?EOT}
     end;
 
 match(Type, Uri, RealmUri, Opts) ->
-    MS = index_ms(Type, RealmUri, Uri, Opts),
-    Tab = index_table(Type, RealmUri),
-    lookup_entries(Type, {ets:select(Tab, MS), ?EOT}).
+    try
+        MS = index_ms(Type, RealmUri, Uri, Opts),
+        Tab = index_table(Type, RealmUri),
+        lookup_entries(Type, {ets:select(Tab, MS), ?EOT})
+    catch
+        throw:non_eligible_entries ->
+            {[], ?EOT}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -547,8 +557,10 @@ match({Type, Cont}) ->
 
 
 init([]) ->
+    %% TODO DO NOT DO THIS, LOAD only data from particular node when we get an update from peerservice. Make sure we load before the first Exchange or actually force and exchange and then load.
     %% We tell ourselves to load the registry from the db
     self() ! init_from_db,
+    process_flag(trap_exit, true),
 
     %% We subscribe to change notifications in plum_db_events. We get updates
     %% in handle_info so that we can we recompile the Cowboy dispatch tables
@@ -748,6 +760,64 @@ do_remove_all(Term, ETab, SessionId, Fun) ->
 
 
 
+%% TODO move to wamp library
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Returns the components of an URI.
+%%
+%% Example:
+%%
+%% <pre lang="erlang">
+%% uri_components(&lt;&lt;com.mycompany.foo.bar"&gt;&gt;).
+%% [&lt;&lt;com.mycompany"&gt;&gt;, &lt;&lt;foo"&gt;&gt;, &lt;&lt;bar"&gt;&gt;].
+%% </pre>
+%% @end
+%% -----------------------------------------------------------------------------
+-spec uri_components(uri()) -> [binary()].
+
+%% uri_components(<<"wamp.", Rest/binary>>) ->
+%%     L = binary:split(Rest, <<".">>, [global]),
+%%     [<<"wamp">> | L];
+
+%% uri_components(<<"com.leapsight.bondy.", Rest/binary>>) ->
+%%     L = binary:split(Rest, <<".">>, [global]),
+%%     [<<"com.leapsight.bondy">> | L];
+
+uri_components(Uri) ->
+    %% case binary:split(Uri, <<".">>, [global]) of
+    %%     %% [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
+    %%     [TopLevelDomain, AppName | Rest] ->
+    %%         Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
+    %%         [Domain | Rest];
+    %%     _Other ->
+    %%         error({badarg, Uri})
+    %% end.
+    binary:split(Uri, <<".">>, [global]).
+
+
+
+%% @private
+incr_counter(Tab, Key, N) ->
+    Default = {counter, Key, 0},
+    ets:update_counter(Tab, Key, {3, N}, Default).
+
+
+%% @private
+decr_counter(Tab, Key, N) ->
+    Default = {counter, Key, 0},
+    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
+        0 ->
+            %% Other process might have concurrently incremented the count,
+            %% so we do a match delete
+            true = ets:match_delete(Tab, Default),
+            0;
+        Val ->
+            Val
+    end.
+
+
+
+
 
 %% =============================================================================
 %% PRIVATE - MATCHING
@@ -859,18 +929,39 @@ index_ms(Type, RealmUri, Uri, Opts) ->
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
     WildcardCond = wilcard_conditions(Cs),
-    AllConds = list_to_tuple(
-        lists:append([['or'], ExactConds, PrefixConds, WildcardCond])),
-    Conds = case maps:get(exclude, Opts, []) of
-        [] ->
-            [AllConds];
-        SessionIds ->
+    Conds0 = [
+        list_to_tuple(
+            lists:append([['or'], ExactConds, PrefixConds, WildcardCond]))
+    ],
+    Conds1 = case maps:find(eligible, Opts) of
+        error ->
+            Conds0;
+        {ok, []} ->
+            %% Non eligible! Most probably a mistake but we need to
+            %% respect the semantics
+            throw(non_eligible_entries);
+        {ok, EligibleIds} ->
+            %% We include the provided SessionIds
+            InclConds = maybe_or(
+                [{'=:=', '$3', {const, S}} || S <- EligibleIds]
+            ),
+            [InclConds | Conds0]
+    end,
+    Conds2 = case maps:find(exclude, Opts) of
+        error ->
+            Conds1;
+        {ok, []} ->
+            Conds1;
+        {ok, ExcludedIds} ->
             %% We exclude the provided SessionIds
-            ExclConds = list_to_tuple([
-                'and' |
-                [{'=/=', '$3', {const, S}} || S <- SessionIds]
-            ]),
-            [list_to_tuple(['andalso', AllConds, ExclConds])]
+            ExclConds = maybe_and(
+                [{'=/=', '$3', {const, S}} || S <- ExcludedIds]
+            ),
+            [ExclConds | Conds1]
+    end,
+    Conds = case Conds2 of
+        [_] -> Conds2;
+        L -> [list_to_tuple(['andalso' | L])]
     end,
     EntryKey = bondy_registry_entry:key_pattern(
         Type, RealmUri, '$2', '$3', '$4'),
@@ -884,6 +975,17 @@ index_ms(Type, RealmUri, Uri, Opts) ->
         { MP, Conds, Proj }
     ].
 
+
+maybe_and([Clause]) ->
+    Clause;
+maybe_and(Clauses) ->
+    list_to_tuple(['and' | Clauses]).
+
+
+maybe_or([Clause]) ->
+    Clause;
+maybe_or(Clauses) ->
+    list_to_tuple(['or' | Clauses]).
 
 %% @private
 -spec prefix_conditions(list()) -> list().
@@ -945,59 +1047,4 @@ do_lookup_entries([Key|T], Type, Acc) ->
         [Entry] ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
-
-
-%% TODO move to wamp library
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Returns the components of an URI.
-%%
-%% Example:
-%%
-%% <pre lang="erlang">
-%% uri_components(&lt;&lt;com.mycompany.foo.bar"&gt;&gt;).
-%% [&lt;&lt;com.mycompany"&gt;&gt;, &lt;&lt;foo"&gt;&gt;, &lt;&lt;bar"&gt;&gt;].
-%% </pre>
-%% @end
-%% -----------------------------------------------------------------------------
--spec uri_components(uri()) -> [binary()].
-
-uri_components(<<"wamp.", Rest/binary>>) ->
-    L = binary:split(Rest, <<".">>, [global]),
-    [<<"wamp">> | L];
-
-uri_components(<<"com.leapsight.bondy.", Rest/binary>>) ->
-    L = binary:split(Rest, <<".">>, [global]),
-    [<<"com.leapsight.bondy">> | L];
-
-uri_components(Uri) ->
-    case binary:split(Uri, <<".">>, [global]) of
-        [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
-            Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
-            [Domain | Rest];
-        _Other ->
-            error({badarg, Uri})
-    end.
-
-
-
-%% @private
-incr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    ets:update_counter(Tab, Key, {3, N}, Default).
-
-
-%% @private
-decr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
-        0 ->
-            %% Other process might have concurrently incremented the count,
-            %% so we do a match delete
-            true = ets:match_delete(Tab, Default),
-            0;
-        Val ->
-            Val
-    end.
-
 
