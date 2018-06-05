@@ -216,7 +216,7 @@ get_round_robin(Entries) ->
 
 
 get_round_robin(undefined, [H|T]) ->
-    %% We never invoke this procedure before or we reordered the round
+    %% We never invoked this procedure before or we reordered the round
     case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
         true ->
             Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
