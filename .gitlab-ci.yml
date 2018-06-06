@@ -10,29 +10,6 @@ build1:
    - packet
  script:
    - $LS_SCRIPTS/build.sh
-   - $LS_SCRIPTS/publish.sh
-
-test1:
- stage: test
- only:
-   - master
-   - develop
- tags:
-   - packet
- script:
-   - $LS_SCRIPTS/test.sh
-
-deploy1:
- stage: deploy
- only:
-   - master
-   - develop
- tags:
-   - packet
- script:
-   - $LS_SCRIPTS/deploy.sh
 
 stages:
   - build
-  - test
-  - deploy
