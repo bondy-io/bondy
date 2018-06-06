@@ -28,14 +28,26 @@
 
 -export([start/2]).
 -export([stop/1]).
+-export([prep_stop/1]).
 -export([vsn/0]).
 
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
 start(_Type, Args) ->
+    ok = print_welcome_message(),
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = setup(Args),
-            ok = bondy_router:start_pool(),
+            ok = setup_env(Args),
+            ok = bondy_router_worker:start_pool(),
             ok = bondy_stats:init(),
+            ok = bondy_cli:register(),
+            ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
             {ok, Pid};
@@ -44,19 +56,51 @@ start(_Type, Args) ->
     end.
 
 
+prep_stop(_State) ->
+    stop_router_services().
+
+
 stop(_State) ->
     ok.
 
 
 -spec vsn() -> list().
-
 vsn() ->
     application:get_env(bondy, vsn, "undefined").
+
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+setup_env(Args) ->
+    case lists:keyfind(vsn, 1, Args) of
+        {vsn, Vsn} ->
+            application:set_env(bondy, vsn, Vsn);
+        false ->
+            ok
+    end.
+
+
+%% @private
+setup_partisan() ->
+    Channels0 = partisan_config:get(channels, []),
+    partisan_config:set(channels, [wamp_peer_messages | Channels0]).
+
+
+%% private
+print_welcome_message() ->
+    {ok, Vsn} = application:get_key(bondy, vsn),
+    io:format(
+        "******************************************~n"
+        "~nLeapsight Bondy v~s~n"
+        "~nDocumentation: http://getbondy.com"
+        "******************************************~n",
+        [Vsn]).
 
 
 %% @private
@@ -79,11 +123,27 @@ maybe_start_router_services() ->
     end.
 
 
-%% @private
-setup(Args) ->
-    case lists:keyfind(vsn, 1, Args) of
-        {vsn, Vsn} ->
-            application:set_env(bondy, vsn, Vsn);
-        false ->
-            ok
-    end.
+stop_router_services() ->
+    _ = lager:info("Initiating shutdown"),
+    %% We stop accepting new connections on HTTP/Websockets
+    ok = bondy_api_gateway:suspend_listeners(),
+    %% We stop accepting new connections on TCP/TLS
+    ok = bondy_wamp_raw_handler:suspend_listeners(),
+
+    %% We ask the router to shutdown which will send a goodbye to all sessions
+    ok = bondy_router:shutdown(),
+
+    %% We sleep for a minute to allow all sessions to terminate gracefully
+    Time = 30000,
+    _ = lager:info(
+        "Awaiting for ~p secs for clients gracefull shutdown.",
+        [trunc(Time/1000)]
+    ),
+    ok = timer:sleep(Time),
+    _ = lager:info("Terminating all client connections"),
+
+    %% We force the HTTP/WS connections to stop
+    ok = bondy_api_gateway:stop_listeners(),
+    %% We force the TCP and TLS connections to stop
+    ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.

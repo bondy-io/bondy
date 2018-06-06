@@ -17,25 +17,101 @@
 %% =============================================================================
 
 -module(bondy_utils).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--export([merge_map_flags/2]).
+-export([bin_to_pid/1]).
+-export([decode/2]).
+-export([encode/2]).
+-export([foreach/2]).
+-export([generate_fragment/1]).
+-export([get_flake_id/0]).
 -export([get_id/1]).
 -export([get_nonce/0]).
 -export([get_random_string/2]).
--export([timeout/1]).
--export([maybe_encode/2]).
--export([encode/2]).
--export([decode/2]).
--export([uuid/0]).
 -export([is_uuid/1]).
+-export([log/5]).
+-export([maybe_encode/2]).
+-export([merge_map_flags/2]).
+-export([pid_to_bin/1]).
+-export([timeout/1]).
 -export([to_binary_keys/1]).
+-export([uuid/0]).
+
 
 
 %% =============================================================================
 %%  API
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec foreach(
+    fun((Elem :: term()) -> term()), ?EOT | {[term()], any()} | any()) -> ok.
+
+foreach(_, ?EOT) ->
+    ok;
+
+foreach(Fun, {L, Cont}) ->
+    ok = lists:foreach(Fun, L),
+    foreach(Fun, Cont);
+
+foreach(Fun, Cont) when is_function(Cont, 0) ->
+    foreach(Fun, Cont()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+pid_to_bin(Pid) ->
+    list_to_binary(pid_to_list(Pid)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+bin_to_pid(Bin) ->
+    list_to_pid(binary_to_list(Bin)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec log(
+    atom(), binary() | list(), list(), wamp_message(), bondy_context:t()) -> ok.
+
+log(Level, Prefix, Head, WampMessage, Ctxt)
+when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+    Format = iolist_to_binary([
+        Prefix,
+        <<
+            %% Right now trace_id is a bin as msgpack does not support
+            %% 128-bit integers
+            ", trace_id=~s"
+            ", realm_uri=~s"
+            ", session_id=~p"
+            ", message_type=~s"
+            ", message_id=~p"
+            ", encoding=~s"
+        >>
+    ]),
+    TraceId = <<>>,
+    Tail = [
+        TraceId,
+        bondy_context:realm_uri(Ctxt),
+        bondy_context:session_id(Ctxt),
+        element(1, WampMessage), %% add function to wamp_message.erl
+        element(2, WampMessage), %% add function to wamp_message.erl
+        bondy_context:encoding(Ctxt)
+    ],
+    _ = lager:log(Level, self(), Format, lists:append(Head, Tail)),
+    ok.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -153,12 +229,20 @@ get_id({session, SessionId}) when is_integer(SessionId) ->
     bondy_session:incr_seq(SessionId).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Calls flake_server:id/0 and returns the generated ID.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_flake_id() -> binary().
+get_flake_id() ->
+    {ok, Id} = flake_server:id(),
+    Id.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-
 timeout(#{timeout := T}) when is_integer(T), T > 0 ->
     T;
 timeout(#{timeout := 0}) ->
@@ -178,10 +262,34 @@ merge_map_flags(M1, M2) when is_map(M1) andalso is_map(M2) ->
 
 
 
+%% Borrowed from
+%% https://github.com/kivra/oauth2/blob/master/src/oauth2_token.erl
+-spec generate_fragment(non_neg_integer()) -> binary().
+
+generate_fragment(0) ->
+    <<>>;
+
+generate_fragment(N) ->
+    Rand = base64:encode(crypto:strong_rand_bytes(N)),
+    Frag = << <<C>> || <<C>> <= <<Rand:N/bytes>>, is_alphanum(C) >>,
+    <<Frag/binary, (generate_fragment(N - byte_size(Frag)))/binary>>.
+
+
+%% @doc Returns true for alphanumeric ASCII characters, false for all others.
+-spec is_alphanum(char()) -> boolean().
+
+is_alphanum(C) when C >= 16#30 andalso C =< 16#39 -> true;
+is_alphanum(C) when C >= 16#41 andalso C =< 16#5A -> true;
+is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;
+is_alphanum(_)                                    -> false.
+
+
+
 
 %% =============================================================================
 %%  PRIVATE
 %% =============================================================================
+
 
 
 %% @private

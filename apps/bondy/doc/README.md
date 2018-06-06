@@ -23,11 +23,11 @@
 <tr><td><a href="bondy_console_table.md" class="module">bondy_console_table</a></td></tr>
 <tr><td><a href="bondy_context.md" class="module">bondy_context</a></td></tr>
 <tr><td><a href="bondy_cowboy_prometheus.md" class="module">bondy_cowboy_prometheus</a></td></tr>
+<tr><td><a href="bondy_db.md" class="module">bondy_db</a></td></tr>
 <tr><td><a href="bondy_dealer.md" class="module">bondy_dealer</a></td></tr>
 <tr><td><a href="bondy_dealer_meta.md" class="module">bondy_dealer_meta</a></td></tr>
 <tr><td><a href="bondy_error.md" class="module">bondy_error</a></td></tr>
-<tr><td><a href="bondy_event.md" class="module">bondy_event</a></td></tr>
-<tr><td><a href="bondy_json_utils.md" class="module">bondy_json_utils</a></td></tr>
+<tr><td><a href="bondy_http_ping_handler.md" class="module">bondy_http_ping_handler</a></td></tr>
 <tr><td><a href="bondy_oauth2.md" class="module">bondy_oauth2</a></td></tr>
 <tr><td><a href="bondy_prometheus.md" class="module">bondy_prometheus</a></td></tr>
 <tr><td><a href="bondy_prometheus_collector.md" class="module">bondy_prometheus_collector</a></td></tr>

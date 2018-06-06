@@ -1,219 +1,108 @@
 #!/bin/sh
-# FROM https://github.com/tsloughter/vanguard/blob/master/bin/vanguard_admin
-set -e
+# -*- tab-width:4;indent-tabs-mode:nil -*-
+# ex: ts=4 sw=4 et
 
-SCRIPT=$(readlink $0 || true)
-if [ -z $SCRIPT ]; then
-    SCRIPT=$0
-fi;
-SCRIPT_DIR="$(cd `dirname "$SCRIPT"` && pwd -P)"
-RELEASE_ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-REL_NAME=bondy
-REL_VSN="{{ rel_vsn }}"
-ERTS_VSN="{{ erts_vsn }}"
-CODE_LOADING_MODE="${CODE_LOADING_MODE:-embedded}"
-REL_DIR="$RELEASE_ROOT_DIR/releases/$REL_VSN"
-ERL_OPTS="{{ erl_opts }}"
-RUNNER_LOG_DIR="${RUNNER_LOG_DIR:-$RELEASE_ROOT_DIR/log}"
+# Lost of code taken from https://github.com/basho/riak/blob/635cad6cf706a71714e4f3a90e6c4b950492c115/rel/files/riak-admin
 
-find_erts_dir() {
-    __erts_dir="$RELEASE_ROOT_DIR/erts-$ERTS_VSN"
-    if [ -d "$__erts_dir" ]; then
-        ERTS_DIR="$__erts_dir";
-        ROOTDIR="$RELEASE_ROOT_DIR"
+RUNNER_SCRIPT_DIR=$(cd ${0%/*} && pwd)
+RUNNER_SCRIPT=${0##*/}
+
+RUNNER_BASE_DIR=${RUNNER_SCRIPT_DIR%/*}
+RUNNER_ETC_DIR="${RUNNER_ETC_DIR:-{{platform_etc_dir}}}"
+RUNNER_LOG_DIR="${RUNNER_LOG_DIR:-{{log_path}}}"
+RUNNER_USER="${RUNNER_USER:-{{run_user}}}"
+
+# Make sure this script is running as the appropriate user
+if [ ! -z "$RUNNER_USER" ] && [ `whoami` != "$RUNNER_USER" ]; then
+    exec sudo -H -u $RUNNER_USER $0 $@
+fi
+
+# Make sure CWD is set to runner base dir
+cd $RUNNER_BASE_DIR
+
+# Extract the target node name and cookie from vm.args
+if [ ! -f "$RUNNER_ETC_DIR/vm.args" ]; then
+    NODENAME=`egrep '^[ \t]*nodename[ \t]*=[ \t]*' $RUNNER_ETC_DIR/{{cuttlefish_conf}} 2> /dev/null | tail -n 1 | cut -d = -f 2`
+    if [ -z "$NODENAME" ]; then
+        echo "vm.args needs to have a -name parameter."
+        echo "  -sname is not supported."
+        exit 1
     else
-        __erl="$(which erl)"
-        code="io:format(\"~s\", [code:root_dir()]), halt()."
-        __erl_root="$("$__erl" -noshell -eval "$code")"
-        ERTS_DIR="$__erl_root/erts-$ERTS_VSN"
-        ROOTDIR="$__erl_root"
+        NAME_ARG="-name ${NODENAME# *}"
     fi
-}
-
-# Get node pid
-relx_get_pid() {
-    if output="$(relx_nodetool rpcterms os getpid)"
-    then
-        echo "$output" | sed -e 's/"//g'
-        return 0
+    COOKIE=`egrep '^[ \t]*distributed_cookie[ \t]*=[ \t]*' $RUNNER_ETC_DIR/{{cuttlefish_conf}} 2> /dev/null | cut -d = -f 2`
+    if [ -z "$COOKIE" ]; then
+        echo "vm.args needs to have a -setcookie parameter."
+        exit 1
     else
-        echo "$output"
-        return 1
+        COOKIE_ARG="-setcookie $COOKIE"
     fi
-}
+else
+    NAME_ARG=`egrep '^\-name' $RUNNER_ETC_DIR/vm.args 2> /dev/null`
+    if [ -z "$NAME_ARG" ]; then
+        echo "vm.args needs to have a -name parameter."
+        echo "  -sname is not supported."
+        exit 1
+    fi
+    COOKIE_ARG=`grep -e '-setcookie' $RUNNER_ETC_DIR/vm.args 2> /dev/null`
+    if [ -z "$COOKIE" ]; then
+        echo "vm.args needs to have a -setcookie parameter."
+        exit 1
+    fi
+fi
 
-relx_get_longname() {
-    id="longname$(relx_gen_id)-${NAME}"
-    "$BINDIR/erl" -boot start_clean -eval 'io:format("~s~n", [node()]), halt()' -noshell -name $id | sed -e 's/.*@//g'
-}
-
-# Connect to a remote node
-relx_rem_sh() {
-    # Generate a unique id used to allow multiple remsh to the same node
-    # transparently
-    id="remsh$(relx_gen_id)-${NAME}"
-
-    # Get the node's ticktime so that we use the same thing.
-    TICKTIME="$(relx_nodetool rpcterms net_kernel get_net_ticktime)"
-
-    # Setup remote shell command to control node
-    exec "$BINDIR/erl" "$NAME_TYPE" "$id" -remsh "$NAME" -boot start_clean \
-         -boot_var ERTS_LIB_DIR "$ERTS_LIB_DIR" \
-         -setcookie "$COOKIE" -hidden -kernel net_ticktime $TICKTIME
-}
-
-# Generate a random id
-relx_gen_id() {
-    od -X -N 4 /dev/urandom | head -n1 | awk '{print $2}'
-}
-
-# Control a node
-relx_nodetool() {
-    command="$1"; shift
-    "$ERTS_DIR/bin/escript" "$ROOTDIR/bin/nodetool" "$NAME_TYPE" "$NAME" \
-                                -setcookie "$COOKIE" "$command" $@
-}
-
-# Run an escript in the node's environment
-relx_escript() {
-    shift; scriptpath="$1"; shift
-    export RELEASE_ROOT_DIR
-
-    "$ERTS_DIR/bin/escript" "$ROOTDIR/$scriptpath" $@
-}
-
-# Output a start command for the last argument of run_erl
-relx_start_command() {
-    printf "exec \"%s\" \"%s\"" "$RELEASE_ROOT_DIR/bin/$REL_NAME" \
-           "$START_OPTION"
-}
-
-# Use $CWD/vm.args if exists, otherwise releases/VSN/vm.args
-if [ -z "$VMARGS_PATH" ]; then
-    if [ -f "$RELEASE_ROOT_DIR/vm.args" ]; then
-        VMARGS_PATH="$RELEASE_ROOT_DIR/vm.args"
+# Learn how to specify node name for connection from remote nodes
+echo "$NAME_ARG" | grep '^-sname' > /dev/null 2>&1
+if [ "X$?" = "X0" ]; then
+    NAME_PARAM="-sname"
+    NAME_HOST=""
+else
+    NAME_PARAM="-name"
+    echo "$NAME_ARG" | grep '@.*' > /dev/null 2>&1
+    if [ "X$?" = "X0" ]; then
+        NAME_HOST=`echo "${NAME_ARG}" | sed -e 's/.*\(@.*\)$/\1/'`
     else
-        VMARGS_PATH="$REL_DIR/vm.args"
+        NAME_HOST=""
     fi
 fi
 
-orig_vmargs_path="$VMARGS_PATH.orig"
-if [ $RELX_REPLACE_OS_VARS ]; then
-    #Make sure we don't break dev mode by keeping the symbolic link to
-    #the user's vm.args
-    if [ ! -L "$orig_vmargs_path" ]; then
-       #we're in copy mode, rename the vm.args file to vm.args.orig
-       mv "$VMARGS_PATH" "$orig_vmargs_path"
+# Identify the script name
+SCRIPT=`basename $0`
+
+# Parse out release and erts info
+START_ERL=`cat $RUNNER_BASE_DIR/releases/start_erl.data`
+ERTS_VSN=${START_ERL% *}
+APP_VSN=${START_ERL#* }
+
+# Add ERTS bin dir to our path
+ERTS_PATH=$RUNNER_BASE_DIR/erts-$ERTS_VSN/bin
+
+# Setup command to control the node
+NODETOOL="$ERTS_PATH/escript $ERTS_PATH/nodetool $NAME_ARG $COOKIE_ARG"
+
+# Ping node without stealing stdin
+ping_node() {
+    $NODETOOL ping < /dev/null
+}
+
+# Function to validate the node is up
+node_up_check() {
+    MUTE=`ping_node 2> /dev/null`
+    if [ "$?" -ne 0 ]; then
+        echo "Node is not running!"
+        exit 1
     fi
-
-    awk '{while(match($0,"[$]{[^}]*}")) {var=substr($0,RSTART+2,RLENGTH -3);gsub("[$]{"var"}",ENVIRON[var])}}1' < "$orig_vmargs_path" > "$VMARGS_PATH"
- else
-    #We don't need to replace env. vars, just rename the
-    #symlink vm.args.orig to vm.args, and keep it as a
-    #symlink.
-    if [ -L "$orig_vmargs_path" ]; then
-       mv "$orig_vmargs_path" "$VMARGS_PATH"
+}
+# Function to validate the node is down
+node_down_check() {
+    MUTE=`ping_node 2> /dev/null`
+    if [ "$?" -eq 0 ]; then
+        echo "Node is already running!"
+        exit 1
     fi
-fi
-
-# Make sure log directory exists
-mkdir -p "$RUNNER_LOG_DIR"
-
-# Use $CWD/sys.config if exists, otherwise releases/VSN/sys.config
-if [ -z "$RELX_CONFIG_PATH" ]; then
-    if [ -f "$RELEASE_ROOT_DIR/sys.config" ]; then
-        RELX_CONFIG_PATH="$RELEASE_ROOT_DIR/sys.config"
-    else
-        RELX_CONFIG_PATH="$REL_DIR/sys.config"
-    fi
-fi
-
-orig_relx_config_path="$RELX_CONFIG_PATH.orig"
-if [ $RELX_REPLACE_OS_VARS ]; then
-    #Make sure we don't break dev mode by keeping the symbolic link to
-    #the user's sys.config
-    if [ ! -L "$orig_relx_config_path" ]; then
-       #We're in copy mode, rename sys.config to sys.config.orig
-       mv "$RELX_CONFIG_PATH" "$orig_relx_config_path"
-    fi
-
-    awk '{while(match($0,"[$]{[^}]*}")) {var=substr($0,RSTART+2,RLENGTH -3);gsub("[$]{"var"}",ENVIRON[var])}}1' < "$orig_relx_config_path" > "$RELX_CONFIG_PATH"
- else
-    #We don't need to replace env. vars, just rename the
-    #symlink sys.config.orig to sys.config. Keep it as
-    #a symlink.
-    if [ -L "$orig_relx_config_path" ]; then
-       mv "$orig_relx_config_path"  "$RELX_CONFIG_PATH"
-    fi
-fi
-
-# Extract the target node name from node.args
-NAME_ARG=$(egrep '^-s?name' "$VMARGS_PATH" || true)
-if [ -z "$NAME_ARG" ]; then
-    echo "vm.args needs to have either -name or -sname parameter."
-    exit 1
-fi
-
-# Extract the name type and name from the NAME_ARG for REMSH
-NAME_TYPE="$(echo "$NAME_ARG" | awk '{print $1}')"
-NAME="$(echo "$NAME_ARG" | awk '{print $2}')"
-
-PIPE_DIR="${PIPE_DIR:-/tmp/erl_pipes/$NAME/}"
-
-# Extract the target cookie
-COOKIE_ARG="$(grep '^-setcookie' "$VMARGS_PATH" || true)"
-if [ -z "$COOKIE_ARG" ]; then
-    echo "vm.args needs to have a -setcookie parameter."
-    exit 1
-fi
-
-# Extract cookie name from COOKIE_ARG
-COOKIE="$(echo "$COOKIE_ARG" | awk '{print $2}')"
-
-find_erts_dir
-export ROOTDIR="$RELEASE_ROOT_DIR"
-export BINDIR="$ERTS_DIR/bin"
-export EMU="beam"
-export PROGNAME="erl"
-export LD_LIBRARY_PATH="$ERTS_DIR/lib:$LD_LIBRARY_PATH"
-ERTS_LIB_DIR="$ERTS_DIR/../lib"
-
-cd "$ROOTDIR"
-
-# User can specify an sname without @hostname
-# This will fail when creating remote shell
-# So here we check for @ and add @hostname if missing
-case $NAME in
-    *@*)
-        # Nothing to do
-        ;;
-    *)
-        # Add @hostname
-        case $NAME_TYPE in
-             -sname)
-                 NAME=$NAME@`hostname -s`
-                 ;;
-             -name)
-                 NAME=$NAME@$(relx_get_longname)
-                 ;;
-        esac
-        ;;
-esac
+}
 
 
 
-
-
-# Check the first argument for instructions
-case "$1" in
-    *)
-        # Make sure a node IS running
-        if ! relx_nodetool "ping" > /dev/null; then
-            echo "Node" $NAME "is not running!"
-            exit 1
-        fi
-        relx_nodetool rpc bondy_cli command bondy-admin $@
-        ;;
-esac
-
-exit 0
+node_up_check
+$NODETOOL rpc bondy_cli command "$@"

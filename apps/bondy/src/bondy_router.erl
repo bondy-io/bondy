@@ -33,7 +33,7 @@
 %% load regulation. Inn case a maximum pool capacity has been reached,
 %% the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
-%% e.g. {@link bondy_ws_handler}).
+%% e.g. {@link bondy_wamp_ws_handler}).
 %%
 %% The router also handles messages synchronously in those
 %% cases where it needs to preserve message ordering guarantees.
@@ -90,57 +90,58 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_router).
--behaviour(gen_server).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(POOL_NAME, router_pool).
 -define(ROUTER_ROLES, #{
     broker => ?BROKER_FEATURES,
     dealer => ?DEALER_FEATURES
 }).
 
--type event()                   ::  {wamp_message(), bondy_context:context()}.
 
+-type event()       ::  {wamp_message(), bondy_context:context()}.
 
--record(state, {
-    pool_type                   ::  permanent | transient,
-    event                       ::  event()
-}).
 
 %% API
 -export([close_context/1]).
 -export([forward/2]).
+-export([handle_peer_message/1]).
 -export([roles/0]).
 -export([agent/0]).
--export([start_pool/0]).
-%% -export([has_role/2]). ur, ctxt
-%% -export([add_role/2]). uri, ctxt
-%% -export([remove_role/2]). uri, ctxt
-%% -export([authorise/4]). session, uri, action, ctxt
-%% -export([start_realm/2]). uri, ctxt
-%% -export([stop_realm/2]). uri, ctxt
-
-%% -export([callees/2]).
-%% -export([count_callees/2]).
-%% -export([count_registrations/2]).
-%% -export([lookup_registration/2]).
-%% -export([fetch_registration/2]). % wamp.registration.get
-
-
-%% GEN_SERVER CALLBACKS
--export([init/1]).
--export([handle_info/2]).
--export([terminate/2]).
--export([code_change/3]).
--export([handle_call/3]).
--export([handle_cast/2]).
+-export([shutdown/0]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sends a GOODBYE message to all existing client connections.
+%% The client should reply with another GOODBYE within the configured time and
+%% when it does or on timeout, Bondy will close the connection triggering the
+%% cleanup of all the client sessions.
+%% @end
+%% -----------------------------------------------------------------------------
+shutdown() ->
+    M = wamp_message:goodbye(
+        #{message => <<"Router is shutting down">>},
+        ?WAMP_SYSTEM_SHUTDOWN
+    ),
+    Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
+
+    try
+        _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
+    catch
+        _:Reason ->
+            _ = lager:error(
+                "Error while shutting down router; reason=~p", [Reason])
+    end,
+
+    ok.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -172,23 +173,6 @@ agent() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Starts a sidejob pool of workers according to the configuration
-%% for the entry named 'router_pool'.
-%% @end
-%% -----------------------------------------------------------------------------
--spec start_pool() -> ok.
-start_pool() ->
-    case do_start_pool() of
-        {ok, _Child} -> ok;
-        {ok, _Child, _Info} -> ok;
-        {error, already_present} -> ok;
-        {error, {already_started, _Child}} -> ok;
-        {error, Reason} -> error(Reason)
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
 %% Forwards a WAMP message to the Dealer or Broker based on message type.
 %% The message might end up being handled synchronously
 %% (performed by the calling process i.e. the transport handler)
@@ -204,106 +188,62 @@ start_pool() ->
 
 
 forward(M, #{session := _} = Ctxt) ->
+    %% _ = lager:debug(
+    %%     "Forwarding message; peer_id=~p, message=~p",
+    %%     [bondy_context:peer_id(Ctxt), M]
+    %% ),
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = bondy_stats:update(M, Ctxt),
     do_forward(M, Ctxt).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_peer_message(bondy_peer_message:t()) -> ok | no_return().
+
+handle_peer_message(PM) ->
+    bondy_peer_message:is_message(PM) orelse exit(badarg),
+
+    Payload = bondy_peer_message:payload(PM),
+    PeerId = bondy_peer_message:to(PM),
+    From = bondy_peer_message:from(PM),
+    Opts = bondy_peer_message:options(PM),
+
+    handle_peer_message(Payload, PeerId, From, Opts).
 
 
-%% =============================================================================
-%% API : GEN_SERVER CALLBACKS FOR SIDEJOB WORKER
-%% =============================================================================
+-spec handle_peer_message(wamp_message(), peer_id(), remote_peer_id(), map()) ->
+    ok | no_return().
 
+handle_peer_message(#publish{} = M, PeerId, From, Opts) ->
+    bondy_broker:handle_peer_message(M, PeerId, From, Opts);
 
+handle_peer_message(#error{} = M, PeerId, From, Opts) ->
+    %% This is a CALL, INVOCATION or INTERRUPT error
+    %% see bondy_peer_message for more details
+    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
 
-init([?POOL_NAME]) ->
-    %% We've been called by sidejob_worker
-    %% We will be called via a a cast (handle_cast/2)
-    %% TODO publish metaevent and stats
-    {ok, #state{pool_type = permanent}};
+handle_peer_message(#interrupt{} = M, PeerId, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
 
-init([Event]) ->
-    %% We've been called by sidejob_supervisor
-    %% We immediately timeout so that we find ourselfs in handle_info/2.
-    %% TODO publish metaevent and stats
-    State = #state{
-        pool_type = transient,
-        event = Event
-    },
-    {ok, State, 0}.
+handle_peer_message(#call{} = M, PeerId, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
 
+handle_peer_message(#invocation{} = M, PeerId, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
 
-handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
-    {noreply, State}.
+handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, PeerId, From, Opts).
 
-
-handle_cast(Event, State) ->
-    try
-        ok = sync_forward(Event),
-        {noreply, State}
-    catch
-        Error:Reason ->
-            %% TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Error, Reason, erlang:get_stacktrace()]),
-            {noreply, State}
-    end.
-
-
-handle_info(timeout, #state{pool_type = transient, event = Event} = State)
-when Event /= undefined ->
-    %% We are a worker that has been spawned to handle this single event,
-    %% so we should stop right after we do it
-    ok = sync_forward(Event),
-    {stop, normal, State};
-
-handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
-    {noreply, State}.
-
-
-terminate(normal, _State) ->
-    ok;
-terminate(shutdown, _State) ->
-    ok;
-terminate({shutdown, _}, _State) ->
-    ok;
-terminate(_Reason, _State) ->
-    %% TODO publish metaevent
-    ok.
-
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Actually starts a sidejob pool based on system configuration.
-%% @end
-%% -----------------------------------------------------------------------------
-do_start_pool() ->
-    Opts = bondy_config:router_pool(),
-    {_, Size} = lists:keyfind(size, 1, Opts),
-    {_, Capacity} = lists:keyfind(capacity, 1, Opts),
-    case lists:keyfind(type, 1, Opts) of
-        {_, permanent} ->
-            sidejob:new_resource(?POOL_NAME, ?MODULE, Capacity, Size);
-        {_, transient} ->
-            sidejob:new_resource(?POOL_NAME, sidejob_supervisor, Capacity, Size)
-    end.
 
 
 
@@ -326,19 +266,8 @@ acknowledge_message(_) ->
 %% =============================================================================
 
 
+
 %% @private
-do_forward(#goodbye{}, #{goodbye_initiated := true} = Ctxt) ->
-    %% The client is replying to our goodbye() message, we stop.
-    {stop, Ctxt};
-
-do_forward(#goodbye{}, Ctxt) ->
-    %% Goodbye initiated by client, we reply with goodbye() and stop.
-    %% _ = lager:info(
-    %%     "Session closed per client request, session=~p, reason=~p",
-    %%     [bondy_context:session_id(Ctxt), M#goodbye.reason_uri]),
-    Reply = wamp_message:goodbye(#{}, ?WAMP_ERROR_GOODBYE_AND_OUT),
-    {stop, Reply, Ctxt};
-
 do_forward(#register{} = M, Ctxt) ->
     %% This is a sync call as it is an easy way to preserve RPC ordering as
     %% defined by RFC 11.2:
@@ -362,7 +291,7 @@ do_forward(#register{} = M, Ctxt) ->
             wamp_message:error(
                 ?REGISTER, ReqId,
                 #{},
-                ?WAMP_ERROR_NOT_AUTHORIZED,
+                ?WAMP_NOT_AUTHORIZED,
                 [Mssg]
             );
         {error, {procedure_already_exists, Mssg}} ->
@@ -370,13 +299,20 @@ do_forward(#register{} = M, Ctxt) ->
                 ?REGISTER,
                 ReqId,
                 #{},
-                ?WAMP_ERROR_PROCEDURE_ALREADY_EXISTS,
+                ?WAMP_PROCEDURE_ALREADY_EXISTS,
                 [Mssg]
             )
     end,
     {reply, Reply, Ctxt};
 
-do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
+do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    async_forward(M, Ctxt);
+
+do_forward(
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
+    async_forward(M, Ctxt);
+
+do_forward(#call{} = M, Ctxt0) ->
     %% This is a sync call as it is an easy way to guarantee ordering of
     %% invocations between any given pair of Caller and Callee as
     %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
@@ -389,38 +325,38 @@ do_forward(#call{request_id = ReqId} = M, Ctxt0) ->
     %% will first receive an invocation corresponding to Call 1 and then Call
     %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
     ok = sync_forward({M, Ctxt0}),
-    %% The invocation is always async,
-    %% so the response will be delivered asynchronously by the dealer
-    {ok, bondy_context:add_awaiting_call(Ctxt0, ReqId)};
+    %% The invocation is always async and the result or error will be delivered
+    %% asynchronously by the dealer.
+    {ok, Ctxt0};
 
-%% do_forward(#publish{} = M, Ctxt0) ->
-%%     %% RFC:
-%%     %% If Subscriber A is subscribed to both Topic 1 and Topic 2, and Publisher
-%%     %% B first publishes an Event 1 to Topic 1 and then an Event 2 to Topic 2,
-%%     %% then Subscriber A will first receive Event 1 and then Event 2. This also
-%%     %% holds if Topic 1 and Topic 2 are identical.
-%%     %% In other words, WAMP guarantees ordering of events between any given
-%%     %% pair of Publisher and Subscriber.
-%%     ok = sync_forward({M, Ctxt0}),
-%%     {ok, Ctxt0};
+do_forward(M, Ctxt) ->
+    async_forward(M, Ctxt).
 
-do_forward(M, Ctxt0) ->
+
+%% @private
+async_forward(M, Ctxt0) ->
     %% Client already has a session.
     %% RFC: By default, publications are unacknowledged, and the _Broker_ will
     %% not respond, whether the publication was successful indeed or not.
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
-    %% We asynchronously handle the message by sending it to the router pool
-    try async_forward(M, Ctxt0) of
+    %% Asynchronously forwards a message by either sending it to an
+    %% existing worker or spawning a new one depending on
+    %% bondy_broker_pool_type.
+    Event = {M, Ctxt0},
+    try bondy_router_worker:cast(fun() -> sync_forward(Event) end) of
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            _ = lager:info("Pool ~p is overloaded.", [?POOL_NAME]),
-            %% TODO publish metaevent and stats
-            %% TODO use throttling and send error to caller conditionally
+            _ = lager:info(
+                "Router pool overloaded, will route message synchronously; "
+                "message=~p", [M]
+            ),
+            %% @TODO publish metaevent and stats
+            %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
-            ok = sync_forward({M, Ctxt0}),
+            ok = sync_forward(Event),
             {ok, Ctxt0}
     catch
         error:Reason when Acknowledge == true ->
@@ -431,16 +367,24 @@ do_forward(M, Ctxt0) ->
                 ?UNSUBSCRIBE,
                 M#unsubscribe.request_id,
                 #{},
-                ?WAMP_ERROR_CANCELLED,
+                ?WAMP_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],
                 #{error => ErrorMap}
             ),
             ok = bondy_stats:update(Reply, Ctxt0),
             {reply, Reply, Ctxt0};
-        _:_ ->
+        Class:Reason ->
+            Ctxt = bondy_context:realm_uri(Ctxt0),
+            SessionId = bondy_context:session_id(Ctxt0),
+            _ = lager:error(
+                "Error while routing message; class=~p, reason=~p, message=~p"
+                " realm_uri=~p, session_id=~p, stacktrace=~p",
+                [Class, Reason, M, Ctxt, SessionId, erlang:get_stacktrace()]
+            ),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -481,50 +425,3 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
 sync_forward({M, _Ctxt}) ->
     error({unexpected_message, M}).
 
-
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Asynchronously forwards a message by either sending it to an
-%% existing worker or spawning a new one depending on the bondy_broker_pool_type
-%% type.
-%% @end.
-%% -----------------------------------------------------------------------------
--spec async_forward(wamp_message(), bondy_context:context()) ->
-    ok | {error, overload}.
-
-async_forward(M, Ctxt) ->
-    %% Todo either fix pool_type based on stats or use mochiweb to compile
-    %% bondy_config to avoid bottlenecks.
-    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
-    case async_forward(PoolType, router_pool, M, Ctxt) of
-        ok ->
-            ok;
-        {ok, _} ->
-            ok;
-        overload ->
-            {error, overload}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Helper function for {@link async_forward/2}
-%% @end
-%% -----------------------------------------------------------------------------
-async_forward(permanent, PoolName, M, Ctxt) ->
-    %% We send a request to an existing permanent worker
-    %% using bondy_router acting as a sidejob_worker
-    sidejob:cast(PoolName, {M, Ctxt});
-
-async_forward(transient, PoolName, M, Ctxt) ->
-    %% We spawn a transient worker using sidejob_supervisor
-    sidejob_supervisor:start_child(
-        PoolName,
-        gen_server,
-        start_link,
-        [?MODULE, [{M, Ctxt}], []]
-    ).

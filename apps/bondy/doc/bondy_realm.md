@@ -17,7 +17,7 @@ protected by authentication and authorization. Bondy messages are
 only routed within a Realm.
 
 Realms are persisted to disk and replicated across the cluster using the
-plumtree_metadata subsystem.
+plum_db subsystem.
 <a name="types"></a>
 
 ## Data Types ##

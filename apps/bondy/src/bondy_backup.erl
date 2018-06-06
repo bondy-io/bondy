@@ -105,6 +105,10 @@
 -export([handle_cast/2]).
 
 
+
+
+
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -249,7 +253,7 @@ handle_info({backup_reply, ok, Pid}, #state{pid = Pid} = State) ->
         "Finished creating backup; filename=~p, elapsed_time_secs=~p",
         [State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
@@ -257,15 +261,16 @@ handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
         "Error creating backup; reason=~p, filename=~p, elapsed_time_secs=~p",
         [Reason, State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
-handle_info({restore_reply, ok, Pid}, #state{pid = Pid} = State) ->
+handle_info({restore_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
+    #{read_count := N, merged_count := M} = Counters,
     Secs = erlang:system_time(second) - State#state.timestamp,
     _ = lager:info(
-        "Finished restoring backup; filename=~p, elapsed_time_secs=~p",
-        [State#state.filename, Secs]
+        "Finished restoring backup; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
+        [State#state.filename, Secs, N, M]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
@@ -273,7 +278,7 @@ handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
         "Error restoring backup; reason=~p, filename=~p, elapsed_time_secs=~p",
         [Reason, State#state.filename, Secs]
     ),
-    {noreply, State#state{pid = undefined}};
+    {noreply, State#state{status = undefined, pid = undefined}};
 
 
 handle_info(Info, State) ->
@@ -309,7 +314,13 @@ async_backup(#{path := Path} , State0) ->
                 Me ! {backup_reply, Error, self()}
         end
     end),
-    {ok, State0#state{filename = File, pid = Pid, timestamp = Ts}}.
+    State1 = State0#state{
+        filename = File,
+        pid = Pid,
+        timestamp = Ts,
+        status = backup_in_progress
+    },
+    {ok, State1}.
 
 
 %% @private
@@ -325,7 +336,7 @@ do_backup(File, Ts) ->
             mod_vsn => mod_vsn(),
             node => erlang:node(),
             timestamp => Ts,
-            vsn => <<"1.0.0">>
+            vsn => <<"1.1.0">>
         }}
     ],
     case disk_log:open(Opts) of
@@ -345,62 +356,43 @@ mod_vsn() ->
 
 %% @private
 build_backup(Log) ->
+    Iterator = plum_db:iterator({undefined, undefined}),
     try
-        build_backup(plumtree_metadata_manager:iterator(), Log, [])
+        Acc1 = build_backup(Iterator, Log, []),
+        %% We log the remaining elements
+        log(Acc1, Log)
     catch
         throw:Reason ->
-            lager:error("Error creating backup; reason=~p", [Reason]),
+            _ = lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
             {error, Reason}
     after
-        _ = disk_log:close(Log)
+        ok = plum_db:iterator_close(Iterator),
+        disk_log:close(Log)
     end.
 
 
 %% @private
-build_backup(PrefixIt, Log, Acc) ->
-    case plumtree_metadata_manager:iterator_done(PrefixIt) of
+build_backup(Iterator, Log, Acc0) ->
+    case plum_db:iterator_done(Iterator) of
         true ->
-            plumtree_metadata_manager:iterator_close(PrefixIt),
-            log(Acc, Log);
+            Acc0;
         false ->
-            Prefix = plumtree_metadata_manager:iterator_value(PrefixIt),
-            ObjIt = plumtree_metadata_manager:iterator(Prefix, undefined),
-            build_backup(PrefixIt, ObjIt, Log, Acc)
+            %% iterator_element/1 gets the whole prefixed object without
+            %% resolving conflicts
+            E = plum_db:iterator_element(Iterator),
+            Acc1 = maybe_log([E | Acc0], Log),
+            build_backup(plum_db:iterate(Iterator), Log, Acc1)
     end.
 
 
 %% @private
-build_backup(PrefixIt, ObjIt, Log, Acc0) ->
-    case plumtree_metadata_manager:iterator_done(ObjIt) of
-        true ->
-            plumtree_metadata_manager:iterator_close(ObjIt),
-            build_backup(
-                plumtree_metadata_manager:iterate(PrefixIt), Log, Acc0);
-        false ->
-            FullPrefix = plumtree_metadata_manager:iterator_prefix(ObjIt),
-            {K, V} = plumtree_metadata_manager:iterator_value(ObjIt),
-            try
-                Acc1 = maybe_log([{{FullPrefix, K}, V}|Acc0], Log),
-                build_backup(
-                    PrefixIt,
-                    plumtree_metadata_manager:iterate(ObjIt),
-                    Log,
-                    Acc1)
-            catch
-                _:Reason ->
-                    lager:error("Error creating backup; reason=~p", [Reason]),
-                    ok = plumtree_metadata_manager:iterator_close(ObjIt),
-                    ok = plumtree_metadata_manager:iterator_close(PrefixIt),
-                    throw(Reason)
-            end
-    end.
-
-
-maybe_log(Acc, Log) when length(Acc) == 100 ->
+maybe_log(Acc, Log) when length(Acc) =:= 100 ->
     ok = log(Acc, Log),
     [];
+
 maybe_log(Acc, _) ->
     Acc.
+
 
 %% @private
 log([], _) ->
@@ -411,20 +403,32 @@ log(L, Log) ->
     maybe_throw(disk_log:sync(Log)).
 
 
+%% @private
+maybe_throw(ok) -> ok;
+maybe_throw({error, Reason}) -> throw(Reason).
+
+
 async_restore(#{filename := Filename}, State0) ->
-    %% @TODO We might want to stop AAE so that (1) we avoid writing the
-    %% hahstree during restore and (2) avoid exchanges too.
+    %% @TODO We might want to stop AAE so that
+    %% (1) we avoid writing the hahstree during restore and
+    %% (2) avoid exchanges too.
     Ts = erlang:system_time(second),
     Me = self(),
     Pid = spawn_link(fun() ->
         case do_restore(Filename) of
-            ok ->
-                Me ! {restore_reply, ok, self()};
+            {ok, _Counters} = OK ->
+                Me ! {restore_reply, OK, self()};
             {error, _} = Error ->
                 Me ! {restore_reply, Error, self()}
         end
     end),
-    {ok, State0#state{filename = Filename, pid = Pid, timestamp = Ts}}.
+    State1 = State0#state{
+        filename = Filename,
+        pid = Pid,
+        timestamp = Ts,
+        status = restore_in_progress
+    },
+    {ok, State1}.
 
 
 %% @private
@@ -453,11 +457,11 @@ do_restore(Filename) ->
 
 do_restore_aux(Log) ->
     try
-        Counters = #{n => 0, merged => 0},
-        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters)
+        Counters0 = #{read_count => 0, merged_count => 0},
+        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters0)
     catch
         _:Reason ->
-            lager:error("Error restoring backup; reason=~p", [Reason]),
+            _ = lager:error("Error restoring backup; reason=~p", [Reason]),
             {error, Reason}
     after
         _ = disk_log:close(Log)
@@ -466,10 +470,9 @@ do_restore_aux(Log) ->
 
 
 %% @private
-restore_chunk(eof, Log, #{n := N, merged := M}) ->
-    _ = lager:info(
-        "Finished backup restore; read_count=~p, merged_count=~p", [N, M]),
-    disk_log:close(Log);
+restore_chunk(eof, Log, Counters) ->
+    ok = disk_log:close(Log),
+    {ok, Counters};
 
 restore_chunk({error, _} = Error, Log, _) ->
     _ = disk_log:close(Log),
@@ -491,16 +494,31 @@ restore_chunk({Cont, Terms}, Log, Counters0) ->
 
 
 %% @private
-restore_terms([{PKey, Object}|T], #{n := N, merged := M} = Counters) ->
-    case plumtree_metadata_manager:merge({PKey, undefined}, Object) of
+restore_terms(
+    [{PKey, Object}|T], #{read_count := N, merged_count := M} = Counters) ->
+    case merge(PKey, Object) of
         true ->
-            restore_terms(T, Counters#{n => N + 1, merged => M + 1});
+            restore_terms(
+                T, Counters#{read_count => N + 1, merged_count => M + 1});
         false ->
-            restore_terms(T, Counters#{n => N + 1})
+            restore_terms(T, Counters#{read_count => N + 1})
     end;
 
 restore_terms([], Counters) ->
     {ok, Counters}.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc We renamed to legacy plumtree metadata object
+%% @end
+%% -----------------------------------------------------------------------------
+merge(PKey, {metadata, _} = Object) ->
+    merge(PKey, setelement(1, Object, object));
+
+merge(PKey, {object, _} = Object) ->
+    plum_db:merge({PKey, undefined}, Object).
 
 
 %% @private
@@ -509,11 +527,6 @@ validate_head(#{format := dvvset_log}) ->
 
 validate_head(H) ->
     throw({invalid_header, H}).
-
-
-%% @private
-maybe_throw(ok) -> ok;
-maybe_throw({error, Reason}) -> throw(Reason).
 
 
 %% @private

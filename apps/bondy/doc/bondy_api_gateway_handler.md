@@ -91,7 +91,7 @@ Bondy API Gateway Specification Format.<a name="index"></a>
 
 ### is_authorized/2 ###
 
-`is_authorized(Req0, St0) -> any()`
+`is_authorized(Req0, St) -> any()`
 
 <a name="options-2"></a>
 

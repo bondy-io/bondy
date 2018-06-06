@@ -37,14 +37,14 @@
 %%     Total number of Cowboy request errors.
 %%   </li>
 %%   <li>
-%%     `cowboy_request_duration_seconds'<br/>
+%%     `cowboy_request_duration_microseconds'<br/>
 %%     Type: histogram.<br/>
 %%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
 %%     Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]', configured via `duration_buckets'.<br/>
 %%     Cowboy request duration.
 %%   </li>
 %%   <li>
-%%     `cowboy_receive_body_duration_seconds'<br/>
+%%     `cowboy_receive_body_duration_microseconds'<br/>
 %%     Type: histogram.<br/>
 %%     Labels: default - `[method, reason, status_class]', configured via `request_labels'.<br/>
 %%     Buckets: default - `[0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]', configured via `duration_buckets'.<br/>
@@ -105,7 +105,11 @@
                    inc/3,
                    observe/3]}).
 
--define(DEFAULT_DURATION_BUCKETS, [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 4]).
+-define(DEFAULT_DURATION_BUCKETS, [
+  10, 25, 50, 100, 250, 500,
+  1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
+  1000000, 2500000, 5000000, 10000000
+]).
 -define(DEFAULT_EARLY_ERROR_LABELS, []).
 -define(DEFAULT_PROTOCOL_UPGRADE_LABELS, []).
 -define(DEFAULT_REQUEST_LABELS, [method, reason, status_class]).
@@ -161,12 +165,12 @@ setup() ->
                               {registry, registry()},
                               {labels, error_labels()},
                               {help, "Total number of HTTP request errors."}]),
-  prometheus_histogram:declare([{name, bondy_http_request_duration_seconds},
+  prometheus_histogram:declare([{name, bondy_http_request_duration_microseconds},
                                 {registry, registry()},
                                 {labels, request_labels()},
                                 {buckets, duration_buckets()},
                                 {help, "HTTP request duration."}]),
-  prometheus_histogram:declare([{name, bondy_http_receive_body_duration_seconds},
+  prometheus_histogram:declare([{name, bondy_http_receive_body_duration_microseconds},
                                 {registry, registry()},
                                 {labels, request_labels()},
                                 {buckets, duration_buckets()},
@@ -191,12 +195,18 @@ dispatch_metrics(#{req_start := ReqStart,
   RequestLabels = request_labels(Metrics),
   inc(bondy_http_requests_total, RequestLabels),
   inc(bondy_http_spawned_processes_total, RequestLabels, maps:size(Procs)),
-  observe(bondy_http_request_duration_seconds, RequestLabels,
-                               ReqEnd - ReqStart),
+  Microsecs = trunc((ReqEnd - ReqStart) / 1000),
+  observe(bondy_http_request_duration_microseconds, RequestLabels, Microsecs),
   case ReqBodyEnd of
-    undefined -> ok;
-    _ -> observe(bondy_http_receive_body_duration_seconds, RequestLabels,
-                                      ReqBodyEnd - ReqBodyStart)
+    undefined ->
+      ok;
+    _ ->
+      BMicrosecs = trunc((ReqEnd - ReqBodyStart) / 1000),
+      observe(
+        bondy_http_receive_body_duration_microseconds,
+        RequestLabels,
+        BMicrosecs
+      )
   end,
 
   case Reason of

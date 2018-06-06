@@ -73,8 +73,12 @@
                                 | serializer_unsupported
                                 | use_of_reserved_bits.
 
+
 -export([start_link/4]).
 -export([start_listeners/0]).
+-export([suspend_listeners/0]).
+-export([resume_listeners/0]).
+-export([stop_listeners/0]).
 
 
 -export([init/1]).
@@ -104,42 +108,48 @@ start_listeners() ->
     start_listeners([?TCP, ?TLS]).
 
 
-%% @private
-start_listeners([]) ->
-    ok;
 
-start_listeners([H|T]) ->
-    {ok, Opts} = application:get_env(bondy, H),
-    case lists:keyfind(enabled, 1, Opts) of
-        {_, true} ->
-            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-            {_, Port} = lists:keyfind(port, 1, Opts),
-            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
-            TransportOpts = case H == ?TLS of
-                true ->
-                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
-                    Files;
-                false ->
-                    []
-            end,
-            {ok, _} = ranch:start_listener(
-                H,
-                PoolSize,
-                ranch_mod(H),
-                [{port, Port}],
-                bondy_wamp_raw_handler,
-                TransportOpts
-            ),
-            _ = ranch:set_max_connections(H, MaxConns),
-            start_listeners(T);
-        {_, false} ->
-            start_listeners(T)
-    end.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_listeners() -> ok.
+
+stop_listeners() ->
+    catch ranch:stop_listener(?TCP),
+    catch ranch:stop_listener(?TLS),
+    ok.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_listeners() -> ok.
+
+suspend_listeners() ->
+    catch ranch:suspend_listener(?TCP),
+    catch ranch:suspend_listener(?TLS),
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_listeners() -> ok.
+
+resume_listeners() ->
+    catch ranch:resume_listener(?TCP),
+    catch ranch:resume_listener(?TLS),
+    ok.
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
 
@@ -207,14 +217,14 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
             {stop, Reason, St2}
     end;
 
-handle_info({?BONDY_PEER_CALL, Pid, M}, St) when Pid =:= self() ->
+handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_rotuer in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls, so we do not ack
     %% TODO check if we still need this now that bondy:ack seems to handle this case
     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_CALL, Pid, Ref, M}, St) ->
+handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy:send/2,3 which requires us to ack
     ok = bondy:ack(Pid, Ref),
@@ -238,7 +248,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
     {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
-    _ = log(debug, "Timeout. Sending ping", [], State0),
+    _ = log(debug, "Timeout. Sending first ping", [], State0),
     {ok, State1} = send_ping(State0),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timet
     {noreply, State1};
@@ -256,10 +266,14 @@ handle_info(
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
     _ = log(debug, "Ping timeout. Sending second ping", [], State),
+    %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {noreply, State1};
 
+handle_info({stop, Reason}, State) ->
+    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    {stop, normal, State};
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info, message='~p'", [Info]),
@@ -291,6 +305,39 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+start_listeners([]) ->
+    ok;
+
+start_listeners([H|T]) ->
+    {ok, Opts} = application:get_env(bondy, H),
+    case lists:keyfind(enabled, 1, Opts) of
+        {_, true} ->
+            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+            {_, Port} = lists:keyfind(port, 1, Opts),
+            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
+            TransportOpts = case H == ?TLS of
+                true ->
+                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
+                    Files;
+                false ->
+                    []
+            end,
+            {ok, _} = ranch:start_listener(
+                H,
+                PoolSize,
+                ranch_mod(H),
+                [{port, Port}],
+                bondy_wamp_raw_handler,
+                TransportOpts
+            ),
+            _ = ranch:set_max_connections(H, MaxConns),
+            start_listeners(T);
+        {_, false} ->
+            start_listeners(T)
+    end.
 
 
 %% @private
@@ -359,12 +406,12 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
             %% We reset the state
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             handle_data(Rest, St#state{ping_sent = false, ping_attempts = 0});
-        {true, _, TimerRef} ->
+        {true, Bin, TimerRef} ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             _ = log(
                 error,
-                "Invalid pong message from peer, reason=invalid_payload",
-                [], St
+                "Invalid pong message from peer, reason=invalid_payload, received=~p, expected=~p",
+                [Bin, Payload], St
             ),
             ok = close_socket(invalid_ping_response, St),
             {stop, invalid_ping_response, St};
@@ -414,7 +461,12 @@ handle_outbound(M, St0) ->
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
             ok = send(Bin, St0#state{protocol_state = PSt}),
-            {stop, normal, St0#state{protocol_state = PSt}}
+            {stop, normal, St0#state{protocol_state = PSt}};
+        {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
+            erlang:send_after(
+                Time, self(), {stop, <<"Router dropped session.">>}),
+            ok = send(Bin, St0#state{protocol_state = PSt}),
+            {noreply, St0#state{protocol_state = PSt}}
     end.
 
 
@@ -454,7 +506,9 @@ init_wamp(Len, Enc, St0) ->
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
                     _ = lager:info(
-                        "Established connection with peer, protocol=wamp,transport=raw, frame_type=~p, encoding=~p,  message_max_length=~p, peer=~s",
+                        "Established connection with peer, protocol=wamp,"
+                        " transport=raw, frame_type=~p, encoding=~p,"
+                        " message_max_length=~p, peer=~s",
                         [FrameType, EncName, MaxLen, inet_utils:peername_to_binary(Peer)]
                     ),
                     {ok, St1};
@@ -463,13 +517,18 @@ init_wamp(Len, Enc, St0) ->
             end;
         {ok, NonIPAddr} ->
             _ = lager:error(
-                "Unexpected peername when establishing connection, received a non IP address of '~p', reason=invalid_socket, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                "Unexpected peername when establishing connection,"
+                " received a non IP address of '~p', reason=invalid_socket,"
+                " protocol=wamp, transport=raw, frame_type=~p, encoding=~p,"
+                " message_max_length=~p",
                 [NonIPAddr, FrameType, EncName, MaxLen]
             ),
             {stop, invalid_socket, St0};
         {error, Reason} ->
             _ = lager:error(
-                "Invalid peername when establishing connection, reason=~p, description=~p, protocol=wamp, transport=raw, frame_type=~p, encoding=~p, message_max_length=~p",
+                "Invalid peername when establishing connection,"
+                " reason=~p, description=~p, protocol=wamp, transport=raw,"
+                " frame_type=~p, encoding=~p, message_max_length=~p",
                 [Reason, inet:format_error(Reason), FrameType, EncName, MaxLen]
             ),
             {stop, invalid_socket, St0}
@@ -496,7 +555,7 @@ send_frame(Frame, St) when is_binary(Frame) ->
 
 %% @private
 send_ping(St) ->
-    send_ping(term_to_binary(make_ref()), St).
+    send_ping(integer_to_binary(erlang:system_time(microsecond)), St).
 
 
 %% -----------------------------------------------------------------------------

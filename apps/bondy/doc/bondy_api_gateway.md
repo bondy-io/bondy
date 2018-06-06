@@ -24,8 +24,7 @@ listener() = api_gateway_http | api_gateway_https | admin_api_http | admin_api_h
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-2">add/2</a></td><td>
-We store the API Spec in the metadata store.</td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#dispatch_table-1">dispatch_table/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#load-1">load/1</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#dispatch_table-1">dispatch_table/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#load-1">load/1</a></td><td>
 Parses the provided Spec, stores it in the metadata store and calls
 rebuild_dispatch_tables/0.</td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td></td></tr><tr><td valign="top"><a href="#start_admin_listeners-0">start_admin_listeners/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_listeners-0">start_listeners/0</a></td><td>
 Conditionally start the public http and https listeners based on the
@@ -35,17 +34,6 @@ configuration.</td></tr></table>
 <a name="functions"></a>
 
 ## Function Details ##
-
-<a name="add-2"></a>
-
-### add/2 ###
-
-`add(Id, Spec) -> any()`
-
-We store the API Spec in the metadata store. Notice that we store the JSON
-and not the parsed spec as the parsed spec might contain mops proxy
-functions.  In case we upgrade the code of the mops.erl module those funs
-will no longer be valid and will fail with a badfun exception.
 
 <a name="delete-1"></a>
 

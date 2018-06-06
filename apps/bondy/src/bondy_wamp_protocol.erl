@@ -19,23 +19,31 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(SHUTDOWN_TIMEOUT, 5000).
 -define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
 
 -record(wamp_state, {
-    subprotocol             ::  subprotocol(),
-    challenge_sent          ::  {true, AuthMethod :: any()} | false,
-    goodbye_initiated       ::  boolean(),
+    subprotocol             ::  subprotocol() | undefined,
+    authmethod              ::  any(),
+    state_name = closed     ::  state_name(),
     context                 ::  bondy_context:context() | undefined
 }).
 
 
 -type state()               ::  #wamp_state{} | undefined.
+-type state_name()          ::  closed
+                                | establishing
+                                | challenging
+                                | failed
+                                | established
+                                | shutting_down.
 -type raw_wamp_message()    ::  wamp_message:message()
                                 | {raw, ping}
                                 | {raw, pong}
@@ -146,8 +154,20 @@ validate_subprotocol(_) ->
     | {reply, [binary()], state()}.
 
 handle_inbound(Data, St) ->
-    {Messages, <<>>} = wamp_encoding:decode(St#wamp_state.subprotocol, Data),
-    handle_inbound_messages(Messages, St).
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} ->
+            handle_inbound_messages(Messages, St)
+    catch
+        _:{unsupported_encoding, Format} ->
+            Mssg = <<"Unsupported message encoding">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{encoding => Format}, St);
+        _:badarg ->
+            Mssg = <<"Error during message decoding">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St);
+        _:function_clause ->
+            Mssg = <<"Incompatible message">>,
+            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St)
+    end.
 
 
 
@@ -158,25 +178,31 @@ handle_inbound(Data, St) ->
 -spec handle_outbound(wamp_message:message(), state()) ->
     {ok, binary(), state()}
     | {stop, state()}
-    | {stop, binary(), state()}.
+    | {stop, binary(), state()}
+    | {stop, binary(), state(), After :: non_neg_integer()}.
+
 
 handle_outbound(#result{} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#result.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
-    ok = bondy_stats:update(M, St0#wamp_state.context),
-    CallId = M#error.request_id,
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:remove_awaiting_call(Ctxt0, CallId),
-    St1 = update_context(bondy_context:reset(Ctxt1), St0),
+    ok = bondy_stats:update(M, Ctxt0),
+    St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
+
+handle_outbound(#goodbye{} = M, St0) ->
+    %% Bondy is shutting_down this session, we will stop when we
+    %% get the client's goodbye response
+    ok = bondy_stats:update(M, St0#wamp_state.context),
+    Bin = wamp_encoding:encode(M, encoding(St0)),
+    St1 = St0#wamp_state{state_name = shutting_down},
+    {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
 
 handle_outbound(M, St) ->
     case wamp_message:is_message(M) of
@@ -230,72 +256,92 @@ handle_inbound_messages([], St, []) ->
 handle_inbound_messages([], St, Acc) ->
     {reply, lists:reverse(Acc), St};
 
-handle_inbound_messages([#goodbye{} = M|_], St, Acc) ->
-    %% The client initiated a goodbye, so we will not process
-    %% any subsequent messages
-   case bondy_router:forward(M, St#wamp_state.context) of
-        {stop, Ctxt} ->
-            {stop, lists:reverse(Acc), update_context(Ctxt, St)};
-        {stop, Reply, Ctxt} ->
-            Bin = wamp_encoding:encode(Reply, encoding(St)),
-            {stop, lists:reverse([Bin|Acc]), update_context(Ctxt, St)}
-    end;
+
+handle_inbound_messages(
+    [#goodbye{}|_], #wamp_state{state_name = established} = St0, Acc) ->
+
+    %% Client initiated a goodbye, we ignore any subsequent messages
+    %% We reply with all previous messages plus a goodbye and stop
+    Reply = wamp_message:goodbye(
+        #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
+    Bin = wamp_encoding:encode(Reply, encoding(St0)),
+    St1 = St0#wamp_state{state_name = closed},
+    {stop, lists:reverse([Bin|Acc]), St1};
+
+handle_inbound_messages(
+    [#goodbye{}|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
+    %% Client is replying to our goodbye, we ignore any subsequent messages
+    %% We reply all previous messages and close
+    St1 = St0#wamp_state{state_name = closed},
+    {stop, lists:reverse(Acc), St1};
 
 handle_inbound_messages(
     [#hello{} = M|_],
-    #wamp_state{context = #{session := _}} = St, _) ->
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    #wamp_state{state_name = established, context = #{session := _}} = St0,
+    Acc) ->
     %% Client already has a session!
-    %% RFC:
-    %% It is a protocol error to receive a second "HELLO" message during the
-    %% lifetime of the session and the _Peer_ must fail the session if that
-    %% happens
-    abort(
-        ?BONDY_SESSION_ALREADY_EXISTS,
+    %% RFC: It is a protocol error to receive a second "HELLO" message during
+    %% the lifetime of the session and the _Peer_ must fail the session if that
+    %% happens.
+    ok = bondy_stats:update(M, St0#wamp_state.context),
+    %% We reply all previous messages plus an abort message and close
+    Bin = abort_error_bin(
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
-        St);
+        #{},
+        St0
+    ),
+    St1 = St0#wamp_state{state_name = closed},
+    {stop, [Bin | Acc], St1};
 
 handle_inbound_messages(
-    [#hello{} = M|_], #wamp_state{challenge_sent = {true, _}} = St, _) ->
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
+    ok = bondy_stats:update(M, St#wamp_state.context),
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
+        #{},
         St);
 
 handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
-    Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
     %% Client is requesting a session
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
+    Ctxt0 = St0#wamp_state.context,
+    ok = bondy_stats:update(M, Ctxt0),
+
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
+
     maybe_open_session(
         maybe_auth_challenge(M#hello.details, get_realm(St1), St1));
 
 handle_inbound_messages(
-    [#authenticate{} = M|_], #wamp_state{context = #{session := _}} = St, _) ->
+    [#authenticate{} = M|_],
+    #wamp_state{state_name = established, context = #{session := _}} = St, _) ->
     ok = bondy_stats:update(M, St#wamp_state.context),
     %% Client already has a session so is already authenticated.
     abort(
-        ?BONDY_SESSION_ALREADY_EXISTS,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent an AUTHENTICATE message more than once.">>,
+        #{},
         St);
 
 handle_inbound_messages(
-    [#authenticate{} = M|_],
-    #wamp_state{challenge_sent = {true, AuthMethod}} = St,
-    _) ->
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
     %% Client is responding to a challenge
-    #authenticate{signature = Sign} = M,
+
+    ok = bondy_stats:update(M, St#wamp_state.context),
+
+    Sign = M#authenticate.signature,
     Ctxt0 = St#wamp_state.context,
+    AuthMethod = St#wamp_state.authmethod,
     Realm = maps:get(realm_uri, Ctxt0),
     Peer = maps:get(peer, Ctxt0),
     AuthId = maps:get(authid, Ctxt0),
+
     case
         bondy_security_utils:authenticate(
             AuthMethod, {AuthMethod, AuthId, Sign}, Realm, Peer)
@@ -304,19 +350,24 @@ handle_inbound_messages(
             %% We already stored the authid (username) in the ctxt
             open_session(St);
         {error, Reason} ->
-            abort(?WAMP_ERROR_AUTHORIZATION_FAILED, Reason, St)
+            abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St)
     end;
 
-handle_inbound_messages([#authenticate{} = M|_], St, _) ->
-    %% Client does not have a session and has not been sent a challenge
+handle_inbound_messages(
+    [#authenticate{} = M|_], #wamp_state{state_name = Name} = St, _)
+    when Name =/= challenging ->
+    %% Client has not been sent a challenge
     ok = bondy_stats:update(M, St#wamp_state.context),
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to request a session first by sending a HELLO message.">>,
+        #{},
         St);
 
 handle_inbound_messages(
-    [H|T], #wamp_state{context = #{session := _}} = St, Acc) ->
+    [H|T],
+    #wamp_state{state_name = established, context = #{session := _}} = St,
+    Acc) ->
     %% We have a session, so we forward messages via router
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
@@ -326,14 +377,15 @@ handle_inbound_messages(
             handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
         {stop, M, Ctxt} ->
             Bin = wamp_encoding:encode(M, encoding(St)),
-            {stop, [Bin], update_context(Ctxt, St)}
+            {stop, [Bin | Acc], update_context(Ctxt, St)}
     end;
 
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO
     abort(
-        ?BONDY_ERROR_NOT_IN_SESSION,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to establish a session first.">>,
+        #{},
         St).
 
 
@@ -341,8 +393,6 @@ handle_inbound_messages(_, St, _) ->
 %% =============================================================================
 %% PRIVATE: AUTH & SESSION
 %% =============================================================================
-
-
 
 
 
@@ -355,30 +405,33 @@ maybe_open_session({error, {Code, Term}, St}) when is_atom(Term) ->
 
 maybe_open_session({error, {realm_not_found, Uri}, St}) ->
     abort(
-        ?WAMP_ERROR_NO_SUCH_REALM,
+        ?WAMP_NO_SUCH_REALM,
         <<"Realm '", Uri/binary, "' does not exist.">>,
+        #{},
         St
     );
 
 maybe_open_session({error, {missing_param, Param}, St}) ->
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_PROTOCOL_VIOLATION,
         <<"Missing value for required parameter '", Param/binary, "'.">>,
+        #{},
         St
     );
 
 maybe_open_session({error, {user_not_found, AuthId}, St}) ->
     abort(
-        ?WAMP_ERROR_CANCELLED,
+        ?WAMP_NO_SUCH_ROLE,
         <<"User '", AuthId/binary, "' does not exist.">>,
+        #{},
         St
     );
 
 maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     ok = bondy_stats:update(M, St0#wamp_state.context),
-    St1 = St0#wamp_state{challenge_sent = {true, AuthMethod}},
-    Bin = wamp_encoding:encode(M, encoding(St1)),
+    Bin = wamp_encoding:encode(M, encoding(St0)),
+    St1 = St0#wamp_state{state_name = challenging, authmethod = AuthMethod},
     {reply, Bin, St1}.
 
 
@@ -398,86 +451,55 @@ open_session(St0) ->
     try
         #{
             realm_uri := Uri,
+            authid := AuthId,
             id := Id,
             request_details := Details
         } = Ctxt0 = St0#wamp_state.context,
+
+        %% We open a session
         Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
-        Ctxt1 = Ctxt0#{
-            session => Session,
-            roles => parse_roles(maps:get(roles, Details))
-        },
+
+        %% We set the session in the context
+        Ctxt1 = Ctxt0#{session => Session},
         St1 = update_context(Ctxt1, St0),
 
+        %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             Id,
             #{
+                authid => AuthId,
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles()
             }
         ),
         ok = bondy_stats:update(Welcome, Ctxt1),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
-        {reply, Bin, St1}
+        {reply, Bin, St1#wamp_state{state_name = established}}
     catch
         error:{invalid_options, missing_client_role} ->
             abort(
-                <<"wamp.error.missing_client_role">>,
-                <<"Please provide at least one client role.">>,
+                ?WAMP_PROTOCOL_VIOLATION,
+                <<"No client roles provided. Please provide at least one client role.">>,
+                #{},
                 St0)
     end.
 
 
 
-%% ------------------------------------------------------------------------
-%% private
-%% @doc
-%% Merges the client provided role features with the ones provided by
-%% the router. This will become the feature set used by the router on
-%% every session request.
-%% @end
-%% ------------------------------------------------------------------------
-parse_roles(Roles) ->
-    parse_roles(maps:keys(Roles), Roles).
+%% @private
+abort(Type, Reason, Details, St) ->
+    {stop, abort_error_bin(Type, Reason, Details, St), St}.
 
 
 %% @private
-parse_roles([], Roles) ->
-    Roles;
-
-parse_roles([caller|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(caller, Roles), ?CALLER_FEATURES),
-    parse_roles(T, Roles#{caller => F});
-
-parse_roles([callee|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(callee, Roles), ?CALLEE_FEATURES),
-    parse_roles(T, Roles#{callee => F});
-
-parse_roles([subscriber|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
-    parse_roles(T, Roles#{subscriber => F});
-
-parse_roles([publisher|T], Roles) ->
-    F = bondy_utils:merge_map_flags(
-        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
-    parse_roles(T, Roles#{publisher => F});
-
-parse_roles([_|T], Roles) ->
-    parse_roles(T, Roles).
-
-
-%% @private
-abort(Type, Reason, St) ->
-    Details = #{
+abort_error_bin(Type, Reason, Details0, St) ->
+    Details = Details0#{
         message => Reason,
         timestamp => erlang:system_time(seconds)
     },
     M = wamp_message:abort(Details, Type),
     ok = bondy_stats:update(M, St#wamp_state.context),
-    Bin = wamp_encoding:encode(M, encoding(St)),
-    {stop, Bin, St}.
+    wamp_encoding:encode(M, encoding(St)).
 
 
 %% @private
@@ -504,10 +526,13 @@ maybe_auth_challenge(Details, Realm, St0) ->
             end;
         {true, _} ->
             {error, {missing_param, authid}, St0};
+        {false, #{authid := UserId}} ->
+            Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+            {ok, update_context(Ctxt1, St0)};
         {false, _} ->
-            Ctxt1 = Ctxt0#{authid => undefined, request_details => Details},
-            St1 = update_context(Ctxt1, St0),
-            {ok, St1}
+            TempId = bondy_utils:uuid(),
+            Ctxt1 = Ctxt0#{authid => TempId, request_details => Details},
+            {ok, update_context(Ctxt1, St0)}
     end.
 
 
@@ -560,6 +585,7 @@ get_realm(St) ->
             %% Will throw an exception if it does not exist
             bondy_realm:lookup(Uri)
     end.
+
 
 
 %% =============================================================================

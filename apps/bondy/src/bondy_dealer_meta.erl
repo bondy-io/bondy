@@ -113,11 +113,12 @@ handle_call(
     } = M,
     Ctxt) when length(L) =:= 1; length(L) =:= 2 ->
     % @TODO: Implement options
-    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Args = case bondy_registry:match(registration, Proc, RealmUri) of
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->
-            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
     R = wamp_message:result(ReqId, #{}, Args),
@@ -129,11 +130,12 @@ handle_call(
         arguments = [Proc] = L
     } = M,
     Ctxt) when length(L) =:= 1 ->
-    Args = case bondy_registry:match(registration, Proc, Ctxt) of
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Args = case bondy_registry:match(registration, Proc, RealmUri) of
         {[], '$end_of_table'} ->
             [];
         {Sessions, '$end_of_table'} ->
-            [bondy_registry:entry_id(hd(Sessions))] % @TODO Get from round-robin?
+            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
     end,
     ReqId = M#call.request_id,
     R = wamp_message:result(ReqId, #{}, Args),
@@ -498,7 +500,7 @@ handle_call(#call{} = M, Ctxt) ->
         ?CALL,
         M#call.request_id,
         #{},
-        ?WAMP_ERROR_NO_SUCH_PROCEDURE,
+        ?WAMP_NO_SUCH_PROCEDURE,
         [Mssg],
         #{
             message => Mssg,

@@ -22,8 +22,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway).
+-behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+
+
 
 -define(PREFIX, {global, api_specs}).
 -define(HTTP, api_gateway_http).
@@ -31,8 +34,13 @@
 -define(ADMIN_HTTP, admin_api_http).
 -define(ADMIN_HTTPS, admin_api_https).
 
+-record(state, {
+    exchange_ref            ::  {pid(), reference()} | undefined,
+    updated_specs = []      ::  list()
+}).
 
--type listener()  ::    api_gateway_http
+
+-type listener()    ::  api_gateway_http
                         | api_gateway_https
                         | admin_api_http
                         | admin_api_https.
@@ -44,11 +52,24 @@
 -export([list/0]).
 -export([load/1]).
 -export([lookup/1]).
+-export([rebuild_dispatch_tables/0]).
+-export([resume_admin_listeners/0]).
+-export([resume_listeners/0]).
 -export([start_admin_listeners/0]).
+-export([start_link/0]).
 -export([start_listeners/0]).
+-export([stop_admin_listeners/0]).
+-export([stop_listeners/0]).
+-export([suspend_admin_listeners/0]).
+-export([suspend_listeners/0]).
 
-% -export([start_http/1]).
-% -export([start_https/1]).
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
 
 
 
@@ -56,6 +77,10 @@
 %% API
 %% =============================================================================
 
+
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
 %% -----------------------------------------------------------------------------
@@ -66,18 +91,40 @@
 %% {@link start_admin_listeners()} for that.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec start_listeners() -> ok.
+
 start_listeners() ->
-    DTables = case load_dispatch_tables() of
-        [] ->
-            [
-                {<<"http">>, base_routes()},
-                {<<"https">>, base_routes()}
-            ];
-        L ->
-            L
-    end,
-    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
-    ok.
+    gen_server:call(?MODULE, {start_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_listeners() -> ok.
+
+suspend_listeners() ->
+    gen_server:call(?MODULE, {suspend_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_listeners() -> ok.
+
+resume_listeners() ->
+    gen_server:call(?MODULE, {resume_listeners, public}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_listeners() -> ok.
+
+stop_listeners() ->
+    gen_server:call(?MODULE, {stop_listeners, public}).
 
 
 %% -----------------------------------------------------------------------------
@@ -85,11 +132,37 @@ start_listeners() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start_admin_listeners() ->
-    _ = [
-        start_admin_listener({Scheme, Routes})
-        || {Scheme, Routes} <- parse_specs([admin_spec()], admin_base_routes())],
-    ok.
+    gen_server:call(?MODULE, {start_listeners, admin}).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec stop_admin_listeners() -> ok.
+
+stop_admin_listeners() ->
+    gen_server:call(?MODULE, {stop_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec suspend_admin_listeners() -> ok.
+
+suspend_admin_listeners() ->
+    gen_server:call(?MODULE, {suspend_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resume_admin_listeners() -> ok.
+
+resume_admin_listeners() ->
+    gen_server:call(?MODULE, {resume_listeners, admin}).
 
 
 %% -----------------------------------------------------------------------------
@@ -102,6 +175,253 @@ start_admin_listeners() ->
     ok | {error, invalid_specification_format | any()}.
 
 load(Map) when is_map(Map) ->
+    gen_server:call(?MODULE, {load, Map}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the current dispatch configured in the HTTP server.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dispatch_table(listener()) -> any().
+
+dispatch_table(Listener) ->
+    Map = ranch:get_protocol_options(Listener),
+    maps_utils:get_path([env, dispatch], Map).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Loads all configured API specs from the metadata store and rebuilds the
+%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
+%% environment.
+%% @end
+%% -----------------------------------------------------------------------------
+rebuild_dispatch_tables() ->
+    %% We get a dispatch table per scheme
+    _ = [
+        rebuild_dispatch_table(Scheme, Routes) ||
+        {Scheme, Routes} <- load_dispatch_tables()
+    ],
+    ok.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the API Specification object identified by `Id'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(binary()) -> map() | {error, not_found}.
+
+lookup(Id) ->
+    case plum_db:get(?PREFIX, Id)  of
+        Spec when is_map(Spec) ->
+            Spec;
+        undefined ->
+            {error, not_found}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of all stored API Specification objects.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec list() -> [ParsedSpec :: map()].
+
+list() ->
+    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Deletes the API Specification object identified by `Id'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(binary()) -> ok.
+
+delete(Id) when is_binary(Id) ->
+    plum_db:delete(?PREFIX, Id),
+    ok.
+
+
+
+
+%% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    %% We subscribe to change notifications in plum_db_events, we are
+    %% interested in updates to API Specs coming from another node so that we
+    %% recompile them and generate the Cowboy dispatch tables
+    ok = plum_db_events:subscribe(exchange_started),
+    ok = plum_db_events:subscribe(exchange_finished),
+    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
+    ok = plum_db_events:subscribe(object_update, MS),
+
+    {ok, #state{}}.
+
+
+handle_call({start_listeners, Type}, _From, State) ->
+    Res = do_start_listeners(Type),
+    {reply, Res, State};
+
+handle_call({suspend_listeners, Type}, _From, State) ->
+    Res = do_suspend_listeners(Type),
+    {reply, Res, State};
+
+handle_call({resume_listeners, Type}, _From, State) ->
+    Res = do_resume_listeners(Type),
+    {reply, Res, State};
+
+handle_call({stop_listeners, Type}, _From, State) ->
+    Res = do_stop_listeners(Type),
+    {reply, Res, State};
+
+handle_call({load, Map}, _From, State) ->
+    Res = load_spec(Map),
+    {reply, Res, State};
+
+handle_call(Event, From, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    {noreply, State}.
+
+
+handle_cast(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {noreply, State}.
+
+handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
+    Ref = erlang:monitor(process, Pid),
+    {noreply, State#state{exchange_ref = {Pid, Ref}}};
+
+handle_info(
+    {plum_db_event, exchange_finished, {Pid, _Reason}},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    true = erlang:demonitor(Ref),
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+    {noreply, State1};
+
+handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
+    %% We are receiving the notification after we recevied a DOWN message
+    %% we do nothing
+    {noreply, State};
+
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+    {noreply, State1};
+
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+    %% We've got a notification that an API Spec object has been updated
+    %% in the database via cluster replication, so we need to rebuild the
+    %% Cowboy dispatch tables
+    %% But since Specs depend on other objects being present and we also want
+    %% to avoid rebuilding the diospatch table multiple times, we just set a
+    %% flag on the state to rebuild the dispatch tables once we received an
+    %% exchange_finished event,
+    _ = lager:info("API Spec object_update received; key=~p", [Key]),
+    Acc = State#state.updated_specs,
+    {noreply, State#state{updated_specs = [Key|Acc]}};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
+    {noreply, State}.
+
+
+terminate(normal, _State) ->
+    unsubscribe();
+terminate(shutdown, _State) ->
+    unsubscribe();
+terminate({shutdown, _}, _State) ->
+    unsubscribe();
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+unsubscribe() ->
+    _ = plum_db_events:unsubscribe(exchange_started),
+    _ = plum_db_events:unsubscribe(exchange_finished),
+    _ = plum_db_events:unsubscribe(object_update),
+    ok.
+
+
+%% @private
+do_start_listeners(public) ->
+    DTables = case load_dispatch_tables() of
+        [] ->
+            [
+                {<<"http">>, base_routes()},
+                {<<"https">>, base_routes()}
+            ];
+        L ->
+            L
+    end,
+    _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
+    ok;
+
+do_start_listeners(admin) ->
+    DTables = parse_specs([admin_spec()], admin_base_routes()),
+    _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
+    ok.
+
+
+%% @private
+do_suspend_listeners(public) ->
+    catch ranch:suspend_listener(?HTTP),
+    catch ranch:suspend_listener(?HTTPS),
+    ok;
+
+do_suspend_listeners(admin) ->
+    catch ranch:suspend_listener(?ADMIN_HTTP),
+    catch ranch:suspend_listener(?ADMIN_HTTPS),
+    ok.
+
+
+%% @private
+do_resume_listeners(public) ->
+    catch ranch:resume_listener(?HTTP),
+    catch ranch:resume_listener(?HTTPS),
+    ok;
+
+do_resume_listeners(admin) ->
+    catch ranch:resume_listener(?ADMIN_HTTP),
+    catch ranch:resume_listener(?ADMIN_HTTPS),
+    ok.
+
+
+%% @private
+do_stop_listeners(public) ->
+    catch cowboy:stop_listener(?HTTP),
+    catch cowboy:stop_listener(?HTTPS),
+    ok;
+
+do_stop_listeners(admin) ->
+    catch cowboy:stop_listener(?ADMIN_HTTP),
+    catch cowboy:stop_listener(?ADMIN_HTTPS),
+    ok.
+
+
+%% @private
+load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{<<"id">> := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
@@ -116,7 +436,7 @@ load(Map) when is_map(Map) ->
             Error
     end;
 
-load(FName) ->
+load_spec(FName) ->
     try jsx:consult(FName, [return_maps]) of
         [Spec] ->
             load(Spec)
@@ -124,62 +444,6 @@ load(FName) ->
         error:badarg ->
             {error, invalid_specification_format}
     end.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec dispatch_table(listener()) -> any().
-
-dispatch_table(Listener) ->
-    Map = ranch:get_protocol_options(Listener),
-    maps_utils:get_path([env, dispatch], Map).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(binary()) -> map() | {error, not_found}.
-
-lookup(Id) ->
-    case plumtree_metadata:get(?PREFIX, Id)  of
-        Spec when is_map(Spec) ->
-            Spec;
-        undefined ->
-            {error, not_found}
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec list() -> [ParsedSpec :: map()].
-
-list() ->
-    [V || {_K, [V]} <- plumtree_metadata:to_list(?PREFIX), V =/= '$deleted'].
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(binary()) -> ok.
-
-delete(Id) when is_binary(Id) ->
-    plumtree_metadata:delete(?PREFIX, Id),
-    ok.
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -190,7 +454,7 @@ delete(Id) when is_binary(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
-    plumtree_metadata:put(?PREFIX, Id, Spec).
+    plum_db:put(?PREFIX, Id, Spec).
 
 
 
@@ -318,7 +582,7 @@ validate_spec(Map) ->
 %% @end
 %% -----------------------------------------------------------------------------
 load_dispatch_tables() ->
-    %% We sorted by time, this is becuase in case api definitions overlap
+    %% We sorted by time, this is because in case api definitions overlap
     %% we want at least try to process them in FIFO order.
     %% @TODO This does not work in a distributed env, since we are relying
     %% on wall clock, to be solve by using a CRDT?
@@ -342,28 +606,12 @@ load_dispatch_tables() ->
             end
 
         end ||
-        {K, [V]} <- plumtree_metadata:to_list(?PREFIX),
+        {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
     bondy_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @private
-%% Loads all configured API specs from the metadata store and rebuilds the
-%% Cowboy dispatch table by calling cowboy_router:compile/1 and updating the
-%% environment.
-%% @end
-%% -----------------------------------------------------------------------------
-rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
-    _ = [
-        rebuild_dispatch_table(Scheme, Routes) ||
-        {Scheme, Routes} <- load_dispatch_tables()
-    ],
-    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -386,6 +634,26 @@ rebuild_dispatch_table(<<"https">>, Routes) ->
     cowboy:set_env(?HTTPS, dispatch, cowboy_router:compile(Routes)).
 
 
+%% @private
+handle_spec_updates(#state{updated_specs = []}) ->
+    ok;
+
+handle_spec_updates(#state{updated_specs = [Key]}) ->
+    _ = lager:info(
+        "API Spec object_update received,"
+        " rebuilding HTTP server dispatch tables; key=~p",
+        [Key]
+    ),
+    rebuild_dispatch_tables();
+
+handle_spec_updates(#state{}) ->
+    _ = lager:info(
+        "Multiple API Spec object_update(s) received,"
+        " rebuilding HTTP server dispatch tables"
+    ),
+    rebuild_dispatch_tables().
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -395,7 +663,7 @@ base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}}
+            {"/ws", bondy_wamp_ws_handler, #{}}
         ]}
     ].
 
@@ -408,7 +676,7 @@ base_routes() ->
 admin_base_routes() ->
     [
         {'_', [
-            {"/ws", bondy_ws_handler, #{}},
+            {"/ws", bondy_wamp_ws_handler, #{}},
             {"/ping", bondy_http_ping_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}

@@ -51,6 +51,7 @@
 -export([security_enable/1]).
 -export([security_status/1]).
 
+
 %% API
 -export([load_api/3]).
 
@@ -99,7 +100,7 @@ status(_Command, [], [{status, Status}]) ->
 
 register_node_finder() ->
     F = fun() ->
-        {ok, Members} = plumtree_peer_service_manager:members(),
+        {ok, Members} = bondy_peer_service:members(),
         Members
     end,
     clique:register_node_finder(F).
@@ -125,11 +126,11 @@ register_cli() ->
 %%%===================================================================
 
 register_all_usage() ->
-    %% clique:register_usage(["bondy-admin", "cluster"], cluster_usage()),
-    %% clique:register_usage(["bondy-admin", "cluster", "status"], status_usage()),
-    %% clique:register_usage(["bondy-admin", "cluster", "partition"], partition_usage()),
-    %% clique:register_usage(["bondy-admin", "cluster", "partitions"], partitions_usage()),
-    %% clique:register_usage(["bondy-admin", "cluster", "partition_count"], partition_count_usage()).
+    %% clique:register_usage(["cluster"], cluster_usage()),
+    %% clique:register_usage(["cluster", "status"], status_usage()),
+    %% clique:register_usage(["cluster", "partition"], partition_usage()),
+    %% clique:register_usage(["cluster", "partitions"], partitions_usage()),
+    %% clique:register_usage(["cluster", "partition_count"], partition_count_usage()).
     [].
 
 
@@ -143,7 +144,7 @@ register_all_commands() ->
                 apply(clique, register_usage, [Cmd, UsageCB])
         end,
         lists:append([
-            %% status_register(),
+            cluster_commands(),
             %% router_register(),
             security_commands(),
             api_gateway_commands()
@@ -151,16 +152,64 @@ register_all_commands() ->
     ).
 
 
-%% status_register() ->
-%%     %% [Cmd, KeySpecs, FlagSpecs, Callback]
-%%     [["bondy-admin", "cluster", "status"], [], [], fun status/3].
+cluster_commands() ->
+    %% [ {Cmd, KeySpecs, FlagSpecs, CmdCallback, UsageCallback} ]
+    [
+        {
+            ["cluster"],
+            [],
+            [],
+            undefined,
+            fun cluster_usage/0
+        },
+        {
+            ["cluster", "join"],
+            [
+                {node, [
+                    {shortname, "n"},
+                    {longname, "node"},
+                    {typecast, fun to_node/1}
+                ]}
+            ],
+            [],
+            fun join/3,
+            fun join_usage/0
+        },
+        {
+            ["cluster", "leave"],
+            [],
+            [],
+            fun leave/3,
+            fun leave_usage/0
+        },
+        {
+            ["cluster", "kick-out"],
+            [
+                {node, [
+                    {shortname, "n"},
+                    {longname, "node"},
+                    {typecast, fun to_node/1}
+                ]}
+            ],
+            [],
+            fun kick_out/3,
+            fun kick_out_usage/0
+        },
+        {
+            ["cluster", "members"],
+            [],
+            [],
+            fun members/3,
+            fun members_usage/0
+        }
+    ].
 
 
 security_commands() ->
     %% [ {Cmd, KeySpecs, FlagSpecs, CmdCallback, UsageCallback} ]
     [
         {
-            ["bondy-admin", "security", "add-user"],
+            ["security", "add-user"],
             [],
             [],
             fun status/3,
@@ -173,14 +222,14 @@ api_gateway_commands() ->
     %% [Cmd, KeySpecs, FlagSpecs, Callback]
     [
         {
-            ["bondy-admin", "gateway"],
+            ["gateway"],
             [],
             [],
             undefined,
             fun gateway_usage/0
         },
         {
-            ["bondy-admin", "gateway", "load-api"],
+            ["gateway", "load-api"],
             [{filename, []}],
             [],
             fun load_api/3,
@@ -188,30 +237,104 @@ api_gateway_commands() ->
         }
     ].
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+members(["cluster", "members"], [], []) ->
+    {ok, L} = bondy_peer_service:members(),
+    Table = [ [{name, E}] || E <- L ],
+    [
+        clique_status:table(Table)
+    ].
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-load_api(["bondy-admin", "gateway", "load-api"], [{filename, FName}], []) ->
+join(["cluster", "join"], [], []) ->
+    clique_status:usage();
+
+join(["cluster", "join"], [{node, Node}], []) ->
+    ok = bondy_peer_service:join(Node),
+    {ok, L} = bondy_peer_service:members(),
+    Mssg = io_lib:format(
+        "Node succesfully joined the cluster.~n"
+        "The cluster has ~p members.~n",
+        [length(L)]
+    ),
+    Table = [ [{name, E}] || E <- L ],
+    [
+        clique_status:text(Mssg),
+        clique_status:table(Table)
+    ].
+
+
+kick_out(["cluster", "kick-out"], [{node, Node}], []) ->
+    ok = bondy_peer_service:leave(Node),
+    {ok, L} = bondy_peer_service:members(),
+    Table = [ [{name, E}] || E <- L ],
+    [
+        clique_status:text("Node was kicked out from the cluster."),
+        clique_status:table(Table)
+    ].
+
+
+leave(["cluster", "leave"], [], []) ->
+    ok = bondy_peer_service:leave(),
+    [clique_status:text("ok")].
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+load_api(["gateway", "load-api"], [{filename, FName}], []) ->
     case bondy_api_gateway:load(FName) of
         ok ->
             Text = io_lib:format("The API Gateway Specification was succesfully loaded."),
             %% TODO Also Print table of resulting API/Versions
             [clique_status:text(Text)];
         {error, invalid_specification_format} ->
-            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file is not of a valid API Gateway Specification format.", [FName]),
+            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file does not contain a valid API Gateway Specification format.", [FName]),
             [clique_status:alert([Text])];
         {error, badarg} ->
             Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file was either not found or had the wrong permissions.", [FName]),
             [clique_status:alert([Text])]
     end;
 
-load_api(["bondy-admin", "gateway", "load-api"], [{Op, Value}], []) ->
+load_api(["gateway", "load-api"], [{Op, Value}], []) ->
     [make_alert(["ERROR: The given value ", integer_to_list(Value),
                 " for ", atom_to_list(Op), " is invalid."])];
 load_api(_, [], []) ->
     clique_status:usage().
+
+
+cluster_usage() ->
+    [
+     "bondy-admin cluster <sub-command>\n\n",
+     "  Interact with a the peer service.\n\n",
+     "  Sub-commands:\n",
+     "    join    join cluster by providing another node.\n",
+     "    leave   leave the cluster.\n",
+     "    kick-out   make another node leave the cluster.\n",
+     "    members list the cluster members.\n",
+     "  Use --help after a sub-command for more details.\n"
+    ].
+
+members_usage() ->
+    ["tbd\n"].
+
+join_usage() ->
+    ["tbd\n"].
+
+leave_usage() ->
+    ["tbd\n"].
+
+kick_out_usage() ->
+    ["tbd\n"].
 
 
 gateway_usage() ->
@@ -563,3 +686,11 @@ parse_cidr(CIDR) ->
 
 make_alert(Iolist) ->
     clique_status:alert([clique_status:text(Iolist)]).
+
+-spec to_node(string()) -> node() | {error, bad_node}.
+to_node(Str) ->
+    try
+        list_to_atom(Str)
+    catch error:badarg ->
+        {error, bad_node}
+    end.

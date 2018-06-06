@@ -18,8 +18,8 @@
 
 %% =============================================================================
 %% @doc
-%% A Session is a transient conversation between two Peers attached to a
-%% Realm and running over a Transport.
+%% A Session (wamp session) is a transient conversation between two
+%% WAMP Peers attached to a Realm and running over a Transport.
 %%
 %% Bondy implementation ties the lifetime of the underlying transport connection
 %% for a WAMP connection to that of a WAMP Session
@@ -39,8 +39,8 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(SESSION_TABLE_NAME, ?MODULE).
--define(SESSION_SEQ_POS, 7).
+-define(SESSION_SPACE_NAME, ?MODULE).
+-define(SESSION_SEQ_POS, #session.seq).
 -define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
 -define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
 
@@ -109,7 +109,10 @@
 -record(session, {
     id                              ::  id(),
     realm_uri                       ::  uri(),
-    %% If a WS connection then we have a pid
+    node                            ::  atom(),
+    %% If owner of the session.
+    %% This is either pid of the TCP or WS handler process or
+    %% the cowboy handler.
     pid = self()                    ::  pid() | undefined,
     %% The {IP, Port} of the client
     peer                            ::  peer() | undefined,
@@ -117,12 +120,9 @@
     agent                           ::  binary(),
     %% Sequence number used for ID generation
     seq = 0                         ::  non_neg_integer(),
-    %% Peer WAMP Roles
-    caller                          ::  map() | undefined,
-    callee                          ::  map() | undefined,
-    subscriber                      ::  map() | undefined,
-    publisher                       ::  map() | undefined,
-    %% Auth
+    %% Peer WAMP Roles played by peer
+    roles                           ::  map() | undefined,
+    %% WAMP Auth
     authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
     authmethod                      ::  binary() | undefined,
@@ -149,28 +149,28 @@
 
 -export_type([peer/0]).
 
-
-
 -export([close/1]).
 -export([created/1]).
 -export([fetch/1]).
 -export([id/1]).
 -export([incr_seq/1]).
--export([lookup/1]).
 -export([list/0]).
 -export([list/1]).
--export([list_peers/0]).
+-export([list_peer_ids/1]).
+-export([list_peer_ids/2]).
+-export([lookup/1]).
 -export([new/3]).
 -export([new/4]).
 -export([open/3]).
 -export([open/4]).
--export([peer_id/1]).
 -export([peer/1]).
+-export([peer_id/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
+-export([roles/1]).
 -export([size/0]).
--export([update/1]).
 -export([to_details_map/1]).
+-export([update/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -183,7 +183,10 @@
 %% API
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc Creates a new transient session (not persisted)
+%% @end
+%% -----------------------------------------------------------------------------
 -spec new(peer(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
@@ -206,6 +209,7 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
         id = Id,
         peer = Peer,
         realm_uri = RealmUri,
+        node = bondy_peer_service:mynode(),
         created = calendar:local_time()
     },
     parse_details(Opts, S0).
@@ -293,21 +297,38 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
-realm_uri(#session{realm_uri = Uri}) ->
-    Uri;
+realm_uri(#session{realm_uri = Val}) ->
+    Val;
 realm_uri(Id) ->
-    #session{realm_uri = Uri} = fetch(Id),
-    Uri.
+    #session{realm_uri = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(session()) -> peer_id().
+-spec roles(id() | session()) -> map().
+roles(#session{roles = Val}) ->
+    Val;
+roles(Id) ->
+    #session{roles = Val} = fetch(Id),
+    Val.
 
-peer_id(#session{id = Id, pid = Pid}) ->
-    {Id, Pid}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the identifier for the owner of this session
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(session()) -> local_peer_id().
+
+peer_id(#session{} = S) ->
+    {
+        S#session.realm_uri,
+        S#session.node,
+        S#session.id,
+        S#session.pid
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -353,7 +374,7 @@ incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
 incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
-    Tab = tuplespace:locate_table(?SESSION_TABLE_NAME, SessionId),
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, SessionId),
     ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
@@ -365,7 +386,7 @@ incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
 -spec size() -> non_neg_integer().
 
 size() ->
-    tuplespace:size(?SESSION_TABLE_NAME).
+    tuplespace:size(?SESSION_SPACE_NAME).
 
 
 %% -----------------------------------------------------------------------------
@@ -417,11 +438,11 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 list(#{return := details_map}) ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
     [to_details_map(X) || T <- Tabs, X <- ets:tab2list(T)];
 
 list(_) ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
 
@@ -429,29 +450,18 @@ list(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-%% @TODO provide a limit and itereate on each table providing a custom
-%% continuation
-list_peers() ->
-    Tabs = tuplespace:tables(?SESSION_TABLE_NAME),
-    Head = #session{
-        id = '$1',
-        realm_uri = '$2',
-        pid = '$3',
-        peer = '$4',
-        agent = '_',
-        seq = '_',
-        caller = '_',
-        callee = '_',
-        subscriber = '_',
-        publisher = '_',
-        authid = '_',
-        created = '_',
-        expires_in = '_',
-        rate = '_',
-        quota = '_'
-    },
-    MS = [{ Head, [], [{{'$1', '$2', '$3', '$4'}}] }],
-    lists:append([ets:select(T, MS) || T <- Tabs]).
+list_peer_ids(N) ->
+    list_peer_ids('_', N).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
+    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
+    do_list_peer_ids(Tabs, RealmUri, N).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -481,41 +491,69 @@ to_details_map(#session{} = S) ->
 
 %% @private
 parse_details(Opts, Session0)  when is_map(Opts) ->
-    case maps:fold(fun parse_details/3, Session0, Opts) of
-        #session{
-            caller = undefined,
-            callee = undefined,
-            subscriber = undefined,
-            publisher = undefined} ->
-                error({invalid_options, missing_client_role});
-        Session1 ->
-            Session1
-    end.
+    maps:fold(fun parse_details/3, Session0, Opts).
 
 
 %% @private
 
 parse_details(roles, Roles, Session) when is_map(Roles) ->
-    parse_details(Roles, Session);
-parse_details(caller, V, Session) when is_map(V) ->
-    Session#session{caller = V};
-parse_details(callee, V, Session) when is_map(V) ->
-    Session#session{callee = V};
-parse_details(subscriber, V, Session) when is_map(V) ->
-    Session#session{subscriber = V};
-parse_details(publisher, V, Session) when is_map(V) ->
-    Session#session{publisher = V};
+    length(maps:keys(Roles)) > 0 orelse
+    error({invalid_options, missing_client_role}),
+    Session#session{roles = parse_roles(Roles)};
+
 parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
+
 parse_details(agent, V, Session) when is_binary(V) ->
     Session#session{agent = V};
+
 parse_details(_, _, Session) ->
     Session.
 
 
+
+%% ------------------------------------------------------------------------
+%% private
+%% @doc
+%% Merges the client provided role features with the ones provided by
+%% the router. This will become the feature set used by the router on
+%% every session request.
+%% @end
+%% ------------------------------------------------------------------------
+parse_roles(Roles) ->
+    parse_roles(maps:keys(Roles), Roles).
+
+
+%% @private
+parse_roles([], Roles) ->
+    Roles;
+
+parse_roles([caller|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(caller, Roles), ?CALLER_FEATURES),
+    parse_roles(T, Roles#{caller => F});
+
+parse_roles([callee|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(callee, Roles), ?CALLEE_FEATURES),
+    parse_roles(T, Roles#{callee => F});
+
+parse_roles([subscriber|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(subscriber, Roles), ?SUBSCRIBER_FEATURES),
+    parse_roles(T, Roles#{subscriber => F});
+
+parse_roles([publisher|T], Roles) ->
+    F = bondy_utils:merge_map_flags(
+        maps:get(publisher, Roles), ?PUBLISHER_FEATURES),
+    parse_roles(T, Roles#{publisher => F});
+
+parse_roles([_|T], Roles) ->
+    parse_roles(T, Roles).
+
 %% @private
 table(Id) ->
-    tuplespace:locate_table(?SESSION_TABLE_NAME, Id).
+    tuplespace:locate_table(?SESSION_SPACE_NAME, Id).
 
 
 %% @private
@@ -530,3 +568,63 @@ do_lookup(Id) ->
             {error, not_found}
     end.
 
+
+
+%% @private
+do_list_peer_ids([], _, _) ->
+    ?EOT;
+
+do_list_peer_ids([Tab | Tabs], RealmUri, N)
+when is_binary(RealmUri) orelse RealmUri == '_' ->
+    Pattern = #session{
+        id = '$3',
+        realm_uri = '$1',
+        node = '$2',
+        pid = '$4',
+        peer = '_',
+        agent = '_',
+        seq = '_',
+        roles = '_',
+        authid = '_',
+        authrole = '_',
+        authmethod = '_',
+        created = '_',
+        expires_in = '_',
+        rate = '_',
+        quota = '_'
+    },
+    Conds = case RealmUri of
+        '_' -> [];
+        _ ->  [{'=:=', '$1', RealmUri}]
+    end,
+    Projection = [{{'$1', '$2', '$3', '$4'}}],
+    MS = [{Pattern, Conds, Projection}],
+
+    case ets:select(Tab, MS, N) of
+        {L, Cont} ->
+            FunCont = fun() ->
+                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+            end,
+           {L, FunCont};
+        ?EOT ->
+            do_list_peer_ids(Tabs, RealmUri, N)
+    end.
+
+
+%% @private
+do_list_peer_ids({continuation, [], _, _, ?EOT}) ->
+    ?EOT;
+
+do_list_peer_ids({continuation, Tabs, RealmUri, N, ?EOT}) ->
+    do_list_peer_ids(Tabs, RealmUri, N);
+
+do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont}) ->
+    case ets:select(Cont) of
+        ?EOT ->
+            ?EOT;
+        {L, Cont} ->
+            FunCont = fun() ->
+                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+            end,
+            {L, FunCont}
+    end.

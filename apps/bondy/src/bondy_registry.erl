@@ -19,20 +19,30 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% An in-memory registry for PubSub subscriptions and RPC registrations,
+%% An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 %% providing pattern matching capabilities including support for WAMP's
 %% version 2.0 match policies (exact, prefix and wilcard).
+%%
+%% This is a temporary solution till we finish our
+%% adaptive radix trie implementation. Does no support prefix matching nor
+%% wilcard matching.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry).
+-behaviour(gen_server).
+
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
 
-
+%% -define(SUBSCRIPTION_DB_full_PREFIX, {global, bondy_subscription}).
+%% -define(REGISTRATION_DB_full_PREFIX, {global, bondy_registration}).
 -define(ANY, <<"*">>).
 
-%% -define(DEFAULT_LIMIT, 1000).
+-define(PREFIX, registry).
+-define(FULLPREFIX(RealmUri), {?PREFIX, RealmUri}).
+
+
 -define(SUBSCRIPTION_TABLE_NAME, bondy_subscription).
 -define(SUBSCRIPTION_INDEX_TABLE_NAME, bondy_subscription_index).
 -define(REGISTRATION_TABLE_NAME, bondy_registration).
@@ -41,190 +51,68 @@
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
 
-%% An entry denotes a registration or a subscription
-%% TODO entries should be replicated across the cluster via plumtree
-%% maybe using the metadata store directly
--record(entry, {
-    key                     ::  entry_key(),
-    type                    ::  entry_type(),
-    uri                     ::  uri() | atom(),
-    match_policy            ::  binary(),
-    criteria                ::  [{'=:=', Field :: binary(), Value :: any()}]
-                                | atom(),
-    created                 ::  calendar:date_time() | atom(),
-    options                 ::  map() | atom()
-}).
-
 %% TODO indices should be recomputed based on entry creation/deletion but are
 %% always local (i.e. they should not be replicated)
 -record(index, {
     key                     ::  tuple() | atom(),  % dynamically generated
-    entry_key               ::  entry_key()
+    entry_key               ::  bondy_registry_entry:key()
 }).
 
--type entry_key()           ::  {
-                                    RealmUri    ::  uri(),
-                                    SessionId   ::  id() | atom(),   % the owner
-                                    EntryId     ::  id() | atom()
-                                }.
--type entry()               ::  #entry{}.
--type entry_type()          ::  registration | subscription.
 -type eot()                 ::  ?EOT.
--type continuation()        ::  {entry_type(), etc:continuation()}.
-
-
--type details_map() :: #{
-    id => id(),
-    created => calendar:date(),
-    uri => uri(),
-    match => binary()
+-type continuation()        ::  {
+    bondy_registry_entry:entry_type(),
+    etc:continuation()
 }.
 
--type task() :: fun( (details_map(), bondy_context:context()) -> ok).
+
+-type task() :: fun(
+    (bondy_registry_entry:details_map(), bondy_context:context()) ->
+        ok
+).
 
 
-
--export_type([entry/0]).
--export_type([entry_key/0]).
--export_type([entry_type/0]).
 -export_type([eot/0]).
 -export_type([continuation/0]).
--export_type([details_map/0]).
 
 
 -export([add/4]).
--export([created/1]).
--export([criteria/1]).
 -export([entries/1]).
 -export([entries/2]).
--export([entries/3]).
 -export([entries/4]).
--export([entry_id/1]).
--export([lookup/3]).
--export([lookup/4]).
+-export([entries/5]).
+-export([lookup/1]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
--export([match_policy/1]).
--export([options/1]).
--export([realm_uri/1]).
+-export([remove/1]).
 -export([remove/3]).
 -export([remove/4]).
 -export([remove_all/2]).
 -export([remove_all/3]).
--export([session_id/1]).
--export([to_details_map/1]).
--export([type/1]).
--export([uri/1]).
+-export([remove_all/4]).
+-export([start_link/0]).
+
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
+
+
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the value of the subscription's or registration's realm_uri property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(entry()) -> uri().
-realm_uri(#entry{key = {Val, _, _}}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's session_id
-%% property.
-%% @end
-%% -----------------------------------------------------------------------------
--spec session_id(entry()) -> id().
-session_id(#entry{key = {_, Val, _}}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's entry_id
-%% property.
-%% @end
-%% -----------------------------------------------------------------------------
--spec entry_id(entry()) -> id().
-entry_id(#entry{key = {_, _, Val}}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the type of the entry, the atom 'registration' or 'subscription'.
-%% @end
-%% -----------------------------------------------------------------------------
--spec type(entry()) -> entry_type().
-type(#entry{type = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the uri this entry is about i.e. either a subscription topic_uri or
-%% a registration procedure_uri.
-%% @end
-%% -----------------------------------------------------------------------------
--spec uri(entry()) -> uri().
-uri(#entry{uri = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the match_policy used by this subscription or regitration.
-%% @end
-%% -----------------------------------------------------------------------------
--spec match_policy(entry()) -> binary().
-match_policy(#entry{match_policy = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Not used at the moment
-%% @end
-%% -----------------------------------------------------------------------------
--spec criteria(entry()) -> list().
-criteria(#entry{criteria = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the time when this entry was created.
-%% @end
-%% -----------------------------------------------------------------------------
--spec created(entry()) -> calendar:date_time().
-created(#entry{created = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the 'options' property of the entry.
-%% @end
-%% -----------------------------------------------------------------------------
--spec options(entry()) -> map().
-options(#entry{options = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Converts the entry into a map according to the WAMP protocol Details
-%% dictionary format.
-%% @end
-%% -----------------------------------------------------------------------------
--spec to_details_map(entry()) -> details_map().
-
-to_details_map(#entry{key = {_, _, Id}} = E) ->
-    #{
-        id => Id,
-        created => E#entry.created,
-        uri => E#entry.uri,
-        match => E#entry.match_policy,
-        invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
-    }.
-
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
 %% -----------------------------------------------------------------------------
@@ -234,11 +122,11 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 %% Adding an already existing entry is treated differently based on whether the
 %% entry is a registration or a subscription.
 %%
-%% According to the WAMP specifictation, in the case of a subscription that was
+%% According to the WAMP specification, in the case of a subscription that was
 %% already added before by the same _Subscriber_, the _Broker_ should not fail
 %% and answer with a "SUBSCRIBED" message, containing the existing
 %% "Subscription|id". So in this case this function returns
-%% {ok, details_map(), boolean()}.
+%% {ok, bondy_registry_entry:details_map(), boolean()}.
 %%
 %% In case of a registration, as a default, only a single Callee may
 %% register a procedure for an URI. However, when shared registrations are
@@ -254,61 +142,50 @@ to_details_map(#entry{key = {_, _, Id}} = E) ->
 %% return an error tuple.
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(entry_type(), uri(), map(), bondy_context:context()) ->
-    {ok, details_map(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, id()}}.
+-spec add(
+    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:context()) ->
+    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:details_map()}}.
+
 
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
-    SessionId = bondy_context:session_id(Ctxt),
-    MatchPolicy = validate_match_policy(Options),
-
-    MaybeAdd = fun
-        ({error, _} = Error) ->
-            Error;
-        (RegId) when is_integer(RegId) ->
-            Entry = #entry{
-                key = {RealmUri, SessionId, RegId},
-                type = Type,
-                uri = Uri,
-                match_policy = MatchPolicy,
-                criteria = [], % TODO Criteria
-                created = calendar:local_time(),
-                options = parse_options(Type, Options)
-            },
-            do_add(Type, Entry, Ctxt)
+    PeerId = bondy_context:peer_id(Ctxt),
+    %% Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
+    Pattern = case Type of
+        registration ->
+            %% A session can register a procedure multiple times if
+            %% shared_registration is enabled
+            %% So we do not match SessionId
+            bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_');
+        subscription ->
+            {RealmUri, Node, SessionId, _} = PeerId,
+            bondy_registry_entry:pattern(
+                Type, RealmUri, Node, SessionId, Uri, '_')
     end,
-
-    Pattern = #entry{
-        key = key_pattern(Type, RealmUri, SessionId),
-        type = Type,
-        uri = Uri,
-        match_policy = MatchPolicy,
-        criteria = '_', % TODO Criteria
-        created = '_',
-        options = '_'
-    },
-    Tab = entry_table(Type, RealmUri),
+    Tab = partition_table(Type, RealmUri),
 
     case ets:match_object(Tab, Pattern) of
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
-            MaybeAdd(bondy_utils:get_id(global));
+            Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
+            do_add(Entry);
 
-        [#entry{} = Entry] when Type == subscription ->
+        [Entry] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
-            {error, {already_exists, Entry}};
+            Map = bondy_registry_entry:to_details_map(Entry),
+            {error, {already_exists, Map}};
 
-        [#entry{options = EOpts} = Entry| _] when Type == registration ->
+        [Entry | _] when Type == registration ->
+            EOpts = bondy_registry_entry:options(Entry),
             SharedEnabled = bondy_context:is_feature_enabled(
                 Ctxt, callee, shared_registration),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-            %% As a default, only a single Callee may register a procedure
             %% for an URI.
             %% Shared Registration (RFC 13.3.9)
             %% When shared registrations are supported, then the first
@@ -325,9 +202,12 @@ add(Type, Uri, Options, Ctxt) ->
                 NewPolicy =:= PrevPolicy,
             case Flag of
                 true ->
-                    MaybeAdd(entry_id(Entry));
+                    NewEntry = bondy_registry_entry:new(
+                        Type, PeerId, Uri, Options),
+                    do_add(NewEntry);
                 false ->
-                    MaybeAdd({error, {already_exists, to_details_map(Entry)}})
+                    Map = bondy_registry_entry:to_details_map(Entry),
+                    {error, {already_exists, Map}}
             end
     end.
 
@@ -337,7 +217,8 @@ add(Type, Uri, Options, Ctxt) ->
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(entry_type(), bondy_context:context()) -> ok.
+-spec remove_all(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+    ok.
 
 remove_all(Type, Ctxt) ->
     remove_all(Type, Ctxt, undefined).
@@ -348,27 +229,31 @@ remove_all(Type, Ctxt) ->
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(entry_type(), bondy_context:context(), task() | undefined) ->
+-spec remove_all(
+    bondy_registry_entry:entry_type(),
+    bondy_context:context(),
+    task() | undefined) ->
     ok.
 
-remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task) ->
-    Pattern = #entry{
-        key = {RealmUri, bondy_context:session_id(Ctxt), '_'},
-        type = Type,
-        uri = '_',
-        match_policy = '_',
-        criteria = '_',
-        options = '_',
-        created = '_'
-    },
-    Tab = entry_table(Type, RealmUri),
-    case ets:match_object(Tab, Pattern, 1) of
-        ?EOT ->
-            %% There are no entries for this session
+remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
+when is_function(Task, 2) orelse Task == undefined ->
+    case bondy_context:session_id(Ctxt) of
+        undefined ->
             ok;
-        {[First], _} ->
-            %% Use iterator to remove each one
-            do_remove_all(First, Tab, Ctxt, Task)
+        SessionId ->
+            Node = bondy_context:node(Ctxt),
+            Pattern = bondy_registry_entry:pattern(
+                Type, RealmUri, Node, SessionId, '_', #{}),
+            Tab = partition_table(Type, RealmUri),
+            case ets:match_object(Tab, Pattern, 1) of
+                ?EOT ->
+                    %% There are no entries for this session
+                    ok;
+                {[First], _} ->
+                    %% Use iterator to remove each one
+                    MaybeFun = maybe_fun(Task, Ctxt),
+                    do_remove_all(First, Tab, SessionId, MaybeFun)
+            end
     end;
 
 remove_all(_, _, _) ->
@@ -377,30 +262,39 @@ remove_all(_, _, _) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Lookup an entry by Type, Id (Registration or Subscription Id) and Ctxt
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(entry_type(), id(), bondy_context:context()) ->
-    entry() | {error, not_found}.
+-spec remove_all(
+    bondy_registry_entry:entry_type(),
+    RealmUri :: uri(),
+    Node :: atom(),
+    SessionId :: id()) -> [bondy_registry_entry:t()].
 
-lookup(Type, EntryId, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    SessionId = bondy_context:session_id(Ctxt),
-    lookup(Type, EntryId, SessionId, RealmUri).
+remove_all(Type, RealmUri, Node, SessionId) ->
+    Pattern = bondy_registry_entry:pattern(
+        Type, RealmUri, Node, SessionId, '_', #{}),
+    Tab = partition_table(Type, RealmUri),
+    case ets:match_object(Tab, Pattern, 1) of
+        ?EOT ->
+            %% There are no entries for this session
+            ok;
+        {[First], _} ->
+            %% Use iterator to remove each one
+            do_remove_all(First, Tab, SessionId, undefined)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(entry_type(), id(), id(), uri()) -> entry() | {error, not_found}.
+-spec lookup(Key :: bondy_registry_entry:entry_key()) -> any().
 
-lookup(Type, EntryId, SessionId, RealmUri) ->
-    % TODO Use UserId when there is no SessionId
-    Tab = entry_table(Type, RealmUri),
-    case ets:take(Tab, {RealmUri, SessionId, EntryId}) of
+lookup(Key) ->
+    Type = bondy_registry_entry:type(Key),
+    RealmUri = bondy_registry_entry:realm_uri(Key),
+    case ets:lookup(partition_table(Type, RealmUri), Key) of
         [] ->
-            %% The session had no entries with EntryId.
             {error, not_found};
         [Entry] ->
             Entry
@@ -411,38 +305,82 @@ lookup(Type, EntryId, SessionId, RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(entry_type(), id(), bondy_context:context()) ->
-    ok | {error, not_found}.
+-spec remove(bondy_registry_entry:t()) -> ok.
 
-remove(Type, EntryId, Ctxt) ->
-    remove(Type, EntryId, Ctxt, undefined).
+remove(Entry) ->
+    Key = bondy_registry_entry:key(Entry),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    _ = take_from_tuplespace(Key),
+    %% We delete the entry from plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    plum_db:delete(?FULLPREFIX(RealmUri), Key).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(entry_type(), id(), bondy_context:context(), task() | undefined) ->
+-spec remove(
+    bondy_registry_entry:entry_type(), id(), bondy_context:context()) ->
     ok | {error, not_found}.
 
-remove(Type, EntryId, Ctxt, Task) ->
+remove(Type, EntryId, Ctxt) ->
+    remove(Type, EntryId, Ctxt, undefined).
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(
+    bondy_registry_entry:entry_type(),
+    id(),
+    bondy_context:context(),
+    task() | undefined) -> ok.
+
+remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
+    Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
-    % TODO Use UserId when there is no SessionId
-    Tab = entry_table(Type, RealmUri),
-    Key = {RealmUri, SessionId, EntryId},
+    Key = bondy_registry_entry:key_pattern(
+        Type, RealmUri, Node, SessionId, EntryId),
+
+    case take_from_tuplespace(Key) of
+        {ok, Entry} ->
+            MaybeFun = maybe_fun(Task, Ctxt),
+            maybe_execute(MaybeFun, Entry);
+        {error, not_found} ->
+            ok
+    end,
+    %% We delete the entry from plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    plum_db:delete(?FULLPREFIX(RealmUri), Key).
+
+
+%% @private
+take_from_tuplespace(Key) ->
+    RealmUri = bondy_registry_entry:realm_uri(Key),
+    Type = bondy_registry_entry:type(Key),
+    Tab = partition_table(Type, RealmUri),
     case ets:take(Tab, Key) of
         [] ->
             %% The session had no entries with EntryId.
             {error, not_found};
-        [#entry{uri = Uri, match_policy = MP} = Entry] ->
+        [Entry] ->
+            %% We delete the Entry and decrement the Uri count
+            Uri = bondy_registry_entry:uri(Entry),
+            MP = bondy_registry_entry:match_policy(Entry),
             decr_counter(Tab, {RealmUri, Uri}, 1),
+
             %% Delete indices for entry
             IdxTab = index_table(Type, RealmUri),
-            IdxEntry = index_entry(EntryId, Uri, MP, Ctxt),
+            IdxEntry = index_entry(Entry, MP),
             ets:delete_object(IdxTab, IdxEntry),
-            maybe_execute(Task, Entry, Ctxt)
+            {ok, Entry}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -453,12 +391,14 @@ remove(Type, EntryId, Ctxt, Task) ->
 %% and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(entry_type(), bondy_context:context()) -> [entry()].
+-spec entries(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+    [bondy_registry_entry:t()].
 
 entries(Type, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
+    Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
-    entries(Type, RealmUri, SessionId).
+    entries(Type, RealmUri, Node, SessionId).
 
 
 %% -----------------------------------------------------------------------------
@@ -470,19 +410,16 @@ entries(Type, Ctxt) ->
 %% of entries returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(entry_type(), RealmUri :: uri(), SessionId :: id()) -> [entry()].
+-spec entries(
+    bondy_registry_entry:entry_type(),
+    RealmUri :: uri(),
+    Node :: atom(),
+    SessionId :: id()) -> [bondy_registry_entry:t()].
 
-entries(Type, RealmUri, SessionId) ->
-    Pattern = #entry{
-        key = {RealmUri, SessionId, '_'},
-        type = Type,
-        uri = '_',
-        match_policy = '_',
-        criteria = '_',
-        created = '_',
-        options = '_'
-    },
-    ets:match_object(entry_table(Type, RealmUri), Pattern).
+entries(Type, RealmUri, Node, SessionId) ->
+    Pattern = bondy_registry_entry:pattern(
+        Type, RealmUri, Node, SessionId, '_', #{}),
+    ets:match_object(partition_table(Type, RealmUri), Pattern).
 
 
 
@@ -495,20 +432,17 @@ entries(Type, RealmUri, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(
-    entry_type(), Realm :: uri(), SessionId :: id(), Limit :: pos_integer()) ->
-    {[entry()], continuation() | eot()}.
+    bondy_registry_entry:entry_type(),
+    Realm :: uri(),
+    Node :: atom(),
+    SessionId :: id(),
+    Limit :: pos_integer()) ->
+    {[bondy_registry_entry:t()], continuation() | eot()}.
 
-entries(Type, RealmUri, SessionId, Limit) ->
-    Pattern = #entry{
-        key = {RealmUri, SessionId, '_'},
-        type = Type,
-        uri = '_',
-        match_policy = '_',
-        criteria = '_',
-        created = '_',
-        options = '_'
-    },
-    ets:match_object(entry_table(Type, RealmUri), Pattern, Limit).
+entries(Type, RealmUri, Node, SessionId, Limit) ->
+    Pattern = bondy_registry_entry:pattern(
+        Type, RealmUri, Node, SessionId, '_', #{}),
+    ets:match_object(partition_table(Type, RealmUri), Pattern, Limit).
 
 
 
@@ -525,7 +459,8 @@ entries(Type, RealmUri, SessionId, Limit) ->
 %% returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(continuation()) -> {[entry()], continuation() | eot()}.
+-spec entries(continuation()) ->
+    {[bondy_registry_entry:t()], continuation() | eot()}.
 
 entries(?EOT) ->
     {[], ?EOT};
@@ -545,11 +480,12 @@ entries({Type, Cont}) when Type == registration orelse Type == subscription ->
 %% Calls {@link match/4}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(entry_type(), uri(), bondy_context:context()) ->
-    {[entry()], continuation()} | eot().
+-spec match(
+    bondy_registry_entry:entry_type(), uri(), RealmUri :: uri()) ->
+    {[bondy_registry_entry:t()], continuation()} | eot().
 
-match(Type, Uri, Ctxt) ->
-    match(Type, Uri, Ctxt, #{}).
+match(Type, Uri, RealmUri) ->
+    match(Type, Uri, RealmUri, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -562,32 +498,42 @@ match(Type, Uri, Ctxt) ->
 %% registrations matching a procedure.
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(entry_type(), uri(), bondy_context:context(), map()) ->
-    {[entry()], continuation()} | eot().
+-spec match(
+    bondy_registry_entry:entry_type(), uri(), RealmUri :: uri(), map()) ->
+    {[bondy_registry_entry:t()], continuation()} | eot().
 
-match(Type, Uri, Ctxt, #{limit := Limit} = Opts) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    MS = index_ms(RealmUri, Uri, Opts),
-    Tab = index_table(Type, RealmUri),
-    case ets:select(Tab, MS, Limit) of
-        ?EOT ->
-            {[], ?EOT};
-        Result ->
-            lookup_entries(Type, Result)
+match(Type, Uri, RealmUri, #{limit := Limit} = Opts) ->
+    try
+        MS = index_ms(Type, RealmUri, Uri, Opts),
+        Tab = index_table(Type, RealmUri),
+        case ets:select(Tab, MS, Limit) of
+            ?EOT ->
+                {[], ?EOT};
+            Result ->
+                lookup_entries(Type, Result)
+        end
+    catch
+        throw:non_eligible_entries ->
+            {[], ?EOT}
     end;
 
-match(Type, Uri, Ctxt, Opts) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    MS = index_ms(RealmUri, Uri, Opts),
-    Tab = index_table(Type, RealmUri),
-    lookup_entries(Type, {ets:select(Tab, MS), ?EOT}).
+match(Type, Uri, RealmUri, Opts) ->
+    try
+        MS = index_ms(Type, RealmUri, Uri, Opts),
+        Tab = index_table(Type, RealmUri),
+        lookup_entries(Type, {ets:select(Tab, MS), ?EOT})
+    catch
+        throw:non_eligible_entries ->
+            {[], ?EOT}
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation()) -> {[entry()], continuation()} | eot().
+-spec match(continuation()) ->
+    {[bondy_registry_entry:t()], continuation()} | eot().
 
 match(?EOT) ->
     {[], ?EOT};
@@ -603,16 +549,159 @@ match({Type, Cont}) ->
 
 
 
+
+%% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    %% TODO DO NOT DO THIS, LOAD only data from particular node when we get an update from peerservice. Make sure we load before the first Exchange or actually force and exchange and then load.
+    %% We tell ourselves to load the registry from the db
+    self() ! init_from_db,
+    process_flag(trap_exit, true),
+
+    %% We subscribe to change notifications in plum_db_events. We get updates
+    %% in handle_info so that we can we recompile the Cowboy dispatch tables
+    MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
+    ok = plum_db_events:subscribe(object_update, MS),
+
+    {ok, undefined}.
+
+
+handle_call(Event, From, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    {noreply, State}.
+
+
+handle_cast(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {noreply, State}.
+
+handle_info(init_from_db, State0) ->
+    _ = lager:debug("Loading registry from db"),
+    State = init_from_db(State0),
+    {noreply, State};
+
+handle_info(
+    {plum_db_event, object_update, {{{registry, _}, Key}, Object}}, State) ->
+    Node = bondy_registry_entry:node(Key),
+    _ = case Node =:= bondy_peer_service:mynode() of
+        true ->
+            %% This should not be happenning as only we can change our
+            %% registrations. We do nothing.
+            ok;
+        false ->
+            case maybe_resolve(Object) of
+                '$deleted' ->
+                    _ = take_from_tuplespace(Key);
+                Entry ->
+                    add_to_tuplespace(Entry)
+            end
+    end,
+    {noreply, State};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    {noreply, State}.
+
+
+terminate(normal, _State) ->
+    ok;
+terminate(shutdown, _State) ->
+    ok;
+terminate({shutdown, _}, _State) ->
+    ok;
+terminate(_Reason, _State) ->
+    %% TODO publish metaevent
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+
 %% @private
-maybe_execute(undefined, _, _) ->
+init_from_db(State) ->
+    Opts = [{resolver, lww}],
+    Iterator = plum_db:iterator({?PREFIX, undefined}, Opts),
+    init_from_db(Iterator, State).
+
+%% @private
+init_from_db(Iterator, State) ->
+    Now = calendar:local_time(),
+    case plum_db:iterator_done(Iterator) of
+        true ->
+            ok = plum_db:iterator_close(Iterator),
+            State;
+        false ->
+            ok = case plum_db:iterator_key_value(Iterator) of
+                {_, '$deleted'} ->
+                    ok;
+                {_, Entry} ->
+                    maybe_add_to_tuplespace(Entry, Now)
+            end,
+            init_from_db(plum_db:iterate(Iterator), State)
+    end.
+
+
+%% @private
+maybe_add_to_tuplespace(Entry, Now) ->
+    MyNode = bondy_peer_service:mynode(),
+    Node = bondy_registry_entry:node(Entry),
+    Created = bondy_registry_entry:created(Entry),
+    %% Here we asume nodes keep their names
+    case MyNode == Node andalso Created < Now of
+        true ->
+            %% This entry should have been deleted when node crashed or shutdown
+            _ = lager:debug("removing stale entry ~p", [Entry]),
+            _ = remove(Entry),
+            ok;
+        false ->
+            _ = add_to_tuplespace(Entry),
+            ok
+    end.
+
+
+%% @private
+maybe_resolve(Object) ->
+    case plum_db_object:value_count(Object) > 1 of
+        true ->
+            %% Entries are immutable so we either get an Entry or a tombstone
+            Resolver = fun
+                ('$deleted', _) -> '$deleted';
+                (_, '$deleted') -> '$deleted'
+            end,
+            Resolved = plum_db_object:resolve(Object, Resolver),
+            plum_db_object:value(Resolved);
+        false ->
+            plum_db_object:value(Object)
+    end.
+
+%% @private
+maybe_fun(undefined, _) ->
+    undefined;
+
+maybe_fun(Fun, Ctxt) when is_function(Fun, 2) ->
+    fun(Entry) -> Fun(Entry, Ctxt) end.
+
+
+%% @private
+maybe_execute(undefined, _) ->
     ok;
 
-maybe_execute(Task, Entry, Ctxt) when is_function(Task, 2) ->
-    _ = Task(to_details_map(Entry), Ctxt),
+maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
+    _ = Fun(bondy_registry_entry:to_details_map(Entry)),
     ok.
 
 
@@ -620,41 +709,112 @@ maybe_execute(Task, Entry, Ctxt) when is_function(Task, 2) ->
 do_remove_all(?EOT, _, _, _) ->
     ok;
 
-do_remove_all(#entry{key = Key, type = Type} = E, ETab, Ctxt, Task) ->
-    {RealmUri, _, EntryId} = Key,
-    %% We first delete the index entry associated with this Entry
-    Uri = E#entry.uri,
-    IdxTab = index_table(Type, RealmUri),
-    IdxEntry = index_entry(EntryId, Uri, E#entry.match_policy, Ctxt),
-    true = ets:delete_object(IdxTab, IdxEntry),
-    %% We then delete the Entry and decrement the Uri count
-    N = ets:select_delete(ETab, [{E, [], [true]}]),
-    decr_counter(ETab, {RealmUri, Uri}, N),
-    %% We perform the task
-    ok = maybe_execute(Task, E, Ctxt),
-    %% We continue traversing the ets table
-    do_remove_all(ets:next(ETab, Key), ETab, Ctxt, Task);
+do_remove_all(Term, ETab, SessionId, Fun) ->
+    case bondy_registry_entry:is_entry(Term) of
+        true ->
+            RealmUri = bondy_registry_entry:realm_uri(Term),
+            Key = bondy_registry_entry:key(Term),
+            Uri = bondy_registry_entry:uri(Term),
+            Type = bondy_registry_entry:type(Term),
+            MatchPolicy = bondy_registry_entry:match_policy(Term),
 
-do_remove_all({_, Sid, _} = Key, ETab, Ctxt, Task) ->
-    case bondy_context:session_id(Ctxt) of
-        Sid ->
-            case ets:lookup(ETab, Key) of
-                [] ->
-                    ok;
-                [Entry] ->
-                    %% We should not be getting more than one
-                    %% with ordered_set and the matching semantics
-                    %% we are using
-                    do_remove_all(Entry, ETab, Ctxt, Task)
-            end;
-        _ ->
-            %% No longer our session
-            ok
-    end;
+            %% We first delete the index entry associated with this Entry
+            IdxTab = index_table(Type, RealmUri),
+            IdxEntry = index_entry(Term, MatchPolicy),
+            true = ets:delete_object(IdxTab, IdxEntry),
 
-do_remove_all(_, _, _, _) ->
-    %% No longer our session
-    ok.
+            %% We then delete the Entry and decrement the Uri count
+            N = ets:select_delete(ETab, [{Term, [], [true]}]),
+            decr_counter(ETab, {RealmUri, Uri}, N),
+
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            Key = bondy_registry_entry:key(Term),
+            ok = plum_db:delete(?FULLPREFIX(RealmUri), Key),
+
+            %% Finally, we perform the Fun if any
+            ok = maybe_execute(Fun, Term),
+
+            %% We continue traversing the ets table
+            do_remove_all(ets:next(ETab, Key), ETab, SessionId, Fun);
+
+        false ->
+            %% Term is entry key
+            Sid = bondy_registry_entry:session_id(Term),
+            case SessionId =:= Sid orelse SessionId == '_' of
+                true ->
+                    case ets:lookup(ETab, Term) of
+                        [] ->
+                            ok;
+                        [Entry] ->
+                            %% We should not be getting more than one
+                            %% with ordered_set and the matching semantics
+                            %% we are using
+                            do_remove_all(Entry, ETab, SessionId, Fun)
+                    end;
+                false ->
+                    %% No longer our session
+                    ok
+            end
+    end.
+
+
+
+%% TODO move to wamp library
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Returns the components of an URI.
+%%
+%% Example:
+%%
+%% <pre lang="erlang">
+%% uri_components(&lt;&lt;com.mycompany.foo.bar"&gt;&gt;).
+%% [&lt;&lt;com.mycompany"&gt;&gt;, &lt;&lt;foo"&gt;&gt;, &lt;&lt;bar"&gt;&gt;].
+%% </pre>
+%% @end
+%% -----------------------------------------------------------------------------
+-spec uri_components(uri()) -> [binary()].
+
+%% uri_components(<<"wamp.", Rest/binary>>) ->
+%%     L = binary:split(Rest, <<".">>, [global]),
+%%     [<<"wamp">> | L];
+
+%% uri_components(<<"com.leapsight.bondy.", Rest/binary>>) ->
+%%     L = binary:split(Rest, <<".">>, [global]),
+%%     [<<"com.leapsight.bondy">> | L];
+
+uri_components(Uri) ->
+    %% case binary:split(Uri, <<".">>, [global]) of
+    %%     %% [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
+    %%     [TopLevelDomain, AppName | Rest] ->
+    %%         Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
+    %%         [Domain | Rest];
+    %%     _Other ->
+    %%         error({badarg, Uri})
+    %% end.
+    binary:split(Uri, <<".">>, [global]).
+
+
+
+%% @private
+incr_counter(Tab, Key, N) ->
+    Default = {counter, Key, 0},
+    ets:update_counter(Tab, Key, {3, N}, Default).
+
+
+%% @private
+decr_counter(Tab, Key, N) ->
+    Default = {counter, Key, 0},
+    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
+        0 ->
+            %% Other process might have concurrently incremented the count,
+            %% so we do a match delete
+            true = ets:match_delete(Tab, Default),
+            0;
+        Val ->
+            Val
+    end.
+
 
 
 
@@ -665,51 +825,21 @@ do_remove_all(_, _, _, _) ->
 
 
 
-%% @private
--spec validate_match_policy(map()) -> binary().
-validate_match_policy(Options) when is_map(Options) ->
-    P = maps:get(match, Options, ?EXACT_MATCH),
-    P == ?EXACT_MATCH
-    orelse P == ?PREFIX_MATCH
-    orelse P == ?WILDCARD_MATCH
-    orelse error({invalid_match_policy, P}),
-    P.
-
-
-%% @private
-parse_options(subscription, Opts) ->
-    parse_subscription_options(Opts);
-
-parse_options(registration, Opts) ->
-    parse_registration_options(Opts).
-
-
-%% @private
-parse_subscription_options(Opts) ->
-    maps:without([match], Opts).
-
-
-%% @private
-parse_registration_options(Opts) ->
-    maps:without([match], Opts).
-
-
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Uses the tuplespace to locate the ets table name assigned to the Realm
+%% @doc Locates the tuplespace partition ets table name assigned to the Realm
 %% @end
 %% -----------------------------------------------------------------------------
--spec entry_table(entry_type(), uri()) -> ets:tid().
-entry_table(subscription, RealmUri) ->
+-spec partition_table(bondy_registry_entry:entry_type(), uri()) -> ets:tid().
+partition_table(subscription, RealmUri) ->
     tuplespace:locate_table(?SUBSCRIPTION_TABLE_NAME, RealmUri);
 
-entry_table(registration, RealmUri) ->
+partition_table(registration, RealmUri) ->
     tuplespace:locate_table(?REGISTRATION_TABLE_NAME, RealmUri).
 
 
 %% @private
--spec index_table(entry_type(), uri()) -> ets:tid().
+-spec index_table(bondy_registry_entry:entry_type(), uri()) -> ets:tid().
 index_table(subscription, RealmUri) ->
     tuplespace:locate_table(?SUBSCRIPTION_INDEX_TABLE_NAME, RealmUri);
 
@@ -718,24 +848,49 @@ index_table(registration, RealmUri) ->
 
 
 
+
+
 %% @private
--spec do_add(atom(), entry(), bondy_context:context()) ->
-    {ok, entry(), IsFirstEntry :: boolean()}.
+-spec do_add(bondy_registry_entry:t()) ->
+    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}.
 
-do_add(Type, Entry, Ctxt) ->
-    #entry{
-        key = {RealmUri, _, EntryId},
-        uri = Uri,
-        match_policy = MatchPolicy
-    } = Entry,
+do_add(Entry) ->
+    ok = add_to_db(Entry),
+    add_to_tuplespace(Entry).
 
-    SSTab = entry_table(Type, RealmUri),
+
+%% @private
+add_to_tuplespace(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = bondy_registry_entry:uri(Entry),
+    Type = bondy_registry_entry:type(Entry),
+
+    %% We insert the entry in tuplespace
+    SSTab = partition_table(Type, RealmUri),
     true = ets:insert(SSTab, Entry),
 
+    %% We insert the index in tuplespace
     IdxTab = index_table(Type, RealmUri),
-    IdxEntry = index_entry(EntryId, Uri, MatchPolicy, Ctxt),
+    IdxEntry = index_entry(Entry),
     true = ets:insert(IdxTab, IdxEntry),
-    {ok, to_details_map(Entry), incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1}.
+
+    Map = bondy_registry_entry:to_details_map(Entry),
+    IsFirstEntry = incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1,
+    {ok, Map, IsFirstEntry}.
+
+
+%% @private
+add_to_db(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    %% We insert the entry in plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    Key = bondy_registry_entry:key(Entry),
+    plum_db:put(?FULLPREFIX(RealmUri), Key, Entry).
+
+
+index_entry(Entry) ->
+    Policy = bondy_registry_entry:match_policy(Entry),
+    index_entry(Entry, Policy).
 
 
 %% -----------------------------------------------------------------------------
@@ -744,56 +899,93 @@ do_add(Type, Entry, Ctxt) ->
 %% Creates an index entry.
 %% @end
 %% -----------------------------------------------------------------------------
--spec index_entry(id(), uri(), binary(), bondy_context:context()) -> #index{}.
+-spec index_entry(bondy_registry_entry:t(), binary()) -> #index{}.
 
-index_entry(EntryId, Uri, Policy, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    SessionId = bondy_context:session_id(Ctxt),
-    Entry = #index{entry_key = {RealmUri, SessionId, EntryId}},
+index_entry(Entry, Policy) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Key = bondy_registry_entry:key(Entry),
+    Uri = bondy_registry_entry:uri(Entry),
+    Index = #index{entry_key = Key},
     Cs = [RealmUri | uri_components(Uri)],
     case Policy of
         ?EXACT_MATCH ->
-            Entry#index{key = list_to_tuple(Cs)};
+            Index#index{key = list_to_tuple(Cs)};
         ?PREFIX_MATCH ->
-            Entry#index{key = list_to_tuple(Cs ++ [?ANY])};
+            Index#index{key = list_to_tuple(Cs ++ [?ANY])};
         ?WILDCARD_MATCH ->
             %% Wildcard-matching allows to provide wildcards for *whole* URI
             %% components.
-            Entry#index{key = list_to_tuple(Cs)}
+            Index#index{key = list_to_tuple(Cs)}
     end.
 
 
-%% @private
--spec index_ms(uri(), uri(), map()) -> ets:match_spec().
 
-index_ms(RealmUri, Uri, Opts) ->
+%% @private
+-spec index_ms(bondy_registry_entry:entry_type(), uri(), uri(), map()) ->
+    ets:match_spec().
+
+index_ms(Type, RealmUri, Uri, Opts) ->
     Cs = [RealmUri | uri_components(Uri)],
     ExactConds = [{'=:=', '$1', {const, list_to_tuple(Cs)}}],
     PrefixConds = prefix_conditions(Cs),
     WildcardCond = wilcard_conditions(Cs),
-    AllConds = list_to_tuple(
-        lists:append([['or'], ExactConds, PrefixConds, WildcardCond])),
-    Conds = case maps:get(exclude, Opts, []) of
-        [] ->
-            [AllConds];
-        SessionIds ->
-            %% We exclude the provided SessionIds
-            ExclConds = list_to_tuple([
-                'and' |
-                [{'=/=', '$2', {const, S}} || S <- SessionIds]
-            ]),
-            [list_to_tuple(['andalso', AllConds, ExclConds])]
+    Conds0 = [
+        list_to_tuple(
+            lists:append([['or'], ExactConds, PrefixConds, WildcardCond]))
+    ],
+    Conds1 = case maps:find(eligible, Opts) of
+        error ->
+            Conds0;
+        {ok, []} ->
+            %% Non eligible! Most probably a mistake but we need to
+            %% respect the semantics
+            throw(non_eligible_entries);
+        {ok, EligibleIds} ->
+            %% We include the provided SessionIds
+            InclConds = maybe_or(
+                [{'=:=', '$3', {const, S}} || S <- EligibleIds]
+            ),
+            [InclConds | Conds0]
     end,
+    Conds2 = case maps:find(exclude, Opts) of
+        error ->
+            Conds1;
+        {ok, []} ->
+            Conds1;
+        {ok, ExcludedIds} ->
+            %% We exclude the provided SessionIds
+            ExclConds = maybe_and(
+                [{'=/=', '$3', {const, S}} || S <- ExcludedIds]
+            ),
+            [ExclConds | Conds1]
+    end,
+    Conds = case Conds2 of
+        [_] -> Conds2;
+        L -> [list_to_tuple(['andalso' | L])]
+    end,
+    EntryKey = bondy_registry_entry:key_pattern(
+        Type, RealmUri, '$2', '$3', '$4'),
     MP = #index{
         key = '$1',
-        entry_key = {RealmUri, '$2', '$3'}
+        entry_key = EntryKey
     },
-    Proj = [{{RealmUri, '$2', '$3'}}],
+    Proj = [{EntryKey}],
 
     [
         { MP, Conds, Proj }
     ].
 
+
+maybe_and([Clause]) ->
+    Clause;
+maybe_and(Clauses) ->
+    list_to_tuple(['and' | Clauses]).
+
+
+maybe_or([Clause]) ->
+    Clause;
+maybe_or(Clauses) ->
+    list_to_tuple(['or' | Clauses]).
 
 %% @private
 -spec prefix_conditions(list()) -> list().
@@ -847,73 +1039,12 @@ lookup_entries(Type, {Keys, Cont}) ->
 do_lookup_entries([], _, Acc) ->
     lists:reverse(Acc);
 
-do_lookup_entries([{RealmUri, _, _} = Key|T], Type, Acc) ->
-    case ets:lookup(entry_table(Type, RealmUri), Key) of
+do_lookup_entries([Key|T], Type, Acc) ->
+    RealmUri = bondy_registry_entry:realm_uri(Key),
+    case ets:lookup(partition_table(Type, RealmUri), Key) of
         [] ->
             do_lookup_entries(T, Type, Acc);
         [Entry] ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
-
-
-%% TODO move to wamp library
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Returns the components of an URI.
-%%
-%% Example:
-%%
-%% <pre lang="erlang">
-%% uri_components(&lt;&lt;com.mycompany.foo.bar"&gt;&gt;).
-%% [&lt;&lt;com.mycompany"&gt;&gt;, &lt;&lt;foo"&gt;&gt;, &lt;&lt;bar"&gt;&gt;].
-%% </pre>
-%% @end
-%% -----------------------------------------------------------------------------
--spec uri_components(uri()) -> [binary()].
-
-uri_components(<<"wamp.", Rest/binary>>) ->
-    L = binary:split(Rest, <<".">>, [global]),
-    [<<"wamp">> | L];
-
-uri_components(<<"com.leapsight.bondy.", Rest/binary>>) ->
-    L = binary:split(Rest, <<".">>, [global]),
-    [<<"com.leapsight.bondy">> | L];
-
-uri_components(Uri) ->
-    case binary:split(Uri, <<".">>, [global]) of
-        [TopLevelDomain, AppName | Rest] when length(Rest) > 0 ->
-            Domain = <<TopLevelDomain/binary, $., AppName/binary>>,
-            [Domain | Rest];
-        _Other ->
-            error({badarg, Uri})
-    end.
-
-
-%% @private
-key_pattern(subscription, RealmUri, SessionId) ->
-    {RealmUri, SessionId, '$1'};
-
-key_pattern(registration, RealmUri, _) ->
-    {RealmUri, '_', '$1'}.
-
-
-%% @private
-incr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    ets:update_counter(Tab, Key, {3, N}, Default).
-
-
-%% @private
-decr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
-        0 ->
-            %% Other process might have concurrently incremented the count,
-            %% so we do a match delete
-            true = ets:match_delete(Tab, Default),
-            0;
-        Val ->
-            Val
-    end.
-
 

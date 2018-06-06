@@ -300,7 +300,7 @@ resource_existed(Req, St) ->
 
 provide(Req, St) ->
     %% This is just to support OPTIONS
-    {ok, cowboy_req:set_resp_header(?HEADERS, Req), St}.
+    {ok, cowboy_req:set_resp_headers(?HEADERS, Req), St}.
 
 
 accept(Req0, St) ->

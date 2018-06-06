@@ -267,3 +267,11 @@
   {datatype, integer},
   hidden
 ]}.
+
+
+%% @doc Set 'off' for allowing explicit connections only
+{mapping, "erlang.distribution.connect_all", "vm_args.-connect_all", [
+  {default, off},
+  {datatype, flag},
+  hidden
+]}.

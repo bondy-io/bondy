@@ -30,7 +30,43 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
-    Procs = [
+    Children = [
+        #{
+            id => bondy_registry,
+            start => {
+                bondy_registry,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_registry]
+        },
+        #{
+            id => bondy_peer_wamp_forwarder,
+            start => {
+                bondy_peer_wamp_forwarder,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_peer_wamp_forwarder]
+        },
+        #{
+            id => bondy_api_gateway,
+            start => {
+                bondy_api_gateway,
+                start_link,
+                []
+            },
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [bondy_api_gateway]
+        },
         #{
             id => bondy_backup,
             start => {
@@ -44,4 +80,10 @@ init([]) ->
             modules => [bondy_backup]
         }
     ],
-    {ok, {{one_for_one, 1, 5}, Procs}}.
+    %% REVIEW SUPERVISION TREE, MAYBE SPLIT IN SUPERVISORS TO ADOPT
+    %% MIXED STRATEGY
+    %% TODO, we should use rest_for_one strategy.
+    %% If the registry or the wamp forwarder dies it is useless to
+    %% accept HTTP requests. Also they need to wait for the registry
+    %% to restore data from disk and mayeb perform an exchange
+    {ok, {{one_for_one, 1, 5}, Children}}.
