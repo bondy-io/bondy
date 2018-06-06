@@ -52,6 +52,7 @@
             %% Ours
             flake,
             tuplespace,
+            art,
             wamp
         ]},
     {env, []},

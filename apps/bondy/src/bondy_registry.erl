@@ -44,8 +44,10 @@
 
 
 -define(SUBSCRIPTION_TABLE_NAME, bondy_subscription).
--define(SUBSCRIPTION_INDEX_TABLE_NAME, bondy_subscription_index).
 -define(REGISTRATION_TABLE_NAME, bondy_registration).
+-define(SUBSCRIPTION_TRIE_NAME, bondy_subscription_trie).
+-define(REGISTRATION_TRIE_NAME, bondy_registration_trie).
+-define(SUBSCRIPTION_INDEX_TABLE_NAME, bondy_subscription_index).
 -define(REGISTRATION_INDEX_TABLE_NAME, bondy_registration_index).
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
