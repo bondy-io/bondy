@@ -2,7 +2,7 @@ kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   labels:
-    app: testbondy
+    app: bondy
     tier: gateway
   name: testbondy
   namespace: {{ .infra.namespace }}
