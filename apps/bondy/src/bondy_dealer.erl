@@ -199,8 +199,13 @@ close_context(Ctxt) ->
     %% Cleanup registrations
     ok = unregister_all(Ctxt),
     %% Cleanup invocations queue
-    ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
-    Ctxt.
+    try
+        ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
+        Ctxt
+    catch
+        _:_ ->
+            Ctxt
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -296,7 +301,8 @@ handle_message(#cancel{} = M, Ctxt0) ->
             %% back to the caller. INTERRUPT is sent to the callee and any
             %% response to the invocation or interrupt from the callee is
             %% discarded when received.
-            %% We dequeue, that way the response will be discarded.
+            %% We dequeue the invocation, that way the response will be
+            %% discarded.
             Fun = fun(InvocationId, Callee, Ctxt1) ->
                 Caller = bondy_context:peer_id(Ctxt1),
                 Mssg = <<"call_cancelled">>,
@@ -319,7 +325,10 @@ handle_message(#cancel{} = M, Ctxt0) ->
             %% The pending call is canceled and ERROR is sent immediately
             %% back to the caller. No INTERRUPT is sent to the callee and
             %% the result is discarded when received.
-            %% We dequeue,
+            %% We dequeue the invocation, that way the response will be
+            %% discarded.
+            %% TODO instead of dequeing, update the entry to reflect it was
+            %% cancelled
             Fun = fun(_InvocationId, Callee, Ctxt1) ->
                 Caller = bondy_context:peer_id(Ctxt1),
                 Mssg = <<"call_cancelled">>,
@@ -377,7 +386,9 @@ handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
             no_matching_promise(M);
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, Caller, M#error{request_type = ?CALL}, #{})
+            CallId = bondy_rpc_promise:call_id(Promise),
+            CallError = M#error{request_id = CallId, request_type = ?CALL},
+            bondy:send(Callee, Caller, CallError, #{})
     end,
     InvocationId = M#error.request_id,
     Callee = bondy_context:peer_id(Ctxt0),
@@ -385,17 +396,21 @@ handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     ok;
 
 handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
+    %% A callee is responding with an error to an INTERRUPT message
+    %% We need to turn this into a CANCEL error
     Callee = bondy_context:peer_id(Ctxt0),
-    Fun = fun
-        (empty) ->
-            no_matching_promise(M);
-        ({ok, Promise}) ->
-            Caller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, Caller, M#error{request_type = ?CANCEL}, #{})
-        end,
-    CallId = M#error.request_id,
+    InvocationId = M#error.request_id,
     Caller = bondy_context:peer_id(Ctxt0),
-    _ = bondy_rpc_promise:dequeue_call(CallId, Caller, Fun),
+    case bondy_rpc_promise:peek_invocation(InvocationId, Callee) of
+        empty ->
+            %% Call was evicted or performed already by Callee
+            no_matching_promise(M);
+        {ok, Promise} ->
+            Caller = bondy_rpc_promise:caller(Promise),
+            CallId = bondy_rpc_promise:call_id(Promise),
+            CancelError = M#error{request_id = CallId, request_type = ?CALL},
+            bondy:send(Callee, Caller, CancelError, #{})
+    end,
     ok;
 
 handle_message(
@@ -482,33 +497,33 @@ handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
 
 handle_peer_message(
     #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
-    %% A CALL we made to a remote callee has failed,
-    %% We forward the error back to the local caller.
+    %% A remote callee is returning an error to a local caller.
     Fun = fun
         (empty) ->
             no_matching_promise(M);
         ({ok, Promise}) ->
             LocalCaller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, LocalCaller, M, #{})
+            CallId = bondy_rpc_promise:call_id(Promise),
+            CallError = M#error{request_id = CallId, request_type = ?CALL},
+            bondy:send(Callee, LocalCaller, CallError, #{})
     end,
-    %% Is this CallId or InvId?
     InvocationId = M#error.request_id,
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
 handle_peer_message(
     #error{request_type = ?CANCEL} = M, Caller, Callee, _Opts) ->
-    %% A CANCEL we made to a remote callee has failed,
-    %% We forward the error back to the local caller.
-    Fun = fun
-        (empty) ->
+    %% A CANCEL we made to a remote callee has failed.
+    %% We forward the error back to the local caller, keeping the promise to be
+    %% able to match the future yield message,
+    CallId = M#error.request_id,
+    case bondy_rpc_promise:peek_call(CallId, Caller) of
+        empty ->
             no_matching_promise(M);
-        ({ok, Promise}) ->
+        {ok, Promise} ->
             LocalCaller = bondy_rpc_promise:caller(Promise),
             bondy:send(Callee, LocalCaller, M, #{})
     end,
-    CallId = M#error.request_id,
-    _ = bondy_rpc_promise:dequeue_call(CallId, Caller, Fun),
     ok;
 
 handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
@@ -529,7 +544,7 @@ handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
 handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
     %% We first need to find the registry entry to get the local callee
-    %% At the moment we might not get the Pid in teh Calle tuple, so we fetch it
+    %% At the moment we might not get the Pid in the Calle tuple, so we fetch it
     {RealmUri, Node, SessionId, _Pid} = Callee,
     Key = bondy_registry_entry:key_pattern(
         registration, RealmUri, Node, SessionId, M#invocation.registration_id),
