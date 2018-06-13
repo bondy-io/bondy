@@ -296,7 +296,7 @@ publish(Opts, TopicUri, Args, Payload, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec publish(id(), map(), uri(), list(), map(), bondy_context:context()) ->
-    {ok, id()}.
+    {ok, id()} | {error, any()}.
 
 publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
     try
