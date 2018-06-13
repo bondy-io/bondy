@@ -355,8 +355,8 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
             {error, Response0, St2} ->
-                {StatusCode, Response1} = take_status_code(Response0, 500),
-                Req2 = reply(StatusCode, error_encoding(Enc), Response1, Req1),
+                {HTTPCode, Response1} = take_status_code(Response0, 500),
+                Req2 = reply(HTTPCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
             {error, HTTPCode, Response, St2} ->
 
@@ -402,8 +402,9 @@ take_status_code(Term) ->
 take_status_code(#{<<"status_code">> := _} = Map, _) ->
     maps:take(<<"status_code">>, Map);
 
-take_status_code(#{<<"body">> := ErrorBody}, Default) ->
-    take_status_code(ErrorBody, Default);
+take_status_code(#{<<"body">> := Body0} = Map, Default) ->
+    {HTTStatus, Body1} =  take_status_code(Body0, Default),
+    {HTTStatus, Map#{<<"body">> => Body1}};
 
 take_status_code(ErrorBody, Default) ->
     case maps:take(<<"status_code">>, ErrorBody) of
