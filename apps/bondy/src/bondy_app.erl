@@ -96,10 +96,10 @@ setup_partisan() ->
 print_welcome_message() ->
     {ok, Vsn} = application:get_key(bondy, vsn),
     io:format(
-        "******************************************~n"
+        "~n******************************************~n"
         "~nLeapsight Bondy v~s~n"
         "~nDocumentation: http://getbondy.com"
-        "******************************************~n",
+        "~n******************************************~n",
         [Vsn]).
 
 
