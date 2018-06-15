@@ -18,10 +18,9 @@
 
 -module(bondy_api_oauth2_handler).
 -include("bondy.hrl").
+-include("bondy_api_gateway.hrl").
 
-% -type state() :: #{
-%     api_context => map()
-% }.
+
 
 %% AUTH CODE GRANT FLOW
 % curl -v -X POST http://localhost/v1.0.0/oauth/token -d \
@@ -29,13 +28,6 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
--define(CORS_HEADERS, #{
-    <<"access-control-allow-origin">> => <<"*">>,
-    <<"access-control-allow-credentials">> => <<"true">>,
-    <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
-    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
-    <<"access-control-max-age">> => <<"86400">>
-}).
 
 -define(HEADERS, ?CORS_HEADERS#{
     <<"content-type">> => <<"application/json; charset=utf-8">>
