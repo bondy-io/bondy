@@ -771,8 +771,21 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
 -spec reply(integer(), atom(), map(), cowboy_req:req()) ->
     cowboy_req:req().
 
-reply(HTTPCode, Enc, Response, Req) ->
-    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req)).
+reply(HTTPCode, Enc, Response, Req0) ->
+    %% We add the content-type since we are bypassing Cowboy by replying
+    %% ourselves
+    MimeType = case Enc of
+        msgpack ->
+            <<"application/msgpack; charset=utf-8">>;
+        json ->
+            <<"application/json; charset=utf-8">>;
+        undefined ->
+            <<"application/json; charset=utf-8">>;
+        Bin ->
+            Bin
+    end,
+    Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
+    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
 
 
 
