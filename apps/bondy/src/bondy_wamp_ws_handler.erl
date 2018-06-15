@@ -178,7 +178,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
         {reply, L, PSt} ->
             reply(T, L, St#state{protocol_state = PSt});
         {stop, PSt} ->
-            {shutdown, St#state{protocol_state = PSt}};
+            {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             self() ! {stop, <<"Router dropped session.">>},
             reply(T, L, St#state{protocol_state = PSt})
