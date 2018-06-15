@@ -87,7 +87,6 @@ init(Req, St0) ->
     %     bondy_context:new(), cowboy_req:peer(Req)),
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
-        session => Session,
         body_evaluated => false,
         api_context => init_context(Req),
         session => Session,
