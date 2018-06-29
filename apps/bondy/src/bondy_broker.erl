@@ -212,10 +212,15 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
                 %% We publish to a local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
                 ESessionId = bondy_registry_entry:session_id(Entry),
-                ESession = bondy_session:fetch(ESessionId),
-                Event = wamp_message:event(SubsId, PubId, Opts, Args, ArgsKW),
-                bondy:send(bondy_session:peer_id(ESession), Event),
-                maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc);
+                case bondy_session:lookup(ESessionId) of
+                    {error, not_found} ->
+                        Acc;
+                    ESession ->
+                        Event = wamp_message:event(
+                            SubsId, PubId, Opts, Args, ArgsKW),
+                        bondy:send(bondy_session:peer_id(ESession), Event),
+                        maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc)
+                end;
             _ ->
                 %% This is a forwarded PUBLISH so we do not forward it
                 Acc
@@ -567,7 +572,7 @@ match_subscriptions(TopicUri, RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match_subscriptions(uri(), RealmUri :: uri(), non_neg_integer()) ->
+-spec match_subscriptions(uri(), RealmUri :: uri(), map()) ->
     {
         [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
