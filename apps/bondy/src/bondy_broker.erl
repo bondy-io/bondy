@@ -370,10 +370,14 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
                 %% We publish to a local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
                 ESessionId = bondy_registry_entry:session_id(Entry),
-                ESession = bondy_session:fetch(ESessionId),
-                Event = wamp_message:event(SubsId, PubId, Opts, Args, Payload),
-                bondy:send(bondy_session:peer_id(ESession), Event),
-                maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc);
+                case bondy_session:lookup(ESessionId) of
+                    {error, not_found} ->
+                        Acc;
+                    ESession ->
+                        Event = wamp_message:event(SubsId, PubId, Opts, Args, Payload),
+                        bondy:send(bondy_session:peer_id(ESession), Event),
+                        maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc)
+                end;
             Other ->
                 %% We just acummulate the subscribers per peer, later we will
                 %% forward a single message to each peer.
