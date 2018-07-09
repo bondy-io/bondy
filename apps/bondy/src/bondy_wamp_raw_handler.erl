@@ -33,7 +33,7 @@
 -define(TCP, wamp_tcp).
 -define(TLS, wamp_tls).
 -define(TIMEOUT, ?PING_TIMEOUT * 2).
--define(PING_TIMEOUT, 30000). % 30 secs
+-define(PING_TIMEOUT, 10000). % 10 secs
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -79,6 +79,9 @@
 -export([suspend_listeners/0]).
 -export([resume_listeners/0]).
 -export([stop_listeners/0]).
+-export([connections/0]).
+-export([tcp_connections/0]).
+-export([tls_connections/0]).
 
 
 -export([init/1]).
@@ -152,6 +155,21 @@ resume_listeners() ->
 %% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+connections() ->
+    tls_connections() ++ tcp_connections().
+
+tls_connections() ->
+    ranch:procs(?TLS, connections).
+
+
+tcp_connections() ->
+    ranch:procs(?TCP, connections).
 
 
 
@@ -257,7 +275,7 @@ handle_info(
     ping_timeout,
     #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
     _ = log(
-        error, "Connection closing, reason=ping_timeout, attempts=~p", [N],
+        error, "Raw TCP connection closing, reason=ping_timeout, attempts=~p", [N],
         State
     ),
     ok = close_socket(ping_timeout, State),
@@ -272,7 +290,9 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     {noreply, State1};
 
 handle_info({stop, Reason}, State) ->
-    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
+    SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
+    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     {stop, normal, State};
 
 handle_info(Info, State) ->
