@@ -136,7 +136,7 @@ stop_router_services() ->
     %% We sleep for a minute to allow all sessions to terminate gracefully
     Time = 10000,
     _ = lager:info(
-        "Awaiting for ~p secs for clients gracefull shutdown.",
+        "Awaiting for ~p secs for clients graceful shutdown.",
         [trunc(Time/1000)]
     ),
     ok = timer:sleep(Time),
