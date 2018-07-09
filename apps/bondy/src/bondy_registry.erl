@@ -340,7 +340,8 @@ remove(Type, EntryId, Ctxt) ->
     bondy_context:context(),
     task() | undefined) -> ok.
 
-remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
+remove(Type, EntryId, Ctxt, Task)
+when is_function(Task, 2) orelse Task == undefined ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
