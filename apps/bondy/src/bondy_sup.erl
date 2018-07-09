@@ -85,5 +85,5 @@ init([]) ->
     %% TODO, we should use rest_for_one strategy.
     %% If the registry or the wamp forwarder dies it is useless to
     %% accept HTTP requests. Also they need to wait for the registry
-    %% to restore data from disk and mayeb perform an exchange
+    %% to restore data from disk and maybe perform an exchange
     {ok, {{one_for_one, 1, 5}, Children}}.
