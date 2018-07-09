@@ -497,18 +497,19 @@ match(Type, Uri, RealmUri) ->
     bondy_registry_entry:entry_type(), uri(), RealmUri :: uri(), map()) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
-match(Type, Uri, RealmUri, _Opts) ->
-    %% art does not support limits yet
-    %% #{limit := _Limit} = Opts,
+match(Type, Uri, RealmUri, Opts) ->
     try
         Trie = trie(Type),
         Pattern = <<RealmUri/binary, $,, Uri/binary>>,
-        Result = art_server:find_matches(Pattern, Trie),
+        MS = trie_ms(Opts),
+        Result = art_server:find_matches(Pattern, MS, Trie),
         lookup_entries(Type, {Result, ?EOT})
     catch
         throw:non_eligible_entries ->
             {[], ?EOT}
     end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -710,6 +711,7 @@ do_remove_all(Term, ETab, SessionId, Fun) ->
 
             %% We first delete the entry from the trie
             _ = art_server:delete(trie_key(Term), trie(Type)),
+            %% io:format("Called delete ~p~n", [trie_key(Term)]),
 
             %% We then delete the Entry and decrement the Uri count
             N = ets:select_delete(ETab, [{Term, [], [true]}]),
@@ -852,6 +854,76 @@ trie_key(Entry, Policy) ->
             {Key, Node, SessionId, Id}
     end.
 
+
+%% @private
+-spec trie_ms(map()) -> ets:match_spec() | undefined.
+
+trie_ms(Opts) ->
+    %% {{$1, $2, $2, $4}, $5},
+    %% {{Key, Node, SessionIdBin, EntryIdBin}, '_'},
+    Conds1 = case maps:find(eligible, Opts) of
+        {ok, []} ->
+            %% Non eligible! Most probably a mistake but we need to
+            %% respect the semantics
+            throw(non_eligible_entries);
+        {ok, EligibleIds} ->
+            %% We include the provided SessionIds
+            [
+                maybe_or(
+                    [
+                        {'=:=', '$3', {const, integer_to_binary(S)}}
+                        || S <- EligibleIds
+                    ]
+                )
+            ];
+        error ->
+            []
+    end,
+    Conds2 = case maps:find(exclude, Opts) of
+        {ok, []} ->
+            Conds1;
+        {ok, ExcludedIds} ->
+            %% We exclude the provided SessionIds
+            ExclConds = maybe_and(
+                [
+                    {'=/=', '$3', {const, integer_to_binary(S)}}
+                    || S <- ExcludedIds
+                ]
+            ),
+            [ExclConds | Conds1];
+        error ->
+            Conds1
+    end,
+
+    case Conds2 of
+        [] ->
+            undefined;
+        [_] ->
+            [
+                {
+                    {{'_', '_', '$3', '_'}, '_'}, Conds2, ['$_']
+                }
+            ];
+        _ ->
+            Conds3 = [list_to_tuple(['andalso' | Conds2])],
+            [
+                {
+                    {{'_', '_', '$3', '_'}, '_'}, Conds3, ['$_']
+                }
+            ]
+    end.
+
+
+maybe_and([Clause]) ->
+    Clause;
+maybe_and(Clauses) ->
+    list_to_tuple(['and' | Clauses]).
+
+
+maybe_or([Clause]) ->
+    Clause;
+maybe_or(Clauses) ->
+    list_to_tuple(['or' | Clauses]).
 
 
 %% @private
