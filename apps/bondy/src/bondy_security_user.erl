@@ -118,7 +118,7 @@ add(RealmUri, User0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), binary(), user()) -> ok.
+-spec update(uri(), binary(), user()) -> ok | {error, any()}.
 
 update(RealmUri, Username, User0) when is_binary(Username) ->
     try
