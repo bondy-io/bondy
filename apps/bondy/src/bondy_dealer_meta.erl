@@ -26,20 +26,21 @@
 %% -----------------------------------------------------------------------------
 %% com.leapsight.bondy.security
 %% -----------------------------------------------------------------------------
--define(BONDY_USER_ON_ADD, <<"com.leapsight.bondy.security.user_added">>).
--define(BONDY_USER_ON_DELETE, <<"com.leapsight.bondy.security.user_deleted">>).
--define(BONDY_USER_ON_UPDATE, <<"com.leapsight.bondy.security.user_updated">>).
--define(BONDY_GROUP_ON_ADD, <<"com.leapsight.bondy.security.group_added">>).
--define(BONDY_GROUP_ON_DELETE,
+-define(REALM_ADDED, <<"com.leapsight.bondy.security.realm_added">>).
+
+-define(USER_ADDED, <<"com.leapsight.bondy.security.user_added">>).
+-define(USER_DELETED, <<"com.leapsight.bondy.security.user_deleted">>).
+-define(USER_UPDATED, <<"com.leapsight.bondy.security.user_updated">>).
+-define(GROUP_ADDED, <<"com.leapsight.bondy.security.group_added">>).
+-define(GROUP_DELETED,
     <<"com.leapsight.bondy.security.group_deleted">>
 ).
--define(BONDY_GROUP_ON_UPDATE,
+-define(GROUP_UPDATED,
     <<"com.leapsight.bondy.security.group_updated">>
 ).
--define(BONDY_SOURCE_ON_ADD, <<"com.leapsight.bondy.security.source_added">>).
--define(BONDY_SOURCE_ON_DELETE,
-    <<"com.leapsight.bondy.security.source_deleted">>
-).
+-define(SOURCE_ADDED, <<"com.leapsight.bondy.security.source_added">>).
+-define(SOURCE_DELETED,
+<<"com.leapsight.bondy.security.source_deleted">>).
 
 %% -----------------------------------------------------------------------------
 %% com.leapsight.bondy.api_gateway
@@ -189,6 +190,7 @@ handle_call(
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_added(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(
@@ -200,6 +202,7 @@ handle_call(
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_updated(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(
@@ -239,6 +242,7 @@ handle_call(
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_deleted(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{
@@ -250,6 +254,7 @@ handle_call(#call{
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_added(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 
@@ -264,6 +269,7 @@ handle_call(#call{
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_updated(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.delete_resource_owner">>} = M, Ctxt) ->
@@ -276,6 +282,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.api_gateway.delete_reso
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_deleted(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 %% -----------------------------------------------------------------------------
@@ -292,6 +299,7 @@ handle_call(#call{
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_realm_added(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{
@@ -358,6 +366,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.add_user">>} =
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_added(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.update_user">>} = M, Ctxt) ->
@@ -368,6 +377,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.update_user">>
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_updated(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.delete_user">>} = M, Ctxt) ->
@@ -378,6 +388,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.delete_user">>
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_user_deleted(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.list_users">>} = M, Ctxt) ->
@@ -425,6 +436,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.add_group">>} 
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_group_added(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.delete_group">>} = M, Ctxt) ->
@@ -435,6 +447,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.delete_group">
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_group_deleted(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.list_groups">>} = M, Ctxt) ->
@@ -464,6 +477,7 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.update_group">
         {error, WampError} ->
             WampError
     end,
+    ok = maybe_group_updated(R, Ctxt),
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.add_source">>} = M, Ctxt) ->
@@ -493,6 +507,8 @@ handle_call(#call{procedure_uri = <<"com.leapsight.bondy.security.find_source">>
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
     bondy:send(bondy_context:peer_id(Ctxt), R);
+
+
 
 %% =============================================================================
 %% BACKUPS
@@ -540,7 +556,65 @@ handle_call(#call{} = M, Ctxt) ->
 %% =============================================================================
 
 
+%% @private
+maybe_realm_added(#error{}, _) ->
+    ok;
+
+maybe_realm_added(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?REALM_ADDED, Args, #{}, Ctxt),
+    ok.
 
 
+%% @private
+maybe_user_added(#error{}, _) ->
+    ok;
 
+maybe_user_added(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?USER_ADDED, Args, #{}, Ctxt),
+    ok.
+
+
+%% @private
+maybe_user_updated(#error{}, _) ->
+    ok;
+
+maybe_user_updated(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?USER_UPDATED, Args, #{}, Ctxt),
+    ok.
+
+
+%% @private
+maybe_user_deleted(#error{}, _) ->
+    ok;
+
+maybe_user_deleted(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?USER_DELETED, Args, #{}, Ctxt),
+    ok.
+
+
+%% @private
+maybe_group_added(#error{}, _) ->
+    ok;
+
+maybe_group_added(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?GROUP_ADDED, Args, #{}, Ctxt),
+    ok.
+
+
+%% @private
+maybe_group_updated(#error{}, _) ->
+    ok;
+
+maybe_group_updated(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?GROUP_UPDATED, Args, #{}, Ctxt),
+    ok.
+
+
+%% @private
+maybe_group_deleted(#error{}, _) ->
+    ok;
+
+maybe_group_deleted(#result{arguments = Args}, Ctxt) ->
+    _ = bondy_broker:publish(#{}, ?GROUP_DELETED, Args, #{}, Ctxt),
+    ok.
 
