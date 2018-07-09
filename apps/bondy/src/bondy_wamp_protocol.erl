@@ -57,6 +57,8 @@
 
 -export([init/3]).
 -export([peer/1]).
+-export([session_id/1]).
+-export([peer_id/1]).
 -export([handle_inbound/2]).
 -export([handle_outbound/2]).
 -export([terminate/1]).
@@ -94,6 +96,26 @@ init(Term, Peer, Opts) ->
 
 peer(#wamp_state{context = Ctxt}) ->
     bondy_context:peer(Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec session_id(state()) -> id().
+
+session_id(#wamp_state{context = Ctxt}) ->
+    bondy_context:session_id(Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer_id(state()) -> peer_id().
+
+peer_id(#wamp_state{context = Ctxt}) ->
+    bondy_context:peer_id(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
