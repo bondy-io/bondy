@@ -60,7 +60,7 @@
 
 
 -type task() :: fun(
-    (bondy_registry_entry:details_map(), bondy_context:context()) ->
+    (bondy_registry_entry:details_map(), bondy_context:t()) ->
         ok
 ).
 
@@ -137,7 +137,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(
-    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:context()) ->
+    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:t()) ->
     {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, bondy_registry_entry:details_map()}}.
 
@@ -211,7 +211,7 @@ add(Type, Uri, Options, Ctxt) ->
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+-spec remove_all(bondy_registry_entry:entry_type(), bondy_context:t()) ->
     ok.
 
 remove_all(Type, Ctxt) ->
@@ -225,7 +225,7 @@ remove_all(Type, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec remove_all(
     bondy_registry_entry:entry_type(),
-    bondy_context:context(),
+    bondy_context:t(),
     task() | undefined) ->
     ok.
 
@@ -315,7 +315,7 @@ remove(Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(
-    bondy_registry_entry:entry_type(), id(), bondy_context:context()) ->
+    bondy_registry_entry:entry_type(), id(), bondy_context:t()) ->
     ok | {error, not_found}.
 
 remove(Type, EntryId, Ctxt) ->
@@ -331,7 +331,7 @@ remove(Type, EntryId, Ctxt) ->
 -spec remove(
     bondy_registry_entry:entry_type(),
     id(),
-    bondy_context:context(),
+    bondy_context:t(),
     task() | undefined) -> ok.
 
 remove(Type, EntryId, Ctxt, Task)
@@ -386,7 +386,7 @@ take_from_tuplespace(Key) ->
 %% and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+-spec entries(bondy_registry_entry:entry_type(), bondy_context:t()) ->
     [bondy_registry_entry:t()].
 
 entries(Type, Ctxt) ->
@@ -656,7 +656,8 @@ maybe_add_to_tuplespace(Entry, Now) ->
     case MyNode == Node andalso Created < Now of
         true ->
             %% This entry should have been deleted when node crashed or shutdown
-            _ = lager:debug("removing stale entry ~p", [Entry]),
+            _ = lager:debug(
+                "Removing stale entry from plum_db; entry=~p", [Entry]),
             _ = remove(Entry),
             ok;
         false ->

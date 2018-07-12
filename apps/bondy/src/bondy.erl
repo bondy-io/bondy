@@ -179,9 +179,9 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     map(),
     list() | undefined,
     map() | undefined,
-    bondy_context:context()) ->
-    {ok, map(), bondy_context:context()}
-    | {error, wamp_error_map(), bondy_context:context()}.
+    bondy_context:t()) ->
+    {ok, map(), bondy_context:t()}
+    | {error, wamp_error_map(), bondy_context:t()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
