@@ -163,7 +163,7 @@ socket_error(Procotol, Transport) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec wamp_message(wamp_message:message(), bondy_context:context()) -> ok.
+-spec wamp_message(wamp_message:message(), bondy_context:t()) -> ok.
 
 wamp_message(#abort{} = M, Ctxt) ->
     wamp_message(bondy_wamp_abort_messages_total, M, [], Ctxt);

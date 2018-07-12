@@ -50,7 +50,7 @@ validate_admin_call_args(Call, Ctxt, Min, Max) ->
 %% -----------------------------------------------------------------------------
 -spec do_validate_call_args(
     wamp_call(),
-    bondy_context:context(),
+    bondy_context:t(),
     MinArity :: integer(),
     MaxArity :: integer(),
     AdminOnly :: boolean()) ->

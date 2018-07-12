@@ -99,7 +99,7 @@
 }).
 
 
--type event()       ::  {wamp_message(), bondy_context:context()}.
+-type event()       ::  {wamp_message(), bondy_context:t()}.
 
 
 %% API
@@ -147,7 +147,7 @@ shutdown() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_context(bondy_context:context()) -> bondy_context:context().
+-spec close_context(bondy_context:t()) -> bondy_context:t().
 close_context(Ctxt) ->
     bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
 
@@ -181,10 +181,10 @@ agent() ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(M :: wamp_message(), Ctxt :: bondy_context:context()) ->
-    {ok, bondy_context:context()}
-    | {reply, Reply :: wamp_message(), bondy_context:context()}
-    | {stop, Reply :: wamp_message(), bondy_context:context()}.
+-spec forward(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
+    {ok, bondy_context:t()}
+    | {reply, Reply :: wamp_message(), bondy_context:t()}
+    | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
 
 forward(M, #{session := _} = Ctxt) ->

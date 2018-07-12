@@ -108,7 +108,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"git@gitlab.com:leapsight/wamp.git",
-       {ref,"9d94909f51c14734e65f9aa5b9866edc79c1392f"}},
+       {ref,"706b685b00d42fc5e5515d23fb75dbf1959f007a"}},
   0},
  {<<"wts">>,{pkg,<<"wts">>,<<"0.3.0">>},1}]}.
 [

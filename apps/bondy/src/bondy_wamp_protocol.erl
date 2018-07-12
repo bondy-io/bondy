@@ -33,7 +33,7 @@
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
     state_name = closed     ::  state_name(),
-    context                 ::  bondy_context:context() | undefined
+    context                 ::  bondy_context:t() | undefined
 }).
 
 
