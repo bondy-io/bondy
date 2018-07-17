@@ -233,6 +233,7 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
 when is_function(Task, 2) orelse Task == undefined ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
+            _ = lager:info("Context has no session_id; failed to remove registry contents"),
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
