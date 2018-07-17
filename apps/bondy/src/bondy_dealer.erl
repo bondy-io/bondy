@@ -196,14 +196,18 @@
 -spec close_context(bondy_context:t()) -> bondy_context:t().
 
 close_context(Ctxt) ->
-    %% Cleanup registrations
-    ok = unregister_all(Ctxt),
-    %% Cleanup invocations queue
     try
+        %% Cleanup registrations
+        ok = unregister_all(Ctxt),
+        %% Cleanup invocations queue
         ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
         Ctxt
     catch
-        _:_ ->
+        Class:Reason ->
+            _ = lager:info(
+                "Error while closing context; class=~p, reason=~p",
+                [Class, Reason]
+            ),
             Ctxt
     end.
 
