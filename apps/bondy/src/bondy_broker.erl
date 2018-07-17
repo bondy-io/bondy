@@ -92,8 +92,18 @@
 
 -spec close_context(bondy_context:t()) -> bondy_context:t().
 close_context(Ctxt) ->
-    ok = unsubscribe_all(Ctxt),
-    Ctxt.
+    try
+        %% Cleanup subscriptions for context's session
+        ok = unsubscribe_all(Ctxt),
+        Ctxt
+    catch
+    Class:Reason ->
+        _ = lager:info(
+            "Error while closing context; class=~p, reason=~p",
+            [Class, Reason]
+        ),
+        Ctxt
+    end.
 
 
 -spec features() -> map().
