@@ -427,7 +427,7 @@ handle_message(
 
 handle_message(
     #call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
-    bondy_broker:handle_call(M, Ctxt);
+    bondy_broker_wamp_handler:handle_call(M, Ctxt);
 
 handle_message(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
