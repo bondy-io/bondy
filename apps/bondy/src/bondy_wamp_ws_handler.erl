@@ -213,7 +213,7 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
 websocket_info({stop, Reason}, St) ->
     Peer = bondy_wamp_protocol:peer(St#state.protocol_state),
     SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
-    _ = lager:debug(<<"WS TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
+    _ = lager:debug(<<"WS WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     %% ok = do_terminate(St),
     {stop, St};
 

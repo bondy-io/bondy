@@ -76,7 +76,6 @@
 -export([features/0]).
 -export([handle_message/2]).
 -export([handle_peer_message/4]).
--export([handle_call/2]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
 -export([publish/5]).
@@ -228,63 +227,6 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     end,
     _Acc1 = publish_fold(Subs, Fun, #{}),
     ok.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Handles the following META API wamp calls:
-%%
-%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
-%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
-%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
-%% * "wamp.subscription.get": Retrieves information on a particular subscription.
-%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
-%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_call(wamp_call(), bondy_context:t()) -> ok | no_return().
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
-    %% TODO, BUT This call might be too big, dos not make any sense as it is a dump of the whole database
-    Res = #{
-        ?EXACT_MATCH => [],
-        ?PREFIX_MATCH=> [],
-        ?WILDCARD_MATCH => []
-    },
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.lookup">>} = M, Ctxt) ->
-    % #{<<"topic">> := TopicUri} = Args = M#call.arguments,
-    % Opts = maps:get(<<"options">>, Args, #{}),
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.match">>} = M, Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.get">>} = M, Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(
-    #call{procedure_uri = <<"wamp.subscription.list_subscribers">>} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(
-    #call{procedure_uri = <<"wamp.subscription.count_subscribers">>} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M).
 
 
 %% -----------------------------------------------------------------------------
