@@ -279,6 +279,7 @@ close(#session{id = Id} = S) ->
     ok = bondy_stats:update(
         {session_closed, Id, Realm, IP, Secs}),
     true = ets:delete(table(Id), Id),
+    _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
     ok.
 
 
