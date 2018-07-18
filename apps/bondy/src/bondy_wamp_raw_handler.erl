@@ -484,7 +484,7 @@ handle_outbound(M, St0) ->
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
             erlang:send_after(
-                Time, self(), {stop, <<"Router dropped session.">>}),
+                Time, self(), {stop, normal}),
             ok = send(Bin, St0#state{protocol_state = PSt}),
             {noreply, St0#state{protocol_state = PSt}}
     end.
