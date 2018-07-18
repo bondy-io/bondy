@@ -113,12 +113,7 @@ new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
 -spec pattern(entry_type(), uri(), atom(), id(), uri(), map()) -> t().
 
 pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
-    MatchPolicy = try
-        validate_match_policy(Options)
-    catch
-        _:_ ->
-            '_'
-    end,
+    MatchPolicy = validate_match_policy(pattern, Options),
     #entry{
         key = key_pattern(Type, RealmUri, Node, SessionId, '_'),
         pid = '_',
@@ -336,11 +331,16 @@ to_details_map(#entry{key = Key} = E) ->
 %% PRIVATE
 %% =============================================================================
 
-
+validate_match_policy(Options) ->
+    validate_match_policy(key, Options).
 
 %% @private
 -spec validate_match_policy(map()) -> binary().
-validate_match_policy(Options) when is_map(Options) ->
+
+validate_match_policy(pattern, '_') ->
+    '_';
+
+validate_match_policy(_, Options) when is_map(Options) ->
     case maps:get(match, Options, ?EXACT_MATCH) of
         ?EXACT_MATCH = P -> P;
         ?PREFIX_MATCH = P -> P;
