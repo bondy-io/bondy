@@ -98,9 +98,9 @@ close_context(Ctxt) ->
         Ctxt
     catch
     Class:Reason ->
-        _ = lager:info(
-            "Error while closing context; class=~p, reason=~p",
-            [Class, Reason]
+        _ = lager:debug(
+            "Error while closing context; class=~p, reason=~p, trace=~p",
+            [Class, Reason, erlang:get_stacktrace()]
         ),
         Ctxt
     end.
