@@ -180,7 +180,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
-            self() ! {stop, <<"Router dropped session.">>},
+            self() ! {stop, normal},
             reply(T, L, St#state{protocol_state = PSt})
     end;
 
@@ -287,11 +287,11 @@ handle_outbound(T, M, St) ->
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
-            self() ! {stop, <<"Router dropped session.">>},
+            self() ! {stop, normal},
             reply(T, [Bin], St#state{protocol_state = PSt});
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
             erlang:send_after(
-                Time, self(), {stop, <<"Router dropped session.">>}),
+                Time, self(), {stop, normal}),
             reply(T, [Bin], St#state{protocol_state = PSt})
     end.
 
