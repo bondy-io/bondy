@@ -92,10 +92,10 @@
     is_active = true        ::  boolean
 }).
 
-
--type grant_type()      ::   client_credentials | password | authorization_code.
--type error()           ::   oauth2_invalid_grant | unknown_realm.
--type token_type()      ::   access_token | refresh_token.
+-type token()           ::  #bondy_oauth2_token{}.
+-type grant_type()      ::  client_credentials | password | authorization_code.
+-type error()           ::  oauth2_invalid_grant | unknown_realm.
+-type token_type()      ::  access_token | refresh_token.
 
 -export_type([error/0]).
 
@@ -147,7 +147,7 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 %% The function stores the refresh token in the store.
 %% @end
 %% -----------------------------------------------------------------------------
--spec issue_token(grant_type(), bondy_realm:uri(), #bondy_oauth2_token{}) ->
+-spec issue_token(grant_type(), bondy_realm:uri(), token()) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 

@@ -60,7 +60,7 @@
 
 
 -type task() :: fun(
-    (bondy_registry_entry:details_map(), bondy_context:context()) ->
+    (bondy_registry_entry:details_map(), bondy_context:t()) ->
         ok
 ).
 
@@ -137,7 +137,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(
-    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:context()) ->
+    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:t()) ->
     {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, bondy_registry_entry:details_map()}}.
 
@@ -211,7 +211,7 @@ add(Type, Uri, Options, Ctxt) ->
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+-spec remove_all(bondy_registry_entry:entry_type(), bondy_context:t()) ->
     ok.
 
 remove_all(Type, Ctxt) ->
@@ -225,7 +225,7 @@ remove_all(Type, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec remove_all(
     bondy_registry_entry:entry_type(),
-    bondy_context:context(),
+    bondy_context:t(),
     task() | undefined) ->
     ok.
 
@@ -233,21 +233,16 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
 when is_function(Task, 2) orelse Task == undefined ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
+            _ = lager:info("Context has no session_id; failed to remove registry contents"),
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
             Pattern = bondy_registry_entry:pattern(
-                Type, RealmUri, Node, SessionId, '_', #{}),
+                Type, RealmUri, Node, SessionId, '_', '_'),
             Tab = partition_table(Type, RealmUri),
-            case ets:match_object(Tab, Pattern, 1) of
-                ?EOT ->
-                    %% There are no entries for this session
-                    ok;
-                {[First], _} ->
-                    %% Use iterator to remove each one
-                    MaybeFun = maybe_fun(Task, Ctxt),
-                    do_remove_all(First, Tab, SessionId, MaybeFun)
-            end
+            MaybeFun = maybe_fun(Task, Ctxt),
+            do_remove_all(
+                ets:match_object(Tab, Pattern, 100), SessionId, MaybeFun)
     end;
 
 remove_all(_, _, _) ->
@@ -268,14 +263,7 @@ remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, SessionId, '_', #{}),
     Tab = partition_table(Type, RealmUri),
-    case ets:match_object(Tab, Pattern, 1) of
-        ?EOT ->
-            %% There are no entries for this session
-            ok;
-        {[First], _} ->
-            %% Use iterator to remove each one
-            do_remove_all(First, Tab, SessionId, undefined)
-    end.
+    do_remove_all(ets:match_object(Tab, Pattern, 1), SessionId, undefined).
 
 
 %% -----------------------------------------------------------------------------
@@ -305,8 +293,6 @@ remove(Entry) ->
     Key = bondy_registry_entry:key(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     _ = take_from_tuplespace(Key),
-    %% We delete the entry from plum_db. This will broadcast the delete
-    %% amongst the nodes in the cluster
     plum_db:delete(?FULLPREFIX(RealmUri), Key).
 
 
@@ -315,13 +301,11 @@ remove(Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(
-    bondy_registry_entry:entry_type(), id(), bondy_context:context()) ->
+    bondy_registry_entry:entry_type(), id(), bondy_context:t()) ->
     ok | {error, not_found}.
 
 remove(Type, EntryId, Ctxt) ->
     remove(Type, EntryId, Ctxt, undefined).
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -331,50 +315,17 @@ remove(Type, EntryId, Ctxt) ->
 -spec remove(
     bondy_registry_entry:entry_type(),
     id(),
-    bondy_context:context(),
+    bondy_context:t(),
     task() | undefined) -> ok.
 
-remove(Type, EntryId, Ctxt, Task) when is_function(Task, 2) ->
+remove(Type, EntryId, Ctxt, Task)
+when is_function(Task, 2) orelse Task == undefined ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     Key = bondy_registry_entry:key_pattern(
         Type, RealmUri, Node, SessionId, EntryId),
-
-    case take_from_tuplespace(Key) of
-        {ok, Entry} ->
-            MaybeFun = maybe_fun(Task, Ctxt),
-            maybe_execute(MaybeFun, Entry);
-        {error, not_found} ->
-            ok
-    end,
-    %% We delete the entry from plum_db. This will broadcast the delete
-    %% amongst the nodes in the cluster
-    plum_db:delete(?FULLPREFIX(RealmUri), Key).
-
-
-%% @private
-take_from_tuplespace(Key) ->
-    RealmUri = bondy_registry_entry:realm_uri(Key),
-    Type = bondy_registry_entry:type(Key),
-    Tab = partition_table(Type, RealmUri),
-    case ets:take(Tab, Key) of
-        [] ->
-            %% The session had no entries with EntryId.
-            {error, not_found};
-        [Entry] ->
-            %% We delete the trie entry
-            ok = art_server:delete(trie_key(Entry), trie(Type)),
-
-            %% We decrement the Uri count
-            Uri = bondy_registry_entry:uri(Entry),
-            decr_counter(Tab, {RealmUri, Uri}, 1),
-
-            {ok, Entry}
-    end.
-
-
-
+    do_remove(Key, Ctxt, Task).
 
 
 %% -----------------------------------------------------------------------------
@@ -385,7 +336,7 @@ take_from_tuplespace(Key) ->
 %% and SessionId extracted from the Context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec entries(bondy_registry_entry:entry_type(), bondy_context:context()) ->
+-spec entries(bondy_registry_entry:entry_type(), bondy_context:t()) ->
     [bondy_registry_entry:t()].
 
 entries(Type, Ctxt) ->
@@ -655,12 +606,41 @@ maybe_add_to_tuplespace(Entry, Now) ->
     case MyNode == Node andalso Created < Now of
         true ->
             %% This entry should have been deleted when node crashed or shutdown
-            _ = lager:debug("removing stale entry ~p", [Entry]),
+            _ = lager:debug(
+                "Removing stale entry from plum_db; entry=~p", [Entry]),
             _ = remove(Entry),
             ok;
         false ->
             _ = add_to_tuplespace(Entry),
             ok
+    end.
+
+
+%% @private
+take_from_tuplespace(Key) ->
+    RealmUri = bondy_registry_entry:realm_uri(Key),
+    Type = bondy_registry_entry:type(Key),
+    Tab = partition_table(Type, RealmUri),
+    %% We remove the entry from the registry space
+    case ets:take(Tab, Key) of
+        [] ->
+            {error, not_found};
+        [Entry] ->
+            %% We delete the entry from the registry trie
+            TrieKey = trie_key(Entry),
+            ok = case art_server:take(TrieKey, trie(Type)) of
+                {value, _} ->
+                    ok;
+                error ->
+                    _ = lager:debug(
+                        "Failed deleting element from trie; key=~p", [TrieKey]),
+                    ok
+            end,
+
+            %% We decrement the Uri count
+            Uri = bondy_registry_entry:uri(Entry),
+            decr_counter(Tab, {RealmUri, Uri}, 1),
+            {ok, Entry}
     end.
 
 
@@ -697,53 +677,57 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
 
 
 %% @private
-do_remove_all(?EOT, _, _, _) ->
+do_remove(Key, Ctxt, Task) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    case take_from_tuplespace(Key) of
+        {ok, Entry} ->
+            MaybeFun = maybe_fun(Task, Ctxt),
+            maybe_execute(MaybeFun, Entry);
+        {error, not_found} ->
+            ok
+    end,
+    %% We delete the entry from plum_db. This will broadcast the delete
+    %% amongst the nodes in the cluster
+    plum_db:delete(?FULLPREFIX(RealmUri), Key).
+
+
+%% @private
+do_remove_all(?EOT, _, _) ->
     ok;
 
-do_remove_all(Term, ETab, SessionId, Fun) ->
-    case bondy_registry_entry:is_entry(Term) of
+do_remove_all({[], ?EOT}, _, _) ->
+    ok;
+
+do_remove_all({[], Cont}, SessionId, Fun) ->
+    do_remove_all(ets:match(Cont), SessionId, Fun);
+
+do_remove_all({[Term|T], Cont}, SessionId, Fun) ->
+    Sid = bondy_registry_entry:session_id(Term),
+    case SessionId =:= Sid orelse SessionId == '_' of
         true ->
-            RealmUri = bondy_registry_entry:realm_uri(Term),
             EntryKey = bondy_registry_entry:key(Term),
-            Uri = bondy_registry_entry:uri(Term),
-            Type = bondy_registry_entry:type(Term),
-
-            %% We first delete the entry from the trie
-            _ = art_server:delete(trie_key(Term), trie(Type)),
-            %% io:format("Called delete ~p~n", [trie_key(Term)]),
-
-            %% We then delete the Entry and decrement the Uri count
-            N = ets:select_delete(ETab, [{Term, [], [true]}]),
-            decr_counter(ETab, {RealmUri, Uri}, N),
-
-            %% We delete the entry from plum_db. This will broadcast the delete
-            %% amongst the nodes in the cluster
-            ok = plum_db:delete(?FULLPREFIX(RealmUri), EntryKey),
-
-            %% Finally, we perform the Fun if any
-            ok = maybe_execute(Fun, Term),
-
-            %% We continue traversing the ets table
-            do_remove_all(ets:next(ETab, EntryKey), ETab, SessionId, Fun);
-
-        false ->
-            %% Term is entry key
-            Sid = bondy_registry_entry:session_id(Term),
-            case SessionId =:= Sid orelse SessionId == '_' of
-                true ->
-                    case ets:lookup(ETab, Term) of
-                        [] ->
-                            ok;
-                        [Entry] ->
-                            %% We should not be getting more than one
-                            %% with ordered_set and the matching semantics
-                            %% we are using
-                            do_remove_all(Entry, ETab, SessionId, Fun)
-                    end;
-                false ->
-                    %% No longer our session
+            %% Term is entry_key
+            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+            case take_from_tuplespace(EntryKey) of
+                {ok, Term} ->
+                    %% We delete the entry from plum_db.
+                    %% This will broadcast the delete
+                    %% amongst the nodes in the cluster
+                    ok = plum_db:delete(?FULLPREFIX(RealmUri), EntryKey),
+                    %% Finally, we perform the Fun if any
+                    maybe_execute(Fun, Term);
+                {error, not_found} ->
+                    _ = lager:debug(
+                        "Failed deleting element from space; key=~p",
+                        [Term]
+                    ),
                     ok
-            end
+            end,
+            %% We continue traversing the ets table
+            do_remove_all({T, Cont}, SessionId, Fun);
+        false ->
+            %% No longer our session
+            ok
     end.
 
 

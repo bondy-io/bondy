@@ -76,7 +76,6 @@
 -export([features/0]).
 -export([handle_message/2]).
 -export([handle_peer_message/4]).
--export([handle_call/2]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
 -export([publish/5]).
@@ -91,10 +90,20 @@
 %% =============================================================================
 
 
--spec close_context(bondy_context:context()) -> bondy_context:context().
+-spec close_context(bondy_context:t()) -> bondy_context:t().
 close_context(Ctxt) ->
-    ok = unsubscribe_all(Ctxt),
-    Ctxt.
+    try
+        %% Cleanup subscriptions for context's session
+        ok = unsubscribe_all(Ctxt),
+        Ctxt
+    catch
+    Class:Reason ->
+        _ = lager:debug(
+            "Error while closing context; class=~p, reason=~p, trace=~p",
+            [Class, Reason, erlang:get_stacktrace()]
+        ),
+        Ctxt
+    end.
 
 
 -spec features() -> map().
@@ -117,7 +126,7 @@ is_feature_enabled(F) when is_binary(F) ->
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: wamp_message(), Ctxt :: bondy_context:context()) -> ok.
+-spec handle_message(M :: wamp_message(), Ctxt :: bondy_context:t()) -> ok.
 
 handle_message(#subscribe{} = M, Ctxt) ->
     subscribe(M, Ctxt);
@@ -230,69 +239,18 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     ok.
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Handles the following META API wamp calls:
-%%
-%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
-%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
-%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
-%% * "wamp.subscription.get": Retrieves information on a particular subscription.
-%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
-%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_call(wamp_call(), bondy_context:context()) -> ok | no_return().
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
-    %% TODO, BUT This call might be too big, dos not make any sense as it is a dump of the whole database
-    Res = #{
-        ?EXACT_MATCH => [],
-        ?PREFIX_MATCH=> [],
-        ?WILDCARD_MATCH => []
-    },
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.lookup">>} = M, Ctxt) ->
-    % #{<<"topic">> := TopicUri} = Args = M#call.arguments,
-    % Opts = maps:get(<<"options">>, Args, #{}),
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.match">>} = M, Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(#call{procedure_uri = <<"wamp.subscription.get">>} = M, Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(
-    #call{procedure_uri = <<"wamp.subscription.list_subscribers">>} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
-
-handle_call(
-    #call{procedure_uri = <<"wamp.subscription.count_subscribers">>} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M).
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-publish(Opts, TopicUri, Args, Payload, Ctxt) ->
-    publish(bondy_utils:get_id(global), Opts, TopicUri, Args, Payload, Ctxt).
+-spec publish(
+    Opts :: map(),
+    {Realm :: uri(), TopicUri :: uri()} | uri(),
+    Args :: [],
+    ArgsKw :: map(),
+    bondy_context:t()) -> {ok, id()} | {error, any()}.
+publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
+    publish(bondy_utils:get_id(global), Opts, TopicUri, Args, ArgsKw, Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -300,12 +258,17 @@ publish(Opts, TopicUri, Args, Payload, Ctxt) ->
 
 %% @end
 %% -----------------------------------------------------------------------------
--spec publish(id(), map(), uri(), list(), map(), bondy_context:context()) ->
-    {ok, id()} | {error, any()}.
+-spec publish(
+    id(),
+    Opts :: map(),
+    {Realm :: uri(), TopicUri :: uri()} | uri(),
+    Args :: list(),
+    ArgsKw :: map(),
+    bondy_context:t()) -> {ok, id()} | {error, any()}.
 
-publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
+publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     try
-        do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt)
+        do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         _:Reason ->
             _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
@@ -314,7 +277,15 @@ publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
 
 
 %% @private
-do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
+-spec do_publish(
+    id(),
+    Opts :: map(),
+    {Realm :: uri(), TopicUri :: uri()},
+    Args :: list(),
+    ArgsKw :: map(),
+    bondy_context:t()) -> {ok, id()} | {error, any()}.
+
+do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
 
     %% REVIEW We need to parallelise this based on batches
@@ -359,7 +330,6 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
             MatchOpts0#{eligible => sets:to_list(Eligible)}
     end,
 
-    RealmUri = bondy_context:realm_uri(Ctxt),
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
     Node = bondy_peer_service:mynode(),
     PubId = bondy_utils:get_id(global),
@@ -374,7 +344,7 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
                     {error, not_found} ->
                         Acc;
                     ESession ->
-                        Event = wamp_message:event(SubsId, PubId, Opts, Args, Payload),
+                        Event = wamp_message:event(SubsId, PubId, Opts, Args, ArgsKw),
                         bondy:send(bondy_session:peer_id(ESession), Event),
                         maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc)
                 end;
@@ -399,7 +369,7 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
             ok = case sets:size(Set) > 0 of
                 true ->
                     M = wamp_message:publish(
-                        ReqId, Opts, TopicUri, Args, Payload),
+                        ReqId, Opts, TopicUri, Args, ArgsKw),
                     %% We also forward the PubId
                     FOpts = #{publication_id => PubId},
                     forward_publication(sets:to_list(Set), M, FOpts, Ctxt);
@@ -407,7 +377,11 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
                     ok
             end,
             {ok, PubId}
-    end.
+    end;
+
+do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt).
 
 
 
@@ -423,7 +397,7 @@ do_publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(wamp_subscribe(), bondy_context:context()) -> ok.
+-spec subscribe(wamp_subscribe(), bondy_context:t()) -> ok.
 
 subscribe(M, Ctxt) ->
     ReqId = M#subscribe.request_id,
@@ -450,7 +424,7 @@ subscribe(M, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 %% TODO Rename to flush()
--spec unsubscribe_all(bondy_context:context()) -> ok.
+-spec unsubscribe_all(bondy_context:t()) -> ok.
 
 unsubscribe_all(Ctxt) ->
     bondy_registry:remove_all(subscription, Ctxt).
@@ -461,7 +435,7 @@ unsubscribe_all(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id(), bondy_context:context()) -> ok | {error, not_found}.
+-spec unsubscribe(id(), bondy_context:t()) -> ok | {error, not_found}.
 
 unsubscribe(SubsId, Ctxt) ->
     case bondy_registry:remove(subscription, SubsId, Ctxt) of
@@ -545,7 +519,7 @@ subscriptions(RealmUri, Node, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscriptions(
-    RealmUri :: uri(), Node :: atom(),SessionId :: id(), non_neg_integer()) ->
+    RealmUri :: uri(), Node :: atom(), SessionId :: id(), non_neg_integer()) ->
     {
         [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()

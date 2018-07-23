@@ -180,7 +180,7 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
-            self() ! {stop, <<"Router dropped session.">>},
+            self() ! {stop, normal},
             reply(T, L, St#state{protocol_state = PSt})
     end;
 
@@ -213,7 +213,7 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
 websocket_info({stop, Reason}, St) ->
     Peer = bondy_wamp_protocol:peer(St#state.protocol_state),
     SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
-    _ = lager:debug(<<"WS TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
+    _ = lager:debug(<<"WS WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     %% ok = do_terminate(St),
     {stop, St};
 
@@ -287,11 +287,11 @@ handle_outbound(T, M, St) ->
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
-            self() ! {stop, <<"Router dropped session.">>},
+            self() ! {stop, normal},
             reply(T, [Bin], St#state{protocol_state = PSt});
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
             erlang:send_after(
-                Time, self(), {stop, <<"Router dropped session.">>}),
+                Time, self(), {stop, normal}),
             reply(T, [Bin], St#state{protocol_state = PSt})
     end.
 

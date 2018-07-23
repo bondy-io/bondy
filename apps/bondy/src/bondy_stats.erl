@@ -168,7 +168,7 @@ update(Event) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(wamp_message:message(), bondy_context:context()) -> ok.
+-spec update(wamp_message:message(), bondy_context:t()) -> ok.
 
 update(M, #{peer := {_IP, _}} = Ctxt) ->
     %% Type = element(1, M),
