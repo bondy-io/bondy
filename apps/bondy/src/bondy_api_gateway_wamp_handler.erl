@@ -11,6 +11,12 @@
 -define(LOAD_API,
     <<"com.leapsight.bondy.api_gateway.load">>
 ).
+-define(LIST,
+    <<"com.leapsight.bondy.api_gateway.list">>
+).
+-define(LOOKUP,
+    <<"com.leapsight.bondy.api_gateway.lookup">>
+).
 -define(CLIENT_LIST,
     <<"com.leapsight.bondy.api_gateway.list_clients">>
 ).
@@ -69,6 +75,28 @@ handle_call(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Spec]} ->
             bondy_wamp_utils:maybe_error(catch bondy_api_gateway:load(Spec), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
+    #call{procedure_uri = ?LIST} = M,
+    Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0) of
+        {ok, [_]} ->
+            bondy_wamp_utils:maybe_error(catch bondy_api_gateway:list(), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
+    #call{procedure_uri = ?LOOKUP} = M,
+    Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [Id]} ->
+            bondy_wamp_utils:maybe_error(catch bondy_api_gateway:lookup(Id), M);
         {error, WampError} ->
             WampError
     end,
