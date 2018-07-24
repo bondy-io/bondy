@@ -324,7 +324,7 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables
     %% But since Specs depend on other objects being present and we also want
-    %% to avoid rebuilding the diospatch table multiple times, we just set a
+    %% to avoid rebuilding the dispatch table multiple times, we just set a
     %% flag on the state to rebuild the dispatch tables once we received an
     %% exchange_finished event,
     _ = lager:info("API Spec object_update received; key=~p", [Key]),
