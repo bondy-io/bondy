@@ -181,6 +181,28 @@ handle_call(
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.api_gateway.list">>} = M,
+    Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0) of
+        {ok, [_]} ->
+            bondy_wamp_utils:maybe_error(catch bondy_api_gateway:list(), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.api_gateway.lookup">>} = M,
+    Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [Id]} ->
+            bondy_wamp_utils:maybe_error(catch bondy_api_gateway:lookup(Id), M);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(
     #call{procedure_uri = <<"com.leapsight.bondy.api_gateway.add_client">>} = M,
     Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of

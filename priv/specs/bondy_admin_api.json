@@ -182,6 +182,125 @@
                         }
                     }
                 },
+
+                "/api_specs" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.list",
+                            "options" : {},
+                            "arguments" : [],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.load",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.body}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/api_specs/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.lookup",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.id}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/api_specs/:id/info" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.api_gateway.lookup",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.id}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" : "{{action.result.arguments |> head |> with([id, name, host, realm_uri, meta, ts])}}"
+                            }
+                        }
+                    }
+                },
                 "/realms": {
                     "is_collection" : true,
                     "options": {
