@@ -140,7 +140,7 @@
 %% The Cowboy max number of connections for the Admin API http listener
 {mapping, "admin_api.http.max_connections", "bondy.admin_api_http.max_connections", [
   {datatype, integer},
-  {default, 1000}
+  {default, 1024}
 ]}.
 
 
@@ -166,7 +166,7 @@
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
   {datatype, integer},
-  {default, 500000}
+  {default, 250000}
 ]}.
 
 %% @doc Default cert location for https can be overridden

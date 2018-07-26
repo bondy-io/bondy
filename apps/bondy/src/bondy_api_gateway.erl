@@ -497,11 +497,12 @@ start_admin_listener({<<"https">>, Routes}) ->
 start_http(Routes, Name) ->
     {ok, Opts} = application:get_env(bondy, Name),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
     {_, Port} = lists:keyfind(port, 1, Opts),
 
     cowboy:start_clear(
         Name,
-        [{port, Port}, {num_acceptors, PoolSize}],
+        [{port, Port}, {num_acceptors, PoolSize}, {max_connections, MaxConnections}],
         #{
             env => #{
                 bondy => #{
@@ -510,7 +511,8 @@ start_http(Routes, Name) ->
                     }
                 },
                 dispatch => cowboy_router:compile(Routes),
-                max_connections => infinity
+                %% REVIEW why is this here?
+                max_connections => MaxConnections
             },
             metrics_callback => fun bondy_cowboy_prometheus:observe/1,
             %% cowboy_metrics_h must be first on the list
