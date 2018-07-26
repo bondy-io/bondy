@@ -64,6 +64,7 @@
 -export([new/4]).
 -export([node/1]).
 -export([options/1]).
+-export([pattern/4]).
 -export([pattern/6]).
 -export([peer_id/1]).
 -export([pid/1]).
@@ -110,6 +111,23 @@ new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec pattern(entry_type(), uri(), id(), map()) -> t().
+
+pattern(Type, RealmUri, EntryId, Options) ->
+    MatchPolicy = validate_match_policy(pattern, Options),
+    #entry{
+        key = key_pattern(Type, RealmUri, '_', '_', EntryId),
+        pid = '_',
+        uri = '_',
+        match_policy = MatchPolicy,
+        created = '_',
+        options = '_'
+    }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec pattern(entry_type(), uri(), atom(), id(), uri(), map()) -> t().
 
 pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
@@ -138,10 +156,10 @@ key_pattern(Type, RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 key_pattern(Type, RealmUri, Node, SessionId, EntryId)
 when (Type =:= subscription orelse Type =:= registration)
-andalso (is_binary(RealmUri) orelse is_atom(RealmUri))
+andalso (is_binary(RealmUri) orelse RealmUri == '_')
 andalso is_atom(Node)
-andalso (is_integer(SessionId) orelse is_atom(SessionId))
-andalso (is_integer(EntryId) orelse is_atom(EntryId)) ->
+andalso (is_integer(SessionId) orelse SessionId == '_')
+andalso (is_integer(EntryId) orelse EntryId == '_') ->
     #entry_key{
         realm_uri = RealmUri,
         node = Node,
