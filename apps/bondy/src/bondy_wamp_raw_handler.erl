@@ -483,6 +483,7 @@ handle_outbound(M, St0) ->
             ok = send(Bin, St0#state{protocol_state = PSt}),
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
+            %% We send ourselves a message to stop after Time
             erlang:send_after(
                 Time, self(), {stop, normal}),
             ok = send(Bin, St0#state{protocol_state = PSt}),
