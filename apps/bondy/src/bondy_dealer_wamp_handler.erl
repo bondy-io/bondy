@@ -21,6 +21,12 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(REG_LIST, <<"wamp.registration.list">>).
+-define(REG_LOOKUP, <<"wamp.registration.lookup">>).
+-define(REG_MATCH, <<"wamp.registration.match">>).
+-define(REG_GET, <<"wamp.registration.get">>).
+-define(LIST_CALLEES, <<"wamp.registration.list_callees">>).
+-define(COUNT_CALLEES, <<"wamp.registration.count_callees">>).
 
 -export([handle_call/2]).
 
@@ -69,94 +75,187 @@ handle_call(
 %% -----------------------------------------------------------------------------
 %% WAMP META PROCEDURES
 %% -----------------------------------------------------------------------------
-handle_call(#call{procedure_uri = <<"wamp.registration.list">>} = M, Ctxt) ->
-    ReqId = M#call.request_id,
-    Res = #{
-        ?EXACT_MATCH => [], % @TODO
-        ?PREFIX_MATCH => [], % @TODO
-        ?WILDCARD_MATCH => [] % @TODO
-    },
-    R = wamp_message:result(ReqId, #{}, [Res]),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(
-    #call{
-        procedure_uri = <<"wamp.registration.lookup">>,
-        arguments = [Proc|_] = L
-    } = M,
-    Ctxt) when length(L) =:= 1; length(L) =:= 2 ->
-    % @TODO: Implement options
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Args = case bondy_registry:match(registration, Proc, RealmUri) of
-        {[], '$end_of_table'} ->
-            [];
-        {Sessions, '$end_of_table'} ->
-            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
+handle_call(#call{procedure_uri = ?REG_LIST} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
+        {ok, [RealmUri]} ->
+            list(RealmUri);
+        {error, WampError} ->
+            WampError
     end,
-    ReqId = M#call.request_id,
-    R = wamp_message:result(ReqId, #{}, Args),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
-handle_call(
-    #call{
-        procedure_uri = <<"wamp.registration.match">>,
-        arguments = [Proc] = L
-    } = M,
-    Ctxt) when length(L) =:= 1 ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Args = case bondy_registry:match(registration, Proc, RealmUri) of
-        {[], '$end_of_table'} ->
-            [];
-        {Sessions, '$end_of_table'} ->
-            [bondy_registry_entry:id(hd(Sessions))] % @TODO Get from round-robin?
+handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+        {ok, [RealmUri, ProcUri]} ->
+            lookup(RealmUri, ProcUri, #{});
+        {ok, [RealmUri, ProcUri, Opts]} ->
+            lookup(RealmUri, ProcUri, Opts);
+        {error, WampError} ->
+            WampError
     end,
-    ReqId = M#call.request_id,
-    R = wamp_message:result(ReqId, #{}, Args),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
-handle_call(#call{procedure_uri = <<"wamp.registration.get">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_call(#call{procedure_uri = ?REG_MATCH} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+        {ok, [RealmUri, ProcUri]} ->
+            match(RealmUri, ProcUri, #{});
+        {ok, [RealmUri, ProcUri, Opts]} ->
+            match(RealmUri, ProcUri, Opts);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
-handle_call(
-    #call{procedure_uri = <<"wamp.registration.list_callees">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+        {ok, [RealmUri, RegId]} ->
+            get(RealmUri, RegId, #{});
+        {ok, [RealmUri, RegId, Details]} ->
+            get(RealmUri, RegId, Details);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
-handle_call(#call{
-    procedure_uri = <<"wamp.registration.count_callees">>} = M, Ctxt) ->
-    %% @TODO
-    ReqId = M#call.request_id,
-    Res = #{count => 0},
-    R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+
+handle_call(#call{procedure_uri = ?LIST_CALLEES} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2) of
+        {ok, [RealmUri, RegId]} ->
+            list_callees(RealmUri, RegId);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+
+
+handle_call(#call{procedure_uri = ?COUNT_CALLEES} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
+        {ok, [RealmUri, RegId]} ->
+            count_callees(RealmUri, RegId);
+        {error, WampError} ->
+        WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+
 
 handle_call(#call{} = M, Ctxt) ->
-    Mssg = <<
-        "There are no registered procedures matching the uri",
-        $\s, $', (M#call.procedure_uri)/binary, $', $.
-    >>,
-    R = wamp_message:error(
-        ?CALL,
-        M#call.request_id,
-        #{},
-        ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-        }
-    ),
-    bondy:send(bondy_context:peer_id(Ctxt), R).
+    Error = bondy_wamp_utils:no_such_procedure_error(M),
+    bondy:send(bondy_context:peer_id(Ctxt), Error).
 
 
 
 
 
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
+
+
+
+%% @private
+list(RealmUri) ->
+    Default = #{
+        ?EXACT_MATCH => [],
+        ?PREFIX_MATCH => [],
+        ?WILDCARD_MATCH => []
+    },
+    try
+        case bondy_registry:entries(registration, RealmUri, '_', '_') of
+            [] ->
+                {ok, Default};
+            Entries ->
+                Tuples = [
+                    {
+                        bondy_registry_entry:id(E),
+                        bondy_registry_entry:match_policy(E)
+                    } || E <- Entries
+                ],
+                Summary = leap_tuples:summarize(
+                    Tuples, {2, {function, collect, [1]}}, #{}),
+                Map = maps:merge(Default, maps:from_list(Summary)),
+                {ok, Map}
+        end
+    catch
+        _:Reason ->
+            _ = lager:debug("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            {error, Reason}
+    end.
+
+
+%% @private
+get(RealmUri, RegId, Details) ->
+    try
+        case bondy_registry:lookup(registration, RegId, RealmUri, Details) of
+            {error, not_found} ->
+                {error, bondy_wamp_utils:no_such_registration_error(RegId)};
+            Entry ->
+                {ok, bondy_registry_entry:to_details_map(Entry)}
+        end
+    catch
+        _:Reason ->
+            _ = lager:debug("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            {error, Reason}
+    end.
+
+
+%% @private
+lookup(RealmUri, Uri, Opts) ->
+    try
+        case bondy_registry:match(registration, Uri, RealmUri, Opts) of
+            {[], '$end_of_table'} ->
+                ok;
+            {[Entries], '$end_of_table'} ->
+                {ok, bondy_registry_entry:id(hd(Entries))}
+        end
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
+
+
+%% @private
+match(RealmUri, Uri, Opts) ->
+    try
+        case bondy_registry:match(registration, Uri, RealmUri, Opts) of
+            {[], '$end_of_table'} ->
+                ok;
+            {[Entries], '$end_of_table'} ->
+                {ok, [bondy_registry_entry:id(E) || E <- Entries]}
+        end
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
+
+
+%% @private
+list_callees(_RealmUri, _RegId) ->
+    %% try
+    %%     case bondy_registry:entries(registration, RealmUri, '_', '_') of
+    %%         {[], '$end_of_table'} ->
+    %% {error, bondy_wamp_utils:no_such_registration_error(RegId)};
+    %%         {[Entries], '$end_of_table'} ->
+    %%             Sessions = [bondy_registry_entry:session_id(E) || E <- Entries],
+    %%             {ok, Sessions}
+    %%     end
+    %% catch
+    %%     _:Reason ->
+    %%         {error, Reason}
+    %% end.
+    {error, not_implemented}.
+
+
+count_callees(_RealmUri, _Uri) ->
+    %% try
+    %%     case bondy_registry:match(registration, Uri, RealmUri) of
+    %%         {[], '$end_of_table'} ->
+    %%             {ok, 0};
+    %%         {[Entries], '$end_of_table'} ->
+    %%             {ok, length(Entries)}
+    %%     end
+    %% catch
+    %%     _:Reason ->
+    %%         {error, Reason}
+    %% end.
+    {error, not_implemented}.

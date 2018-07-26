@@ -182,126 +182,6 @@
                         }
                     }
                 },
-
-                "/api_specs" : {
-                    "is_collection" : true,
-                    "options": {
-                        "action": {},
-                        "response": {
-                            "on_error": {
-                                "body": ""
-                            },
-                            "on_result": {
-                                "body": ""
-                            }
-                        }
-                    },
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.list",
-                            "options" : {},
-                            "arguments" : [],
-                            "arguments_kw" : {}
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
-                                "body" : "{{variables.wamp_error_body}}"
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
-                            }
-                        }
-                    },
-                    "post" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.load",
-                            "options" : {},
-                            "arguments" : [
-                                "{{request.body}}"
-                            ],
-                            "arguments_kw" : {
-                            }
-                        },
-                        "response" : {
-                           "on_error" : {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
-                                "body" : "{{variables.wamp_error_body}}"
-                            },
-                            "on_result" : {
-                                "body" :
-                                    "{{action.result.arguments |> head}}"
-                            }
-                        }
-                    }
-                },
-                "/api_specs/:id" : {
-                    "is_collection" : false,
-                    "options": {
-                        "action": {},
-                        "response": {
-                            "on_error": {
-                                "body": ""
-                            },
-                            "on_result": {
-                                "body": ""
-                            }
-                        }
-                    },
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.lookup",
-                            "options" : {},
-                            "arguments" : ["{{request.bindings.id}}"],
-                            "arguments_kw" : {}
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
-                                "body" : "{{variables.wamp_error_body}}"
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
-                            }
-                        }
-                    }
-                },
-                "/api_specs/:id/info" : {
-                    "is_collection" : false,
-                    "options": {
-                        "action": {},
-                        "response": {
-                            "on_error": {
-                                "body": ""
-                            },
-                            "on_result": {
-                                "body": ""
-                            }
-                        }
-                    },
-                    "get" : {
-                        "action" : {
-                            "type" : "wamp_call",
-                            "procedure" : "com.leapsight.bondy.api_gateway.lookup",
-                            "options" : {},
-                            "arguments" : ["{{request.bindings.id}}"],
-                            "arguments_kw" : {}
-                        },
-                        "response" : {
-                           "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
-                                "body" : "{{variables.wamp_error_body}}"
-                            },
-                            "on_result" : {
-                                "body" : "{{action.result.arguments |> head |> with([id, name, host, realm_uri, meta, ts])}}"
-                            }
-                        }
-                    }
-                },
-
                 "/api_specs" : {
                     "is_collection" : true,
                     "options": {
@@ -1038,6 +918,113 @@
                             },
                             "on_result": {
                                 "body": "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.list",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations/:id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.get",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id |> integer}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations/:id/callees" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "wamp.registration.list_callees",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id |> integer}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
                             }
                         }
                     }
