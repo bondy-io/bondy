@@ -75,6 +75,8 @@
 -export([entries/4]).
 -export([entries/5]).
 -export([lookup/1]).
+-export([lookup/3]).
+-export([lookup/4]).
 -export([match/1]).
 -export([match/3]).
 -export([match/4]).
@@ -276,6 +278,29 @@ lookup(Key) ->
     Type = bondy_registry_entry:type(Key),
     RealmUri = bondy_registry_entry:realm_uri(Key),
     case ets:lookup(partition_table(Type, RealmUri), Key) of
+        [] ->
+            {error, not_found};
+        [Entry] ->
+            Entry
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
+    lookup(Type, EntryId, RealmUri, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+lookup(Type, EntryId, RealmUri, Details) when is_integer(EntryId) ->
+    Pattern = bondy_registry_entry:pattern(
+        Type, RealmUri, EntryId, Details),
+    case ets:match_object(partition_table(Type, RealmUri), Pattern) of
         [] ->
             {error, not_found};
         [Entry] ->
