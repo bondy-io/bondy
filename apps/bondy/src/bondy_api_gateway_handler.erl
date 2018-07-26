@@ -364,8 +364,8 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {HTTPCode, Response1} = take_status_code(Response0, 500),
                 Req2 = reply(HTTPCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
-            {error, HTTPCode, Response, St2} ->
 
+            {error, HTTPCode, Response, St2} ->
                 {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
