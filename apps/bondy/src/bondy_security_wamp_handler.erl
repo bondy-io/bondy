@@ -250,22 +250,8 @@ handle_call(#call{procedure_uri = ?FIND_SOURCE} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{} = M, Ctxt) ->
-    Mssg = <<
-        "There are no registered procedures matching the uri",
-        $\s, $', (M#call.procedure_uri)/binary, $', $.
-    >>,
-    R = wamp_message:error(
-        ?CALL,
-        M#call.request_id,
-        #{},
-        ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-        }
-    ),
-    bondy:send(bondy_context:peer_id(Ctxt), R).
+    Error = bondy_wamp_utils:no_such_procedure_error(M),
+    bondy:send(bondy_context:peer_id(Ctxt), Error).
 
 
 
