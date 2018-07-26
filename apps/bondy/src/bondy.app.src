@@ -47,6 +47,7 @@
             plum_db,
             prometheus,
             redbug,
+            observer_cli,
             sidejob,
             uuid,
             %% Ours
