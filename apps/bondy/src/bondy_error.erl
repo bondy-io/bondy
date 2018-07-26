@@ -227,7 +227,7 @@ map(Code) ->
 
 
 map(Code, Term) when is_binary(Code) ->
-    maps:put(code, Code, map(Term)).
+    maps:put(<<"code">>, Code, map(Term)).
 
 
 
