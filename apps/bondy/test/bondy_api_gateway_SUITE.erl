@@ -18,7 +18,8 @@
 
 -module(bondy_api_gateway_SUITE).
 -include_lib("common_test/include/ct.hrl").
--compile(export_all).
+-compile([nowarn_export_all, export_all]).
+
 
 all() ->
     common:all().

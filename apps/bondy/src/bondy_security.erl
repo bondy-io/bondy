@@ -1912,11 +1912,11 @@ illegal_name_chars(Name) ->
 
 
 to_lowercase_bin(Name) when is_binary(Name) ->
-    unicode_util_compat:casefold(Name);
+    string:casefold(Name);
 
 to_lowercase_bin(Name) ->
     unicode:characters_to_binary(
-        unicode_util_compat:casefold(Name), utf8, utf8).
+        string:casefold(Name), utf8, utf8).
 
 
 
