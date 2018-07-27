@@ -40,7 +40,6 @@
 
 
 start(_Type, Args) ->
-    ok = print_welcome_message(),
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup_env(Args),
@@ -90,17 +89,6 @@ setup_env(Args) ->
 setup_partisan() ->
     Channels0 = partisan_config:get(channels, []),
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
-
-
-%% private
-print_welcome_message() ->
-    {ok, Vsn} = application:get_key(bondy, vsn),
-    io:format(
-        "~n******************************************~n"
-        "~nLeapsight Bondy v~s~n"
-        "~nDocumentation: http://getbondy.com"
-        "~n******************************************~n",
-        [Vsn]).
 
 
 %% @private
