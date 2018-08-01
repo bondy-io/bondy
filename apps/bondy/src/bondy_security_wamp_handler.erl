@@ -113,7 +113,7 @@ handle_call(#call{procedure_uri = ?ADD_USER} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?UPDATE_USER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
         {ok, [Uri, Username, Info]} ->
-            Val = ondy_wamp_utils:maybe_error(
+            Val = bondy_wamp_utils:maybe_error(
                 bondy_security_user:update(Uri, Username, Info), M),
             maybe_user_updated(Uri, Val, Ctxt);
         {error, WampError} ->
