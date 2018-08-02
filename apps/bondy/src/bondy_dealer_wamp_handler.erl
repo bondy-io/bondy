@@ -76,7 +76,7 @@ handle_call(
 %% WAMP META PROCEDURES
 %% -----------------------------------------------------------------------------
 handle_call(#call{procedure_uri = ?REG_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
         {ok, [RealmUri]} ->
             list(RealmUri);
         {error, WampError} ->
@@ -85,7 +85,7 @@ handle_call(#call{procedure_uri = ?REG_LIST} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
         {ok, [RealmUri, ProcUri]} ->
             lookup(RealmUri, ProcUri, #{});
         {ok, [RealmUri, ProcUri, Opts]} ->
@@ -96,7 +96,7 @@ handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?REG_MATCH} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
         {ok, [RealmUri, ProcUri]} ->
             match(RealmUri, ProcUri, #{});
         {ok, [RealmUri, ProcUri, Opts]} ->
@@ -107,7 +107,7 @@ handle_call(#call{procedure_uri = ?REG_MATCH} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2, 3) of
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
         {ok, [RealmUri, RegId]} ->
             get(RealmUri, RegId, #{});
         {ok, [RealmUri, RegId, Details]} ->
@@ -119,7 +119,7 @@ handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
 
 
 handle_call(#call{procedure_uri = ?LIST_CALLEES} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2) of
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [RealmUri, RegId]} ->
             list_callees(RealmUri, RegId);
         {error, WampError} ->
