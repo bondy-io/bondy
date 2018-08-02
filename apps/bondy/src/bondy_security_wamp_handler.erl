@@ -160,8 +160,7 @@ handle_call(#call{procedure_uri = ?CHANGE_PASSWORD} = M, Ctxt) ->
             );
         {ok, [Uri, Username, New, Old]} ->
             bondy_wamp_utils:maybe_error(
-                bondy_security_user:change_password(
-                    Uri, Username, New, Old),
+                bondy_security_user:change_password(Uri, Username, New, Old),
                 M
             );
         {error, WampError} ->
