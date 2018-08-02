@@ -26,7 +26,6 @@
 -export([load_schema/0]).
 -export([register/0]).
 -export([register_node_finder/0]).
--export([status/3]).
 
 %% API SECURITY
 -export([add_group/1]).
@@ -83,16 +82,6 @@ load_schema() ->
         _ ->
             ok = clique_config:load_schema([code:lib_dir()])
     end.
-
-
-status(_Command, [], []) ->
-    JSON = sampler_server:get_status(),
-    [clique_status:text(jsx:encode(JSON))];
-
-status(_Command, [], [{status, Status}]) ->
-    sampler_server:set_status([{status, list_to_binary(Status)}]),
-    JSON = sampler_server:get_status(),
-    [clique_status:text(mochijson2:encode(JSON))].
 
 
 
@@ -212,8 +201,8 @@ security_commands() ->
             ["security", "add-user"],
             [],
             [],
-            fun status/3,
-            fun status_usage/0
+            fun add_user/1,
+            fun add_user_usage/0
         }
     ].
 
@@ -294,15 +283,15 @@ leave(["cluster", "leave"], [], []) ->
 load_api(["gateway", "load-api"], [{filename, FName}], []) ->
     case bondy_api_gateway:load(FName) of
         ok ->
-            Text = io_lib:format("The API Gateway Specification was succesfully loaded."),
+            Text = io_lib:format("The API Gateway Specification was succesfully loaded.", []),
             %% TODO Also Print table of resulting API/Versions
             [clique_status:text(Text)];
         {error, invalid_specification_format} ->
-            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file does not contain a valid API Gateway Specification format.", [FName]),
-            [clique_status:alert([Text])];
+            Text = io_lib:format("ERROR: Failed to load API Gateway Specification from file '~p'. The file does not contain a valid API Gateway Specification format.", [FName]),
+            [clique_status:alert(Text)];
         {error, badarg} ->
-            Text = clique_status:text("ERROR: Failed to load API Gateway Specification from file '~p'. The file was either not found or had the wrong permissions.", [FName]),
-            [clique_status:alert([Text])]
+            Text = io_lib:format("ERROR: Failed to load API Gateway Specification from file '~p'. The file was either not found or had the wrong permissions.", [FName]),
+            [clique_status:alert(Text)]
     end;
 
 load_api(["gateway", "load-api"], [{Op, Value}], []) ->
@@ -352,11 +341,11 @@ load_api_usage() ->
      "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
     ].
 
-status_usage() ->
-    [
-     "bondy-admin cluster status'\n\n",
-     "  TBD\n"
-    ].
+%% status_usage() ->
+%%     [
+%%      "bondy-admin cluster status'\n\n",
+%%      "  TBD\n"
+%%     ].
 
 %% =============================================================================
 %% SECURITY (FROM RIAK CORE)
@@ -422,14 +411,21 @@ security_error_xlate({error, role_exists}) ->
 security_error_xlate(Error) ->
     io_lib:format("~p", [Error]).
 
-add_user([Username|Options]) ->
-    add_role(Username, Options, fun bondy_security:add_user/2).
+add_user([Realm, Username|Options]) ->
+    add_role(Realm, Username, Options, fun bondy_security:add_user/3).
 
-add_group([Groupname|Options]) ->
-    add_role(Groupname, Options, fun bondy_security:add_group/2).
+add_user_usage() ->
+    [
+     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
+     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
+    ].
 
-add_role(Name, Options, Fun) ->
-    try Fun(Name, parse_options(Options)) of
+
+add_group([Realm, Groupname|Options]) ->
+    add_role(Realm, Groupname, Options, fun bondy_security:add_group/3).
+
+add_role(Realm, Name, Options, Fun) ->
+    try Fun(Realm, Name, parse_options(Options)) of
         ok ->
             ok;
         Error ->
@@ -443,14 +439,14 @@ add_role(Name, Options, Fun) ->
             error
     end.
 
-alter_user([Username|Options]) ->
-    alter_role(Username, Options, fun bondy_security:alter_user/2).
+alter_user([Realm, Username|Options]) ->
+    alter_role(Realm, Username, Options, fun bondy_security:alter_user/3).
 
-alter_group([Groupname|Options]) ->
-    alter_role(Groupname, Options, fun bondy_security:alter_group/2).
+alter_group([Realm, Groupname|Options]) ->
+    alter_role(Realm, Groupname, Options, fun bondy_security:alter_group/3).
 
-alter_role(Name, Options, Fun) ->
-    try Fun(Name, parse_options(Options)) of
+alter_role(Realm, Name, Options, Fun) ->
+    try Fun(Realm, Name, parse_options(Options)) of
         ok ->
             ok;
         Error ->
@@ -464,14 +460,14 @@ alter_role(Name, Options, Fun) ->
             error
     end.
 
-del_user([Username]) ->
-    del_role(Username, fun bondy_security:del_user/1).
+del_user([Realm, Username]) ->
+    del_role(Realm, Username, fun bondy_security:del_user/2).
 
-del_group([Groupname]) ->
-    del_role(Groupname, fun bondy_security:del_group/1).
+del_group([Realm, Groupname]) ->
+    del_role(Realm, Groupname, fun bondy_security:del_group/2).
 
-del_role(Name, Fun) ->
-    case Fun(Name) of
+del_role(Realm, Name, Fun) ->
+    case Fun(Realm, Name) of
         ok ->
             io:format("Successfully deleted ~ts~n", [Name]),
             ok;
@@ -481,7 +477,7 @@ del_role(Name, Fun) ->
             Error
     end.
 
-add_source([Users, CIDR, Source | Options]) ->
+add_source([Realm, Users, CIDR, Source | Options]) ->
     Unames = case string:tokens(Users, ",") of
         ["all"] ->
             all;
@@ -490,7 +486,7 @@ add_source([Users, CIDR, Source | Options]) ->
     end,
     %% Unicode note: atoms are constrained to latin1 until R18, so our
     %% sources are as well
-    try bondy_security:add_source(Unames, parse_cidr(CIDR),
+    try bondy_security:add_source(Realm, Unames, parse_cidr(CIDR),
                                   list_to_atom(string:to_lower(Source)),
                                   parse_options(Options)) of
         ok ->
@@ -509,14 +505,14 @@ add_source([Users, CIDR, Source | Options]) ->
                       [Source])
     end.
 
-del_source([Users, CIDR]) ->
+del_source([Realm, Users, CIDR]) ->
     Unames = case string:tokens(Users, ",") of
         ["all"] ->
             all;
         Other ->
             Other
     end,
-    bondy_security:del_source(Unames, parse_cidr(CIDR)),
+    bondy_security:del_source(Realm, Unames, parse_cidr(CIDR)),
     io:format("Deleted source~n").
 
 
@@ -531,8 +527,8 @@ parse_roles(Roles) ->
 parse_grants(Grants) ->
     string:tokens(Grants, ",").
 
-grant_int(Permissions, Bucket, Roles) ->
-    case bondy_security:add_grant(Roles, Bucket, Permissions) of
+grant_int(Realm, Permissions, Bucket, Roles) ->
+    case bondy_security:add_grant(Realm, Roles, Bucket, Permissions) of
         ok ->
             io:format("Successfully granted~n"),
             ok;
@@ -543,24 +539,24 @@ grant_int(Permissions, Bucket, Roles) ->
     end.
 
 
-grant([Grants, "on", "any", "to", Users]) ->
-    grant_int(parse_grants(Grants),
+grant([Realm, Grants, "on", "any", "to", Users]) ->
+    grant_int(Realm, parse_grants(Grants),
               any,
               parse_roles(Users));
-grant([Grants, "on", Type, Bucket, "to", Users]) ->
-    grant_int(parse_grants(Grants),
+grant([Realm, Grants, "on", Type, Bucket, "to", Users]) ->
+    grant_int(Realm, parse_grants(Grants),
               { Type, Bucket },
               parse_roles(Users));
-grant([Grants, "on", Type, "to", Users]) ->
-    grant_int(parse_grants(Grants),
+grant([Realm, Grants, "on", Type, "to", Users]) ->
+    grant_int(Realm, parse_grants(Grants),
               Type,
               parse_roles(Users));
 grant(_) ->
     io:format("Usage: grant <permissions> on (<type> [bucket]|any) to <users>~n"),
     error.
 
-revoke_int(Permissions, Bucket, Roles) ->
-    case bondy_security:add_revoke(Roles, Bucket, Permissions) of
+revoke_int(Realm, Permissions, Bucket, Roles) ->
+    case bondy_security:add_revoke(Realm, Roles, Bucket, Permissions) of
         ok ->
             io:format("Successfully revoked~n"),
             ok;
@@ -570,24 +566,24 @@ revoke_int(Permissions, Bucket, Roles) ->
             Error
     end.
 
-revoke([Grants, "on", "any", "from", Users]) ->
-    revoke_int(parse_grants(Grants),
+revoke([Realm, Grants, "on", "any", "from", Users]) ->
+    revoke_int(Realm, parse_grants(Grants),
                any,
                parse_roles(Users));
-revoke([Grants, "on", Type, Bucket, "from", Users]) ->
-    revoke_int(parse_grants(Grants),
+revoke([Realm, Grants, "on", Type, Bucket, "from", Users]) ->
+    revoke_int(Realm, parse_grants(Grants),
                { Type, Bucket },
                parse_roles(Users));
-revoke([Grants, "on", Type, "from", Users]) ->
-    revoke_int(parse_grants(Grants),
+revoke([Realm, Grants, "on", Type, "from", Users]) ->
+    revoke_int(Realm, parse_grants(Grants),
                Type,
                parse_roles(Users));
 revoke(_) ->
     io:format("Usage: revoke <permissions> on <type> [bucket] from <users>~n"),
     error.
 
-print_grants([Name]) ->
-    case bondy_security:print_grants(Name) of
+print_grants([Realm, Name]) ->
+    case bondy_security:print_grants(Realm, Name) of
         ok ->
             ok;
         Error ->
@@ -596,11 +592,11 @@ print_grants([Name]) ->
             Error
     end.
 
-print_users([]) ->
-    bondy_security:print_users().
+print_users([Realm]) ->
+    bondy_security:print_users(Realm).
 
-print_user([User]) ->
-    case bondy_security:print_user(User) of
+print_user([Realm, User]) ->
+    case bondy_security:print_user(Realm, User) of
         ok ->
             ok;
         Error ->
@@ -610,11 +606,11 @@ print_user([User]) ->
     end.
 
 
-print_groups([]) ->
-    bondy_security:print_groups().
+print_groups([Realm]) ->
+    bondy_security:print_groups(Realm).
 
-print_group([Group]) ->
-    case bondy_security:print_group(Group) of
+print_group([Realm, Group]) ->
+    case bondy_security:print_group(Realm, Group) of
         ok ->
             ok;
         Error ->
@@ -623,29 +619,29 @@ print_group([Group]) ->
             Error
     end.
 
-print_sources([]) ->
-    bondy_security:print_sources().
+print_sources([Realm]) ->
+    bondy_security:print_sources(Realm).
 
-ciphers([]) ->
-    bondy_security:print_ciphers();
+ciphers([Realm]) ->
+    bondy_security:print_ciphers(Realm);
 
-ciphers([CipherList]) ->
-    case bondy_security:set_ciphers(CipherList) of
+ciphers([Realm, CipherList]) ->
+    case bondy_security:set_ciphers(Realm, CipherList) of
         ok ->
-            bondy_security:print_ciphers(),
+            bondy_security:print_ciphers(Realm),
             ok;
         error ->
             error
     end.
 
-security_enable([]) ->
-    bondy_security:enable().
+security_enable([Realm]) ->
+    bondy_security:enable(Realm).
 
-security_disable([]) ->
-    bondy_security:disable().
+security_disable([Realm]) ->
+    bondy_security:disable(Realm).
 
-security_status([]) ->
-    case bondy_security:status() of
+security_status([Realm]) ->
+    case bondy_security:status(Realm) of
         enabled ->
             io:format("Enabled~n");
         disabled ->
