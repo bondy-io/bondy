@@ -129,8 +129,9 @@ reset(Ctxt) ->
 
 close(Ctxt0) ->
     %% We cleanup router first as cleanup requires the session
-    case maps:find(session, bondy_router:close_context(Ctxt0)) of
+    case maps:find(session, Ctxt0) of
         {ok, Session} ->
+            _ = bondy_router:close_context(Ctxt0),
             bondy_session:close(Session);
         error ->
             ok
