@@ -18,7 +18,7 @@
 
 -module(bondy_security_SUITE).
 -include_lib("common_test/include/ct.hrl").
--compile(export_all).
+-compile([nowarn_export_all, export_all]).
 
 all() ->
     [
@@ -171,7 +171,7 @@ api_client_auth2(Config) ->
 api_client_auth3(Config) ->
     {api_client_auth2, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
-    Id = unicode_util_compat:uppercase(?config(client_id, Prev)),
+    Id = string:uppercase(?config(client_id, Prev)),
     Secret = ?config(client_secret, Prev),
     {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
     {save_config, Prev}.
@@ -258,7 +258,7 @@ resource_owner_auth2(Config) ->
 resource_owner_auth3(Config) ->
     {resource_owner_auth2, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
-    Username = unicode_util_compat:uppercase(?config(username, Prev)),
+    Username = string:uppercase(?config(username, Prev)),
     Pass = ?config(password, Prev),
     {ok, _} = bondy_security:authenticate(
         Uri, Username, Pass, [{ip, {127,0,0,1}}]),
@@ -324,7 +324,7 @@ user_auth2(Config) ->
 user_auth3(Config) ->
     {user_auth2, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Prev),
-    Username = unicode_util_compat:uppercase(?config(username, Prev)),
+    Username = string:uppercase(?config(username, Prev)),
     Pass = ?config(password, Prev),
     {ok, _} = bondy_security:authenticate(
         Uri, Username, Pass, [{ip, {127,0,0,1}}]),
