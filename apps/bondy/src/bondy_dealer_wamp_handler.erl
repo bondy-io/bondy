@@ -178,7 +178,7 @@ list(RealmUri) ->
         end
     catch
         _:Reason ->
-            _ = lager:debug("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
             {error, Reason}
     end.
 
@@ -194,7 +194,7 @@ get(RealmUri, RegId, Details) ->
         end
     catch
         _:Reason ->
-            _ = lager:debug("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
             {error, Reason}
     end.
 
@@ -205,11 +205,12 @@ lookup(RealmUri, Uri, Opts) ->
         case bondy_registry:match(registration, Uri, RealmUri, Opts) of
             {[], '$end_of_table'} ->
                 ok;
-            {[Entries], '$end_of_table'} ->
+            {Entries, '$end_of_table'} ->
                 {ok, bondy_registry_entry:id(hd(Entries))}
         end
     catch
         _:Reason ->
+            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
             {error, Reason}
     end.
 
@@ -220,11 +221,12 @@ match(RealmUri, Uri, Opts) ->
         case bondy_registry:match(registration, Uri, RealmUri, Opts) of
             {[], '$end_of_table'} ->
                 ok;
-            {[Entries], '$end_of_table'} ->
+            {Entries, '$end_of_table'} ->
                 {ok, [bondy_registry_entry:id(E) || E <- Entries]}
         end
     catch
         _:Reason ->
+            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
             {error, Reason}
     end.
 
