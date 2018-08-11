@@ -622,7 +622,13 @@ init_from_db(Iterator, State) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc In the event of Bondy not terminating properly, the last sessions'
+%% registrations will still be in the DB. This function ensures no stale entry
+%% is restore from db to memory and that they are removed from the db.
+%% @end
+%% -----------------------------------------------------------------------------
 maybe_add_to_tuplespace(Entry, Now) ->
     MyNode = bondy_peer_service:mynode(),
     Node = bondy_registry_entry:node(Entry),
@@ -809,7 +815,7 @@ add_to_tuplespace(Entry) ->
     SSTab = partition_table(Type, RealmUri),
     true = ets:insert(SSTab, Entry),
 
-    %% We add entrye to the trie
+    %% We add entry to the trie
     _ = art_server:set(trie_key(Entry), EntryKey, trie(Type)),
 
     Map = bondy_registry_entry:to_details_map(Entry),
