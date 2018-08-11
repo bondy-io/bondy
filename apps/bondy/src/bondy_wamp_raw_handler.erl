@@ -179,7 +179,7 @@ tcp_connections() ->
 
 
 
-init({Ref, Socket, Transport, _Opts}) ->
+init({Ref, Socket, Transport, _Opts0}) ->
     %% We must call ranch:accept_ack/1 before doing any socket operation.
     %% This will ensure the connection process is the owner of the socket.
     %% It expects the listener’s name as argument.
@@ -335,25 +335,14 @@ start_listeners([H|T]) ->
     {ok, Opts} = application:get_env(bondy, H),
     case lists:keyfind(enabled, 1, Opts) of
         {_, true} ->
-            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-            {_, Port} = lists:keyfind(port, 1, Opts),
-            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
-            TransportOpts = case H == ?TLS of
-                true ->
-                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
-                    Files;
-                false ->
-                    []
-            end,
             {ok, _} = ranch:start_listener(
                 H,
-                PoolSize,
                 ranch_mod(H),
-                [{port, Port}],
+                transport_opts(H),
                 bondy_wamp_raw_handler,
-                TransportOpts
+                []
             ),
-            _ = ranch:set_max_connections(H, MaxConns),
+            %% _ = ranch:set_max_connections(H, MaxConns),
             start_listeners(T);
         {_, false} ->
             start_listeners(T)
@@ -696,3 +685,34 @@ socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
     bondy_stats:socket_closed(wamp, raw, Seconds).
 
+
+transport_opts(Name) ->
+    {ok, Opts} = application:get_env(bondy, Name),
+    {_, Port} = lists:keyfind(port, 1, Opts),
+    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
+
+    %% In ranch 2.0 we will need to use socket_opts directly
+    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
+        {socket_opts, L} -> normalise(L);
+        false -> []
+    end,
+
+    [
+        {port, Port},
+        {num_acceptors, PoolSize},
+        {max_connections, MaxConnections} | normalise(SocketOpts)
+    ].
+
+
+normalise(Opts) ->
+    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
+    Recbuf = lists:keyfind(recbuf, 1, Opts),
+    case Sndbuf =/= false andalso Recbuf =/= false of
+        true ->
+            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
+            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+        false ->
+            Opts
+    end.
