@@ -133,7 +133,7 @@ handle_call(#call{procedure_uri = ?COUNT_CALLEES} = M, Ctxt) ->
         {ok, [RealmUri, RegId]} ->
             count_callees(RealmUri, RegId);
         {error, WampError} ->
-        WampError
+            WampError
     end,
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
@@ -144,12 +144,9 @@ handle_call(#call{} = M, Ctxt) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 
 

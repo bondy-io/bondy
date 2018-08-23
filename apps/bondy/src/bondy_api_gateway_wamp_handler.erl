@@ -199,7 +199,8 @@ maybe_user_added(Uri, #result{arguments = Args} = Res, Ctxt) ->
         Uri ->
             Res;
         Other ->
-            _ = bondy_broker:publish(#{}, {Other, ?USER_ADDED}, Args, #{}, Ctxt),
+            _ = bondy_broker:publish(
+                #{}, {Other, ?USER_ADDED}, Args, #{}, Ctxt),
             Res
     end.
 

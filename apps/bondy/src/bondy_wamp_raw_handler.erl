@@ -223,7 +223,7 @@ handle_info(
     {stop, invalid_handshake, St};
 
 handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
-    %% We append the newly received data to any existing buffer
+    %% We append the newly received data to the existing buffer
     Buffer = St0#state.buffer,
     St1 = St0#state{buffer = <<>>},
     case handle_data(<<Buffer/binary, Data/binary>>, St1) of
@@ -239,7 +239,8 @@ handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_rotuer in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls, so we do not ack
-    %% TODO check if we still need this now that bondy:ack seems to handle this case
+    %% TODO check if we still need this now that bondy:ack seems to handle this
+    %% case
     handle_outbound(M, St);
 
 handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
