@@ -41,6 +41,7 @@
 
 -export([ack/2]).
 -export([call/5]).
+-export([publish/5]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
@@ -163,6 +164,10 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% =============================================================================
 
 
+publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
+    bondy_broker:publish(Opts, TopicUri, Args, ArgsKw, Ctxt).
+
+
 
 %% =============================================================================
 %% API - CALLER ROLE
@@ -193,7 +198,9 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         Val -> Val
     end,
     ReqId = bondy_utils:get_id(global),
+
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
+
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
             receive
@@ -346,11 +353,13 @@ maybe_enqueue(false, SessionId, M, Reason) ->
 %% @private
 message_to_map(#result{} = M) ->
     #result{
+        request_id = Id,
         details = Details,
         arguments = Args,
         arguments_kw = ArgsKw
     } = M,
     #{
+        request_id => Id,
         details => Details,
         arguments => args(Args),
         arguments_kw => args_kw(ArgsKw)
@@ -358,6 +367,8 @@ message_to_map(#result{} = M) ->
 
 message_to_map(#error{} = M) ->
     #error{
+        request_type = Type,
+        request_id = Id,
         details = Details,
         error_uri = Uri,
         arguments = Args,
@@ -366,6 +377,8 @@ message_to_map(#error{} = M) ->
     %% We need these keys to be binaries, becuase we will
     %% inject this in a mops context.
     #{
+        request_type => Type,
+        request_id => Id,
         details => Details,
         error_uri => Uri,
         arguments => args(Args),
