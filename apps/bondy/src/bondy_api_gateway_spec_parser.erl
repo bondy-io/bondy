@@ -507,6 +507,16 @@
         alias => put,
         required => false,
         datatype => [binary, map] % To support mop expressions
+    },
+    <<"summary">> => #{
+        alias => summary,
+        required => false,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        required => false,
+        datatype => binary
     }
 }).
 
