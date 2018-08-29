@@ -97,9 +97,10 @@
 }).
 
 -export([add/2]).
--export([remove/2]).
+-export([remove/3]).
 -export([update/3]).
-
+-export([change_password/4]).
+-export([change_password/5]).
 
 
 
@@ -157,14 +158,44 @@ update(RealmUri, Username, Info0) ->
     end.
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), list() | binary()) -> ok.
+change_password(RealmUri, Issuer, Username, New) when is_binary(New) ->
+    case bondy_security_user:change_password(RealmUri, Username, New) of
+        ok ->
+            bondy_oauth2:revoke_tokens(
+                refresh_token, RealmUri, Issuer, Username);
+        Error ->
+            Error
+    end.
 
-remove(RealmUri, Id) ->
-    bondy_security_user:remove(RealmUri, Id).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+change_password(RealmUri, Issuer, Username, New, Old) ->
+    case bondy_security_user:change_password(RealmUri, Username, New, Old) of
+        ok ->
+            bondy_oauth2:revoke_tokens(
+                refresh_token, RealmUri, Issuer, Username);
+        Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(uri(), binary(), list() | binary()) -> ok.
+
+remove(RealmUri, Issuer, Id) ->
+    ok = bondy_security_user:remove(RealmUri, Id),
+    bondy_oauth2:revoke_tokens(refresh_token, RealmUri, Issuer, Id).
 
 
 

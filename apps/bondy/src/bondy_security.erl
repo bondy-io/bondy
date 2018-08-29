@@ -1204,11 +1204,13 @@ print_group(RealmUri, Group) ->
 %% -----------------------------------------------------------------------------
 print_groups(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
-    Groups = plum_db:fold(fun({_Groupname, [?TOMBSTONE]}, Acc) ->
-                                             Acc;
-                                        ({Groupname, Options}, Acc) ->
-                                    [{Groupname, Options}|Acc]
-                            end, [], ?GROUPS_PREFIX(Uri), ?FOLD_OPTS),
+    Fun = fun
+        ({_Groupname, [?TOMBSTONE]}, Acc) ->
+            Acc;
+        ({Groupname, Options}, Acc) ->
+            [{Groupname, Options}|Acc]
+    end,
+    Groups = plum_db:fold(Fun, [], ?GROUPS_PREFIX(Uri), ?FOLD_OPTS),
     do_print_groups(RealmUri, Groups).
 
 %% @private

@@ -383,6 +383,6 @@ password_token_crud_1(Config) ->
         {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
             password, Uri, C, U, [], #{<<"client_device_id">> => D}
         ),
-        ok = bondy_oauth2:revoke_user_token(refresh_token, Uri, C, U, D),
+        ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
         {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(
             refresh_token, Uri, C, RToken0).
