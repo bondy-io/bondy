@@ -199,7 +199,7 @@ refresh_token(RealmUri, Issuer, Token) ->
                     _ = lager:warning(
                         "Removing dangling refresh_token; "
                         "refresh_token=~p, "
-                        "realm_uri=~p, ",
+                        "realm_uri=~p, "
                         "issuer=~p",
                         [Token, RealmUri, Issuer]
                     ),
