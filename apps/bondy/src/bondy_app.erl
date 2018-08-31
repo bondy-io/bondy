@@ -19,6 +19,7 @@
 -behaviour(application).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
 
 -define(BONDY_REALM, #{
     <<"description">> => <<"The Bondy administrative realm.">>,
@@ -49,6 +50,7 @@ start(_Type, Args) ->
             ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
+            ok = setup_internal_subscriptions(),
             {ok, Pid};
         Other  ->
             Other
@@ -134,4 +136,34 @@ stop_router_services() ->
     ok = bondy_api_gateway:stop_listeners(),
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.
+
+
+%% TODO moved this into each app when we finish restructuring
+setup_internal_subscriptions() ->
+    Opts = #{match => <<"exact">>},
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_ADDED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    _ = bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_DELETED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_UPDATED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?PASSWORD_CHANGED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
     ok.

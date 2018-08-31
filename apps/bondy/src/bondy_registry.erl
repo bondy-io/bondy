@@ -70,6 +70,7 @@
 
 
 -export([add/4]).
+-export([add_local_subscription/4]).
 -export([entries/1]).
 -export([entries/2]).
 -export([entries/4]).
@@ -110,6 +111,40 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc A function used by Bondy to register local subscribers and callees
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_local_subscription(uri(), uri(), map(), bondy_context:t()) ->
+    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:details_map()}}.
+
+
+add_local_subscription(RealmUri, Uri, Opts, Pid) ->
+    Node = bondy_peer_service:mynode(),
+    Type = subscription,
+    Pattern = bondy_registry_entry:pattern(
+        Type, RealmUri, Node, undefined, Uri, Opts),
+    Tab = partition_table(Type, RealmUri),
+
+    case ets:match_object(Tab, Pattern) of
+        [] ->
+            PeerId = {RealmUri, Node, undefined, Pid},
+            RegId = bondy_utils:get_id(global),
+            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
+            %% We do not add to DB since that will broadcast the subscription
+            %% to other nodes
+            add_to_tuplespace(Entry);
+
+        [Entry] ->
+            %% In case of receiving a "SUBSCRIBE" message from the same
+            %% _Subscriber_ and to already added topic, _Broker_ should
+            %% answer with "SUBSCRIBED" message, containing the existing
+            %% "Subscription|id".
+            Map = bondy_registry_entry:to_details_map(Entry),
+            {error, {already_exists, Map}}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -206,6 +241,7 @@ add(Type, Uri, Options, Ctxt) ->
                     {error, {already_exists, Map}}
             end
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -787,7 +823,8 @@ decr_counter(Tab, Key, N) ->
 %% @doc Locates the tuplespace partition ets table name assigned to the Realm
 %% @end
 %% -----------------------------------------------------------------------------
--spec partition_table(bondy_registry_entry:entry_type(), uri()) -> ets:tid().
+-spec partition_table(bondy_registry_entry:entry_type(), uri() | undefined) ->
+    ets:tid().
 partition_table(subscription, RealmUri) ->
     tuplespace:locate_table(?SUBSCRIPTION_TABLE_NAME, RealmUri);
 
@@ -848,7 +885,10 @@ trie_key(Entry) ->
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Node = list_to_binary(atom_to_list(bondy_registry_entry:node(Entry))),
-    SessionId = integer_to_binary(bondy_registry_entry:session_id(Entry)),
+    SessionId = case bondy_registry_entry:session_id(Entry) of
+        undefined -> <<"undefined">>;
+        N -> integer_to_binary(N)
+    end,
     Id = integer_to_binary(bondy_registry_entry:id(Entry)),
     Uri = bondy_registry_entry:uri(Entry),
 

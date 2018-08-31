@@ -1,6 +1,23 @@
 # CHANGELOG
 
+## 0.7.1
+- New Trie data structure for bondy_registry
+    - Bondy now uses Leapsight's `art` library to implement the registry index structure use to match RPC calls and PubSub subscriptions. `art`  provides a single-writter, multi-reader Radix Trie following the Adaptive Radix Tree algorithm. The implementation uses one gen_server and one ets table per trie and currently supports WAMP `exact` and `prefix` matching strategies. `wildcard` matching support is on its way.
+- Internal wamp subscriptions
+    - We have implemented a first version of an internal WAMP subscription so that Bondy internally can subscribe to WAMP events. This is done through new functions in bondy_broker and the new module bondy_broker_events
+- OAuth 2 Security
+    - Major changes to security subsytem including harmonisation of APIs, deduplication and bug fixes.
+    - Use new internal wamp subscriptions to avoid coupling Bondy Security with Bondy API Gateway & OAuth.
+        - Bondy Security modules publishe wamp events on entity actions e.g. user creation, deletion, etc.
+        - Bondy API Gateway modules and bondy_api_gateway_client subscribe to the user delete events to cleanup OAuth tokens
+    - Fixed a bug where internal security operations will not trigger token revocation.
+        - Bondy API Gateway modules, i.e. are now implemented by calling Bondy Security modules e.g. bondy_security_user instead of calling bondy_security (former Basho Riak Core Security) directly. This will help in the refactoring of bondy_security and in addition all event publishing is centralised in bondy_security_user.
+        - Implemented additional index for tokens to enable deletion of all users’ tokens
+        - Added two db maintenance functions to (i) remove dangling tokens and (ii) rebuild the indices on an existing db
+    - Added additional Internal wamp events to subsystems e.g. bondy_realm and bondy_backup
+
 ## 0.7.0
+
 - Clustering
     - Completion of clustering implementation using partisan library (at the moment supporting the default peer service only, hyparview to be considered in the future)
     - bondy_router can now route WAMP messages across nodes. The internal load balancer prefers local callees by default, only when a local callee is not found for a procedure the invocation is routed to another node. Load balancer state is local and not replicated. Future global load balancing strategies based on ant-colony optimisation to be considered in the future.
@@ -39,6 +56,7 @@
 - Testing
     - Fixed mops suite bugs
     - Added oauth2 refresh_token CRUD test case, covering creation, refresh and revoke by token and by user/client_device_id
+
 ## 0.6.3
 
 * Upgraded Cowboy dependency to 2.1.0

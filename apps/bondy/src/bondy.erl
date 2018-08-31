@@ -42,6 +42,7 @@
 -export([ack/2]).
 -export([call/5]).
 -export([publish/5]).
+-export([subscribe/4]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
@@ -157,6 +158,9 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% API - SUBSCRIBER ROLE
 %% =============================================================================
 
+subscribe(RealmUri, Opts, TopicUri, Fun) ->
+    bondy_broker_events:subscribe(RealmUri, Opts, TopicUri, Fun).
+
 
 
 %% =============================================================================
@@ -164,8 +168,8 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% =============================================================================
 
 
-publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
-    bondy_broker:publish(Opts, TopicUri, Args, ArgsKw, Ctxt).
+publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
+    bondy_broker:publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm).
 
 
 

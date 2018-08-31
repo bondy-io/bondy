@@ -23,6 +23,15 @@
 -module(bondy_sup).
 -behaviour(supervisor).
 
+-define(CHILD(Id, Type, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => Type,
+    modules => [Id]
+}).
+
 -export([start_link/0]).
 -export([init/1]).
 
@@ -31,54 +40,11 @@ start_link() ->
 
 init([]) ->
     Children = [
-        #{
-            id => bondy_registry,
-            start => {
-                bondy_registry,
-                start_link,
-                []
-            },
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [bondy_registry]
-        },
-        #{
-            id => bondy_peer_wamp_forwarder,
-            start => {
-                bondy_peer_wamp_forwarder,
-                start_link,
-                []
-            },
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [bondy_peer_wamp_forwarder]
-        },
-        #{
-            id => bondy_api_gateway,
-            start => {
-                bondy_api_gateway,
-                start_link,
-                []
-            },
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [bondy_api_gateway]
-        },
-        #{
-            id => bondy_backup,
-            start => {
-                bondy_backup,
-                start_link,
-                []
-            },
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [bondy_backup]
-        }
+        ?CHILD(bondy_registry, worker, [], permanent, 5000),
+        ?CHILD(bondy_broker_events, worker, [], permanent, 5000),
+        ?CHILD(bondy_peer_wamp_forwarder, worker, [], permanent, 5000),
+        ?CHILD(bondy_api_gateway, worker, [], permanent, 5000),
+        ?CHILD(bondy_backup, worker, [], permanent, 5000)
     ],
     %% REVIEW SUPERVISION TREE, MAYBE SPLIT IN SUPERVISORS TO ADOPT
     %% MIXED STRATEGY

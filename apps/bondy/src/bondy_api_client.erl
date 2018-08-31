@@ -23,27 +23,41 @@
 -module(bondy_api_client).
 -include_lib("wamp/include/wamp.hrl").
 
--define(VALIDATE_USERNAME, fun
-        (<<"all">>) ->
-            %% Reserved
-            false;
-        (all) ->
-            %% Reserved
-            false;
-        (undefined) ->
-            {ok, undefined};
-        (null) ->
-            {ok, undefined};
-        (_) ->
-            true
-    end
-).
-
-
--define(CLIENT_UPDATE_SPEC, #{
+-define(ADD_SPEC, #{
+    <<"client_id">> => #{
+        alias => client_id,
+        key => <<"username">>,
+        required => true,
+        allow_null => true,
+        allow_undefined => true,
+        default => undefined,
+        datatype => binary
+    },
     <<"client_secret">> => #{
         alias => client_secret,
-        key => <<"client_secret">>,
+        key => <<"password">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary},
+        default => []
+    }
+}).
+
+
+
+-define(UPDATE_SPEC, #{
+    <<"client_secret">> => #{
+        alias => client_secret,
+        key => <<"password">>,
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -56,59 +70,8 @@
         allow_null => true,
         allow_undefined => true,
         datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        required => false,
-        allow_null => true,
-        allow_undefined => true,
-        datatype => map
     }
 }).
-
--define(CLIENT_SPEC, #{
-    <<"client_id">> => #{
-        alias => client_id,
-        key => <<"client_id">>,
-        required => true,
-        allow_null => true,
-        allow_undefined => true,
-        default => undefined,
-        datatype => binary,
-        validator => ?VALIDATE_USERNAME
-    },
-    <<"client_secret">> => #{
-        alias => client_secret,
-        key => <<"client_secret">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary,
-        default => fun() ->
-            bondy_utils:generate_fragment(48)
-        end
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary},
-        default => []
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => map,
-        default => #{}
-    }
-}).
-
 
 -export([add/2]).
 -export([remove/2]).
@@ -134,24 +97,12 @@
 -spec add(uri(), map()) -> {ok, map()} | {error, atom() | map()}.
 
 add(RealmUri, Info0) ->
-    try
-        case validate(Info0, ?CLIENT_SPEC) of
-            {undefined, _Info, _Opts} = Val ->
-                %% We will generate a client_id and try 3 times
-                %% This is to contemplate the unusual case in which the
-                %% uuid generated has already been used
-                %% (most probably due to manual input)
-                do_add(RealmUri, Val, 3);
-            Val ->
-                do_add(RealmUri, Val, 0)
-        end
-
-    catch
-        error:Reason when is_map(Reason) ->
-            {error, Reason}
+    case bondy_security_user:add(RealmUri, validate(Info0, ?ADD_SPEC)) of
+        {ok, Info1} ->
+            {ok, to_client(Info1)};
+        {error, _} = Error ->
+            Error
     end.
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -161,16 +112,15 @@ add(RealmUri, Info0) ->
 -spec update(uri(), binary(), map()) -> ok| {error, term()} | no_return().
 
 update(RealmUri, ClientId, Info0) ->
-    {undefined, Opts, _} = validate(Info0, ?CLIENT_UPDATE_SPEC),
-    bondy_security:alter_user(RealmUri, ClientId, Opts).
+    bondy_security_user:update(
+        RealmUri, ClientId, validate(Info0, ?UPDATE_SPEC)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), list() | binary()) ->
-    ok | {error, {unknown_user, binary()}}.
+-spec remove(uri(), list() | binary()) -> ok.
 
 remove(RealmUri, Id) ->
     bondy_security_user:remove(RealmUri, Id).
@@ -184,36 +134,25 @@ remove(RealmUri, Id) ->
 
 
 %% @private
-do_add(RealmUri, {undefined, Opts, Info}, Retries) ->
-    Id = bondy_utils:uuid(),
-    do_add(RealmUri, {Id, Opts, maps:put(<<"client_id">>, Id, Info)}, Retries);
-
-do_add(RealmUri, {Id, Opts, Info}, Retries) ->
-    case bondy_security:add_user(RealmUri, Id, Opts) of
-        {error, role_exists} when Retries > 0 ->
-            do_add(RealmUri, {undefined, Opts, Info}, Retries - 1);
-        {error, _} = Error ->
-            Error;
-        ok ->
-            {ok, Info}
-    end.
-
-
+validate(Info0, Spec) ->
+    %% We do this since maps_utils:validate will remove keys that have no spec
+    %% So we only validate groups the following list here
+    With = [<<"groups">>, <<"client_id">>, <<"client_secret">>],
+    {ToValidate, Rest} = maps_utils:split(With, Info0),
+    Info1 = maps:merge(Rest, maps_utils:validate(ToValidate, Spec)),
+    maybe_add_groups(Info1).
 
 
 %% @private
-validate(Info0, Spec) ->
-    Info1 = maps_utils:validate(Info0, Spec),
-    Groups0 = [<<"api_clients">> | maps:get(<<"groups">>, Info1, [])],
-    Groups1 = sets:to_list(sets:from_list(Groups0)),
-    Meta = maps:get(<<"meta">>, Info1),
-    Opts = [{<<"groups">>, Groups1} | maps:to_list(Meta)],
-    Pass = case maps:find(<<"client_secret">>, Info1) of
-        {ok, Val} ->
-            [{<<"password">>, Val}];
-        error ->
-            []
-    end,
-    Id = maps:get(<<"client_id">>, Info1, undefined),
-    Info2 = maps:put(<<"groups">>, Groups1, Info1),
-    {Id, lists:append(Pass, Opts), Info2}.
+maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
+    Groups1 = [<<"api_clients">> | Groups0],
+    maps:put(<<"groups">>, sets:to_list(sets:from_list(Groups1)), M);
+
+maybe_add_groups(#{} = M) ->
+    %% For update op
+    M.
+
+to_client(Map) ->
+    {L, R} = maps_utils:split([<<"username">>], Map),
+    #{<<"username">> := Username} = L,
+    maps:put(<<"client_id">>, Username, R).

@@ -99,7 +99,6 @@ allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
-%% TODO get from API Conf
 %% languages_provided(Req, St) ->
 %%     {Result, Req, State}.
 
