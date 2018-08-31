@@ -36,7 +36,7 @@
                                 | {http, text, json | msgpack}.
 
 
--type context()       ::  #{
+-type t()       ::  #{
     id => id(),
     %% Realm and Session
     realm_uri => uri(),
@@ -54,13 +54,14 @@
     %% Metadata
     user_info => map()
 }.
--export_type([context/0]).
+-export_type([t/0]).
 
 
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
+-export([local_context/1]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
@@ -86,7 +87,7 @@
 %% Initialises a new context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec new() -> context().
+-spec new() -> t().
 new() ->
     #{
         id => bondy_utils:get_id(global),
@@ -95,12 +96,20 @@ new() ->
         request_timeout => bondy_config:request_timeout()
     }.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+local_context(RealmUri) when is_binary(RealmUri) ->
+    Ctxt = new(),
+    Ctxt#{realm_uri => RealmUri}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(bondy_session:peer(), subprotocol_2()) -> context().
+-spec new(bondy_session:peer(), subprotocol_2()) -> t().
 new(Peer, Subprotocol) ->
     set_subprotocol(set_peer(new(), Peer), Subprotocol).
 
@@ -111,7 +120,7 @@ new(Peer, Subprotocol) ->
 %% have been reset: request_id, request_timeout.
 %% @end
 %% -----------------------------------------------------------------------------
--spec reset(context()) -> context().
+-spec reset(t()) -> t().
 reset(Ctxt) ->
     Ctxt#{
         request_id => undefined,
@@ -125,12 +134,13 @@ reset(Ctxt) ->
 %% and {@link bondy_router:close_context/1}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(context()) -> ok.
+-spec close(t()) -> ok.
 
 close(Ctxt0) ->
     %% We cleanup router first as cleanup requires the session
-    case maps:find(session, bondy_router:close_context(Ctxt0)) of
+    case maps:find(session, Ctxt0) of
         {ok, Session} ->
+            _ = bondy_router:close_context(Ctxt0),
             bondy_session:close(Session);
         error ->
             ok
@@ -142,7 +152,7 @@ close(Ctxt0) ->
 %% Returns the peer of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer(context()) -> bondy_session:peer().
+-spec peer(t()) -> bondy_session:peer().
 peer(#{peer := Val}) -> Val.
 
 
@@ -151,7 +161,7 @@ peer(#{peer := Val}) -> Val.
 %% Returns the peer of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec node(context()) -> atom().
+-spec node(t()) -> atom().
 node(#{node := Val}) -> Val.
 
 
@@ -161,7 +171,7 @@ node(#{node := Val}) -> Val.
 %% Set the peer to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_peer(context(), bondy_session:peer()) -> context().
+-spec set_peer(t(), bondy_session:peer()) -> t().
 set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
     Ctxt#{peer => Peer}.
 
@@ -171,7 +181,7 @@ set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
 %% Returns the subprotocol of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subprotocol(context()) -> subprotocol_2().
+-spec subprotocol(t()) -> subprotocol_2().
 subprotocol(#{subprotocol := Val}) -> Val.
 
 
@@ -180,7 +190,7 @@ subprotocol(#{subprotocol := Val}) -> Val.
 %% Returns the encoding used by the peer of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec encoding(context()) -> encoding().
+-spec encoding(t()) -> encoding().
 encoding(#{subprotocol := {_, _, Val}}) -> Val.
 
 
@@ -190,7 +200,7 @@ encoding(#{subprotocol := {_, _, Val}}) -> Val.
 %% Set the peer to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_subprotocol(context(), subprotocol_2()) -> context().
+-spec set_subprotocol(t(), subprotocol_2()) -> t().
 set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
     Ctxt#{subprotocol => S}.
 
@@ -200,7 +210,7 @@ set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
 %% Returns the roles of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec roles(context()) -> map().
+-spec roles(t()) -> map().
 roles(Ctxt) ->
     bondy_session:roles(session(Ctxt)).
 
@@ -210,7 +220,7 @@ roles(Ctxt) ->
 %% Returns the realm uri of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(context()) -> uri().
+-spec realm_uri(t()) -> uri().
 realm_uri(#{realm_uri := Val}) -> Val.
 
 
@@ -220,7 +230,7 @@ realm_uri(#{realm_uri := Val}) -> Val.
 %% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(context()) -> id() | undefined.
+-spec session_id(t()) -> id() | undefined.
 session_id(#{session := S}) ->
     bondy_session:id(S);
 session_id(#{}) ->
@@ -233,7 +243,7 @@ session_id(#{}) ->
 %% false otherwise.
 %% @end
 %% -----------------------------------------------------------------------------
--spec has_session(context()) -> boolean().
+-spec has_session(t()) -> boolean().
 has_session(#{session := _}) -> true;
 has_session(#{}) -> false.
 
@@ -243,7 +253,7 @@ has_session(#{}) -> false.
 %% Sets the sessionId to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_session(context(), bondy_session:session()) -> context().
+-spec set_session(t(), bondy_session:session()) -> t().
 set_session(Ctxt, S) ->
     Ctxt#{session => S}.
 
@@ -253,7 +263,7 @@ set_session(Ctxt, S) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(context()) -> peer_id().
+-spec peer_id(t()) -> peer_id().
 
 peer_id(#{session := S}) ->
     %% TODO evaluate caching this as it should be immutable
@@ -265,7 +275,7 @@ peer_id(#{session := S}) ->
 %% Fetches and returns the bondy_session for the associated sessionId.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session(context()) -> bondy_session:session() | no_return().
+-spec session(t()) -> bondy_session:session() | no_return().
 session(#{session := S}) ->
     S.
 
@@ -275,7 +285,7 @@ session(#{session := S}) ->
 %% Returns the current request id.
 %% @end
 %% -----------------------------------------------------------------------------
--spec request_id(context()) -> id().
+-spec request_id(t()) -> id().
 request_id(#{request_id := Val}) ->
     Val.
 
@@ -285,7 +295,7 @@ request_id(#{request_id := Val}) ->
 %% Sets the current request id to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_request_id(context(), id()) -> context().
+-spec set_request_id(t(), id()) -> t().
 set_request_id(Ctxt, ReqId) ->
     Ctxt#{set_request_id => ReqId}.
 
@@ -295,7 +305,7 @@ set_request_id(Ctxt, ReqId) ->
 %% Returns the current request timeout.
 %% @end
 %% -----------------------------------------------------------------------------
--spec request_timeout(context()) -> non_neg_integer().
+-spec request_timeout(t()) -> non_neg_integer().
 request_timeout(#{request_timeout := Val}) ->
     Val.
 
@@ -305,7 +315,7 @@ request_timeout(#{request_timeout := Val}) ->
 %% Sets the current request timeout to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_request_timeout(context(), non_neg_integer()) -> context().
+-spec set_request_timeout(t(), non_neg_integer()) -> t().
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
 
@@ -315,7 +325,7 @@ set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% Returns true if the feature Feature is enabled for role Role.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_feature_enabled(context(), atom(), binary()) -> boolean().
+-spec is_feature_enabled(t(), atom(), binary()) -> boolean().
 
 is_feature_enabled(Ctxt, Role, Feature) ->
     maps_utils:get_path([Role, Feature], roles(Ctxt), false).

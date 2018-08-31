@@ -31,10 +31,10 @@
 }).
 
 -record(entry_key, {
-    realm_uri               ::  uri(),
+    realm_uri               ::  uri() | '_',
     node                    ::  node(),
-    session_id              ::  id() | atom(),   % the owner
-    entry_id                ::  id() | atom(),
+    session_id              ::  id() | '_' | undefined,   % the owner
+    entry_id                ::  id() | '_',
     type                    ::  entry_type()
 }).
 
@@ -62,8 +62,10 @@
 -export([key_pattern/5]).
 -export([match_policy/1]).
 -export([new/4]).
+-export([new/5]).
 -export([node/1]).
 -export([options/1]).
+-export([pattern/4]).
 -export([pattern/6]).
 -export([peer_id/1]).
 -export([pid/1]).
@@ -79,7 +81,6 @@
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -88,6 +89,16 @@
 
 new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
+    new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
+
+new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     MatchPolicy = validate_match_policy(Options),
     Key = #entry_key{
         realm_uri = RealmUri,
@@ -110,15 +121,27 @@ new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec pattern(entry_type(), uri(), id(), map()) -> t().
+
+pattern(Type, RealmUri, EntryId, Options) ->
+    MatchPolicy = validate_match_policy(pattern, Options),
+    #entry{
+        key = key_pattern(Type, RealmUri, '_', '_', EntryId),
+        pid = '_',
+        uri = '_',
+        match_policy = MatchPolicy,
+        created = '_',
+        options = '_'
+    }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec pattern(entry_type(), uri(), atom(), id(), uri(), map()) -> t().
 
 pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
-    MatchPolicy = try
-        validate_match_policy(Options)
-    catch
-        _:_ ->
-            '_'
-    end,
+    MatchPolicy = validate_match_policy(pattern, Options),
     #entry{
         key = key_pattern(Type, RealmUri, Node, SessionId, '_'),
         pid = '_',
@@ -143,10 +166,12 @@ key_pattern(Type, RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 key_pattern(Type, RealmUri, Node, SessionId, EntryId)
 when (Type =:= subscription orelse Type =:= registration)
-andalso (is_binary(RealmUri) orelse is_atom(RealmUri))
 andalso is_atom(Node)
-andalso (is_integer(SessionId) orelse is_atom(SessionId))
-andalso (is_integer(EntryId) orelse is_atom(EntryId)) ->
+andalso (is_binary(RealmUri) orelse RealmUri == '_')
+andalso (
+    is_integer(SessionId) orelse SessionId == '_' orelse SessionId == undefined
+)
+andalso (is_integer(EntryId) orelse EntryId == '_') ->
     #entry_key{
         realm_uri = RealmUri,
         node = Node,
@@ -179,7 +204,7 @@ key(#entry{key = Key}) ->
 %% Returns the value of the subscription's or registration's realm_uri property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t() | entry_key()) -> uri().
+-spec realm_uri(t() | entry_key()) -> uri() | undefined.
 realm_uri(#entry{key = Key}) ->
     Key#entry_key.realm_uri;
 
@@ -217,7 +242,7 @@ pid(#entry{pid = Val}) -> Val.
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t() | entry_key()) -> id().
+-spec session_id(t() | entry_key()) -> id() | undefined.
 session_id(#entry{key = Key}) ->
     Key#entry_key.session_id;
 
@@ -336,11 +361,16 @@ to_details_map(#entry{key = Key} = E) ->
 %% PRIVATE
 %% =============================================================================
 
-
+validate_match_policy(Options) ->
+    validate_match_policy(key, Options).
 
 %% @private
 -spec validate_match_policy(map()) -> binary().
-validate_match_policy(Options) when is_map(Options) ->
+
+validate_match_policy(pattern, '_') ->
+    '_';
+
+validate_match_policy(_, Options) when is_map(Options) ->
     case maps:get(match, Options, ?EXACT_MATCH) of
         ?EXACT_MATCH = P -> P;
         ?PREFIX_MATCH = P -> P;

@@ -324,7 +324,7 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables
     %% But since Specs depend on other objects being present and we also want
-    %% to avoid rebuilding the diospatch table multiple times, we just set a
+    %% to avoid rebuilding the dispatch table multiple times, we just set a
     %% flag on the state to rebuild the dispatch tables once we received an
     %% exchange_finished event,
     _ = lager:info("API Spec object_update received; key=~p", [Key]),
@@ -343,7 +343,6 @@ terminate(shutdown, _State) ->
 terminate({shutdown, _}, _State) ->
     unsubscribe();
 terminate(_Reason, _State) ->
-    %% TODO publish metaevent
     ok.
 
 
@@ -495,13 +494,10 @@ start_admin_listener({<<"https">>, Routes}) ->
 -spec start_http(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_http(Routes, Name) ->
-    {ok, Opts} = application:get_env(bondy, Name),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, Port} = lists:keyfind(port, 1, Opts),
 
     cowboy:start_clear(
         Name,
-        [{port, Port}, {num_acceptors, PoolSize}],
+        transport_opts(Name),
         #{
             env => #{
                 bondy => #{
@@ -509,8 +505,7 @@ start_http(Routes, Name) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Routes),
-                max_connections => infinity
+                dispatch => cowboy_router:compile(Routes)
             },
             metrics_callback => fun bondy_cowboy_prometheus:observe/1,
             %% cowboy_metrics_h must be first on the list
@@ -532,13 +527,9 @@ start_http(Routes, Name) ->
 -spec start_https(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_https(Routes, Name) ->
-    {ok, Opts} = application:get_env(bondy, Name),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, Port} = lists:keyfind(port, 1, Opts),
-    {_, PKIFiles} = lists:keyfind(pki_files, 1, Opts),
     cowboy:start_tls(
         Name,
-        [{port, Port}, {num_acceptors, PoolSize} | PKIFiles],
+        transport_opts(Name),
         #{
             env => #{
                 bondy => #{
@@ -546,8 +537,7 @@ start_https(Routes, Name) ->
                         schemes => [basic, digest, bearer]
                     }
                 },
-                dispatch => cowboy_router:compile(Routes),
-                max_connections => infinity
+                dispatch => cowboy_router:compile(Routes)
             },
             stream_handlers => [
                 cowboy_compress_h, cowboy_stream_h
@@ -743,3 +733,34 @@ maybe_init_groups(RealmUri) ->
         end
     end || G <- Gs],
     ok.
+
+
+transport_opts(Name) ->
+    {ok, Opts} = application:get_env(bondy, Name),
+    {_, Port} = lists:keyfind(port, 1, Opts),
+    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
+
+    %% In ranch 2.0 we will need to use socket_opts directly
+    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
+        {socket_opts, L} -> normalise(L);
+        false -> []
+    end,
+
+    [
+        {port, Port},
+        {num_acceptors, PoolSize},
+        {max_connections, MaxConnections} | normalise(SocketOpts)
+    ].
+
+normalise(Opts) ->
+    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
+    Recbuf = lists:keyfind(recbuf, 1, Opts),
+    case Sndbuf =/= false andalso Recbuf =/= false of
+        true ->
+            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
+            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+        false ->
+            Opts
+    end.

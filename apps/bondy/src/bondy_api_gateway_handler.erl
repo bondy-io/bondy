@@ -48,7 +48,7 @@
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
-    encoding => dynamic | json | msgpack
+    encoding => binary() | json | msgpack
 }.
 
 
@@ -87,11 +87,10 @@ init(Req, St0) ->
     %     bondy_context:new(), cowboy_req:peer(Req)),
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
-        session => Session,
         body_evaluated => false,
         api_context => init_context(Req),
         session => Session,
-        encoding => dynamic
+        encoding => undefined
     },
     {cowboy_rest, Req, St1}.
 
@@ -100,7 +99,6 @@ allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
-%% TODO get from API Conf
 %% languages_provided(Req, St) ->
 %%     {Result, Req, State}.
 
@@ -220,15 +218,21 @@ to_msgpack(Req, St) ->
 
 
 from_json(Req, St) ->
-    accept(Req, St#{encoding => json}).
+    do_accept(Req, St#{encoding => json}).
 
 
 from_msgpack(Req, St) ->
-    accept(Req, St#{encoding => msgpack}).
+    do_accept(Req, St#{encoding => msgpack}).
 
 
 from_form_urlencoded(Req, St) ->
-    accept(Req, St#{encoding => urlencoded}).
+    do_accept(Req, St#{encoding => urlencoded}).
+
+
+accept(Req0, St0) ->
+    %% Encoding is not JSON, MSGPACK or URLEncoded
+    ContentType = cowboy_req:header(<<"content-type">>, Req0),
+    do_accept(Req0, St0#{encoding => ContentType}).
 
 
 %% =============================================================================
@@ -333,14 +337,15 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 
 
 
-%% @private
+
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% Accepts a POST, PATCH, PUT or DELETE over a resource by executing
 %% the configured action
 %% @end
 %% -----------------------------------------------------------------------------
-accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
+do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
     Method = method(Req0),
     try
@@ -355,11 +360,11 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
             {error, Response0, St2} ->
-                {StatusCode, Response1} = take_status_code(Response0, 500),
-                Req2 = reply(StatusCode, error_encoding(Enc), Response1, Req1),
+                {HTTPCode, Response1} = take_status_code(Response0, 500),
+                Req2 = reply(HTTPCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
-            {error, HTTPCode, Response, St2} ->
 
+            {error, HTTPCode, Response, St2} ->
                 {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
@@ -386,10 +391,10 @@ accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 
 take_status_code(Term) ->
@@ -402,8 +407,9 @@ take_status_code(Term) ->
 take_status_code(#{<<"status_code">> := _} = Map, _) ->
     maps:take(<<"status_code">>, Map);
 
-take_status_code(#{<<"body">> := ErrorBody}, Default) ->
-    take_status_code(ErrorBody, Default);
+take_status_code(#{<<"body">> := Body0} = Map, Default) ->
+    {HTTStatus, Body1} =  take_status_code(Body0, Default),
+    {HTTStatus, Map#{<<"body">> => Body1}};
 
 take_status_code(ErrorBody, Default) ->
     case maps:take(<<"status_code">>, ErrorBody) of
@@ -764,8 +770,21 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
 -spec reply(integer(), atom(), map(), cowboy_req:req()) ->
     cowboy_req:req().
 
-reply(HTTPCode, Enc, Response, Req) ->
-    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req)).
+reply(HTTPCode, Enc, Response, Req0) ->
+    %% We add the content-type since we are bypassing Cowboy by replying
+    %% ourselves
+    MimeType = case Enc of
+        msgpack ->
+            <<"application/msgpack; charset=utf-8">>;
+        json ->
+            <<"application/json; charset=utf-8">>;
+        undefined ->
+            <<"application/json; charset=utf-8">>;
+        Bin ->
+            Bin
+    end,
+    Req1 = cowboy_req:set_resp_header(<<"content-type">>, MimeType, Req0),
+    cowboy_req:reply(HTTPCode, prepare_request(Enc, Response, Req1)).
 
 
 
@@ -835,7 +854,7 @@ method_to_atom(<<"put">>) -> put.
 
 
 %% @private
-maybe_encode(dynamic, Body) ->
+maybe_encode(undefined, Body) ->
     Body;
 
 maybe_encode(Enc, Body) ->
@@ -846,13 +865,11 @@ maybe_encode(Enc, Body) ->
 maybe_encode(_, <<>>, _) ->
     <<>>;
 
-maybe_encode(dynamic, Body, _) ->
+maybe_encode(undefined, Body, _) ->
     Body;
 
 maybe_encode(_, Body, #{<<"action">> := #{<<"type">> := <<"forward">>}}) ->
     Body;
-
-
 
 maybe_encode(Enc, Body, _) ->
     bondy_utils:maybe_encode(Enc, Body).
@@ -860,35 +877,36 @@ maybe_encode(Enc, Body, _) ->
 
 error_encoding(json) -> json;
 error_encoding(msgpack) -> msgpack;
-error_encoding(dynamic) -> json.
+error_encoding(undefined) -> json;
+error_encoding(_Other) -> json.
 
 
 
 %% @private
-uri_to_status_code(timeout) ->                                     504;
-uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->       503;
-uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                        504;
-uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->            403;
-uri_to_status_code(?WAMP_CANCELLED) ->                       400;
-uri_to_status_code(?WAMP_CLOSE_REALM) ->                     500;
-uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->         400;
-uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->                 500;
-uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->                400;
-uri_to_status_code(?WAMP_INVALID_URI) ->                     400;
-uri_to_status_code(?WAMP_NET_FAILURE) ->                     502;
-uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->                  401;
-uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->               502;
-uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->               501;
-uri_to_status_code(?WAMP_NO_SUCH_REALM) ->                   502;
-uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->            502;
-uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->                    400;
-uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->                 500;
-uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->            502;
-uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->   400;
-uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->              400;
-uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->        400;
-uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->                 500;
-uri_to_status_code(_) ->                                           500.
+uri_to_status_code(timeout) ->                              504;
+uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->             503;
+uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                 504;
+uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->           403;
+uri_to_status_code(?WAMP_CANCELLED) ->                      400;
+uri_to_status_code(?WAMP_CLOSE_REALM) ->                    500;
+uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->        400;
+uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->                500;
+uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->               400;
+uri_to_status_code(?WAMP_INVALID_URI) ->                    400;
+uri_to_status_code(?WAMP_NET_FAILURE) ->                    502;
+uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->                 401;
+uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->              502;
+uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->              501;
+uri_to_status_code(?WAMP_NO_SUCH_REALM) ->                  502;
+uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->           502;
+uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->                   400;
+uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->                500;
+uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->           502;
+uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->  400;
+uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->             400;
+uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->       400;
+uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->                500;
+uri_to_status_code(_) ->                                    500.
 
 
 %% @private

@@ -19,6 +19,7 @@
 -behaviour(application).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
 
 -define(BONDY_REALM, #{
     <<"description">> => <<"The Bondy administrative realm.">>,
@@ -40,7 +41,6 @@
 
 
 start(_Type, Args) ->
-    ok = print_welcome_message(),
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup_env(Args),
@@ -50,6 +50,7 @@ start(_Type, Args) ->
             ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
             ok = maybe_start_router_services(),
+            ok = setup_internal_subscriptions(),
             {ok, Pid};
         Other  ->
             Other
@@ -92,17 +93,6 @@ setup_partisan() ->
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
 
 
-%% private
-print_welcome_message() ->
-    {ok, Vsn} = application:get_key(bondy, vsn),
-    io:format(
-        "******************************************~n"
-        "~nLeapsight Bondy v~s~n"
-        "~nDocumentation: http://getbondy.com"
-        "******************************************~n",
-        [Vsn]).
-
-
 %% @private
 maybe_init_bondy_realm() ->
     %% TODO Check what happens when we join the cluster and bondy realm was
@@ -134,9 +124,9 @@ stop_router_services() ->
     ok = bondy_router:shutdown(),
 
     %% We sleep for a minute to allow all sessions to terminate gracefully
-    Time = 30000,
+    Time = 10000,
     _ = lager:info(
-        "Awaiting for ~p secs for clients gracefull shutdown.",
+        "Awaiting for ~p secs for clients graceful shutdown.",
         [trunc(Time/1000)]
     ),
     ok = timer:sleep(Time),
@@ -146,4 +136,34 @@ stop_router_services() ->
     ok = bondy_api_gateway:stop_listeners(),
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.
+
+
+%% TODO moved this into each app when we finish restructuring
+setup_internal_subscriptions() ->
+    Opts = #{match => <<"exact">>},
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_ADDED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    _ = bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_DELETED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_UPDATED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?PASSWORD_CHANGED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
     ok.

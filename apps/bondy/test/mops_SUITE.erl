@@ -18,7 +18,7 @@
 
 -module(mops_SUITE).
 -include_lib("common_test/include/ct.hrl").
--compile(export_all).
+-compile([nowarn_export_all, export_all]).
 
 all() ->
     common:all().
@@ -77,19 +77,46 @@ simple_future_2_test(_) ->
     {Proxy, F2} = F(#{<<"foo">> => 3, <<"bar">> => Proxy}),
     <<"The number is 3 or 4">> = F2(#{<<"bar">> => 4}).
 
-pipe_1_test(_) ->
-   3 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3}).
+value_to_integer_1_test(_) ->
+   42 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 42}).
 
-pipe_2_test(_) ->
-   3 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 3.0}).
+value_to_integer_2_test(_) ->
+   42 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => 42.0}).
 
-pipe_3_test(_) ->
-   3.0 = mops:eval(<<"{{foo |> integer |> float}}">>, #{<<"foo">> => 3.0}).
+value_to_integer_3_test(_) ->
+    42 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => <<"42">>}).
 
-pipe_4_test(_) ->
-    <<"Hello!">> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<"Hello!">>}).
+value_to_integer_4_test(_) ->
+    42 = mops:eval(<<"{{foo |> integer}}">>, #{<<"foo">> => <<"42.0">>}).
+
+value_to_float_1_test(_) ->
+    42.0 = mops:eval(<<"{{foo |> float}}">>, #{<<"foo">> => 42}).
+
+ value_to_float_2_test(_) ->
+    42.0 = mops:eval(<<"{{foo |> float}}">>, #{<<"foo">> => 42.0}).
+
+ value_to_float_3_test(_) ->
+    42.0 = mops:eval(<<"{{foo |> float}}">>, #{<<"foo">> => <<"42">>}).
+
+ value_to_float_4_test(_) ->
+    42.0 = mops:eval(<<"{{foo |> float}}">>, #{<<"foo">> => <<"42.0">>}).
+
+value_to_integer_to_float_1_test(_) ->
+    42.0 = mops:eval(
+        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}).
+
+value_to_integer_to_float_2_test(_) ->
+   42.0 = mops:eval(
+       <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42">>}).
+
+value_to_integer_to_float_3_test(_) ->
+    42.0 = mops:eval(
+        <<"{{foo |> integer |> float}}">>, #{<<"foo">> => <<"42.4">>}).
 
 pipe_5_test(_) ->
+    <<"Hello!">> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<"Hello!">>}).
+
+pipe_6_test(_) ->
     <<0,1>> = mops:eval(<<"{{foo |> base64:encode |> base64:decode}}">>, #{<<"foo">> => <<0,1>>}).
 
 

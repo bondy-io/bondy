@@ -507,6 +507,16 @@
         alias => put,
         required => false,
         datatype => [binary, map] % To support mop expressions
+    },
+    <<"summary">> => #{
+        alias => summary,
+        required => false,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        required => false,
+        datatype => binary
     }
 }).
 
@@ -957,10 +967,14 @@ from_file(Filename) ->
 %% Variable replacepement is performed using our "mop" library.
 %% @end
 %% -----------------------------------------------------------------------------
--spec parse(map()) -> map() | no_return().
+-spec parse(map()) ->
+    map() | {error, invalid_specification_format} | no_return().
 
-parse(Map) ->
-    parse(Map, get_context_proxy()).
+parse(Map) when is_map(Map) ->
+    parse(Map, get_context_proxy());
+
+parse(_) ->
+    {error, invalid_specification_format}.
 
 
 %% -----------------------------------------------------------------------------
@@ -1030,9 +1044,14 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
 
 
 %% @private
--spec parse(Spec :: map(), Ctxt :: map()) -> NewSpec :: map().
-parse(Spec, Ctxt) ->
-    parse_host(maps_utils:validate(Spec, ?API_HOST), Ctxt).
+-spec parse(Spec :: map(), Ctxt :: map()) ->
+    NewSpec :: map() |  {error, invalid_specification_format} | no_return().
+
+parse(Spec, Ctxt) when is_map(Spec) ->
+    parse_host(maps_utils:validate(Spec, ?API_HOST), Ctxt);
+
+parse(_, _) ->
+    {error, invalid_specification_format}.
 
 
 %% @private
@@ -1585,6 +1604,15 @@ content_types_provided(L) when is_list(L) ->
 content_types_provided(<<"application/json">>) ->
     % {<<"application/json">>, to_json};
     T = {
+        {<<"application">>, <<"json">>, '*'},
+        to_json
+    },
+    %% We force JSON to have the priority as Cowboy chooses based on the order
+    %% when no content-type was requested by the user
+    {1, T};
+
+content_types_provided(<<"application/json; charset=utf-8">>) ->
+    T = {
         {<<"application">>, <<"json">>, [{<<"charset">>, <<"utf-8">>}]},
         to_json
     },
@@ -1595,6 +1623,10 @@ content_types_provided(<<"application/json">>) ->
 content_types_provided(<<"application/msgpack">>) ->
     % {<<"application/msgpack">>, to_msgpack};
     T = {{<<"application">>, <<"msgpack">>, '*'}, to_msgpack},
+    {2, T};
+
+content_types_provided(<<"application/msgpack; charset=utf-8">>) ->
+    T = {{<<"application">>, <<"msgpack">>, [{<<"charset">>, <<"utf-8">>}]}, to_msgpack},
     {2, T};
 
 content_types_provided(Bin) ->

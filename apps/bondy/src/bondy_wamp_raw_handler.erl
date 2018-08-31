@@ -33,7 +33,7 @@
 -define(TCP, wamp_tcp).
 -define(TLS, wamp_tls).
 -define(TIMEOUT, ?PING_TIMEOUT * 2).
--define(PING_TIMEOUT, 30000). % 30 secs
+-define(PING_TIMEOUT, 10000). % 10 secs
 -define(RAW_MAGIC, 16#7F).
 -define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
 -define(RAW_PING_PREFIX, <<0:5, 1:3>>).
@@ -79,6 +79,9 @@
 -export([suspend_listeners/0]).
 -export([resume_listeners/0]).
 -export([stop_listeners/0]).
+-export([connections/0]).
+-export([tcp_connections/0]).
+-export([tls_connections/0]).
 
 
 -export([init/1]).
@@ -154,6 +157,21 @@ start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+connections() ->
+    tls_connections() ++ tcp_connections().
+
+tls_connections() ->
+    ranch:procs(?TLS, connections).
+
+
+tcp_connections() ->
+    ranch:procs(?TCP, connections).
+
+
 
 %% =============================================================================
 %% GEN SERVER CALLBACKS
@@ -161,7 +179,7 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 
-init({Ref, Socket, Transport, _Opts}) ->
+init({Ref, Socket, Transport, _Opts0}) ->
     %% We must call ranch:accept_ack/1 before doing any socket operation.
     %% This will ensure the connection process is the owner of the socket.
     %% It expects the listener’s name as argument.
@@ -205,7 +223,7 @@ handle_info(
     {stop, invalid_handshake, St};
 
 handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
-    %% We append the newly received data to any existing buffer
+    %% We append the newly received data to the existing buffer
     Buffer = St0#state.buffer,
     St1 = St0#state{buffer = <<>>},
     case handle_data(<<Buffer/binary, Data/binary>>, St1) of
@@ -221,7 +239,8 @@ handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_rotuer in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls, so we do not ack
-    %% TODO check if we still need this now that bondy:ack seems to handle this case
+    %% TODO check if we still need this now that bondy:ack seems to handle this
+    %% case
     handle_outbound(M, St);
 
 handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
@@ -257,7 +276,7 @@ handle_info(
     ping_timeout,
     #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
     _ = log(
-        error, "Connection closing, reason=ping_timeout, attempts=~p", [N],
+        error, "Raw TCP connection closing, reason=ping_timeout, attempts=~p", [N],
         State
     ),
     ok = close_socket(ping_timeout, State),
@@ -272,7 +291,9 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     {noreply, State1};
 
 handle_info({stop, Reason}, State) ->
-    _ = lager:debug(<<"WAMP session shutdown, reason=~p">>, [Reason]),
+    Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
+    SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
+    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     {stop, normal, State};
 
 handle_info(Info, State) ->
@@ -315,25 +336,14 @@ start_listeners([H|T]) ->
     {ok, Opts} = application:get_env(bondy, H),
     case lists:keyfind(enabled, 1, Opts) of
         {_, true} ->
-            {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-            {_, Port} = lists:keyfind(port, 1, Opts),
-            {_, MaxConns} = lists:keyfind(max_connections, 1, Opts),
-            TransportOpts = case H == ?TLS of
-                true ->
-                    {_, Files} = lists:keyfind(pki_files, 1, Opts),
-                    Files;
-                false ->
-                    []
-            end,
             {ok, _} = ranch:start_listener(
                 H,
-                PoolSize,
                 ranch_mod(H),
-                [{port, Port}],
+                transport_opts(H),
                 bondy_wamp_raw_handler,
-                TransportOpts
+                []
             ),
-            _ = ranch:set_max_connections(H, MaxConns),
+            %% _ = ranch:set_max_connections(H, MaxConns),
             start_listeners(T);
         {_, false} ->
             start_listeners(T)
@@ -463,8 +473,9 @@ handle_outbound(M, St0) ->
             ok = send(Bin, St0#state{protocol_state = PSt}),
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
+            %% We send ourselves a message to stop after Time
             erlang:send_after(
-                Time, self(), {stop, <<"Router dropped session.">>}),
+                Time, self(), {stop, normal}),
             ok = send(Bin, St0#state{protocol_state = PSt}),
             {noreply, St0#state{protocol_state = PSt}}
     end.
@@ -675,3 +686,34 @@ socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
     bondy_stats:socket_closed(wamp, raw, Seconds).
 
+
+transport_opts(Name) ->
+    {ok, Opts} = application:get_env(bondy, Name),
+    {_, Port} = lists:keyfind(port, 1, Opts),
+    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
+    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
+
+    %% In ranch 2.0 we will need to use socket_opts directly
+    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
+        {socket_opts, L} -> normalise(L);
+        false -> []
+    end,
+
+    [
+        {port, Port},
+        {num_acceptors, PoolSize},
+        {max_connections, MaxConnections} | normalise(SocketOpts)
+    ].
+
+
+normalise(Opts) ->
+    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
+    Recbuf = lists:keyfind(recbuf, 1, Opts),
+    case Sndbuf =/= false andalso Recbuf =/= false of
+        true ->
+            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
+            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+        false ->
+            Opts
+    end.

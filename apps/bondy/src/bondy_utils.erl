@@ -192,7 +192,11 @@ decode(msgpack, Term) ->
         {unpack_str, as_binary}
     ],
     {ok, Bin} = msgpack:unpack(Term, Opts),
-    Bin.
+    Bin;
+decode(ContentType, Term) ->
+    %% We cannot decode this so create a wrapped data object
+    #{<<"type">> => ContentType, <<"content">> => Term}.
+
 
 
 %% @private

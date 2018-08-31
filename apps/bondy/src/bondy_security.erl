@@ -26,8 +26,12 @@
 -define(PASSWORD, <<"password">>).
 
 %% printing functions
--export([print_users/1, print_sources/1, print_user/2,
-         print_groups/1, print_group/2, print_grants/2]).
+-export([print_users/1]).
+-export([print_sources/1]).
+-export([print_user/2]).
+-export([print_groups/1]).
+-export([print_group/2]).
+-export([print_grants/2]).
 
 %% type exports
 -export_type([context/0]).
@@ -169,25 +173,36 @@
 -type options() :: [{metadata_key(), metadata_value()}].
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec find_user(Realm :: binary(), Username :: string()) ->
     options() | {error, not_found}.
+
 find_user(Realm, Username) ->
     case user_details(Realm, Username) of
-        undefined ->
-            {error, not_found};
-        Options ->
-            Options
+        undefined -> {error, not_found};
+        Options -> Options
     end.
 
--spec find_one_user_by_metadata(binary(), metadata_key(), metadata_value()) -> {Username :: string(), options()} | {error, not_found}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_one_user_by_metadata(binary(), metadata_key(), metadata_value()) ->
+    {Username :: string(), options()} | {error, not_found}.
+
 find_one_user_by_metadata(Realm, Key, Value) ->
     plum_db:fold(
       fun(User, _Acc) -> return_if_user_matches_metadata(Key, Value, User) end,
       {error, not_found},
       ?USERS_PREFIX(Realm),
-      [{default, []} | ?FOLD_OPTS]).
+      [{default, []} | ?FOLD_OPTS]
+    ).
 
+%% @private
 return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
     case lists:member({Key, Value}, Options) of
         true ->
@@ -196,8 +211,15 @@ return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
             {error, not_found}
     end.
 
--spec find_unique_user_by_metadata(binary(), metadata_key(), metadata_value()) ->
-    {Username :: string(), options()} | {error, not_found | not_unique}.
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_unique_user_by_metadata(
+    binary(), metadata_key(), metadata_value()) ->
+    {Username :: string() | binary(), options()}
+    | {error, not_found | not_unique}.
+
 find_unique_user_by_metadata(Realm, Key, Value) ->
     R = to_lowercase_bin(Realm),
     plum_db:fold(
@@ -208,9 +230,11 @@ find_unique_user_by_metadata(Realm, Key, Value) ->
         ?USERS_PREFIX(R),
         [{default, []} | ?FOLD_OPTS]).
 
+%% @private
 accumulate_matching_user(Key, Value, {_Username, Options} = User, Acc) ->
     accumulate_matching_user(lists:member({Key, Value}, Options), User, Acc).
 
+%% @private
 accumulate_matching_user(true, User, {error, not_found}) ->
     User;
 accumulate_matching_user(true, _User, _Acc) ->
@@ -218,326 +242,33 @@ accumulate_matching_user(true, _User, _Acc) ->
 accumulate_matching_user(false, _, Acc) ->
     Acc.
 
--spec find_bucket_grants(binary(), bucket(), user | group) -> [{RoleName :: string(), [permission()]}].
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_bucket_grants(binary(), bucket(), user | group) ->
+    [{RoleName :: string(), [permission()]}].
+
 find_bucket_grants(Realm, Bucket, Type) ->
     Grants = match_grants(Realm, {'_', Bucket}, Type),
-    lists:map(fun ({{Role, _Bucket}, Permissions}) ->
-                      {Role, Permissions}
-              end, Grants).
-
-
-
-
-
-%% =============================================================================
-%% PRINTING FUNCTIONS FOR CLI
-%% =============================================================================
-
-
-
-
-prettyprint_users([all], _) ->
-    "all";
-prettyprint_users(Users0, Width) ->
-    %% my kingdom for an iolist join...
-    Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
-    prettyprint_permissions(Users, Width).
-
-print_sources(RealmUri) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Sources = plum_db:fold(
-        fun({{Username, CIDR}, [{Source, Options}]}, Acc) ->
-                [{Username, CIDR, Source, Options}|Acc];
-            ({{_, _}, [?TOMBSTONE]}, Acc) ->
-                Acc
+    lists:map(
+        fun ({{Role, _Bucket}, Permissions}) ->
+                {Role, Permissions}
         end,
-        [],
-        ?SOURCES_PREFIX(Uri)
-    ),
+        Grants
+    ).
 
-    do_print_sources(Sources).
 
-%% @private
-do_print_sources(Sources) ->
-    GS = group_sources(Sources),
-    bondy_console_table:print([{users, 20}, {cidr, 10}, {source, 10}, {options, 10}],
-                [[prettyprint_users(Users, 20), prettyprint_cidr(CIDR),
-                  atom_to_list(Source), io_lib:format("~p", [Options])] ||
-            {Users, CIDR, Source, Options} <- GS]).
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec print_user(RealmUri :: uri(), Username :: string()) ->
-    ok | {error, term()}.
-print_user(RealmUri, User) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(User),
-    Details = user_details(Uri, Name),
-    case Details of
-        undefined ->
-            {error, {unknown_user, Name}};
-        _ ->
-            print_users([{Name, [Details]}])
-    end.
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-print_users(RealmUri) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Users = plum_db:fold(fun({_Username, [?TOMBSTONE]}, Acc) ->
-                                            Acc;
-                                        ({Username, Options}, Acc) ->
-                                    [{Username, Options}|Acc]
-                            end, [], ?USERS_PREFIX(Uri), ?FOLD_OPTS),
-    do_print_users(Uri, Users).
-
-%% @private
-do_print_users(RealmUri, Users) ->
-    bondy_console_table:print([{username, 10}, {'member of', 15}, {password, 40}, {options, 30}],
-                [begin
-                     Groups = case proplists:get_value(?GROUPS, Options) of
-                                 undefined ->
-                                     "";
-                                 List ->
-                                     prettyprint_permissions([unicode:characters_to_list(R, utf8)
-                                                              || R <- List,
-                                                                 group_exists(RealmUri, R)], 20)
-                             end,
-                     Password = case proplists:get_value(?PASSWORD, Options) of
-                                    undefined ->
-                                        "";
-                                    Pw ->
-                                        proplists:get_value(hash_pass, Pw)
-                                end,
-                     OtherOptions = lists:keydelete(?PASSWORD, 1,
-                                                    lists:keydelete(?GROUPS, 1,
-                                                                    Options)),
-                     [Username, Groups, Password,
-                      lists:flatten(io_lib:format("~p", [OtherOptions]))]
-                 end ||
-            {Username, [Options]} <- Users]).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec print_group(RealmUri :: uri(), Group :: string()) ->
-    ok | {error, term()}.
-print_group(RealmUri, Group) ->
-    Name = to_lowercase_bin(Group),
-    Details = group_details(RealmUri, Name),
-    case Details of
-        undefined ->
-            {error, {unknown_group, Name}};
-        _ ->
-            do_print_groups(RealmUri, [{Name, [Details]}])
-    end.
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-print_groups(RealmUri) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Groups = plum_db:fold(fun({_Groupname, [?TOMBSTONE]}, Acc) ->
-                                             Acc;
-                                        ({Groupname, Options}, Acc) ->
-                                    [{Groupname, Options}|Acc]
-                            end, [], ?GROUPS_PREFIX(Uri), ?FOLD_OPTS),
-    do_print_groups(RealmUri, Groups).
-
-%% @private
-do_print_groups(RealmUri, Groups) ->
-    bondy_console_table:print([{group, 10}, {'member of', 15}, {options, 30}],
-                [begin
-                     GroupOptions = case proplists:get_value(?GROUPS, Options) of
-                                 undefined ->
-                                     "";
-                                 List ->
-                                     prettyprint_permissions([unicode:characters_to_list(R, utf8)
-                                                              || R <- List,
-                                                                 group_exists(RealmUri, R)], 20)
-                             end,
-                     OtherOptions = lists:keydelete(?GROUPS, 1, Options),
-                     [Groupname, GroupOptions,
-                      lists:flatten(io_lib:format("~p", [OtherOptions]))]
-                 end ||
-            {Groupname, [Options]} <- Groups]).
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec print_grants(RealmUri :: uri(), Rolename :: string()) ->
-    ok | {error, term()}.
-print_grants(RealmUri, RoleName) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(RoleName),
-    case is_prefixed(Name) of
-        true ->
-            print_grants(Uri, chop_name(Name), role_type(Uri, Name));
-        false ->
-            case { print_grants(Uri, Name, user), print_grants(Uri, Name, group) } of
-                {{error, _}, {error, _}} ->
-                    {error, {unknown_role, Name}};
-                _ ->
-                    ok
-            end
-    end.
-
-print_grants(_, User, unknown) ->
-    {error, {unknown_role, User}};
-print_grants(RealmUri, User, user) ->
-    case user_details(RealmUri, User) of
-        undefined ->
-            {error, {unknown_user, User}};
-        _U ->
-            Grants = accumulate_grants(RealmUri, User, user),
-
-            bondy_console_table:print(
-              io_lib:format("Inherited permissions (user/~ts)", [User]),
-              [{group, 20}, {type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     [chop_name(Username), "*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [chop_name(Username), T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [chop_name(Username), T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {{Username, Bucket}, Permissions} <- Grants, Username /= <<"user/", User/binary>>]),
-
-            bondy_console_table:print(
-              io_lib:format("Dedicated permissions (user/~ts)", [User]),
-              [{type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     ["*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {{Username, Bucket}, Permissions} <- Grants, Username == <<"user/", User/binary>>]),
-            GroupedGrants = group_grants(Grants),
-
-            bondy_console_table:print(
-              io_lib:format("Cumulative permissions (user/~ts)", [User]),
-              [{type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     ["*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {Bucket, Permissions} <- GroupedGrants]),
-            ok
-    end;
-print_grants(RealmUri, Group, group) ->
-    case group_details(RealmUri, Group) of
-        undefined ->
-            {error, {unknown_group, Group}};
-        _U ->
-            Grants = accumulate_grants(RealmUri, Group, group),
-
-            bondy_console_table:print(
-              io_lib:format("Inherited permissions (group/~ts)", [Group]),
-              [{group, 20}, {type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     [chop_name(Groupname), "*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [chop_name(Groupname), T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [chop_name(Groupname), T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {{Groupname, Bucket}, Permissions} <- Grants, chop_name(Groupname) /= Group]),
-
-            bondy_console_table:print(
-              io_lib:format("Dedicated permissions (group/~ts)", [Group]),
-              [{type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     ["*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {{Groupname, Bucket}, Permissions} <- Grants, chop_name(Groupname) == Group]),
-            GroupedGrants = group_grants(Grants),
-
-            bondy_console_table:print(
-              io_lib:format("Cumulative permissions (group/~ts)", [Group]),
-              [{type, 10}, {bucket, 10}, {grants, 40}],
-                        [begin
-                             case Bucket of
-                                 any ->
-                                     ["*", "*",
-                                      prettyprint_permissions(Permissions, 40)];
-                                 {T, B} ->
-                                     [T, B,
-                                      prettyprint_permissions(Permissions, 40)];
-                                 T ->
-                                     [T, "*",
-                                      prettyprint_permissions(Permissions, 40)]
-                             end
-                         end ||
-                         {Bucket, Permissions} <- GroupedGrants]),
-            ok
-    end.
-
-prettyprint_permissions(Permissions, Width) ->
-    prettyprint_permissions(lists:sort(Permissions), Width, []).
-
-prettyprint_permissions([], _Width, Acc) ->
-    string:join([string:join(Line, ", ") || Line <- lists:reverse(Acc)], ",\n");
-prettyprint_permissions([Permission|Rest], Width, [H|T] =Acc) ->
-    case length(Permission) + lists:flatlength(H) + 2 + (2 * length(H)) > Width of
-        true ->
-            prettyprint_permissions(Rest, Width, [[Permission] | Acc]);
-        false ->
-            prettyprint_permissions(Rest, Width, [[Permission|H]|T])
-    end;
-prettyprint_permissions([Permission|Rest], Width, Acc) ->
-    prettyprint_permissions(Rest, Width, [[Permission] | Acc]).
-
-
-
 -spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
+
 check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
     Context = maybe_refresh_context(Uri, Context0),
     %% The user needs to have this permission applied *globally*
@@ -555,6 +286,7 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
                        Context#context.username, "' does not have '",
                        Permission, "' on any"], utf8, utf8), Context}
     end;
+
 check_permission({Permission, Bucket}, #context{realm_uri = Uri} = Context0) ->
     Context = maybe_refresh_context(Uri, Context0),
     MatchG = match_grant(Bucket, Context#context.grants),
@@ -570,11 +302,18 @@ check_permission({Permission, Bucket}, #context{realm_uri = Uri} = Context0) ->
                        bucket2iolist(Bucket)], utf8, utf8), Context}
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 check_permissions(Permission, Ctx) when is_tuple(Permission) ->
     %% single permission
     check_permission(Permission, Ctx);
+
 check_permissions([], Ctx) ->
     {true, Ctx};
+
 check_permissions([Permission|Rest], Ctx) ->
     case check_permission(Permission, Ctx) of
         {true, NewCtx} ->
@@ -584,18 +323,35 @@ check_permissions([Permission|Rest], Ctx) ->
             Other
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 get_username(#context{username=Username}) ->
     Username.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 get_realm_uri(#context{realm_uri=Uri}) ->
     Uri.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 get_grants(#context{grants=Val}) ->
     Val.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec authenticate(
     RealmUri :: uri(),
     Username::binary(),
@@ -786,6 +542,10 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec alter_user(
     RealmUri :: binary(),
     Username :: binary(),
@@ -815,6 +575,11 @@ alter_user(RealmUri, Username, Options) when is_binary(Username) ->
             end
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec alter_group(
     RealmUri :: binary(),
     Groupname :: binary(),
@@ -843,6 +608,11 @@ alter_group(RealmUri, Groupname, Options) when is_binary(Groupname) ->
             end
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec del_user(RealmUri :: binary(), Username :: binary()) ->
     ok | {error, term()}.
 
@@ -872,6 +642,11 @@ del_user(RealmUri, Username) when is_binary(Username) ->
             ok
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec del_group(RealmUri :: binary(), Groupname :: binary()) ->
     ok | {error, term()}.
 
@@ -902,6 +677,11 @@ del_group(RealmUri, Groupname) when is_binary(Groupname) ->
             ok
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec add_grant(
     binary(), userlist(), bucket() | any, [binary()]) -> ok | {error, term()}.
 
@@ -964,6 +744,10 @@ when is_binary(RealmUri), is_binary(Bucket) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec add_revoke(
     binary(), userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
 
@@ -1021,6 +805,11 @@ add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
             Error
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec add_source(
     RealmUri :: binary(),
     userlist(),
@@ -1080,6 +869,10 @@ del_source(RealmUri, Users, CIDR) ->
     ok.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 is_enabled(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     case plum_db:get(?STATUS_PREFIX(Uri), enabled) of
@@ -1088,11 +881,19 @@ is_enabled(RealmUri) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 enable(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     plum_db:put(?STATUS_PREFIX(Uri), enabled, true).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 get_ciphers(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     case plum_db:get(?CONFIG_PREFIX(Uri), ciphers) of
@@ -1101,6 +902,7 @@ get_ciphers(RealmUri) ->
         Result ->
             Result
     end.
+
 
 print_ciphers(RealmUri) ->
     Ciphers = get_ciphers(to_lowercase_bin(RealmUri)),
@@ -1129,10 +931,20 @@ set_ciphers(RealmUri, CipherList) ->
             ok
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 disable(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     plum_db:put(?STATUS_PREFIX(Uri), enabled, false).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 status(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     Enabled = plum_db:get(
@@ -1275,6 +1087,314 @@ context_to_map(#context{} = Ctxt) ->
     }.
 
 
+
+
+%% =============================================================================
+%% PRINTING FUNCTIONS FOR CLI
+%% =============================================================================
+
+
+
+
+prettyprint_users([all], _) ->
+    "all";
+prettyprint_users(Users0, Width) ->
+    %% my kingdom for an iolist join...
+    Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
+    prettyprint_permissions(Users, Width).
+
+print_sources(RealmUri) ->
+    Uri = to_lowercase_bin(RealmUri),
+    Sources = plum_db:fold(
+        fun({{Username, CIDR}, [{Source, Options}]}, Acc) ->
+                [{Username, CIDR, Source, Options}|Acc];
+            ({{_, _}, [?TOMBSTONE]}, Acc) ->
+                Acc
+        end,
+        [],
+        ?SOURCES_PREFIX(Uri)
+    ),
+
+    do_print_sources(Sources).
+
+%% @private
+do_print_sources(Sources) ->
+    GS = group_sources(Sources),
+    bondy_console_table:print([{users, 20}, {cidr, 10}, {source, 10}, {options, 10}],
+                [[prettyprint_users(Users, 20), prettyprint_cidr(CIDR),
+                  atom_to_list(Source), io_lib:format("~p", [Options])] ||
+            {Users, CIDR, Source, Options} <- GS]).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_user(RealmUri :: uri(), Username :: string()) ->
+    ok | {error, term()}.
+print_user(RealmUri, User) ->
+    Uri = to_lowercase_bin(RealmUri),
+    Name = to_lowercase_bin(User),
+    Details = user_details(Uri, Name),
+    case Details of
+        undefined ->
+            {error, {unknown_user, Name}};
+        _ ->
+            print_users([{Name, [Details]}])
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+print_users(RealmUri) ->
+    Uri = to_lowercase_bin(RealmUri),
+    Users = plum_db:fold(fun({_Username, [?TOMBSTONE]}, Acc) ->
+                                            Acc;
+                                        ({Username, Options}, Acc) ->
+                                    [{Username, Options}|Acc]
+                            end, [], ?USERS_PREFIX(Uri), ?FOLD_OPTS),
+    do_print_users(Uri, Users).
+
+%% @private
+do_print_users(RealmUri, Users) ->
+    bondy_console_table:print([{username, 10}, {'member of', 15}, {password, 40}, {options, 30}],
+                [begin
+                     Groups = case proplists:get_value(?GROUPS, Options) of
+                                 undefined ->
+                                     "";
+                                 List ->
+                                     prettyprint_permissions([unicode:characters_to_list(R, utf8)
+                                                              || R <- List,
+                                                                 group_exists(RealmUri, R)], 20)
+                             end,
+                     Password = case proplists:get_value(?PASSWORD, Options) of
+                                    undefined ->
+                                        "";
+                                    Pw ->
+                                        proplists:get_value(hash_pass, Pw)
+                                end,
+                     OtherOptions = lists:keydelete(?PASSWORD, 1,
+                                                    lists:keydelete(?GROUPS, 1,
+                                                                    Options)),
+                     [Username, Groups, Password,
+                      lists:flatten(io_lib:format("~p", [OtherOptions]))]
+                 end ||
+            {Username, [Options]} <- Users]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_group(RealmUri :: uri(), Group :: string()) ->
+    ok | {error, term()}.
+print_group(RealmUri, Group) ->
+    Name = to_lowercase_bin(Group),
+    Details = group_details(RealmUri, Name),
+    case Details of
+        undefined ->
+            {error, {unknown_group, Name}};
+        _ ->
+            do_print_groups(RealmUri, [{Name, [Details]}])
+    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+print_groups(RealmUri) ->
+    Uri = to_lowercase_bin(RealmUri),
+    Fun = fun
+        ({_Groupname, [?TOMBSTONE]}, Acc) ->
+            Acc;
+        ({Groupname, Options}, Acc) ->
+            [{Groupname, Options}|Acc]
+    end,
+    Groups = plum_db:fold(Fun, [], ?GROUPS_PREFIX(Uri), ?FOLD_OPTS),
+    do_print_groups(RealmUri, Groups).
+
+%% @private
+do_print_groups(RealmUri, Groups) ->
+    bondy_console_table:print([{group, 10}, {'member of', 15}, {options, 30}],
+                [begin
+                     GroupOptions = case proplists:get_value(?GROUPS, Options) of
+                                 undefined ->
+                                     "";
+                                 List ->
+                                     prettyprint_permissions([unicode:characters_to_list(R, utf8)
+                                                              || R <- List,
+                                                                 group_exists(RealmUri, R)], 20)
+                             end,
+                     OtherOptions = lists:keydelete(?GROUPS, 1, Options),
+                     [Groupname, GroupOptions,
+                      lists:flatten(io_lib:format("~p", [OtherOptions]))]
+                 end ||
+            {Groupname, [Options]} <- Groups]).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec print_grants(RealmUri :: uri(), Rolename :: string()) ->
+    ok | {error, term()}.
+print_grants(RealmUri, RoleName) ->
+    Uri = to_lowercase_bin(RealmUri),
+    Name = to_lowercase_bin(RoleName),
+    case is_prefixed(Name) of
+        true ->
+            print_grants(Uri, chop_name(Name), role_type(Uri, Name));
+        false ->
+            case { print_grants(Uri, Name, user), print_grants(Uri, Name, group) } of
+                {{error, _}, {error, _}} ->
+                    {error, {unknown_role, Name}};
+                _ ->
+                    ok
+            end
+    end.
+
+print_grants(_, User, unknown) ->
+    {error, {unknown_role, User}};
+print_grants(RealmUri, User, user) ->
+    case user_details(RealmUri, User) of
+        undefined ->
+            {error, {unknown_user, User}};
+        _U ->
+            Grants = accumulate_grants(RealmUri, User, user),
+
+            bondy_console_table:print(
+              io_lib:format("Inherited permissions (user/~ts)", [User]),
+              [{group, 20}, {type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     [chop_name(Username), "*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [chop_name(Username), T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [chop_name(Username), T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {{Username, Bucket}, Permissions} <- Grants, Username /= <<"user/", User/binary>>]),
+
+            bondy_console_table:print(
+              io_lib:format("Dedicated permissions (user/~ts)", [User]),
+              [{type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     ["*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {{Username, Bucket}, Permissions} <- Grants, Username == <<"user/", User/binary>>]),
+            GroupedGrants = group_grants(Grants),
+
+            bondy_console_table:print(
+              io_lib:format("Cumulative permissions (user/~ts)", [User]),
+              [{type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     ["*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {Bucket, Permissions} <- GroupedGrants]),
+            ok
+    end;
+print_grants(RealmUri, Group, group) ->
+    case group_details(RealmUri, Group) of
+        undefined ->
+            {error, {unknown_group, Group}};
+        _U ->
+            Grants = accumulate_grants(RealmUri, Group, group),
+
+            bondy_console_table:print(
+              io_lib:format("Inherited permissions (group/~ts)", [Group]),
+              [{group, 20}, {type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     [chop_name(Groupname), "*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [chop_name(Groupname), T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [chop_name(Groupname), T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {{Groupname, Bucket}, Permissions} <- Grants, chop_name(Groupname) /= Group]),
+
+            bondy_console_table:print(
+              io_lib:format("Dedicated permissions (group/~ts)", [Group]),
+              [{type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     ["*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {{Groupname, Bucket}, Permissions} <- Grants, chop_name(Groupname) == Group]),
+            GroupedGrants = group_grants(Grants),
+
+            bondy_console_table:print(
+              io_lib:format("Cumulative permissions (group/~ts)", [Group]),
+              [{type, 10}, {bucket, 10}, {grants, 40}],
+                        [begin
+                             case Bucket of
+                                 any ->
+                                     ["*", "*",
+                                      prettyprint_permissions(Permissions, 40)];
+                                 {T, B} ->
+                                     [T, B,
+                                      prettyprint_permissions(Permissions, 40)];
+                                 T ->
+                                     [T, "*",
+                                      prettyprint_permissions(Permissions, 40)]
+                             end
+                         end ||
+                         {Bucket, Permissions} <- GroupedGrants]),
+            ok
+    end.
+
+prettyprint_permissions(Permissions, Width) ->
+    prettyprint_permissions(lists:sort(Permissions), Width, []).
+
+prettyprint_permissions([], _Width, Acc) ->
+    string:join([string:join(Line, ", ") || Line <- lists:reverse(Acc)], ",\n");
+prettyprint_permissions([Permission|Rest], Width, [H|T] =Acc) ->
+    case length(Permission) + lists:flatlength(H) + 2 + (2 * length(H)) > Width of
+        true ->
+            prettyprint_permissions(Rest, Width, [[Permission] | Acc]);
+        false ->
+            prettyprint_permissions(Rest, Width, [[Permission|H]|T])
+    end;
+prettyprint_permissions([Permission|Rest], Width, Acc) ->
+    prettyprint_permissions(Rest, Width, [[Permission] | Acc]).
 
 
 
@@ -1794,11 +1914,11 @@ illegal_name_chars(Name) ->
 
 
 to_lowercase_bin(Name) when is_binary(Name) ->
-    unicode_util_compat:casefold(Name);
+    string:casefold(Name);
 
 to_lowercase_bin(Name) ->
     unicode:characters_to_binary(
-        unicode_util_compat:casefold(Name), utf8, utf8).
+        string:casefold(Name), utf8, utf8).
 
 
 
