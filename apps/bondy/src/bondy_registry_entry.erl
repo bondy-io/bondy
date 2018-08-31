@@ -31,10 +31,10 @@
 }).
 
 -record(entry_key, {
-    realm_uri               ::  uri(),
+    realm_uri               ::  uri() | '_',
     node                    ::  node(),
-    session_id              ::  id() | atom(),   % the owner
-    entry_id                ::  id() | atom(),
+    session_id              ::  id() | '_' | undefined,   % the owner
+    entry_id                ::  id() | '_',
     type                    ::  entry_type()
 }).
 
@@ -62,6 +62,7 @@
 -export([key_pattern/5]).
 -export([match_policy/1]).
 -export([new/4]).
+-export([new/5]).
 -export([node/1]).
 -export([options/1]).
 -export([pattern/4]).
@@ -80,7 +81,6 @@
 %% =============================================================================
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -89,6 +89,16 @@
 
 new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
+    new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
+
+new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     MatchPolicy = validate_match_policy(Options),
     Key = #entry_key{
         realm_uri = RealmUri,
@@ -156,9 +166,11 @@ key_pattern(Type, RealmUri, SessionId) ->
 %% -----------------------------------------------------------------------------
 key_pattern(Type, RealmUri, Node, SessionId, EntryId)
 when (Type =:= subscription orelse Type =:= registration)
-andalso (is_binary(RealmUri) orelse RealmUri == '_')
 andalso is_atom(Node)
-andalso (is_integer(SessionId) orelse SessionId == '_')
+andalso (is_binary(RealmUri) orelse RealmUri == '_')
+andalso (
+    is_integer(SessionId) orelse SessionId == '_' orelse SessionId == undefined
+)
 andalso (is_integer(EntryId) orelse EntryId == '_') ->
     #entry_key{
         realm_uri = RealmUri,
@@ -192,7 +204,7 @@ key(#entry{key = Key}) ->
 %% Returns the value of the subscription's or registration's realm_uri property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t() | entry_key()) -> uri().
+-spec realm_uri(t() | entry_key()) -> uri() | undefined.
 realm_uri(#entry{key = Key}) ->
     Key#entry_key.realm_uri;
 
@@ -230,7 +242,7 @@ pid(#entry{pid = Val}) -> Val.
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t() | entry_key()) -> id().
+-spec session_id(t() | entry_key()) -> id() | undefined.
 session_id(#entry{key = Key}) ->
     Key#entry_key.session_id;
 

@@ -343,7 +343,6 @@ terminate(shutdown, _State) ->
 terminate({shutdown, _}, _State) ->
     unsubscribe();
 terminate(_Reason, _State) ->
-    %% TODO publish metaevent
     ok.
 
 

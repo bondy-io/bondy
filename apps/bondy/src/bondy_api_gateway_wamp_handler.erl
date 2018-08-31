@@ -50,23 +50,25 @@
 -define(ADD_RESOURCE_OWNER,
     <<"com.leapsight.bondy.api_gateway.add_resource_owner">>
 ).
--define(RESOURCE_OWNER_ADDED,
-    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>
-).
 -define(DELETE_RESOURCE_OWNER,
     <<"com.leapsight.bondy.api_gateway.delete_resource_owner">>
 ).
--define(RESOURCE_OWNER_DELETED,
-    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>
-).
 -define(UPDATE_RESOURCE_OWNER,
     <<"com.leapsight.bondy.api_gateway.update_resource_owner">>
+).
+
+-define(RESOURCE_OWNER_ADDED,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_added">>
+).
+-define(RESOURCE_OWNER_DELETED,
+    <<"com.leapsight.bondy.api_gateway.resource_owner_deleted">>
 ).
 -define(RESOURCE_OWNER_UPDATED,
     <<"com.leapsight.bondy.api_gateway.resource_owner_updated">>
 ).
 
 -export([handle_call/2]).
+-export([handle_event/2]).
 
 
 
@@ -105,9 +107,7 @@ handle_call(
 handle_call(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
-            Val = bondy_wamp_utils:maybe_error(
-                bondy_api_client:add(Uri, Info), M),
-            maybe_user_added(Uri, Val, Ctxt);
+            bondy_wamp_utils:maybe_error(bondy_api_client:add(Uri, Info), M);
         {error, WampError} ->
             WampError
     end,
@@ -116,11 +116,10 @@ handle_call(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
         {ok, [Uri, Username, Info]} ->
-            Val = bondy_wamp_utils:maybe_error(
+            bondy_wamp_utils:maybe_error(
                 bondy_api_client:update(Uri, Username, Info),
                 M
-            ),
-            maybe_user_updated(Uri, Val, Ctxt);
+            );
         {error, WampError} ->
             WampError
     end,
@@ -129,11 +128,10 @@ handle_call(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Username]} ->
-            Val = bondy_wamp_utils:maybe_error(
+            bondy_wamp_utils:maybe_error(
                 bondy_api_client:remove(Uri, Username),
                 M
-            ),
-            maybe_user_deleted(Uri, Val, Ctxt);
+            );
         {error, WampError} ->
             WampError
     end,
@@ -142,9 +140,8 @@ handle_call(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Info]} ->
-            Val = bondy_wamp_utils:maybe_error(
-                bondy_api_resource_owner:add(Uri, Info), M),
-            maybe_user_added(Uri, Val, Ctxt);
+            bondy_wamp_utils:maybe_error(
+                bondy_api_resource_owner:add(Uri, Info), M);
         {error, WampError} ->
             WampError
     end,
@@ -154,11 +151,10 @@ handle_call(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
         {ok, [Uri, Username, Info]} ->
-            Val = bondy_wamp_utils:maybe_error(
+            bondy_wamp_utils:maybe_error(
                 bondy_api_resource_owner:update(Uri, Username, Info),
                 M
-            ),
-            maybe_user_updated(Uri, Val, Ctxt);
+            );
         {error, WampError} ->
             WampError
     end,
@@ -167,11 +163,10 @@ handle_call(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?DELETE_RESOURCE_OWNER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [Uri, Username]} ->
-            Val = bondy_wamp_utils:maybe_error(
+            bondy_wamp_utils:maybe_error(
                 bondy_api_resource_owner:remove(Uri, Username),
                 M
-            ),
-            maybe_user_deleted(Uri, Val, Ctxt);
+            );
         {error, WampError} ->
             WampError
     end,
@@ -183,57 +178,14 @@ handle_call(#call{} = M, Ctxt) ->
 
 
 
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
+handle_event(?USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
+    ok;
 
+handle_event(?USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
+handle_event(?USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
-%% @private
-maybe_user_added(_, #error{} = Error, _) ->
-    Error;
-
-maybe_user_added(Uri, #result{arguments = Args} = Res, Ctxt) ->
-    _ = bondy_broker:publish(#{}, ?USER_ADDED, Args, #{}, Ctxt),
-    case bondy_context:realm_uri(Ctxt) of
-        Uri ->
-            Res;
-        Other ->
-            _ = bondy_broker:publish(
-                #{}, {Other, ?USER_ADDED}, Args, #{}, Ctxt),
-            Res
-    end.
-
-
-%% @private
-maybe_user_updated(_, #error{} = Error, _) ->
-    Error;
-
-maybe_user_updated(Uri, #result{arguments = Args} = Res, Ctxt) ->
-    _ = bondy_broker:publish(#{}, ?USER_UPDATED, Args, #{}, Ctxt),
-    case bondy_context:realm_uri(Ctxt) of
-        Uri ->
-            Res;
-        Other ->
-            _ = bondy_broker:publish(
-                #{}, {Other, ?USER_UPDATED}, Args, #{}, Ctxt),
-            Res
-    end.
-
-
-%% @private
-maybe_user_deleted(_, #error{} = Error, _) ->
-    Error;
-
-maybe_user_deleted(Uri, #result{arguments = Args} = Res, Ctxt) ->
-    _ = bondy_broker:publish(#{}, ?USER_DELETED, Args, #{}, Ctxt),
-    case bondy_context:realm_uri(Ctxt) of
-        Uri ->
-            Res;
-        Other ->
-            _ = bondy_broker:publish(
-                #{}, {Other, ?USER_DELETED}, Args, #{}, Ctxt),
-            Res
-    end.
-
-
+handle_event(?PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username).

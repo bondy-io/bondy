@@ -132,11 +132,15 @@ create_groups(Config) ->
 
 api_client_add(Config) ->
     {create_groups, Prev} = ?config(saved_config, Config),
-    {ok, #{
-        <<"client_id">> := Id,
-        <<"client_secret">> := Secret
-    }} = bondy_api_client:add(?config(realm_uri, Prev), #{}),
-    {save_config, [{client_id, Id}, {client_secret, Secret} | Prev]}.
+    ClientId = bondy_utils:generate_fragment(48),
+    Secret = bondy_utils:generate_fragment(48),
+    In = #{
+        <<"client_id">> => ClientId,
+        <<"client_secret">> => Secret
+    },
+    {ok, #{<<"client_id">> := ClientId}} = bondy_api_client:add(
+        ?config(realm_uri, Prev), In),
+    {save_config, [{client_id, ClientId}, {client_secret, Secret} | Prev]}.
 
 api_client_auth1(Config) ->
     {api_client_add, Prev} = ?config(saved_config, Config),
@@ -148,10 +152,20 @@ api_client_auth1(Config) ->
 
 api_client_update(Config) ->
     {api_client_auth1, Prev} = ?config(saved_config, Config),
+
+    RealmUri = ?config(realm_uri, Prev),
+    ClientId = ?config(client_id, Prev),
+
     Secret = <<"New-Password">>,
-    ok = bondy_api_client:update(
-        ?config(realm_uri, Prev),
-        ?config(client_id, Prev),
+    Out = #{
+        <<"groups">> => [<<"api_clients">>],
+        <<"has_password">> => true,
+        <<"meta">> => #{<<"foo">> => <<"bar">>},
+        <<"sources">> => [],
+        <<"username">> => ClientId
+    },
+    {ok, Out} = bondy_api_client:update(
+        RealmUri, ClientId,
         #{
             <<"client_secret">> => Secret,
             <<"meta">> => #{<<"foo">> => <<"bar">>}
@@ -193,10 +207,10 @@ api_client_delete(Config) ->
 
 resource_owner_add(Config) ->
     R = #{
-        username => <<"AlE">>,
-        password => <<"ale">>,
-        meta => #{<<"foo">> => <<"bar">>},
-        groups => []
+        <<"username">> => <<"AlE">>,
+        <<"password">> => <<"ale">>,
+        <<"meta">> => #{<<"foo">> => <<"bar">>},
+        <<"groups">> => []
     },
     {ok, #{
         <<"username">> := Username
@@ -280,13 +294,20 @@ resource_owner_delete(Config) ->
 
 
 user_add(Config) ->
-    R = #{
-        username => <<"AlE2">>,
-        password => <<"ale">>,
-        meta => #{<<"foo">> => <<"bar">>},
-        groups => []
+    In = #{
+        <<"username">> => <<"AlE2">>,
+        <<"password">> => <<"ale">>,
+        <<"meta">> => #{<<"foo">> => <<"bar">>},
+        <<"groups">> => []
     },
-    ok = bondy_security_user:add(?config(realm_uri, Config), R),
+    Out = #{
+        <<"groups">> => [],
+        <<"has_password">> => true,
+        <<"meta">> => #{<<"foo">> => <<"bar">>},
+        <<"sources">> => [],
+        <<"username">> => <<"AlE2">>
+    },
+    {ok, Out} = bondy_security_user:add(?config(realm_uri, Config), In),
     {save_config, [{username, <<"AlE2">>}, {password, <<"ale">>} | Config]}.
 
 user_auth1(Config) ->
@@ -301,12 +322,19 @@ user_auth1(Config) ->
 user_update(Config) ->
     {user_auth1, Prev} = ?config(saved_config, Config),
     Pass = <<"New-Password">>,
-    ok = bondy_security_user:update(
+    Out = #{
+        <<"groups">> => [],
+        <<"has_password">> => true,
+        <<"meta">> => #{<<"foo">> => <<"bar2">>},
+        <<"sources">> => [],
+        <<"username">> => <<"AlE2">>
+    },
+    {ok, Out} = bondy_security_user:update(
         ?config(realm_uri, Prev),
         ?config(username, Prev),
         #{
             <<"password">> => Pass,
-            <<"meta">> => #{<<"foo">> => <<"bar">>}
+            <<"meta">> => #{<<"foo">> => <<"bar2">>}
         }
     ),
     {save_config,
@@ -347,30 +375,43 @@ user_delete(Config) ->
 
 password_token_crud_1(Config) ->
     Uri = ?config(realm_uri, Config),
-    {ok, #{
-        <<"client_id">> := C
-    }} = bondy_api_client:add(Uri, #{}),
-    R = #{
-        username => <<"ale">>,
-        password => <<"1234">>,
-        meta => #{},
-        groups => []
+    ClientId = bondy_utils:generate_fragment(48),
+    Client = #{
+        <<"client_id">> => ClientId,
+        <<"client_secret">> => bondy_utils:generate_fragment(48)
     },
-    {ok, #{
-        <<"username">> := U
-    }} = bondy_api_resource_owner:add(Uri, R),
+    {ok, _} = bondy_api_client:add(Uri, Client),
+    U = <<"ale">>,
+    R = #{
+        <<"username">> => U,
+        <<"password">> => <<"1234">>,
+        <<"meta">> => #{},
+        <<"groups">> => []
+    },
+    {ok, _} = bondy_api_resource_owner:add(Uri, R),
 
     {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
-        password, Uri, C, U, [], #{}
+        password, Uri, ClientId, U, [], #{}
     ),
+    Data0 = bondy_oauth2:lookup_token(Uri, ClientId, RToken0),
+    Ts0 = bondy_oauth2:issued_at(Data0),
+    timer:sleep(2000),
     {ok, _JWT1, RToken1, _Claims1} = bondy_oauth2:refresh_token(
-        Uri, C, RToken0),
-    {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(refresh_token, Uri, C, RToken0),
-    ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, RToken1),
-    {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(
-        refresh_token, Uri, C, RToken1),
+        Uri, ClientId, RToken0
+    ),
+    Data1 = bondy_oauth2:lookup_token(Uri, ClientId, RToken1),
+    {error, not_found} = bondy_oauth2:lookup_token(Uri, ClientId, RToken0),
+    %% Revoke token should never fail, even if the token was already revoked
+    ok = bondy_oauth2:revoke_token(refresh_token, Uri, ClientId, RToken0),
+    Ts1 = bondy_oauth2:issued_at(Data1),
+    true = Ts0 < Ts1,
 
-    {save_config, [{client_id, C}, {username, U} | Config]}.
+    ok = bondy_oauth2:revoke_tokens(refresh_token, Uri, U),
+    {error, not_found} = bondy_oauth2:lookup_token(Uri, ClientId, RToken1),
+    %% Revoke token should never fail, even if the token was already revoked
+    ok = bondy_oauth2:revoke_token(refresh_token, Uri, ClientId, RToken1),
+
+    {save_config, [{client_id, ClientId}, {username, U} | Config]}.
 
 
     password_token_crud_2(Config) ->
@@ -384,5 +425,4 @@ password_token_crud_1(Config) ->
             password, Uri, C, U, [], #{<<"client_device_id">> => D}
         ),
         ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
-        {error, oauth2_invalid_grant} = bondy_oauth2:revoke_token(
-            refresh_token, Uri, C, RToken0).
+        ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, RToken0).

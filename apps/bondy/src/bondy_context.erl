@@ -61,6 +61,7 @@
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
 -export([new/0]).
+-export([local_context/1]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
@@ -94,6 +95,14 @@ new() ->
         request_id => undefined,
         request_timeout => bondy_config:request_timeout()
     }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+local_context(RealmUri) when is_binary(RealmUri) ->
+    Ctxt = new(),
+    Ctxt#{realm_uri => RealmUri}.
 
 
 %% -----------------------------------------------------------------------------

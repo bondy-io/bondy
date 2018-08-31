@@ -31,6 +31,7 @@
 -module(bondy_realm).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
 
 -define(SPEC, #{
     description => #{
@@ -65,7 +66,7 @@
     private_keys                ::  map(),
     public_keys                 ::  map()
 }).
--type realm()  ::  #realm{}.
+-type realm()       ::  #realm{}.
 
 
 -export_type([realm/0]).
@@ -304,6 +305,10 @@ add(Uri, Opts) ->
     case lookup(Uri) of
         {error, not_found} ->
             ok = plum_db:put(?PREFIX, Uri, Realm),
+            _ = bondy:publish(
+                #{}, ?REALM_ADDED, [Uri], #{},
+                ?BONDY_PRIV_REALM_URI
+            ),
             init(Realm);
         _ ->
             error({already_exist, Uri})
@@ -321,9 +326,16 @@ add(Uri, Opts) ->
 delete(?BONDY_REALM_URI) ->
     {error, not_permitted};
 
+delete(?BONDY_PRIV_REALM_URI) ->
+    {error, not_permitted};
+
 delete(Uri) ->
     %% TODO if there are users in the realm, the caller will need to first explicitely delete hthe users so return {error, users_exist} or similar
     plum_db:delete(?PREFIX, Uri),
+    _ = bondy:publish(
+        #{}, ?REALM_DELETED, [Uri], #{},
+        ?BONDY_PRIV_REALM_URI
+    ),
     % TODO we need to close all sessions for this realm
     ok.
 
@@ -388,11 +400,11 @@ to_map(#realm{} = R) ->
 
 %% @private
 init(#realm{uri = Uri} = Realm) ->
-    User = #{
+    User0 = #{
         username => <<"admin">>,
         password => <<"bondy">>
     },
-    ok = bondy_security_user:add(Uri, User),
+    {ok, _User} = bondy_security_user:add(Uri, User0),
     % Opts = [],
     % _ = [
     %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)

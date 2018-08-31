@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_security_group.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,14 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% =============================================================================
-%% Copyright (C) NGINEO LIMITED 2011 - 2016. All rights reserved.
-%% =============================================================================
-
-
 -module(bondy_security_group).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
 
 -define(SPEC, ?UPDATE_SPEC#{
     <<"name">> => #{
@@ -95,7 +91,12 @@ add(RealmUri, Group0) ->
     try
         Group1 = maps_utils:validate(Group0, ?SPEC),
         {#{<<"name">> := Name}, Opts} = maps_utils:split([<<"name">>], Group1),
-        bondy_security:add_group(RealmUri, Name, maps:to_list(Opts))
+        bondy_security:add_group(RealmUri, Name, maps:to_list(Opts)),
+        _ = bondy:publish(
+            #{}, ?GROUP_ADDED, [RealmUri, Name], #{},
+            ?BONDY_PRIV_REALM_URI
+        ),
+        ok
     catch
         error:Reason ->
             {error, Reason}
@@ -111,7 +112,12 @@ add(RealmUri, Group0) ->
 update(RealmUri, Name, Group0) when is_binary(Name) ->
     try
         Group1 = maps_utils:validate(Group0, ?UPDATE_SPEC),
-        bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1))
+        bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1)),
+        _ = bondy:publish(
+            #{}, ?GROUP_UPDATED, [RealmUri, Name], #{},
+            ?BONDY_PRIV_REALM_URI
+        ),
+        ok
     catch
         error:Reason ->
             {error, Reason}
@@ -123,11 +129,15 @@ update(RealmUri, Name, Group0) when is_binary(Name) ->
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), binary()) -> ok | {error, any()}.
 
-remove(RealmUri, Id) when is_binary(Id) ->
-    case bondy_security:del_group(RealmUri, Id) of
+remove(RealmUri, Name) when is_binary(Name) ->
+    case bondy_security:del_group(RealmUri, Name) of
         ok ->
+            _ = bondy:publish(
+                #{}, ?GROUP_DELETED, [RealmUri, Name], #{},
+                ?BONDY_PRIV_REALM_URI
+            ),
             ok;
-        {error, {unknown_group, Id}} ->
+        {error, {unknown_group, Name}} ->
             {error, unknown_group}
     end.
 
@@ -138,8 +148,8 @@ remove(RealmUri, Id) when is_binary(Id) ->
 %% -----------------------------------------------------------------------------
 -spec lookup(uri(), list() | binary()) -> group() | {error, not_found}.
 
-lookup(RealmUri, Id) when is_binary(Id) ->
-    case bondy_security:lookup_group(RealmUri, Id) of
+lookup(RealmUri, Name) when is_binary(Name) ->
+    case bondy_security:lookup_group(RealmUri, Name) of
         {error, _} = Error ->
             Error;
         Group ->
@@ -153,8 +163,8 @@ lookup(RealmUri, Id) when is_binary(Id) ->
 %% -----------------------------------------------------------------------------
 -spec fetch(uri(), list() | binary()) -> group() | no_return().
 
-fetch(RealmUri, Id) ->
-    case lookup(RealmUri, Id) of
+fetch(RealmUri, Name) ->
+    case lookup(RealmUri, Name) of
         {error, Reason} -> error(Reason);
         Group -> Group
     end.
@@ -180,9 +190,9 @@ list(RealmUri) when is_binary(RealmUri) ->
 
 
 %% @private
-to_map({Id, PL}) ->
+to_map({Name, PL}) ->
     #{
-        <<"name">> => Id,
+        <<"name">> => Name,
         <<"groups">> => proplists:get_value(<<"groups">>, PL, []),
         <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
     }.

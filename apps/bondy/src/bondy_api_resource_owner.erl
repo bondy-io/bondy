@@ -32,72 +32,31 @@
     end
 ).
 
--define(USER_SPEC, #{
-    <<"username">> => #{
-        alias => username,
-        key => <<"username">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary,
-        validator => ?VALIDATE_USERNAME
-    },
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => true,
-        allow_null => false,
-        datatype => binary,
-        default => fun() -> bondy_utils:generate_fragment(48) end
-    },
+-define(ADD_SPEC, #{
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>,
-        required => true,
-        allow_null => false,
-        datatype => {list, binary},
-        default => []
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        required => true,
+        key => <<"groups">>, %% bondy_security requirement
         allow_null => false,
         allow_undefined => false,
-        datatype => map,
-        default => #{}
+        required => true,
+        default => [],
+        datatype => {list, binary}
     }
 }).
 
--define(USER_UPDATE_SPEC, #{
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary
-    },
+-define(UPDATE_SPEC, #{
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>,
-        required => false,
-        allow_null => true,
-        allow_undefined => true,
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
+        key => <<"groups">>, %% bondy_security requirement
         required => false,
         allow_null => false,
         allow_undefined => false,
-        datatype => map
+        datatype => {list, binary}
     }
 }).
 
 -export([add/2]).
--export([remove/3]).
+-export([remove/2]).
 -export([update/3]).
 -export([change_password/4]).
 -export([change_password/5]).
@@ -107,7 +66,6 @@
 %% =============================================================================
 %% API
 %% =============================================================================
-
 
 
 
@@ -121,14 +79,14 @@
     {ok, map()} | {error, term()} | no_return().
 
 add(RealmUri, Info0) ->
-    {Username, Opts, Info1} = validate(Info0, ?USER_SPEC),
-    case bondy_security:add_user(RealmUri, Username, Opts) of
+    %% We just validate we have a group, the rest will be validate by
+    %% bondy_security_user
+    case bondy_security_user:add(RealmUri, validate(Info0, ?ADD_SPEC)) of
+        {ok, _} = OK ->
+            OK;
         {error, _} = Error ->
-            Error;
-        ok ->
-            {ok, Info1}
+            Error
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -139,23 +97,30 @@ add(RealmUri, Info0) ->
     {ok, map()} | {error, term()} | no_return().
 
 update(RealmUri, Username, Info0) ->
-    Info1 = case maps:get(<<"groups">>, Info0, undefined) of
-        undefined ->
-            Info0;
-        Groups0 ->
-            Groups1 = sets:to_list(
-                sets:from_list([<<"resource_owners">> | Groups0])),
-            maps:put(<<"groups">>, Groups1, Info0)
-    end,
-    Info2 = maps_utils:validate(Info1, ?USER_UPDATE_SPEC),
-    Opts = maps:to_list(Info2),
+    bondy_security_user:update(
+        RealmUri, Username, validate(Info0, ?UPDATE_SPEC)).
 
-    case bondy_security:alter_user(RealmUri, Username, Opts) of
-        {error, _} = Error ->
-            Error;
-        ok ->
-            {ok, bondy_security_user:fetch(RealmUri, Username)}
-    end.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec change_password(uri(), binary(), binary(), binary()) ->
+    ok | {error, any()}.
+
+change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
+    bondy_security_user:change_password(RealmUri, Username, New).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec change_password(uri(), binary(), binary(), binary(), binary()) ->
+    ok | {error, any()}.
+
+change_password(RealmUri, _Issuer, Username, New, Old) ->
+    bondy_security_user:change_password(RealmUri, Username, New, Old).
 
 
 
@@ -163,40 +128,10 @@ update(RealmUri, Username, Info0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_password(RealmUri, Issuer, Username, New) when is_binary(New) ->
-    case bondy_security_user:change_password(RealmUri, Username, New) of
-        ok ->
-            bondy_oauth2:revoke_tokens(
-                refresh_token, RealmUri, Issuer, Username);
-        Error ->
-            Error
-    end.
+-spec remove(uri(), list() | binary()) -> ok.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-change_password(RealmUri, Issuer, Username, New, Old) ->
-    case bondy_security_user:change_password(RealmUri, Username, New, Old) of
-        ok ->
-            bondy_oauth2:revoke_tokens(
-                refresh_token, RealmUri, Issuer, Username);
-        Error ->
-            Error
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove(uri(), binary(), list() | binary()) -> ok.
-
-remove(RealmUri, Issuer, Id) ->
-    ok = bondy_security_user:remove(RealmUri, Id),
-    bondy_oauth2:revoke_tokens(refresh_token, RealmUri, Issuer, Id).
-
+remove(RealmUri, Id) ->
+    bondy_security_user:remove(RealmUri, Id).
 
 
 
@@ -205,21 +140,22 @@ remove(RealmUri, Issuer, Id) ->
 %% =============================================================================
 
 
+
 %% @private
 validate(Info0, Spec) ->
-    Info1 = maps_utils:validate(Info0, Spec),
-    Groups0 = [<<"resource_owners">> | maps:get(<<"groups">>, Info1, [])],
-    Groups1 = sets:to_list(sets:from_list(Groups0)),
-    Opts = [
-        {<<"password">>, maps:get(<<"password">>, Info1)},
-        {<<"groups">>, Groups1} |
-        maps:to_list(maps:with([<<"meta">>], Info1))
-    ],
-    Username = maps:get(<<"username">>, Info1, undefined),
-    Info2 = maps:put(<<"groups">>, Groups1, Info1),
-    {Username, Opts, Info2}.
+    %% We do this since maps_utils:validate will remove keys that have no spec
+    %% So we only validate groups here
+    {ToValidate, Rest} = maps_utils:split([<<"groups">>], Info0),
+    Info1 = maps:merge(Rest, maps_utils:validate(ToValidate, Spec)),
+    maybe_add_groups(Info1).
 
 
+%% @private
+maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
+    Groups1 = [<<"resource_owners">> | Groups0],
+    maps:put(<<"groups">>, sets:to_list(sets:from_list(Groups1)), M);
 
-
+maybe_add_groups(#{} = M) ->
+    %% For update op
+    M.
 

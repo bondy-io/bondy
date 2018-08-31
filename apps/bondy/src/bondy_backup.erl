@@ -18,6 +18,8 @@
 
 -module(bondy_backup).
 -behaviour(gen_server).
+-include("bondy.hrl").
+-include("bondy_backup.hrl").
 
 -define(BACKUP_SPEC, #{
     <<"path">> => #{
@@ -249,35 +251,23 @@ handle_cast(_Event, State) ->
 
 handle_info({backup_reply, ok, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
-    _ = lager:info(
-        "Finished creating backup; filename=~p, elapsed_time_secs=~p",
-        [State#state.filename, Secs]
-    ),
+    ok = notify_backup_finished([State#state.filename, Secs]),
     {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({backup_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
-    _ = lager:error(
-        "Error creating backup; reason=~p, filename=~p, elapsed_time_secs=~p",
-        [Reason, State#state.filename, Secs]
-    ),
+    ok = notify_backup_error([Reason, State#state.filename, Secs]),
     {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({restore_reply, {ok, Counters}, Pid}, #state{pid = Pid} = State) ->
     #{read_count := N, merged_count := M} = Counters,
     Secs = erlang:system_time(second) - State#state.timestamp,
-    _ = lager:info(
-        "Finished restoring backup; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
-        [State#state.filename, Secs, N, M]
-    ),
+    ok = notify_restore_finished([State#state.filename, Secs, N, M]),
     {noreply, State#state{status = undefined, pid = undefined}};
 
 handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     Secs = erlang:system_time(second) - State#state.timestamp,
-    _ = lager:error(
-        "Error restoring backup; reason=~p, filename=~p, elapsed_time_secs=~p",
-        [Reason, State#state.filename, Secs]
-    ),
+    ok = notify_restore_error([State#state.filename, Reason, Secs]),
     {noreply, State#state{status = undefined, pid = undefined}};
 
 
@@ -287,7 +277,6 @@ handle_info(Info, State) ->
 
 
 terminate(_Reason, _State) ->
-    %% TODO publish metaevent
     ok.
 
 
@@ -339,9 +328,10 @@ do_backup(File, Ts) ->
             vsn => <<"1.1.0">>
         }}
     ],
+
     case disk_log:open(Opts) of
         {ok, Log} ->
-            _ = lager:info("Started backup; filename=~p", [File]),
+            _ = notify_backup_started(File),
             build_backup(Log);
         {error, _} = Error ->
             Error
@@ -363,7 +353,6 @@ build_backup(Log) ->
         log(Acc1, Log)
     catch
         throw:Reason ->
-            _ = lager:error(<<"Error creating backup; reason=~p">>, [Reason]),
             {error, Reason}
     after
         ok = plum_db:iterator_close(Iterator),
@@ -441,14 +430,10 @@ do_restore(Filename) ->
 
     case disk_log:open(Opts) of
         {ok, Log} ->
-            _ = lager:info(
-                "Started restore; filename=~p", [Filename]),
+            ok = notify_restore_started([Filename, 0, 0]),
             do_restore_aux(Log);
         {repaired, Log, {recovered, Rec}, {badbytes, Bad}} ->
-            _ = lager:info(
-                "Started restore; filename=~p, recovered=~p, bad_bytes=~p",
-                [Filename, Rec, Bad]
-            ),
+            ok = notify_restore_started([Filename, Rec, Bad]),
             do_restore_aux(Log);
         {error, _} = Error ->
             Error
@@ -461,7 +446,6 @@ do_restore_aux(Log) ->
         restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters0)
     catch
         _:Reason ->
-            _ = lager:error("Error restoring backup; reason=~p", [Reason]),
             {error, Reason}
     after
         _ = disk_log:close(Log)
@@ -488,7 +472,6 @@ restore_chunk({Cont, Terms}, Log, Counters0) ->
         restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
     catch
         _:Reason ->
-            _ = lager:error("Error restoring backup; reason=~p, ", [Reason]),
             {error, Reason}
     end.
 
@@ -582,3 +565,78 @@ do_read_head(Log, Acc0) ->
     after
         _ = disk_log:close(Log)
     end.
+
+
+%% @private
+notify_backup_started(File) ->
+    _ = lager:info("Started backup; filename=~p", [File]),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?BACKUP_STARTED, [File], #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
+
+
+%% @private
+notify_backup_finished(Args) when length(Args) == 2 ->
+    _ = lager:info(
+        "Finished creating backup; filename=~p, elapsed_time_secs=~p",
+        Args
+    ),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?BACKUP_FINISHED, Args, #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
+
+
+%% @private
+notify_backup_error(Args) when length(Args) == 3 ->
+    _ = lager:error(
+        "Error creating backup; filename=~p, reason=~p, elapsed_time_secs=~p",
+        Args
+    ),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?BACKUP_ERROR, Args, #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
+
+
+%% @private
+notify_restore_started([Filename, _, _] = Args) ->
+    _ = lager:info(
+        "Backup restore started; filename=~p, recovered=~p, bad_bytes=~p",
+        Args
+    ),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?RESTORE_STARTED, [Filename], #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
+
+
+%% @private
+notify_restore_finished(Args) when length(Args) == 4 ->
+    _ = lager:info(
+        "Backup restore finished; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
+        Args
+    ),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?RESTORE_FINISHED, [Args], #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
+
+
+%% @private
+notify_restore_error(Args)  when length(Args) == 3 ->
+    _ = lager:info(
+        "Backup restore error; filename=~p, reason=~p, elapsed_time_secs=~p",
+        Args
+    ),
+    %% @TODO Prometheus stats
+    bondy:publish(
+        #{}, ?RESTORE_ERROR, Args, #{},
+        ?BONDY_PRIV_REALM_URI
+    ).
