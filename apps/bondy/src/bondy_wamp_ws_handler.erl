@@ -288,7 +288,7 @@ terminate({remote, _Code, _Binary}, _Req, St) ->
 
 handle_outbound(T, M, St) ->
     case bondy_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
-        {ok, Bin, PSt} ->
+        {reply, Bin, PSt} ->
             {reply, frame(T, Bin), St#state{protocol_state = PSt}};
         {stop, PSt} ->
             {stop, St#state{protocol_state = PSt}};

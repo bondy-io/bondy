@@ -93,7 +93,7 @@ start_listeners() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Stop the underlying ranch tcp and tls listeners.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec stop_listeners() -> ok.
@@ -105,7 +105,9 @@ stop_listeners() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Suspend the underlying ranch tcp and tls listeners.
+%% Existing connections will remain open while Bondy stops accepting new raw
+%% socket connections until resume_listeners/0 is called.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec suspend_listeners() -> ok.
@@ -117,7 +119,9 @@ suspend_listeners() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Resume the underlying ranch tcp and tls listeners.
+%% Bondy starts accepting new connections again.
+%% This function should be called after suspend_listeners/0.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec resume_listeners() -> ok.
@@ -138,16 +142,24 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the list of all the TCP and TLS connections.
 %% @end
 %% -----------------------------------------------------------------------------
 connections() ->
     tls_connections() ++ tcp_connections().
 
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of all the TLS connections.
+%% @end
+%% -----------------------------------------------------------------------------
 tls_connections() ->
     ranch:procs(?TLS, connections).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of all the TCP connections.
+%% @end
+%% -----------------------------------------------------------------------------
 tcp_connections() ->
     ranch:procs(?TCP, connections).
 
@@ -220,14 +232,13 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
 handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_router in those cases
     %% in which the router is embodied by our process i.e. the sync part
-    %% of a routing process e.g. wamp calls, so we do not ack
-    %% TODO check if we still need this now that bondy:ack seems to handle this
-    %% case
+    %% of a routing process, so we do not ack
     handle_outbound(M, St);
 
 handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy:send/2,3 which requires us to ack
+    %% its reception
     ok = bondy:ack(Pid, Ref),
     %% We send the message to the peer
     handle_outbound(M, St);
@@ -249,7 +260,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
 handle_info(timeout, #state{ping_sent = false} = State0) ->
     _ = log(debug, "Connection timeout, sending first ping;", [], State0),
     {ok, State1} = send_ping(State0),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timet
+    %% Here we do not return a timeout value as send_ping sets an ad-hoc timer
     {noreply, State1};
 
 handle_info(
@@ -266,10 +277,13 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     _ = log(debug, "Ping timeout, sending second ping;", [], State),
     %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
-    %% Here we do not return a timeout value as send_ping set an ah-hoc timer
+    %% Here we do not return a timeout value as send_ping sets an ad-hoc timer
     {noreply, State1};
 
 handle_info({stop, Reason}, State) ->
+    Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
+    SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
+    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     {stop, Reason, State};
 
 handle_info(Info, State) ->
@@ -357,6 +371,7 @@ when byte_size(Data) >= Len ->
     %% We received a WAMP message
     %% Len is the number of octets after serialization
     <<Mssg:Len/binary, Rest/binary>> = Data,
+
     case bondy_wamp_protocol:handle_inbound(Mssg, St#state.protocol_state) of
         {ok, PSt} ->
             handle_data(Rest, St#state{protocol_state = PSt});
@@ -386,6 +401,7 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
     %% We received a PONG
     _ = log(debug, "Received pong;", [], St),
     <<Payload:Len/binary, Rest/binary>> = Data,
+
     case St#state.ping_sent of
         {true, Payload, TimerRef} ->
             %% We reset the state
@@ -438,7 +454,7 @@ handle_data(Data, St) ->
 
 handle_outbound(M, St0) ->
     case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
-        {ok, Bin, PSt} ->
+        {reply, Bin, PSt} ->
             St1 = St0#state{protocol_state = PSt},
             case send(Bin, St1) of
                 ok ->

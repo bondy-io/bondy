@@ -44,6 +44,7 @@
                                 | failed
                                 | established
                                 | shutting_down.
+-type event_type()          ::  in | out.
 -type raw_wamp_message()    ::  wamp_message:message()
                                 | {raw, ping}
                                 | {raw, pong}
@@ -64,6 +65,14 @@
 -export([handle_outbound/2]).
 -export([terminate/1]).
 -export([validate_subprotocol/1]).
+
+%% PRIVATE
+-export([closed/3]).
+-export([establishing/3]).
+-export([challenging/3]).
+-export([failed/3]).
+-export([established/3]).
+-export([shutting_down/3]).
 
 
 
@@ -107,7 +116,6 @@ peer(#wamp_state{context = Ctxt}) ->
 
 agent(#wamp_state{context = Ctxt}) ->
     bondy_context:agent(Ctxt).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -173,7 +181,6 @@ validate_subprotocol(_) ->
     {error, invalid_subprotocol}.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles wamp frames, decoding 1 or more messages, routing them and replying
@@ -186,22 +193,17 @@ validate_subprotocol(_) ->
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
 
-handle_inbound(Data, St) ->
-    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
-        {Messages, <<>>} ->
-            handle_inbound_messages(Messages, St)
-    catch
-        ?EXCEPTION(_, {unsupported_encoding, Format}, _) ->
-            Mssg = <<"Unsupported message encoding">>,
-            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{encoding => Format}, St);
-        ?EXCEPTION(_, badarg, _) ->
-            Mssg = <<"Error during message decoding">>,
-            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St);
-        ?EXCEPTION(_, function_clause, _) ->
-            Mssg = <<"Incompatible message">>,
-            abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St)
+handle_inbound(Data, St0) ->
+    case ?MODULE:(St0#wamp_state.state_name)(in, Data, St0) of
+        {ok, NextState, St1} ->
+            {ok, St1#wamp_state{state_name = NextState}};
+        {reply, NextState, Messages, St1} ->
+            {reply, Messages, St1#wamp_state{state_name = NextState}};
+        {stop, NextState, St1} ->
+            {stop, St1#wamp_state{state_name = NextState}};
+        {stop, NextState, Messages, St1} ->
+            {stop, Messages, St1#wamp_state{state_name = NextState}}
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -214,38 +216,163 @@ handle_inbound(Data, St) ->
     | {stop, binary(), state()}
     | {stop, binary(), state(), After :: non_neg_integer()}.
 
+handle_outbound(M, St0) ->
+    case ?MODULE:(St0#wamp_state.state_name)(out, M, St0) of
+        {ok, NextState, St1} ->
+            {ok, St1#wamp_state{state_name = NextState}};
+        {reply, NextState, Messages, St1} ->
+            {reply, Messages, St1#wamp_state{state_name = NextState}};
+        {stop, NextState, St1} ->
+            {stop, St1#wamp_state{state_name = NextState}};
+        {stop, NextState, Messages, St1} ->
+            {stop, Messages, St1#wamp_state{state_name = NextState}};
+        {stop, NextState, Messages, St1, Timeout} ->
+            {stop, Messages, St1#wamp_state{state_name = NextState}, Timeout}
+    end.
 
-handle_outbound(#result{} = M, St0) ->
+
+%% =============================================================================
+%% STATE FUNCTIONS
+%% =============================================================================
+
+
+
+%% @private
+-spec closed(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+closed(in, Data, St) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> closed(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end.
+
+
+%% @private
+-spec establishing(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+establishing(in, Data, St) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> establishing(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end.
+
+
+%% @private
+-spec challenging(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+challenging(in, Data, St) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> challenging(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end.
+
+
+%% @private
+-spec failed(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+failed(in, Data, St) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> failed(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end.
+
+
+%% @private
+-spec established(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+established(out, #result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
     ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
-    {ok, Bin, St1};
+    {reply, established, Bin, St1};
 
-handle_outbound(#error{request_type = ?CALL} = M, St0) ->
+established(out, #error{request_type = ?CALL} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
     ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
-    {ok, Bin, St1};
+    {reply, established, Bin, St1};
 
-handle_outbound(#goodbye{} = M, St0) ->
+established(out, #goodbye{} = M, St0) ->
     %% Bondy is shutting_down this session, we will stop when we
     %% get the client's goodbye response
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
-    St1 = St0#wamp_state{state_name = shutting_down},
-    {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
+    %% This should be a
+    %% {reply, shutting_down, Bin, St0, ?SHUTDOWN_TIMEOUT};
+    %% and we should have a timer(Timeout) that triggers the stop action
+    {stop, shutting_down, Bin, St0, ?SHUTDOWN_TIMEOUT};
 
-handle_outbound(M, St) ->
+established(out, M, St) ->
     case wamp_message:is_message(M) of
         true ->
             ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
             Bin = wamp_encoding:encode(M, encoding(St)),
-            {ok, Bin, St};
+            {reply, established, Bin, St};
         false ->
             %% RFC: WAMP implementations MUST close sessions (disposing all of their resources such as subscriptions and registrations) on protocol errors caused by offending peers.
-            {stop, St}
+            {stop, closed, St}
+    end;
+
+established(in, Data, St) ->
+    %% DO this in the session process (for calls)
+    %% and spawn a process from there for all other messages
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end.
+
+
+%% @private
+-spec shutting_down(
+    event_type(), Data :: binary() | wamp_message(), State :: state()) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+shutting_down(in, Data, St) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> shutting_down(in, Messages, St, [])
+    catch
+        _:Reason ->
+            abort(Reason, St)
     end.
 
 
@@ -257,125 +384,115 @@ handle_outbound(M, St) ->
 
 
 
--spec handle_inbound_messages([raw_wamp_message()], state()) ->
-    {ok, state()}
-    | {stop, state()}
-    | {stop, [binary()], state()}
-    | {reply, [binary()], state()}.
 
-handle_inbound_messages(Messages, St) ->
-    handle_inbound_messages(Messages, St, []).
-
-
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Handles one or more messages, routing them and returning a reply
-%% when required.
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_inbound_messages(
-    [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
-    {ok, state()}
-    | {stop, state()}
-    | {stop, [binary()], state()}
-    | {reply, [binary()], state()}.
+-spec closed(
+    event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
 
-handle_inbound_messages([], St, []) ->
+closed(_, [], St, []) ->
     %% We have no replies
-    {ok, St};
+    {ok, closed, St};
 
-handle_inbound_messages([], St, Acc) ->
-    {reply, lists:reverse(Acc), St};
+closed(_, [], St, Acc) ->
+    {reply, closed, lists:reverse(Acc), St};
 
-handle_inbound_messages(
-    [#abort{} = M|_], #wamp_state{state_name = Name} = St0, [])
-    when Name =/= established ->
+closed(in, [#hello{realm_uri = Uri} = M|_], St0, _) ->
+    %% Client is requesting a session
+    %% This will return either reply with wamp_welcome() | wamp_challenge()
+    %% or abort
+    Ctxt0 = St0#wamp_state.context,
+    ok = bondy_stats:update(M, Ctxt0),
+
+    Ctxt1 = Ctxt0#{realm_uri => Uri},
+    St1 = update_context(Ctxt1, St0),
+    maybe_open_session(
+        maybe_auth_challenge(M#hello.details, get_realm(St1), St1)
+    );
+
+closed(in, [#abort{} = M|_], St0, []) ->
     %% Client aborting, we ignore any subsequent messages
     Uri = M#abort.reason_uri,
     Details = M#abort.details,
     _ = lager:info(
         "Client aborted; reason=~s, state_name=~p, details=~p",
-        [Uri, Name, Details]
+        [Uri, closed, Details]
     ),
-    St1 = St0#wamp_state{state_name = closed},
-    {stop, St1};
+    {stop, closed, St0};
 
-handle_inbound_messages(
-    [#goodbye{}|_], #wamp_state{state_name = established} = St0, Acc) ->
+closed(_, _, St, _) ->
+    %% Client does not have a session and message is not HELLO
+    abort(
+        closed,
+        ?WAMP_PROTOCOL_VIOLATION,
+        <<"You need to establish a session first.">>,
+        #{},
+        St
+    ).
 
-    %% Client initiated a goodbye, we ignore any subsequent messages
-    %% We reply with all previous messages plus a goodbye and stop
-    Reply = wamp_message:goodbye(
-        #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
-    Bin = wamp_encoding:encode(Reply, encoding(St0)),
-    St1 = St0#wamp_state{state_name = closed},
-    {stop, normal, lists:reverse([Bin|Acc]), St1};
 
-handle_inbound_messages(
-    [#goodbye{}|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
-    %% Client is replying to our goodbye, we ignore any subsequent messages
-    %% We reply all previous messages and close
-    St1 = St0#wamp_state{state_name = closed},
-    {stop, shutdown, lists:reverse(Acc), St1};
+%% @private
+-spec establishing(
+    event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
 
-handle_inbound_messages(
-    [#hello{} = M|_],
-    #wamp_state{state_name = established, context = #{session := _}} = St0,
-    Acc) ->
-    %% Client already has a session!
+establishing(_, [], St, []) ->
+    %% We have no replies
+    {ok, establishing, St};
+
+establishing(_, [], St, Acc) ->
+    {reply, establishing, lists:reverse(Acc), St};
+
+establishing(in, [#abort{} = M|_], St0, _) ->
+    %% Client aborting, we ignore any subsequent messages
+    Uri = M#abort.reason_uri,
+    Details = M#abort.details,
+    _ = lager:info(
+        "Client aborted; reason=~s, state_name=~p, details=~p",
+        [Uri, establishing, Details]
+    ),
+    {stop, closed, St0};
+
+establishing(in, [#hello{} = M|_], St, _) ->
+    %% Client already sent a hello!
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
-    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     %% We reply all previous messages plus an abort message and close
-    Bin = abort_error_bin(
+    abort(
+        closed,
         ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
         #{},
-        St0
-    ),
-    St1 = St0#wamp_state{state_name = closed},
-    {stop, ?WAMP_PROTOCOL_VIOLATION, [Bin | Acc], St1};
+        St
+    );
 
-handle_inbound_messages(
-    [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
-    %% Client does not have a session but we already sent a challenge message
-    %% in response to a HELLO message
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You've sent a HELLO message more than once.">>,
-        #{},
-        St);
+establishing(_, _, State, _) ->
+    {stop, failed, State}.
 
-handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
-    %% Client is requesting a session
-    %% This will return either reply with wamp_welcome() | wamp_challenge()
-    %% or abort
-    Ctxt0 = St0#wamp_state.context,
-    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
 
-    Ctxt1 = Ctxt0#{realm_uri => Uri},
-    St1 = update_context(Ctxt1, St0),
+%% @private
+-spec challenging(event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
 
-    maybe_open_session(
-        maybe_auth_challenge(M#hello.details, get_realm(St1), St1));
+challenging(_, [], St, []) ->
+    %% We have no replies
+    {ok, challenging, St};
 
-handle_inbound_messages(
-    [#authenticate{} = M|_],
-    #wamp_state{state_name = established, context = #{session := _}} = St, _) ->
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    %% Client already has a session so is already authenticated.
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You've sent an AUTHENTICATE message more than once.">>,
-        #{},
-        St);
+challenging(_, [], St, Acc) ->
+    {reply, challenging, lists:reverse(Acc), St};
 
-handle_inbound_messages(
-    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
+challenging(in, [#authenticate{} = M|_], St, _) ->
     %% Client is responding to a challenge
 
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
@@ -395,43 +512,117 @@ handle_inbound_messages(
             %% We already stored the authid (username) in the ctxt
             open_session(St);
         {error, Reason} ->
-            abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St)
+            abort(closed, ?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St)
     end;
 
-handle_inbound_messages(
-    [#authenticate{} = M|_], #wamp_state{state_name = Name} = St, _)
-    when Name =/= challenging ->
-    %% Client has not been sent a challenge
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You need to request a session first by sending a HELLO message.">>,
-        #{},
-        St);
+challenging(in, [#abort{} = M|_], St0, []) ->
+    %% Client aborting, we ignore any subsequent messages
+    Uri = M#abort.reason_uri,
+    Details = M#abort.details,
+    _ = lager:info(
+        "Client aborted; reason=~s, state_name=~p, details=~p",
+        [Uri, challenging, Details]
+    ),
+    {stop, closed, St0};
 
-handle_inbound_messages(
-    [H|T],
-    #wamp_state{state_name = established, context = #{session := _}} = St,
+challenging(_, _, State, _) ->
+    {stop, failed, State}.
+
+
+%% @private
+-spec failed(event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+failed(_, _, State, _) ->
+    {stop, failed, State}.
+
+
+%% @private
+-spec established(event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+established(_, [], St, []) ->
+    %% We have no replies
+    {ok, established, St};
+
+established(_, [], St, Acc) ->
+    {reply, established, lists:reverse(Acc), St};
+
+established(
+    in, [#hello{} = M|_], #wamp_state{context = #{session := _}} = St0, Acc) ->
+    %% Client already has a session!
+    %% RFC: It is a protocol error to receive a second "HELLO" message during
+    %% the lifetime of the session and the _Peer_ must fail the session if that
+    %% happens.
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
+    %% We reply all previous messages plus an abort message and close
+    Bin = abort_error_bin(
+        ?WAMP_PROTOCOL_VIOLATION,
+        <<"You've sent a HELLO message more than once.">>,
+        #{},
+        St0
+    ),
+    {stop, failed, [Bin | Acc], St0};
+
+established(
+    in,
+    [#authenticate{} = M|_],
+    #wamp_state{context = #{session := _}} = St,
     Acc) ->
-    %% We have a session, so we forward messages via router
+    ok = bondy_stats:update(M, St#wamp_state.context),
+    %% Client already has a session so is already authenticated.
+    Bin = abort_error_bin(
+        ?WAMP_PROTOCOL_VIOLATION,
+        <<"You've sent an AUTHENTICATE message more than once.">>,
+        #{},
+        St
+    ),
+    {stop, failed, [Bin | Acc], St};
+
+established(in, [#goodbye{}|_], St0, Acc) ->
+    %% Client initiated a goodbye, we ignore any subsequent messages
+    %% We reply with all previous messages plus a goodbye and stop
+    Reply = wamp_message:goodbye(
+        #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
+    Bin = wamp_encoding:encode(Reply, encoding(St0)),
+    {stop, closed, lists:reverse([Bin|Acc]), St0};
+
+established(in, [H|T], #wamp_state{context = #{session := _}} = St, Acc) ->
+    %% We have a session, so we route the messages
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
-            handle_inbound_messages(T, update_context(Ctxt, St), Acc);
+            established(in, T, update_context(Ctxt, St), Acc);
         {reply, M, Ctxt} ->
             Bin = wamp_encoding:encode(M, encoding(St)),
-            handle_inbound_messages(T, update_context(Ctxt, St), [Bin | Acc]);
+            established(in, T, update_context(Ctxt, St), [Bin | Acc]);
         {stop, M, Ctxt} ->
             Bin = wamp_encoding:encode(M, encoding(St)),
-            {stop, [Bin | Acc], update_context(Ctxt, St)}
-    end;
+            {stop, failed, [Bin | Acc], update_context(Ctxt, St)}
+    end.
 
-handle_inbound_messages(_, St, _) ->
-    %% Client does not have a session and message is not HELLO
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You need to establish a session first.">>,
-        #{},
-        St).
+
+%% @private
+-spec shutting_down(
+    event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+    {ok, state_name(), state()}
+    | {stop, state_name(),state()}
+    | {stop, state_name(), [binary()], state()}
+    | {reply, state_name(), [binary()], state()}.
+
+shutting_down(in, [#goodbye{}|_], St, Acc) ->
+    %% Client is replying to our goodbye, we ignore any subsequent messages
+    %% We reply all previous messages and close
+    {stop, closed, lists:reverse(Acc), St};
+
+shutting_down(_, _, State, _) ->
+    %% We ignore all other messages and wait for a goodbye reply from the client
+    {ok, shutting_down, State}.
 
 
 
@@ -450,6 +641,7 @@ maybe_open_session({error, {Code, Term}, St}) when is_atom(Term) ->
 
 maybe_open_session({error, {realm_not_found, Uri}, St}) ->
     abort(
+        closed,
         ?WAMP_NO_SUCH_REALM,
         <<"Realm '", Uri/binary, "' does not exist.">>,
         #{},
@@ -458,6 +650,7 @@ maybe_open_session({error, {realm_not_found, Uri}, St}) ->
 
 maybe_open_session({error, {missing_param, Param}, St}) ->
     abort(
+        closed,
         ?WAMP_PROTOCOL_VIOLATION,
         <<"Missing value for required parameter '", Param/binary, "'.">>,
         #{},
@@ -466,6 +659,7 @@ maybe_open_session({error, {missing_param, Param}, St}) ->
 
 maybe_open_session({error, {user_not_found, AuthId}, St}) ->
     abort(
+        closed,
         ?WAMP_NO_SUCH_ROLE,
         <<"User '", AuthId/binary, "' does not exist.">>,
         #{},
@@ -476,8 +670,8 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
-    St1 = St0#wamp_state{state_name = challenging, authmethod = AuthMethod},
-    {reply, Bin, St1}.
+    St1 = St0#wamp_state{authmethod = AuthMethod},
+    {reply, challenging, Bin, St1}.
 
 
 
@@ -485,11 +679,10 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
-%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec open_session(state()) ->
-    {reply, binary(), state()}
+    {reply, established, binary(), state()}
     | {stop, binary(), state()}.
 
 open_session(St0) ->
@@ -519,10 +712,11 @@ open_session(St0) ->
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
-        {reply, Bin, St1#wamp_state{state_name = established}}
+        {reply, established, Bin, St1}
     catch
         ?EXCEPTION(error, {invalid_options, missing_client_role}, _) ->
             abort(
+                closed,
                 ?WAMP_PROTOCOL_VIOLATION,
                 <<"No client roles provided. Please provide at least one client role.">>,
                 #{},
@@ -533,8 +727,22 @@ open_session(St0) ->
 
 
 %% @private
-abort(Type, Reason, Details, St) ->
-    {stop, Reason, abort_error_bin(Type, Reason, Details, St), St}.
+abort({unsupported_encoding, Format}, St) ->
+    Mssg = <<"Unsupported message encoding">>,
+    abort(closed, ?WAMP_PROTOCOL_VIOLATION, Mssg, #{encoding => Format}, St);
+
+abort(badarg, St) ->
+    Mssg = <<"Error during message decoding">>,
+    abort(closed, ?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St);
+
+abort(function_clause, St) ->
+    Mssg = <<"Incompatible message">>,
+    abort(closed, ?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St).
+
+
+%% @private
+abort(NextState, Type, Reason, Details, St) ->
+    {stop, NextState, abort_error_bin(Type, Reason, Details, St), St}.
 
 
 %% @private
