@@ -278,11 +278,19 @@ when is_binary(RealmUri) ->
 
 publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
 when is_map(Ctxt) ->
-    try
-        do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
+    try do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         ?EXCEPTION(_, Reason, Stacktrace) ->
+            _ = lager:error(
             _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, ?STACKTRACE(Stacktrace)]),
+                "topic=~p, session_id=~p, stacktrace=~p",
+                [
+                    Reason,
+                    TopicUri,
+                    bondy_context:session_id(Ctxt),
+                    erlang:get_stacktrace()
+                ]
+            ),
             {error, Reason}
     end.
 
