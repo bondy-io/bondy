@@ -100,7 +100,7 @@ close_context(Ctxt) ->
         Ctxt
     catch
     Class:Reason ->
-        _ = lager:debug(
+        _ = lager:error(
             "Error while closing context; class=~p, reason=~p, trace=~p",
             [Class, Reason, erlang:get_stacktrace()]
         ),
@@ -276,11 +276,19 @@ when is_binary(RealmUri) ->
 
 publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
 when is_map(Ctxt) ->
-    try
-        do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
+    try do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         _:Reason ->
-            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error(
+                "Error while publishing; reason=~p, "
+                "topic=~p, session_id=~p, stacktrace=~p",
+                [
+                    Reason,
+                    TopicUri,
+                    bondy_context:session_id(Ctxt),
+                    erlang:get_stacktrace()
+                ]
+            ),
             {error, Reason}
     end.
 
