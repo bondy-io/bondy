@@ -677,7 +677,7 @@ admin_base_routes() ->
 
 
 admin_spec() ->
-    {ok, Base} = application:get_env(bondy, platform_etc_dir),
+    Base = bondy_config:get(platform_etc_dir),
     File = Base ++ "/bondy_admin_api.json",
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
@@ -739,7 +739,7 @@ maybe_init_groups(RealmUri) ->
 
 
 transport_opts(Name) ->
-    {ok, Opts} = application:get_env(bondy, Name),
+    Opts = bondy_config:get(Name),
     {_, Port} = lists:keyfind(port, 1, Opts),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),

@@ -77,11 +77,11 @@ register() ->
 -spec load_schema() -> ok.
 
 load_schema() ->
-    case application:get_env(bondy, schema_dirs) of
-        {ok, Directories} ->
-            ok = clique_config:load_schema(Directories);
-        _ ->
-            ok = clique_config:load_schema([code:lib_dir()])
+    case bondy_config:get(schema_dirs, undefined) of
+        undefined ->
+            ok = clique_config:load_schema([code:lib_dir()]);
+        Directories ->
+            ok = clique_config:load_schema(Directories)
     end.
 
 

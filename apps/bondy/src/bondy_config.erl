@@ -25,30 +25,27 @@
 -module(bondy_config).
 -include("bondy.hrl").
 
+-define(ERROR, '$error_badarg').
 -define(APP, bondy).
 -define(DEFAULT_RESOURCE_SIZE, erlang:system_info(schedulers)).
 -define(DEFAULT_RESOURCE_CAPACITY, 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
--export([api_gateway/0]).
+-export([priv_dir/0]).
+-export([get/1]).
+-export([get/2]).
+%% -export([set/2]).
 -export([automatically_create_realms/0]).
--export([wamp_call_timeout/0]).
 -export([connection_lifetime/0]).
 -export([coordinator_timeout/0]).
 -export([is_router/0]).
 -export([load_regulation_enabled/0]).
--export([priv_dir/0]).
--export([request_timeout/0]).
 -export([router_pool/0]).
--export([tcp_acceptors_pool_size/0]).
--export([tcp_max_connections/0]).
--export([tcp_port/0]).
--export([tls_acceptors_pool_size/0]).
--export([tls_files/0]).
--export([tls_max_connections/0]).
--export([tls_port/0]).
+-export([request_timeout/0]).
 -export([ws_compress_enabled/0]).
+-export([init/0]).
 
+-compile({no_auto_import, [get/1]}).
 
 
 
@@ -58,19 +55,77 @@
 %% =============================================================================
 
 
+init() ->
+    Config = application:get_all_env(bondy),
+    %% We set configs at first level only
+    _ = [set(Key, Value) || {Key, Value} <- Config],
+    ok.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get(Key :: atom() | tuple()) -> term().
+get([H|T]) ->
+    case get(H) of
+        Term when is_map(Term) ->
+            case maps_utils:get_path(T, Term, ?ERROR) of
+                ?ERROR -> error(badarg);
+                Value -> Value
+            end;
+        Term when is_list(Term) ->
+            get_path(Term, T, ?ERROR);
+        _ ->
+            undefined
+    end;
+
+get(Key) when is_tuple(Key) ->
+    get(tuple_to_list(Key));
+get(Key) ->
+
+    bondy_mochiglobal:get(Key).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get(Key :: atom() | tuple(), Default :: term()) -> term().
+get([H|T], Default) ->
+    case get(H, Default) of
+        Term when is_map(Term) ->
+            maps_utils:get_path(T, Term, Default);
+        Term when is_list(Term) ->
+            get_path(Term, T, Default);
+        _ ->
+            Default
+    end;
+
+get(Key, Default) when is_tuple(Key) ->
+    get(tuple_to_list(Key), Default);
+
+get(Key, Default) ->
+    bondy_mochiglobal:get(Key, Default).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set(Key :: atom() | tuple(), Default :: term()) -> ok.
+set(Key, Value) ->
+    application:set_env(?APP, Key, Value),
+    bondy_mochiglobal:put(Key, Value).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec is_router() -> boolean().
 is_router() ->
-    application:get_env(?APP, is_router, true).
-
-
-
-%% =============================================================================
-%% HTTP
-%% =============================================================================
-
-api_gateway() ->
-    application:get_env(?APP, api_gateway, undefined).
+    true.
 
 
 %% -----------------------------------------------------------------------------
@@ -89,54 +144,14 @@ priv_dir() ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @doc
 %% x-webkit-deflate-frame compression draft which is being used by some
 %% browsers to reduce the size of data being transmitted supported by Cowboy.
 %% @end
+%% -----------------------------------------------------------------------------
 ws_compress_enabled() -> true.
 
-
-
-%% =============================================================================
-%% TCP
-%% =============================================================================
-
-
-tcp_acceptors_pool_size() ->
-    application:get_env(?APP, tcp_acceptors_pool_size, 200).
-
-tcp_max_connections() ->
-    application:get_env(?APP, tcp_max_connections, 1000000).
-
-tcp_port() ->
-    Default = 8083,
-    try
-        case application:get_env(?APP, tcp_port, Default) of
-            Int when is_integer(Int) -> Int;
-            Str -> list_to_integer(Str)
-        end
-    catch
-        ?EXCEPTION(_, _, _) -> Default
-    end.
-
-
-%% =============================================================================
-%% TLS
-%% =============================================================================
-
-
-tls_acceptors_pool_size() ->
-    application:get_env(?APP, tls_acceptors_pool_size, 200).
-
-tls_max_connections() ->
-    application:get_env(?APP, tls_max_connections, 1000000).
-
-tls_port() ->
-    application:get_env(?APP, tls_port, 10083).
-
-
-tls_files() ->
-    application:get_env(?APP, tls_files, []).
 
 
 %% =============================================================================
@@ -145,7 +160,7 @@ tls_files() ->
 
 
 automatically_create_realms() ->
-    application:get_env(?APP, automatically_create_realms, false).
+    get(automatically_create_realms).
 
 
 %% =============================================================================
@@ -154,7 +169,7 @@ automatically_create_realms() ->
 
 -spec connection_lifetime() -> session | connection.
 connection_lifetime() ->
-    application:get_env(?APP, connection_lifetime, session).
+    get(connection_lifetime).
 
 
 %% =============================================================================
@@ -163,12 +178,12 @@ connection_lifetime() ->
 
 -spec load_regulation_enabled() -> boolean().
 load_regulation_enabled() ->
-    application:get_env(?APP, load_regulation_enabled, true).
+    get(load_regulation_enabled).
 
 
 -spec coordinator_timeout() -> pos_integer().
 coordinator_timeout() ->
-    application:get_env(?APP, coordinator_timeout, 3000).
+    get(coordinator_timeout).
 
 
 %% -----------------------------------------------------------------------------
@@ -187,25 +202,40 @@ coordinator_timeout() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec router_pool() -> list().
-
 router_pool() ->
-    {ok, Pool} = application:get_env(?APP, router_pool),
-    Pool.
+    get(router_pool).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-wamp_call_timeout() ->
-    {ok, Val} =  application:get_env(?APP, wamp_call_timeout),
-    Val.
+%% CALL
 
-
-%% -----------------------------------------------------------------------------
-%% @doc For http
-%% @end
-%% -----------------------------------------------------------------------------
 request_timeout() ->
-    {ok, Val} = application:get_env(?APP, request_timeout),
-    Val.
+    get(request_timeout).
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% @private
+get_path([H|T], Term, Default) when is_list(Term) ->
+    case lists:keyfind(H, 1, Term) of
+        false when Default == ?ERROR ->
+            error(badarg);
+        false ->
+            Default;
+        {H, Child} ->
+            get_path(T, Child, Default)
+    end;
+
+get_path([], Term, _) ->
+    Term;
+
+get_path(_, _, ?ERROR) ->
+    error(badarg);
+
+get_path(_, _, Default) ->
+    Default.

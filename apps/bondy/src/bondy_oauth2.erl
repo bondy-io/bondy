@@ -54,7 +54,7 @@
 -define(FOLD_OPTS, [{resolver, lww}]).
 -define(TOMBSTONE, '$deleted').
 
--define(ENV, element(2, application:get_env(bondy, oauth2))).
+-define(ENV, bondy_config:get(oauth2)).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
     element(2, lists:keyfind(client_credentials_grant_duration, 1, ?ENV))
 ).

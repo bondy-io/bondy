@@ -51,6 +51,7 @@ start(_Type, Args) ->
         {ok, Pid} ->
             ok = setup_env(Args),
             ok = setup_event_handlers(),
+            ok = bondy_config:init(),
             ok = bondy_router_worker:start_pool(),
             ok = bondy_cli:register(),
             ok = setup_partisan(),

@@ -188,11 +188,6 @@ agent() ->
 
 
 forward(M, #{session := _} = Ctxt0) ->
-    Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
-    %% _ = lager:debug(
-    %%     "Forwarding message; peer_id=~p, message=~p",
-    %%     [bondy_context:peer_id(Ctxt), M]
-    %% ),
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
