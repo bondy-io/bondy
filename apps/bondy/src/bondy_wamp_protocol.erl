@@ -18,8 +18,9 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%%
+%% @doc Tnis module encapsulates the WAMP protocol in a pseudo FSM.
+%% It is meant to be used by a transport process e.g. a gen_server owning a
+%% gen_tcp through the handle_inbound/2 and handle_outbound/2 functions.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
@@ -183,7 +184,7 @@ validate_subprotocol(_) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Handles wamp frames, decoding 1 or more messages, routing them and replying
+%% Handles wamp frames, decoding one or more messages, routing them and replying
 %% when required.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -231,10 +232,10 @@ handle_outbound(M, St0) ->
     end.
 
 
-%% =============================================================================
-%% STATE FUNCTIONS
-%% =============================================================================
 
+%% =============================================================================
+%% PRIVATE: STATE FUNCTIONS
+%% =============================================================================
 
 
 %% @private
@@ -377,11 +378,9 @@ shutting_down(in, Data, St) ->
 
 
 
-
 %% =============================================================================
-%% PRIVATE: HANDLING INBOUND MESSAGES
+%% PRIVATE: AUX STATE FUNCTIONS
 %% =============================================================================
-
 
 
 
@@ -541,7 +540,8 @@ failed(_, _, State, _) ->
 
 
 %% @private
--spec established(event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
+-spec established(
+    event_type(), [raw_wamp_message()], state(), Acc :: [raw_wamp_message()]) ->
     {ok, state_name(), state()}
     | {stop, state_name(),state()}
     | {stop, state_name(), [binary()], state()}
@@ -840,6 +840,44 @@ get_realm(St) ->
             bondy_realm:lookup(Uri)
     end.
 
+
+%% do_async(NextState, Data, St) ->
+%%     Me = self(),
+%%     Ctxt0 = St#wamp_state.context,
+%%     Fun = fun() ->
+%%         try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+%%             {Messages, <<>>} -> established(in, Messages, St, [])
+%%         catch
+%%             _:Reason ->
+%%                 abort(Reason, St)
+%%         end
+%%     end,
+
+%%     try bondy_router_worker:cast(Fun) of
+%%         ok ->
+%%             {ok, NextState, St};
+%%         {error, overload} ->
+%%             _ = lager:info(
+%%                 "Router pool overloaded, will route message synchronously; "
+%%                 "message=~p", [M]
+%%             ),
+%%             try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+%%                 {Messages, <<>>} -> established(in, Messages, St, [])
+%%             catch
+%%                 _:Reason ->
+%%                     abort(Reason, St)
+%%             end
+%%     catch
+%%         Class:Reason ->
+%%             Uri = bondy_context:realm_uri(Ctxt0),
+%%             SessionId = bondy_context:session_id(Ctxt0),
+%%             _ = lager:error(
+%%                 "Error while handling data; class=~p, reason=~p"
+%%                 " realm_uri=~p, session_id=~p, stacktrace=~p",
+%%                 [Class, Reason, Uri, SessionId, erlang:get_stacktrace()]
+%%             ),
+%%             {ok, NextState, St}
+%%     end.
 
 
 %% =============================================================================
