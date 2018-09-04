@@ -23,9 +23,15 @@
 %% providing pattern matching capabilities including support for WAMP's
 %% version 2.0 match policies (exact, prefix and wilcard).
 %%
-%% This is a temporary solution till we finish our
-%% adaptive radix trie implementation. Does no support prefix matching nor
-%% wilcard matching.
+%% The registry is stored both in memory (tuplespace) and disk (plum_db).
+%% Also a trie-based indexed is used for exact and prefix matching currently
+%% while support for wilcard matching is soon to be supported.
+%%
+%% This module also provides a singleton server to perform the initialisation
+%% of the tuplespace from the plum_db copy.
+%% The tuplespace library protects the ets tables that constitute the in-memory
+%% store while the art library also protectes the ets tables behind the trie,
+%% so they can survive in case the singleton dies.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry).
@@ -50,6 +56,9 @@
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
+-record(state, {
+    start_time = calendar:local_time()  :: calendar:datetime()
+}).
 
 
 -type eot()                 ::  ?EOT.
@@ -88,6 +97,8 @@
 -export([remove_all/3]).
 -export([remove_all/4]).
 -export([start_link/0]).
+-export([init/0]).
+
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -113,10 +124,19 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc A function used by Bondy to register local subscribers and callees
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_local_subscription(uri(), uri(), map(), bondy_context:t()) ->
+init() ->
+    gen_server:call(?MODULE, init_from_db, 10*60*1000).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A function used internally by Bondy to register local subscribers
+%% and callees.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_local_subscription(uri(), uri(), map(), pid()) ->
     {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
     | {error, {already_exists, bondy_registry_entry:details_map()}}.
 
@@ -145,6 +165,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
             Map = bondy_registry_entry:to_details_map(Entry),
             {error, {already_exists, Map}}
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -521,8 +542,6 @@ match(Type, Uri, RealmUri, Opts) ->
     end.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -536,16 +555,6 @@ match(?EOT) ->
 match({_, ?EOT}) ->
     {[], ?EOT}.
 
-%% match({Type, Cont}) ->
-%%     case ets:select(Cont) of
-%%         ?EOT ->
-%%             {[], ?EOT};
-%%         Result ->
-%%             lookup_entries(Type, Result)
-%%     end.
-
-
-
 
 
 %% =============================================================================
@@ -555,10 +564,7 @@ match({_, ?EOT}) ->
 
 
 init([]) ->
-
     %% TODO DO NOT DO THIS, LOAD only data from particular node when we get an update from peerservice. Make sure we load before the first Exchange or actually force and exchange and then load.
-    %% We tell ourselves to load the registry from the db
-    self() ! init_from_db,
     process_flag(trap_exit, true),
 
     %% We initialise the tries
@@ -570,8 +576,13 @@ init([]) ->
     MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
     ok = plum_db_events:subscribe(object_update, MS),
 
-    {ok, undefined}.
+    {ok, #state{}}.
 
+
+handle_call(init_from_db, _From, State0) ->
+    _ = lager:info("Initialising registry from store."),
+    State = init_from_db(State0),
+    {reply, ok, State};
 
 handle_call(Event, From, State) ->
     _ = lager:error(
@@ -584,10 +595,6 @@ handle_cast(Event, State) ->
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
-handle_info(init_from_db, State0) ->
-    _ = lager:debug("Loading registry from db"),
-    State = init_from_db(State0),
-    {noreply, State};
 
 handle_info(
     {plum_db_event, object_update, {{{registry, _}, Key}, Object}}, State) ->
@@ -641,12 +648,11 @@ init_from_db(State) ->
     init_from_db(Iterator, State).
 
 %% @private
-init_from_db(Iterator, State) ->
-    Now = calendar:local_time(),
+init_from_db(Iterator, #state{start_time = Now} = State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
             ok = plum_db:iterator_close(Iterator),
-            State;
+            {ok, State};
         false ->
             ok = case plum_db:iterator_key_value(Iterator) of
                 {_, '$deleted'} ->

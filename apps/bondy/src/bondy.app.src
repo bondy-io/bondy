@@ -22,6 +22,10 @@
     {vsn, "0.7.1"},
     {registered, []},
     {mod, {bondy_app, [{vsn, "0.7.1"}]}},
+    {start_phases, [
+        {init_registry, []},
+        {init_listeners, []}
+    ]},
     {applications,[
         %% OTP
         kernel,

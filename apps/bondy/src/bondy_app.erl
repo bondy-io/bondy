@@ -29,6 +29,7 @@
 
 -export([start/2]).
 -export([stop/1]).
+-export([start_phase/3]).
 -export([prep_stop/1]).
 -export([vsn/0]).
 
@@ -49,12 +50,24 @@ start(_Type, Args) ->
             ok = bondy_cli:register(),
             ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
-            ok = maybe_start_router_services(),
             ok = setup_internal_subscriptions(),
+            %% After we return OTP will call start_phase/3 based on
+            %% bondy.app.src config
             {ok, Pid};
         Other  ->
             Other
     end.
+
+
+start_phase(init_registry, normal, []) ->
+    %% During registry initialisation no client should be connected.
+    %% This is a clean way of avoiding new registrations interfiering with
+    %% the previous registry restor and cleanup.
+    bondy_registry:init();
+
+start_phase(init_listeners, normal, []) ->
+    %% Now that the registry has been initialised we can setup the listeners
+    start_listeners().
 
 
 prep_stop(_State) ->
@@ -102,15 +115,11 @@ maybe_init_bondy_realm() ->
 
 
 %% @private
-maybe_start_router_services() ->
-    case bondy_config:is_router() of
-        true ->
-            ok = bondy_wamp_raw_handler:start_listeners(),
-            _ = bondy_api_gateway:start_admin_listeners(),
-            _ = bondy_api_gateway:start_listeners();
-        false ->
-            ok
-    end.
+start_listeners() ->
+    ok = bondy_wamp_raw_handler:start_listeners(),
+    _ = bondy_api_gateway:start_admin_listeners(),
+    _ = bondy_api_gateway:start_listeners(),
+    ok.
 
 
 stop_router_services() ->
@@ -126,7 +135,7 @@ stop_router_services() ->
     %% We sleep for a minute to allow all sessions to terminate gracefully
     Time = 10000,
     _ = lager:info(
-        "Awaiting for ~p secs for clients graceful shutdown.",
+        "Awaiting ~p secs for clients graceful shutdown.",
         [trunc(Time/1000)]
     ),
     ok = timer:sleep(Time),
