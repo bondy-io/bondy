@@ -104,5 +104,16 @@ node_down_check() {
 
 
 
-node_up_check
-$NODETOOL rpc bondy_cli command "$@"
+# node_up_check
+# $NODETOOL rpc bondy_cli command "$@"
+
+case "$1" in
+    repair)
+        node_down_check
+        "$RUNNER_BASE_DIR/bin/bondy" escript bin/bondy-repair.escript "$2"
+        ;;
+    *)
+        node_up_check
+        $NODETOOL rpc bondy_cli command "$@"
+        ;;
+esac
