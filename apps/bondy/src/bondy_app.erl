@@ -42,6 +42,11 @@
 
 
 start(_Type, Args) ->
+    %% We disable it until the build_hashtrees start phase
+    Enabled = application:get_env(plum_db, aae_enabled, true),
+    ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
+    ok = application:set_env(plum_db, aae_enabled, false),
+
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup_env(Args),
@@ -58,12 +63,16 @@ start(_Type, Args) ->
             Other
     end.
 
-
 start_phase(init_registry, normal, []) ->
     %% During registry initialisation no client should be connected.
     %% This is a clean way of avoiding new registrations interfiering with
     %% the previous registry restor and cleanup.
     bondy_registry:init();
+
+start_phase(enable_aae, normal, []) ->
+    {ok, Enabled} = application:get_env(plum_db, priv_aae_enabled),
+    ok = application:set_env(plum_db, aae_enabled, Enabled),
+    ok;
 
 start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can setup the listeners

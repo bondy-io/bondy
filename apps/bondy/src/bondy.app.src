@@ -24,6 +24,7 @@
     {mod, {bondy_app, [{vsn, "0.7.1"}]}},
     {start_phases, [
         {init_registry, []},
+        {enable_aae, []},
         {init_listeners, []}
     ]},
     {applications,[
