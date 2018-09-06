@@ -29,23 +29,24 @@
 -define(DEFAULT_RESOURCE_CAPACITY, 10000). % max messages in process queue
 -define(DEFAULT_POOL_TYPE, transient).
 
--export([priv_dir/0]).
+-export([api_gateway/0]).
 -export([automatically_create_realms/0]).
+-export([wamp_call_timeout/0]).
 -export([connection_lifetime/0]).
 -export([coordinator_timeout/0]).
--export([api_gateway/0]).
 -export([is_router/0]).
 -export([load_regulation_enabled/0]).
--export([router_pool/0]).
+-export([priv_dir/0]).
 -export([request_timeout/0]).
+-export([router_pool/0]).
 -export([tcp_acceptors_pool_size/0]).
 -export([tcp_max_connections/0]).
 -export([tcp_port/0]).
 -export([tls_acceptors_pool_size/0]).
+-export([tls_files/0]).
 -export([tls_max_connections/0]).
 -export([tls_port/0]).
 -export([ws_compress_enabled/0]).
--export([tls_files/0]).
 
 
 
@@ -191,9 +192,19 @@ router_pool() ->
     Pool.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+wamp_call_timeout() ->
+    {ok, Val} =  application:get_env(?APP, wamp_call_timeout),
+    Val.
 
-%% CALL
 
+%% -----------------------------------------------------------------------------
+%% @doc For http
+%% @end
+%% -----------------------------------------------------------------------------
 request_timeout() ->
-    application:get_env(
-        ?APP, request_timeout, 5*60*1000). % 5 mins
+    {ok, Val} = application:get_env(?APP, request_timeout),
+    Val.

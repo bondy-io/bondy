@@ -252,7 +252,7 @@ timeout(#{timeout := T}) when is_integer(T), T > 0 ->
 timeout(#{timeout := 0}) ->
     infinity;
 timeout(_) ->
-    bondy_config:request_timeout().
+    bondy_config:wamp_call_timeout().
 
 
 %% -----------------------------------------------------------------------------

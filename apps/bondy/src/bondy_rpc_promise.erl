@@ -58,12 +58,15 @@
 -export([peek_call/2]).
 -export([peek_invocation/2]).
 -export([procedure_uri/1]).
+-export([queue_size/0]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new promise for a remote invocation
@@ -241,6 +244,10 @@ flush(Caller) ->
     ok.
 
 
+queue_size() ->
+    tuplespace_queue:size(?INVOCATION_QUEUE).
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -279,10 +286,11 @@ dequeue_promise(Key) ->
     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, Opts) of
         empty ->
             %% The promise might have expired so we GC it.
-            case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
-                0 -> empty;
-                _ -> empty
-            end;
+            %% case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
+            %%     0 -> empty;
+            %%     _ -> empty
+            %% end;
+            empty;
         [#bondy_rpc_promise{} = Promise] ->
             {ok, Promise}
     end.

@@ -45,6 +45,12 @@
 ]}.
 
 
+{mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
+  {default, "10s"}, % Long enough but not infinity
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
 
 %% =============================================================================
 %% LOAD REGULATION
