@@ -72,6 +72,7 @@
 -export([realm_uri/1]).
 -export([session_id/1]).
 -export([to_details_map/1]).
+-export([to_map/1]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -354,6 +355,27 @@ to_details_map(#entry{key = Key} = E) ->
         match => E#entry.match_policy,
         invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
     }.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Converts the entry into a map according to the WAMP protocol Details
+%% dictionary format.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_map(t()) -> details_map().
+
+to_map(#entry{key = Key} = E) ->
+    #{
+        id =>  Key#entry_key.entry_id,
+        session_id => Key#entry_key.session_id,
+        node => Key#entry_key.node,
+        created => E#entry.created,
+        uri => E#entry.uri,
+        pid => list_to_binary(pid_to_list(E#entry.pid)),
+        match => E#entry.match_policy,
+        options => E#entry.options
+    }.
+
 
 
 
