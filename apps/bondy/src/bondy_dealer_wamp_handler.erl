@@ -21,6 +21,9 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(BONDY_REG_LIST, <<"com.leapsight.bondy.registration.list">>).
+-define(BONDY_CALLEE_LIST, <<"com.leapsight.bondy.callee.list">>).
+-define(BONDY_CALLEE_GET, <<"com.leapsight.bondy.callee.get">>).
 -define(REG_LIST, <<"wamp.registration.list">>).
 -define(REG_LOOKUP, <<"wamp.registration.lookup">>).
 -define(REG_MATCH, <<"wamp.registration.match">>).
@@ -78,11 +81,12 @@ handle_call(
 handle_call(#call{procedure_uri = ?REG_LIST} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
         {ok, [RealmUri]} ->
-            list(RealmUri);
+            summary(RealmUri);
         {error, WampError} ->
             WampError
     end,
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+
 
 handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
@@ -121,7 +125,7 @@ handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?LIST_CALLEES} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
         {ok, [RealmUri, RegId]} ->
-            list_callees(RealmUri, RegId);
+            list_registration_callees(RealmUri, RegId);
         {error, WampError} ->
             WampError
     end,
@@ -137,6 +141,27 @@ handle_call(#call{procedure_uri = ?COUNT_CALLEES} = M, Ctxt) ->
     end,
     bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
+handle_call(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
+        {ok, [RealmUri]} ->
+            list(RealmUri);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+
+
+handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
+        {ok, [RealmUri]} ->
+            list_callees(RealmUri);
+        {ok, [RealmUri, ProcedureUri]} ->
+            list_callees(RealmUri, ProcedureUri);
+
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{} = M, Ctxt) ->
     Error = bondy_wamp_utils:no_such_procedure_error(M),
@@ -150,8 +175,34 @@ handle_call(#call{} = M, Ctxt) ->
 
 
 
-%% @private
 list(RealmUri) ->
+    list(RealmUri, fun bondy_registry_entry:to_map/1).
+
+list(RealmUri, Fun) ->
+    Default = #{
+        ?EXACT_MATCH => [],
+        ?PREFIX_MATCH => [],
+        ?WILDCARD_MATCH => []
+    },
+    try
+        case bondy_registry:entries(registration, RealmUri, '_', '_') of
+            [] ->
+                {ok, Default};
+            Entries ->
+                {ok, [Fun(E) || E <- Entries]}
+        end
+    catch
+        _:Reason ->
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
+            {error, Reason}
+    end.
+
+
+
+summary(RealmUri) ->
     Default = #{
         ?EXACT_MATCH => [],
         ?PREFIX_MATCH => [],
@@ -175,7 +226,10 @@ list(RealmUri) ->
         end
     catch
         _:Reason ->
-            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
             {error, Reason}
     end.
 
@@ -191,7 +245,10 @@ get(RealmUri, RegId, Details) ->
         end
     catch
         _:Reason ->
-            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
             {error, Reason}
     end.
 
@@ -207,7 +264,10 @@ lookup(RealmUri, Uri, Opts) ->
         end
     catch
         _:Reason ->
-            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
             {error, Reason}
     end.
 
@@ -223,13 +283,52 @@ match(RealmUri, Uri, Opts) ->
         end
     catch
         _:Reason ->
-            _ = lager:error("Error; reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
             {error, Reason}
     end.
 
 
 %% @private
-list_callees(_RealmUri, _RegId) ->
+list_callees(RealmUri) ->
+    try
+        case bondy_dealer:callees(RealmUri) of
+            [] ->
+                {ok, []};
+            Callees ->
+                {ok, Callees}
+        end
+    catch
+        _:Reason ->
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
+            {error, Reason}
+    end.
+
+list_callees(RealmUri, ProcedureUri) ->
+    try
+        case bondy_dealer:callees(RealmUri, ProcedureUri) of
+            [] ->
+                {ok, []};
+            Callees ->
+                {ok, Callees}
+        end
+    catch
+        _:Reason ->
+            _ = lager:error(
+                "Error; reason=~p, trace=~p",
+                [Reason, erlang:get_stacktrace()]
+            ),
+            {error, Reason}
+    end.
+
+
+%% @private
+list_registration_callees(_RealmUri, _RegId) ->
     %% try
     %%     case bondy_registry:entries(registration, RealmUri, '_', '_') of
     %%         {[], '$end_of_table'} ->

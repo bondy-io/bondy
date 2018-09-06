@@ -179,6 +179,9 @@
 -export([registrations/3]).
 -export([registrations/4]).
 -export([match_registrations/2]).
+-export([callees/1]).
+-export([callees/2]).
+-export([callees/3]).
 
 
 
@@ -187,6 +190,67 @@
 %% API
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri()) -> [map()] | no_return().
+
+callees(RealmUri) ->
+    case bondy_registry:entries(registration, RealmUri, '_', '_') of
+        [] ->
+            [];
+        Entries ->
+            All = [
+                {
+                    bondy_registry_entry:node(E),
+                    bondy_registry_entry:session_id(E)
+                } || E <- Entries
+            ],
+            [
+                #{node => N, session_id => S}
+                || {N, S} <- sets:to_list(sets:from_list(All))
+            ]
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri(), ProcedureUri :: uri()) ->
+    [map()] | no_return().
+
+callees(RealmUri, ProcedureUri) ->
+    callees(RealmUri, ProcedureUri, #{}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri(), ProcedureUri :: uri(), Opts :: map()) ->
+    [map()] | no_return().
+
+callees(RealmUri, ProcedureUri, Opts) ->
+    case bondy_registry:match(registration, ProcedureUri, RealmUri, Opts) of
+        {[], '$end_of_table'} ->
+            [];
+        {Entries, '$end_of_table'} ->
+            All = [
+                {
+                    bondy_registry_entry:node(E),
+                    bondy_registry_entry:session_id(E)
+                } || E <- Entries
+            ],
+            [
+                #{node => N, session_id => S}
+                || {N, S} <- sets:to_list(sets:from_list(All))
+            ]
+    end.
 
 
 %% -----------------------------------------------------------------------------
