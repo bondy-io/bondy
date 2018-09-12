@@ -23,11 +23,11 @@
 -define(INVOCATION_QUEUE, bondy_rpc_promise).
 
 -record(bondy_rpc_promise, {
-    invocation_id                           ::  id(),
-    procedure_uri                           ::  uri() | undefined,
-    call_id                                 ::  id() | undefined,
-    caller                                  ::  peer_id(),
-    callee                                  ::  peer_id(),
+    invocation_id       ::  id(),
+    procedure_uri       ::  uri() | undefined,
+    call_id             ::  id() | undefined,
+    caller              ::  bondy_wamp_peer:t(),
+    callee              ::  bondy_wamp_peer:t()
     timestamp                               :: integer()
 }).
 
@@ -35,8 +35,8 @@
 -opaque t() :: #bondy_rpc_promise{}.
 -type match_opts()      ::  #{
     id => id(),
-    caller => peer_id(),
-    callee => peer_id()
+    caller => bondy_wamp_peer:t(),
+    callee => bondy_wamp_peer:t()
 }.
 -type dequeue_fun()     ::  fun((empty | {ok, t()}) -> any()).
 
@@ -47,6 +47,7 @@
 -export([call_id/1]).
 -export([callee/1]).
 -export([caller/1]).
+-export([realm_uri/1]).
 -export([dequeue_call/2]).
 -export([dequeue_call/3]).
 -export([dequeue_invocation/2]).
@@ -76,10 +77,13 @@
 %% -----------------------------------------------------------------------------
 -spec new(
     InvocationId :: id(),
-    Callee :: remote_peer_id(),
-    Ctxt :: bondy_context:t()) -> t().
+    Callee :: bondy_wamp_peer:remote(),
+    Caller :: bondy_context:t()) -> t().
 
 new(InvocationId, Callee, Caller) ->
+    %% Realm Uris should match
+    bondy_wamp_peer:realm_uri(Caller) =:= bondy_wamp_peer:realm_uri(Callee) orelse error(badarg),
+
     #bondy_rpc_promise{
         invocation_id = InvocationId,
         caller = Caller,
@@ -96,18 +100,27 @@ new(InvocationId, Callee, Caller) ->
     InvocationId :: id(),
     CallId :: id(),
     ProcUri :: uri(),
-    Callee :: peer_id(),
-    Ctxt :: bondy_context:t()) -> t().
+    Callee :: bondy_wamp_peer:t(),
+    Caller :: bondy_wamp_peer:t()) -> t().
 
-new(InvocationId, CallId, ProcUri, Callee, Ctxt) ->
+new(InvocationId, CallId, ProcUri, Callee, Caller) ->
     #bondy_rpc_promise{
         invocation_id = InvocationId,
         procedure_uri = ProcUri,
         call_id = CallId,
-        caller = bondy_context:peer_id(Ctxt),
-        callee = Callee,
+        caller = Caller,
+        callee = Callee
         timestamp = bondy_context:request_timestamp(Ctxt)
     }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+realm_uri(#bondy_rpc_promise{caller = Caller}) ->
+    bondy_wamp_peer:realm_uri(Caller).
 
 
 %% -----------------------------------------------------------------------------
@@ -128,7 +141,7 @@ call_id(#bondy_rpc_promise{call_id = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec callee(t()) -> peer_id().
+-spec callee(t()) -> bondy_wamp_peer:t().
 callee(#bondy_rpc_promise{callee = Val}) -> Val.
 
 
@@ -136,15 +149,8 @@ callee(#bondy_rpc_promise{callee = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec caller(t()) -> peer_id().
+-spec caller(t()) -> bondy_wamp_peer:t().
 caller(#bondy_rpc_promise{caller = Val}) -> Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -159,16 +165,20 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
+    %% We validate the realm
+    RealmUri == realm_uri(P) orelse error(badarg),
+
+    Key = key(P),
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
-    %% We match realm_uri for extra validation
-    Key = key(RealmUri, P),
+    CallerSessionId = bondy_wamp_peer:session_id(P#bondy_rpc_promise.caller),
+
     OnEvict = fun(_) ->
         _ = lager:debug(
             "RPC Promise evicted from queue;"
             " realm_uri=~p, caller_session_id=~p, invocation_id=~p, call_id=~p"
-            " ttl=~p",
-            [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
+            " timeout=~p",
+            [RealmUri, CallerSessionId, InvocationId, CallId, Timeout]
         )
     end,
     Secs = erlang:round(Timeout / 1000),
@@ -180,78 +190,93 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
 %% @doc Dequeues the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue_call(CallId :: id(), Caller :: peer_id()) ->
+-spec dequeue_call(CallId :: id(), Caller :: bondy_wamp_peer:t()) ->
     empty | {ok, t()}.
 
-dequeue_call(Id, Caller) ->
-    dequeue_promise(call_key_pattern(Id, Caller)).
+dequeue_call(CallId, Caller) ->
+    RealmUri = bondy_wamp_peer:realm_uri(Caller),
+    Pattern = key_pattern(RealmUri, '_', call_key(CallId, Caller)),
+    dequeue_promise(Pattern).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Dequeues the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec dequeue_call(CallId :: id(), Caller :: peer_id(), Fun :: dequeue_fun()) ->
-    any().
-
-dequeue_call(Id, Caller, Fun) ->
-    dequeue_promise(call_key_pattern(Id, Caller), Fun).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec dequeue_invocation(CallId :: id(), Callee :: peer_id()) ->
+-spec dequeue_call(
+    CallId :: id(), Caller :: bondy_wamp_peer:t(), Fun :: dequeue_fun()) ->
     empty | {ok, t()}.
 
-dequeue_invocation(Id, Callee) ->
-    dequeue_promise(invocation_key_pattern(Id, Callee)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec dequeue_invocation(CallId :: id(), Callee :: peer_id(), dequeue_fun()) ->
-    any().
-
-dequeue_invocation(Id, Callee, Fun) ->
-    dequeue_promise(invocation_key_pattern(Id, Callee), Fun).
+dequeue_call(CallId, Caller, Fun) ->
+    RealmUri = bondy_wamp_peer:realm_uri(Caller),
+    Pattern = key_pattern(RealmUri, '_', call_key(CallId, Caller)),
+    dequeue_promise(Pattern, Fun).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Reads the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec peek_call(CallId :: id(), Caller :: peer_id()) ->
+-spec peek_call(CallId :: id(), Caller :: bondy_wamp_peer:t()) ->
     empty | {ok, t()}.
 
 peek_call(CallId, Caller) ->
-    peek_promise(call_key_pattern(CallId, Caller)).
+    RealmUri = bondy_wamp_peer:realm_uri(Caller),
+    Pattern = key_pattern(RealmUri, '_', call_key(CallId, Caller)),
+    peek_promise(Pattern).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dequeue_invocation(InvocationId :: id(), Callee :: bondy_wamp_peer:t()) ->
+    empty | {ok, t()}.
+
+dequeue_invocation(InvocationId, Callee) ->
+    RealmUri = bondy_wamp_peer:realm_uri(Callee),
+    Pattern = key_pattern(RealmUri, invocation_key(InvocationId, Callee), '_'),
+    dequeue_promise(Pattern).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec dequeue_invocation(
+    InvocationId :: id(), Callee :: bondy_wamp_peer:t(), dequeue_fun()) ->
+    empty | {ok, t()}.
+
+dequeue_invocation(InvocationId, Callee, Fun) ->
+    RealmUri = bondy_wamp_peer:realm_uri(Callee),
+    Pattern = key_pattern(RealmUri, invocation_key(InvocationId, Callee), '_'),
+    dequeue_promise(Pattern, Fun).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Reads the promise that matches the Id for the IdType in Ctxt.
 %% @end
 %% -----------------------------------------------------------------------------
--spec peek_invocation(InvocationId :: id(), Callee :: peer_id()) ->
+-spec peek_invocation(InvocationId :: id(), Callee :: bondy_wamp_peer:t()) ->
     empty | {ok, t()}.
 
 peek_invocation(InvocationId, Callee) ->
-    peek_promise(invocation_key_pattern(InvocationId, Callee)).
+    RealmUri = bondy_wamp_peer:realm_uri(Callee),
+    Pattern = key_pattern(RealmUri, invocation_key(InvocationId, Callee), '_'),
+    peek_promise(Pattern).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Removes all pending promises from the queue for the Caller's SessionId
 %% @end
 %% -----------------------------------------------------------------------------
--spec flush(local_peer_id()) -> ok.
+-spec flush(bondy_wamp_peer:local()) -> ok.
 
 flush(Caller) ->
     %% This will match all promises for SessionId
-    Key = {element(1, Caller), {'_', setelement(4, Caller, '_')}, '_'},
-    _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Key}),
+    RealmUri = bondy_wamp_peer:realm_uri(Caller),
+    Pattern = {RealmUri, '_', call_key('_', Caller)},
+    _N = tuplespace_queue:remove(?INVOCATION_QUEUE, #{key => Pattern}),
     ok.
 
 
@@ -259,34 +284,49 @@ queue_size() ->
     tuplespace_queue:size(?INVOCATION_QUEUE).
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 
-key(RealmUri, #bondy_rpc_promise{} = P) ->
-    CallId = P#bondy_rpc_promise.call_id,
-    InvocationId = P#bondy_rpc_promise.invocation_id,
-    %% {_, Node, CallerSessionId, _} = P#bondy_rpc_promise.caller,
-    %% {_, Node, CalleeSessionId, _} = P#bondy_rpc_promise.callee,
-
-    {
-        RealmUri,
-        {InvocationId, P#bondy_rpc_promise.callee},
-        {CallId, P#bondy_rpc_promise.caller}
-    }.
 
 
 %% @private
-call_key_pattern(CallId, {RealmUri, _, _, _} = Caller) ->
-    %% We exclude the pid from the match
-    {RealmUri, '_', {CallId, setelement(4, Caller, '_')}}.
+key(#bondy_rpc_promise{} = P) ->
+    {realm_uri(P), invocation_key(P), call_key(P)}.
 
 
 %% @private
-invocation_key_pattern(InvocationId, {RealmUri, _, _, _} = Callee) ->
-    %% We exclude the pid from the match
-    {RealmUri, {InvocationId, setelement(4, Callee, '_')}, '_'}.
+key_pattern(RealmUri, '_', CallKey) ->
+    {RealmUri, '_', CallKey};
+
+key_pattern(RealmUri, InvocationKey, '_') ->
+    {RealmUri, InvocationKey, '_'}.
+
+
+%% private
+call_key(#bondy_rpc_promise{} = P) ->
+    call_key(P#bondy_rpc_promise.call_id, P#bondy_rpc_promise.caller).
+
+
+%% @private
+call_key(CallId, Caller) ->
+    CallerNode = bondy_wamp_peer:node(Caller),
+    CallerSessionId = bondy_wamp_peer:session_id(Caller),
+    {CallerNode, CallerSessionId, CallId}.
+
+%% private
+invocation_key(#bondy_rpc_promise{} = P) ->
+    invocation_key(
+        P#bondy_rpc_promise.invocation_id, P#bondy_rpc_promise.callee).
+
+
+%% @private
+invocation_key(InvocationId, Callee) ->
+    CalleeNode = bondy_wamp_peer:node(Callee),
+    CalleeSessionId = bondy_wamp_peer:session_id(Callee),
+    {CalleeNode, CalleeSessionId, InvocationId}.
 
 
 %% @private

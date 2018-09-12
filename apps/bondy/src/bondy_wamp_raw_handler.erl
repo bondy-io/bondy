@@ -47,7 +47,7 @@
     ping_attempts = 0       ::  non_neg_integer(),
     ping_max_attempts = 2   ::  non_neg_integer(),
     hibernate = false       ::  boolean(),
-    start_time              ::  integer(),
+    start_time_secs              ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     buffer = <<>>           ::  binary()
 }).
@@ -176,17 +176,21 @@ init({Ref, Socket, Transport, _Opts0}) ->
     %% This will ensure the connection process is the owner of the socket.
     %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
+    %% @TODO Replace accept_ack by the following when upgrade to ranch >1.6.0
+    %% {ok, Socket} = ranch:handshake(Ref),
+
+    %% We set the necessary socket opts
     Transport:setopts(Socket, [{active, once}, {packet, 0}]),
 
     {ok, Peername} = inet:peername(Socket),
 
     St = #state{
-        start_time = erlang:monotonic_time(second),
+        start_time_secs = erlang:monotonic_time(second),
         socket = Socket,
         peername = inet_utils:peername_to_binary(Peername),
         transport = Transport
     },
-    ok = socket_opened(St),
+    ok = notify_socket_opened(St),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
@@ -194,6 +198,8 @@ init({Ref, Socket, Transport, _Opts0}) ->
 handle_info(
     {tcp, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
     #state{socket = Socket, protocol_state = undefined} = St0) ->
+    %% We received the frame for a WAMP raw socket handshake that is used to
+    %% initate a session
     case handle_handshake(MaxLen, Encoding, St0) of
         {ok, St1} ->
             (St1#state.transport):setopts(Socket, [{active, once}]),
@@ -205,6 +211,7 @@ handle_info(
 handle_info(
     {tcp, Socket, Data},
     #state{socket = Socket, protocol_state = undefined} = St) ->
+    %% We do not have a session established yet
     %% RFC: After a _Client_ has connected to a _Router_, the _Router_ will
     %% first receive the 4 octets handshake request from the _Client_.
     %% If the _first octet_ differs from "0x7F", it is not a WAMP-over-
@@ -226,6 +233,7 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
             (St2#state.transport):setopts(Socket, [{active, once}]),
             {noreply, St2, ?TIMEOUT};
         {stop, Reason, St2} ->
+            ok = close_socket(Reason, St2),
             {stop, Reason, St2}
     end;
 
@@ -237,14 +245,16 @@ handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
 
 handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
-    %% have sent to us using bondy:send/2,3 which requires us to ack
+    %% have sent to us using bondy_wamp_peer:send/2,3 which requires us to ack
     %% its reception
-    ok = bondy:ack(Pid, Ref),
+    ok = bondy_wamp_peer:ack(Pid, Ref),
     %% We send the message to the peer
     handle_outbound(M, St);
 
 handle_info({tcp_closed, _Socket}, State) ->
-    ok = socket_closed(false, State),
+    _ = log(
+        info, "Connection closed by peer, socket='~p'", [Socket], State),
+    ok = notify_socket_closed(false, State),
     {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
@@ -254,7 +264,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
         [Reason, Socket],
         State
     ),
-    ok = socket_closed(true, State),
+    ok = notify_socket_closed(true, State),
     {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
@@ -270,6 +280,7 @@ handle_info(
         error, "Connection closing; reason=ping_timeout, attempts=~p,", [N],
         State
     ),
+    ok = close_socket(ping_timeout, State),
     {stop, ping_timeout, State#state{ping_sent = false}};
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
@@ -281,10 +292,10 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     {noreply, State1};
 
 handle_info({stop, Reason}, State) ->
-    Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
+    Peername = peername(State#state.socket),
     SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
-    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
-    {stop, Reason, State};
+    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peername, SessionId]),
+    {stop, normal, State};
 
 handle_info(Info, State) ->
     _ = lager:error("Received unknown info; message='~p'", [Info]),
@@ -364,6 +375,7 @@ when Len > MaxLen ->
         [Len],
         St
     ),
+    ok = close_socket(maximum_message_length_exceeded, St),
     {stop, maximum_message_length_exceeded, St};
 
 handle_data(<<0:5, 0:3, Len:24, Data/binary>>, St)
@@ -415,6 +427,7 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
                 "reason=invalid_ping_response, received=~p, expected=~p,",
                 [Bin, Payload], St
             ),
+            ok = close_socket(invalid_ping_response, St),
             {stop, invalid_ping_response, St};
         false ->
             _ = log(error, "Unrequested pong message from peer;", [], St),
@@ -507,43 +520,32 @@ handle_handshake(Len, Enc, St) ->
 %% @private
 init_wamp(Len, Enc, St0) ->
     MaxLen = validate_max_len(Len),
+    Socket = St0#state.socket,
+    Transport = St0#state.transport,
     {FrameType, EncName} = validate_encoding(Enc),
 
-    case inet:peername(St0#state.socket) of
-        {ok, {_, _} = Peer} ->
-            Proto = {raw, FrameType, EncName},
-            case bondy_wamp_protocol:init(Proto, Peer, #{}) of
-                {ok, CBState} ->
-                    St1 = St0#state{
-                        frame_type = FrameType,
-                        encoding = EncName,
-                        max_len = MaxLen,
-                        protocol_state = CBState
-                    },
-                    ok = send_frame(
-                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
-                    _ = log(info, "Established connection with peer;", [], St1),
-                    {ok, St1};
-                {error, Reason} ->
-                    {stop, Reason, St0}
-            end;
-        {ok, NonIPAddr} ->
-            _ = lager:error(
-                "Unexpected peername when establishing connection,"
+    Proto = {raw, FrameType, EncName},
+    case bondy_wamp_protocol:init(Proto, self(), Transport, Socket, #{}) of
+        {ok, CBState} ->
+            St1 = St0#state{
+                frame_type = FrameType,
+                encoding = EncName,
+                max_len = MaxLen,
+                protocol_state = CBState
+            },
+            ok = send_frame(
+                <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
+            PeernameBin = peername(Socket),
+            _ = lager:info(
+                "Established connection with peer, protocol=wamp,"
                 " received a non IP address of '~p'; reason=invalid_socket,"
-                " protocol=wamp, transport=raw, frame_type=~p, encoding=~p,"
-                " message_max_length=~p",
-                [NonIPAddr, FrameType, EncName, MaxLen]
+                " transport=raw, frame_type=~p, encoding=~p,"
+                " message_max_length=~p, peer=~s",
+                [FrameType, EncName, MaxLen, PeernameBin]
             ),
-            {stop, invalid_socket, St0};
+            {ok, St1};
         {error, Reason} ->
-            _ = lager:error(
-                "Invalid peername when establishing connection,"
-                " reason=~p, description=~p, protocol=wamp, transport=raw,"
-                " frame_type=~p, encoding=~p, message_max_length=~p",
-                [Reason, inet:format_error(Reason), FrameType, EncName, MaxLen]
-            ),
-            {stop, invalid_socket, St0}
+            {stop, Reason, St0}
     end.
 
 
@@ -653,7 +655,7 @@ error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 %% @private
 close_socket(normal, St) ->
     ok = (St#state.transport):close(St#state.socket),
-    _ = log(info, <<"Connection closed by peer; reason=~p,">>, [normal], St),
+    _ = log(info, <<"TCP Connection closed, reason=~p">>, [Reason], St),
     socket_closed(false, St);
 
 close_socket(shutdown, St)  ->
@@ -665,7 +667,7 @@ close_socket(shutdown, St)  ->
 close_socket(Reason, St) ->
     ok = (St#state.transport):close(St#state.socket),
     _ = log(
-        error, <<"Connection closed due to error; reason=~p,">>, [Reason], St),
+    _ = log(error, <<"TCP Connection closed, reason=~p">>, [Reason], St),
     socket_closed(true, St).
 
 
@@ -685,7 +687,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
 
     Tail = [
         SessionId,
-        St#state.peername,
+        peername(St#state.socket),
         Agent,
         St#state.frame_type,
         St#state.encoding,
@@ -697,19 +699,19 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
 
 %% @private
 socket_opened(St) ->
-    Event = {socket_open, wamp, raw, St#state.peername},
+    Event = {socket_open, wamp, raw, peername(St#state.socket)},
     bondy_event_manager:notify(Event).
 
 
 %% @private
 socket_closed(true, St) ->
-    Event = {socket_error, wamp, raw, St#state.peername},
+    Event = {socket_error, wamp, raw, peername(St#state.socket)},
     ok = bondy_event_manager:notify(Event),
     socket_closed(false, St);
 
 socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    Event = {socket_closed, wamp, raw, St#state.peername, Seconds},
+    Event = {socket_closed, wamp, raw, peername(St#state.socket), Seconds},
     bondy_event_manager:notify(Event).
 
 
@@ -744,4 +746,17 @@ normalise(Opts) ->
             lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
         false ->
             Opts
+    end.
+
+
+%% @private
+peername(undefined) ->
+    undefined;
+
+peername(Socket) ->
+    case inet:peername(Socket) of
+        {ok, Val} ->
+            inet_utils:peername_to_binary(Val);
+        _ ->
+            undefined
     end.

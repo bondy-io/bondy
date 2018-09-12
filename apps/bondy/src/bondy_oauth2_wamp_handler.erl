@@ -23,7 +23,7 @@ handle_call(#call{procedure_uri = ?LOOKUP_TOKEN} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?REVOKE_TOKEN} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4) of
@@ -38,7 +38,7 @@ handle_call(#call{procedure_uri = ?REVOKE_TOKEN} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?REVOKE_TOKENS} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
@@ -49,8 +49,8 @@ handle_call(#call{procedure_uri = ?REVOKE_TOKENS} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{} = M, Ctxt) ->
     Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), Error).

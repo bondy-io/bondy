@@ -93,10 +93,10 @@ init(Req0, _) ->
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
     All = cowboy_req:parse_header(?WS_SUBPROTOCOL_HEADER, Req0),
+    Peername = cowboy_req:peer(Req0),
     case select_subprotocol(All) of
         {ok, {ws, FrameType, _Enc} = Subproto, BinProto} ->
-            Peer = cowboy_req:peer(Req0),
-            case bondy_wamp_protocol:init(Subproto, Peer, #{}) of
+            case bondy_wamp_protocol:init(Subproto, self(), Peername, #{}) of
                 {ok, CBState} ->
                     St = #state{
                         frame_type = FrameType,
@@ -199,7 +199,7 @@ websocket_handle(Data, St) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Handles internal erlang messages and WAMP messages BONDY wants to send to the
-%% client. See {@link bondy:send/2}.
+%% client. See {@link bondy_wamp_peer:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
@@ -207,8 +207,8 @@ websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
 
 websocket_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% Here we receive the messages that either the router or another peer
-    %% sent to us using bondy:send/2,3
-    ok = bondy:ack(Pid, Ref),
+    %% sent to us using bondy_wamp_peer:send/2,3
+    ok = bondy_wamp_peer:ack(Pid, Ref),
     handle_outbound(St#state.frame_type, M, St);
 
 websocket_info({timeout, _Ref, _Msg}, St) ->
@@ -218,8 +218,9 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
 
 websocket_info({stop, Reason}, St) ->
     Peer = bondy_wamp_protocol:peer(St#state.protocol_state),
+    Peername = inet_utils:peername_to_binary(bondy_wamp_peer:peername(Peer)),
     SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
-    _ = lager:debug(<<"WS WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
+    _ = lager:debug(<<"WS WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peername, SessionId]),
     %% ok = do_terminate(St),
     {stop, St};
 

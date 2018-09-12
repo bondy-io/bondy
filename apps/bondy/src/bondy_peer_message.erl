@@ -29,8 +29,8 @@
     %% other node.
     %% We use the pid-to-bin trick since we will be using the pid to generate
     %% an ACK.
-    from            ::  remote_peer_id(),
-    to              ::  remote_peer_id(),
+    from            ::  bondy_wamp_peer:remote(),
+    to              ::  bondy_wamp_peer:remote(),
     payload         ::  wamp_invocation()
                         | wamp_error()
                         | wamp_result()
@@ -68,14 +68,10 @@
 %% @end
 %% ----------------------------------------------------------------------------
 new(From0, To0, Payload0, Opts) ->
-    MyNode = bondy_peer_service:mynode(),
-    element(2, To0) =/= MyNode orelse error(badarg),
+    bondy_wamp_peer:is_remote(To0) orelse error(badarg),
 
-    %% FromPid = bondy_utils:pid_to_bin(element(4, From0)),
-    From1 = setelement(4, From0, undefined),
-
-    %% ToPid = bondy_utils:pid_to_bin(element(4, To0)),
-    To1 = setelement(4, To0, undefined),
+    From1 = bondy_wamp_peer:to_remote(From0),
+    To1 = bondy_wamp_peer:to_remote(To0),
 
     #peer_message{
         payload = validate_payload(Payload0),
@@ -105,20 +101,23 @@ id(#peer_message{id = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-realm_uri(#peer_message{from = Val}) -> element(1, Val).
+realm_uri(#peer_message{from = Peer}) ->
+    bondy_wamp_peer:realm_uri(Peer).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-peer_node(#peer_message{to = Val}) -> element(2, Val).
+peer_node(#peer_message{to = Peer}) ->
+    bondy_wamp_peer:node(Peer).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec from(t()) -> bondy_wamp_peer:t().
 from(#peer_message{from = Val}) -> Val.
 
 
@@ -126,6 +125,7 @@ from(#peer_message{from = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec to(t()) -> bondy_wamp_peer:t().
 to(#peer_message{to = Val}) -> Val.
 
 

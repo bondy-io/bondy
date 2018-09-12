@@ -34,14 +34,14 @@ handle_call(#call{procedure_uri = ?CREATE_REALM} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?LIST_REALMS} = M, Ctxt) ->
     R = bondy_wamp_utils:maybe_error(
         catch [bondy_realm:to_map(X) || X <- bondy_realm:list()],
         M
     ),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?ENABLE_SECURITY} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
@@ -52,7 +52,7 @@ handle_call(#call{procedure_uri = ?ENABLE_SECURITY} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?DISABLE_SECURITY} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
@@ -63,7 +63,7 @@ handle_call(#call{procedure_uri = ?DISABLE_SECURITY} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?SECURITY_STATUS} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
@@ -74,7 +74,7 @@ handle_call(#call{procedure_uri = ?SECURITY_STATUS} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?IS_SECURITY_ENABLED} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
@@ -84,7 +84,7 @@ handle_call(#call{procedure_uri = ?IS_SECURITY_ENABLED} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?ADD_USER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -94,7 +94,7 @@ handle_call(#call{procedure_uri = ?ADD_USER} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?UPDATE_USER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
@@ -104,7 +104,7 @@ handle_call(#call{procedure_uri = ?UPDATE_USER} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?DELETE_USER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -114,7 +114,7 @@ handle_call(#call{procedure_uri = ?DELETE_USER} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?LIST_USERS} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
@@ -123,7 +123,7 @@ handle_call(#call{procedure_uri = ?LIST_USERS} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?FIND_USER} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -133,7 +133,7 @@ handle_call(#call{procedure_uri = ?FIND_USER} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?CHANGE_PASSWORD} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4) of
@@ -150,7 +150,7 @@ handle_call(#call{procedure_uri = ?CHANGE_PASSWORD} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?ADD_GROUP} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -160,7 +160,7 @@ handle_call(#call{procedure_uri = ?ADD_GROUP} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?DELETE_GROUP} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -170,7 +170,7 @@ handle_call(#call{procedure_uri = ?DELETE_GROUP} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?LIST_GROUPS} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
@@ -179,7 +179,7 @@ handle_call(#call{procedure_uri = ?LIST_GROUPS} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?FIND_GROUP} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
@@ -189,7 +189,7 @@ handle_call(#call{procedure_uri = ?FIND_GROUP} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?UPDATE_GROUP} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
@@ -199,36 +199,36 @@ handle_call(#call{procedure_uri = ?UPDATE_GROUP} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?ADD_SOURCE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?DELETE_SOURCE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?LIST_SOURCES} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?FIND_SOURCE} = M, Ctxt) ->
     %% @TODO
     ReqId = M#call.request_id,
     Res = #{},
     R = wamp_message:result(ReqId, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), R);
 
 handle_call(#call{} = M, Ctxt) ->
     Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), Error).

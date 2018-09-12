@@ -113,7 +113,6 @@ iterate(Entries0, Opts0) when is_list(Entries0) ->
             {S, L}
     end,
 
-
     Entries = maybe_sort_entries(Loc, Entries0),
 
     case Strat of
@@ -240,8 +239,8 @@ get_round_robin(undefined, [H|T]) ->
     case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
         true ->
             %% The pid of the connection process
-            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
-            case erlang:is_process_alive(Pid) of
+            Peer = bondy_session:peer(bondy_registry_entry:session_id(H)),
+            case bondy_wamp_peer:is_local_connection_alive(Peer) of
                 true ->
                     %% We update the invocation state
                     ok = set_last_invocation(

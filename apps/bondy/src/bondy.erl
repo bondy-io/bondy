@@ -26,7 +26,6 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(SEND_TIMEOUT, 20000).
 -define(CALL_TIMEOUT, 20000).
 
 -type wamp_error_map() :: #{
@@ -39,13 +38,9 @@
 -export_type([wamp_error_map/0]).
 
 
--export([ack/2]).
 -export([call/5]).
 -export([publish/5]).
 -export([subscribe/4]).
--export([send/2]).
--export([send/3]).
--export([send/4]).
 -export([start/0]).
 
 
@@ -62,88 +57,6 @@
 start() ->
     application:ensure_all_started(bondy).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sends a message to a WAMP peer.
-%% It calls `send/3' with a an empty map for Options.
-%% @end
-%% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message()) -> ok.
-
-send(PeerId, M) ->
-    send(PeerId, M, #{}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sends a message to a local WAMP peer.
-%% If the transport is not open it fails with an exception.
-%% This function is used by the router (dealer | broker) to send WAMP messages
-%% to local peers.
-%% Opts is a map with the following keys:
-%%
-%% * timeout - timeout in milliseconds (defaults to 10000)
-%% * enqueue (boolean) - if the peer is not reachable and this value is true,
-%% bondy will enqueue the message so that the peer can resume the session and
-%% consume all enqueued messages.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
-
-send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
-when is_binary(RealmUri)
-andalso is_integer(SessionId)
-andalso is_pid(Pid) ->
-    %% We validate the message failing with exception
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-
-    %% We validate the opts failing with exception
-    Opts1 = validate_send_opts(Opts0),
-
-    case Node =:= bondy_peer_service:mynode() of
-        true ->
-            do_send(PeerId, M, Opts1);
-        false ->
-            error(not_my_node)
-    end.
-
-
--spec send(peer_id(), peer_id(), wamp_message(), map()) -> ok | no_return().
-
-send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
-when is_binary(RealmUri) ->
-    %% We validate the message failing with exception
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-
-    %% We validate the opts failing with exception
-    Opts1 = validate_send_opts(Opts0),
-
-    case Node =:= bondy_peer_service:mynode() of
-        true ->
-            do_send(To, M, Opts1);
-        false ->
-            bondy_peer_wamp_forwarder:forward(From, To, M, Opts1)
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Acknowledges the reception of a WAMP message. This function should be used by
-%% the peer transport module to acknowledge the reception of a message sent with
-%% {@link send/3}.
-%% @end
-%% -----------------------------------------------------------------------------
--spec ack(pid(), reference()) -> ok.
-
-ack(Pid, _) when Pid =:= self()  ->
-    %% We do not need to send an ack (implicit ack send case)
-    ok;
-
-ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
-    Pid ! {?BONDY_PEER_ACK, Ref},
-    ok.
 
 
 
@@ -172,7 +85,6 @@ subscribe(RealmUri, Opts, TopicUri, Fun) ->
 %% =============================================================================
 %% API - PUBLISHER ROLE
 %% =============================================================================
-
 
 
 publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
@@ -216,10 +128,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
         {ok, Ctxt1} ->
             receive
                 {?BONDY_PEER_REQUEST, Pid, Ref, #result{} = R} ->
-                    ok = bondy:ack(Pid, Ref),
+                    ok = bondy_wamp_peer:ack(Pid, Ref),
                     {ok, message_to_map(R), Ctxt1};
                 {?BONDY_PEER_REQUEST, Pid, Ref, #error{} = R} ->
-                    ok = bondy:ack(Pid, Ref),
+                    ok = bondy_wamp_peer:ack(Pid, Ref),
                     {error, message_to_map(R), Ctxt1}
             after
                 Timeout ->
@@ -280,83 +192,6 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-validate_send_opts(Opts) ->
-    maps_utils:validate(Opts, #{
-        timeout => #{
-            required => true,
-            datatype => timeout,
-            default => ?SEND_TIMEOUT
-        },
-        enqueue => #{
-            required => true,
-            datatype => boolean,
-            default => false
-        }
-    }).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
-    Pid ! {?BONDY_PEER_REQUEST, Pid, make_ref(), M},
-    %% This is a sync message so we resolve this sequentially
-    %% so we will not get an ack, the ack is implicit
-    ok;
-
-do_send({_, _, SessionId, Pid}, M, Opts) ->
-    Timeout = maps:get(timeout, Opts),
-
-    %% Should we enqueue the message in case the process representing
-    %% the WAMP peer no longer exists?
-    Enqueue = maps:get(enqueue, Opts),
-
-    MonitorRef = monitor(process, Pid),
-
-    %% The following no longer applies, as the process should be local
-    %% However, we keep it as it still is the right thing to do.
-    %% ----------------------
-    %% If the monitor/2 call failed to set up a connection to a
-    %% remote node, we don't want the '!' operator to attempt
-    %% to set up the connection again. (If the monitor/2 call
-    %% failed due to an expired timeout, '!' too would probably
-    %% have to wait for the timeout to expire.) Therefore,
-    %% use erlang:send/3 with the 'noconnect' option so that it
-    %% will fail immediately if there is no connection to the
-    %% remote node.
-    erlang:send(Pid, {?BONDY_PEER_REQUEST, self(), MonitorRef, M}, [noconnect]),
-
-    receive
-        {'DOWN', MonitorRef, process, Pid, Reason} ->
-            %% The peer no longer exists
-            maybe_enqueue(Enqueue, SessionId, M, Reason);
-        {?BONDY_PEER_ACK, MonitorRef} ->
-            %% The peer received the message and acked it using ack/2
-            true = demonitor(MonitorRef, [flush]),
-            ok
-    after
-        Timeout ->
-            true = demonitor(MonitorRef, [flush]),
-            maybe_enqueue(Enqueue, SessionId, M, timeout)
-    end.
-
-
-%% @private
-maybe_enqueue(true, _SessionId, _M, _) ->
-    %% TODO Enqueue for session resumption
-    ok;
-
-maybe_enqueue(false, SessionId, M, Reason) ->
-    _ = lager:info(
-        "Could not deliver message to WAMP peer; "
-        "reason=~p, session_id=~p, message_type=~p",
-        [Reason, SessionId, element(1, M)]
-    ),
-    ok.
 
 
 %% @private

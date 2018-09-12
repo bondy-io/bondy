@@ -28,12 +28,15 @@
 %%  loop to provide access to that information.
 %% @end
 %% =============================================================================
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_context).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--type subprotocol_2()        ::  subprotocol()
-                                | {http, text, json | msgpack}.
+-type subprotocol_ex()        ::  subprotocol() | {http, text, json | msgpack}.
 
 
 -type t()       ::  #{
@@ -41,13 +44,13 @@
     %% Realm and Session
     realm_uri => uri(),
     node => atom(),
+    transport_info => bondy_wamp_peer:transport_info(),
+    peer => bondy_wamp_peer:local() | undefined,
+    session_id => id(),
     session => bondy_session:session() | undefined,
-    %% Peer Info
-    peer => bondy_session:peer(),
     authmethod => binary(),
     authid => binary(),
     roles => map(),
-    challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),
@@ -58,15 +61,17 @@
 -export_type([t/0]).
 
 -export([agent/1]).
+-export([authid/1]).
 -export([close/1]).
+-export([encoding/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
--export([new/0]).
 -export([local_context/1]).
+-export([new/0]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
--export([peer_id/1]).
+-export([peername/1]).
 -export([realm_uri/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
@@ -75,14 +80,14 @@
 -export([roles/1]).
 -export([session/1]).
 -export([session_id/1]).
--export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
 -export([set_subprotocol/2]).
--export([subprotocol/1]).
+-export([set_session_id/2]).
 -export([set_session/2]).
--export([encoding/1]).
+-export([subprotocol/1]).
+-export([transport_info/1]).
 
 
 
@@ -90,6 +95,15 @@
 %% API
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+local_context(RealmUri) when is_binary(RealmUri) ->
+    Ctxt = new(),
+    Ctxt#{realm_uri => RealmUri}.
 
 
 %% -----------------------------------------------------------------------------
@@ -111,18 +125,14 @@ new() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-local_context(RealmUri) when is_binary(RealmUri) ->
+-spec new(subprotocol_ex(), bondy_wamp_peer:transport_info()) -> t().
+new(Subproto, TransportInfo) ->
     Ctxt = new(),
-    Ctxt#{realm_uri => RealmUri}.
+    Ctxt#{
+        subprotocol => Subproto,
+        transport_info => TransportInfo
+    }.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec new(bondy_session:peer(), subprotocol_2()) -> t().
-new(Peer, Subprotocol) ->
-    set_subprotocol(set_peer(new(), Peer), Subprotocol).
 
 
 %% -----------------------------------------------------------------------------
@@ -148,24 +158,48 @@ reset(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec close(t()) -> ok.
 
-close(Ctxt0) ->
+close(#{session_id := SessionId} = Ctxt0) ->
     %% We cleanup router first as cleanup requires the session
-    case maps:find(session, Ctxt0) of
-        {ok, Session} ->
-            _ = bondy_router:close_context(Ctxt0),
-            bondy_session:close(Session);
-        error ->
-            ok
-    end.
+    _ = bondy_router:close_context(Ctxt0),
+    bondy_session:close(SessionId);
+
+close(_) ->
+    ok.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the peer of the provided context.
+%% Returns the WAMP Peer of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer(t()) -> bondy_session:peer().
-peer(#{peer := Val}) -> Val.
+-spec authid(t()) -> binary() | undefined.
+
+authid(#{authid := Val}) ->  Val;
+authid(#{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the WAMP Peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer(t()) -> bondy_wamp_peer:local().
+
+peer(#{peer := Val}) ->  Val;
+peer(#{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peername(t()) -> {inet:ip_address(), non_neg_integer()}.
+
+peername(#{peer := Peer}) ->
+    bondy_wamp_peer:peername(Peer);
+
+peername(#{transport_info := #{peername := Val}}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -177,24 +211,23 @@ peer(#{peer := Val}) -> Val.
 node(#{node := Val}) -> Val.
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Set the peer to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec set_peer(t(), bondy_session:peer()) -> t().
-set_peer(Ctxt, {{_, _, _, _}, _Port} = Peer) when is_map(Ctxt) ->
-    Ctxt#{peer => Peer}.
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the subprotocol of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subprotocol(t()) -> subprotocol_2().
+-spec subprotocol(t()) -> subprotocol_ex().
 subprotocol(#{subprotocol := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the module representing the transport e.g. ranch_tcp
+%% @end
+%% -----------------------------------------------------------------------------
+-spec transport_info(t()) -> bondy_wamp_peer:transport_info().
+transport_info(#{transport_info := Val}) -> Val;
+transport_info(#{}) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -203,18 +236,9 @@ subprotocol(#{subprotocol := Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec encoding(t()) -> encoding().
-encoding(#{subprotocol := {_, _, Val}}) -> Val.
+encoding(#{subprotocol := {_, _, Val}}) -> Val;
+encoding(#{}) -> undefined.
 
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Set the peer to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec set_subprotocol(t(), subprotocol_2()) -> t().
-set_subprotocol(Ctxt, {_, _, _} = S) when is_map(Ctxt) ->
-    Ctxt#{subprotocol => S}.
 
 
 %% -----------------------------------------------------------------------------
@@ -256,8 +280,8 @@ agent(#{}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session_id(t()) -> id() | undefined.
-session_id(#{session := S}) ->
-    bondy_session:id(S);
+session_id(#{session_id := SessionId}) ->
+    SessionId;
 session_id(#{}) ->
     undefined.
 
@@ -269,30 +293,31 @@ session_id(#{}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec has_session(t()) -> boolean().
-has_session(#{session := _}) -> true;
+has_session(#{session_id := _}) -> true;
 has_session(#{}) -> false.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sets the sessionId to the provided context.
+%% This creates a new `bondy_wamp_peer:local()' and sets its value to the
+%% `peer' property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_session(t(), bondy_session:session()) -> t().
-set_session(Ctxt, S) ->
-    Ctxt#{session => S}.
+-spec set_session_id(t(), id) -> t().
+set_session_id(#{peer := _}, _) ->
+    error(badarg);
 
+set_session_id(Ctxt, SessionId) when is_integer(SessionId) ->
+    #{
+        realm_uri := RealmUri,
+        transport_info := TransportInfo
+    } = Ctxt,
 
+    Node = bondy_peer_service:mynode(),
+    Peer = bondy_wamp_peer:new(RealmUri, Node, SessionId, TransportInfo),
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec peer_id(t()) -> peer_id().
-
-peer_id(#{session := S}) ->
-    %% TODO evaluate caching this as it should be immutable
-    bondy_session:peer_id(S).
+    Ctxt#{session => undefined, session_id => SessionId, peer => Peer}.
 
 
 %% -----------------------------------------------------------------------------
@@ -301,8 +326,33 @@ peer_id(#{session := S}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec session(t()) -> bondy_session:session() | no_return().
+
+
+session(#{session := undefined, session_id := Id}) ->
+    bondy_session:fetch(Id);
+
 session(#{session := S}) ->
-    S.
+    S;
+
+session(#{session_id := Id}) ->
+    bondy_session:fetch(Id).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+set_session(Ctxt, Session) ->
+    #{
+        realm_uri := RealmUri,
+        transport_info := TransportInfo
+    } = Ctxt,
+
+    Node = bondy_peer_service:mynode(),
+    SessionId = bondy_session:id(Session),
+    Peer = bondy_wamp_peer:new(RealmUri, Node, SessionId, TransportInfo),
+
+    Ctxt#{session => Session, session_id => SessionId, peer => Peer}.
 
 
 %% -----------------------------------------------------------------------------

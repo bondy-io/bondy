@@ -85,7 +85,8 @@ handle_call(#call{procedure_uri = ?REG_LIST} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 
 handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
@@ -97,7 +98,8 @@ handle_call(#call{procedure_uri = ?REG_LOOKUP} = M, Ctxt)  ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?REG_MATCH} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
@@ -108,7 +110,8 @@ handle_call(#call{procedure_uri = ?REG_MATCH} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
@@ -119,7 +122,8 @@ handle_call(#call{procedure_uri = ?REG_GET} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 
 handle_call(#call{procedure_uri = ?LIST_CALLEES} = M, Ctxt) ->
@@ -129,7 +133,8 @@ handle_call(#call{procedure_uri = ?LIST_CALLEES} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 
 handle_call(#call{procedure_uri = ?COUNT_CALLEES} = M, Ctxt) ->
@@ -139,7 +144,8 @@ handle_call(#call{procedure_uri = ?COUNT_CALLEES} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
@@ -148,7 +154,8 @@ handle_call(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 
 handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
@@ -161,11 +168,12 @@ handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
         {error, WampError} ->
             WampError
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    bondy_wamp_peer:send(
+        bondy_context:peer(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{} = M, Ctxt) ->
     Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), Error).
 
 
 

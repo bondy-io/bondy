@@ -110,12 +110,11 @@
     id                              ::  id(),
     realm_uri                       ::  uri(),
     node                            ::  atom(),
+    pid                             ::  pid(),
     %% If owner of the session.
     %% This is either pid of the TCP or WS handler process or
     %% the cowboy handler.
-    pid = self()                    ::  pid() | undefined,
-    %% The {IP, Port} of the client
-    peer                            ::  peer() | undefined,
+    peer                            ::  bondy_wamp_peer:local() | undefined,
     %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
     %% Sequence number used for ID generation
@@ -133,7 +132,6 @@
     quota = ?DEFAULT_QUOTA          ::  quota_window()
 }).
 
--type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type session()                 ::  #session{}.
 -type session_opts()            ::  #{roles => map()}.
 -type details()                 ::  #{
@@ -147,8 +145,6 @@
                                         }
                                     }.
 
--export_type([peer/0]).
-
 -export([agent/1]).
 -export([close/1]).
 -export([created/1]).
@@ -157,16 +153,15 @@
 -export([incr_seq/1]).
 -export([list/0]).
 -export([list/1]).
--export([list_peer_ids/1]).
--export([list_peer_ids/2]).
+-export([list_peers/1]).
+-export([list_peers/2]).
 -export([lookup/1]).
+-export([new/2]).
 -export([new/3]).
--export([new/4]).
 -export([open/3]).
 -export([open/4]).
+-export([set_peer/2]).
 -export([peer/1]).
--export([peer_id/1]).
--export([pid/1]).
 -export([realm_uri/1]).
 -export([roles/1]).
 -export([size/0]).
@@ -188,29 +183,27 @@
 %% @doc Creates a new transient session (not persisted)
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(peer(), uri() | bondy_realm:realm(), session_opts()) ->
+-spec new(uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
-new(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
-    new(bondy_utils:get_id(global), Peer, bondy_realm:fetch(RealmUri), Opts);
+new(RealmUri, Opts) when is_binary(RealmUri) ->
+    new(bondy_utils:get_id(global), bondy_realm:fetch(RealmUri), Opts);
 
-new(Peer, Realm, Opts) when is_map(Opts) ->
-    new(bondy_utils:get_id(global), Peer, Realm, Opts).
+new(Realm, Opts) when is_map(Opts) ->
+    new(bondy_utils:get_id(global), Realm, Opts).
 
 
--spec new(id(), peer(), uri() | bondy_realm:realm(), session_opts()) ->
+-spec new(id(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
-new(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
-    new(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
+new(Id, RealmUri, Opts) when is_binary(RealmUri) ->
+    new(Id, bondy_realm:fetch(RealmUri), Opts);
 
-new(Id, Peer, Realm, Opts) when is_map(Opts) ->
+new(Id, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     S0 = #session{
         id = Id,
-        peer = Peer,
         realm_uri = RealmUri,
-        node = bondy_peer_service:mynode(),
         created = calendar:local_time()
     },
     parse_details(Opts, S0).
@@ -223,7 +216,8 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
 %% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec open(peer(), uri() | bondy_realm:realm(), session_opts()) ->
+-spec open(
+    bondy_wamp_peer:local(), uri() | bondy_realm:realm(), session_opts()) ->
     session() | no_return().
 
 open(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
@@ -240,21 +234,27 @@ open(Peer, Realm, Opts) when is_map(Opts) ->
 %% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec open(id(), peer(), uri() | bondy_realm:realm(), session_opts()) ->
-    session() | no_return().
+-spec open(
+    id(),
+    bondy_wamp_peer:local(),
+    uri() | bondy_realm:realm(),
+    session_opts()
+    ) -> session() | no_return().
+
 open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
     open(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
 
 open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
-    S1 = new(Id, Peer, Realm, Opts),
-    Agent = S1#session.agent,
+    S1 = new(Id, Realm, Opts),
+    S2 = set_peer(S1, Peer),
+    {IP, _} = bondy_wamp_peer:peername(Peer),
 
-    case ets:insert_new(table(Id), S1) of
+    case ets:insert_new(table(Id), S2) of
         true ->
             ok = bondy_event_manager:notify(
                 {session_opened, RealmUri, Id, Agent, Peer}),
-            S1;
+            S2;
         false ->
             error({integrity_constraint_violation, Id})
     end.
@@ -274,7 +274,7 @@ update(#session{id = Id} = S) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(session()) -> ok.
+-spec close(id() | session()) -> ok.
 
 close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
@@ -289,8 +289,8 @@ close(#session{id = Id} = S) ->
 
 close(Id) ->
     case lookup(Id) of
-        #session{} = Session -> close(Session);
-        _ -> ok
+        {error, not_found} -> ok;
+        Session -> close(Session)
     end.
 
 
@@ -333,51 +333,34 @@ roles(Id) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the identifier for the owner of this session
+%% @doc Returns the identifier for the peer currently associated with this
+%% session
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(session()) -> local_peer_id().
+-spec peer(id() | session()) -> bondy_wamp_peer:local().
 
-peer_id(#session{} = S) ->
-    {
-        S#session.realm_uri,
-        S#session.node,
-        S#session.id,
-        S#session.pid
-    };
-
-peer_id(Id) when is_integer(Id) ->
-    peer_id(fetch(Id)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the pid of the process managing the transport that the session
-%% identified by Id runs on.
-%% @end
-%% -----------------------------------------------------------------------------
--spec pid(session()) -> pid().
-
-pid(#session{pid = Pid}) ->
-    Pid;
-
-pid(Id) when is_integer(Id) ->
-    #session{pid = Val} = fetch(Id),
-    Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec created(session()) -> calendar:date_time().
-
-created(#session{created = Val}) ->
+peer(#session{peer = Val}) ->
     Val;
 
-created(Id) when is_integer(Id) ->
-    #session{created = Val} = fetch(Id),
-    Val.
+peer(SessionId) ->
+    peer(fetch(SessionId)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_peer(id() | session(), bondy_wamp_peer:local()) -> session().
+set_peer(#session{} = Session, Peer) ->
+    Session#session{
+        peer = Peer,
+        %% For indexing
+        node = bondy_wamp_peer:node(Peer),
+        pid = bondy_wamp_peer:pid(Peer)
+    };
+
+set_peer(Id, Peer) ->
+    set_peer(fetch(Id), Peer).
 
 
 %% -----------------------------------------------------------------------------
@@ -385,7 +368,6 @@ created(Id) when is_integer(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec agent(session()) -> binary() | undefined.
-
 agent(#session{agent = Val}) ->
     Val;
 
@@ -398,14 +380,10 @@ agent(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer(session()) -> peer().
+-spec created(id() | session()) -> calendar:date_time().
 
-peer(#session{peer = Val}) ->
-    Val;
-
-peer(Id) when is_integer(Id) ->
-    #session{peer = Val} = fetch(Id),
-    Val.
+created(#session{created = Val}) -> Val;
+created(Id) -> created(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------
@@ -494,17 +472,17 @@ list(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list_peer_ids(N) ->
-    list_peer_ids('_', N).
+list_peers(N) ->
+    list_peers('_', N).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
+list_peers(RealmUri, N) when is_integer(N), N >= 1 ->
     Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
-    do_list_peer_ids(Tabs, RealmUri, N).
+    do_list_peers(Tabs, RealmUri, N).
 
 
 
@@ -512,19 +490,31 @@ list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_details_map(session()) -> details().
+-spec to_details_map(id() | session()) -> details().
 
 to_details_map(#session{} = S) ->
+    Transport = case peer(S) of
+        undefined ->
+            #{};
+        Peer ->
+            Peername = bondy_wamp_peer:peername(Peer),
+            #{
+                peername => inet_utils:peername_to_binary(Peername)
+            }
+    end,
+
     #{
         session => S#session.id,
         authid => S#session.authid,
         authrole => S#session.authrole,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
-        transport => #{
-            peername => inet_utils:peername_to_binary(S#session.peer)
-        }
-    }.
+        transport => Transport
+    };
+
+to_details_map(Id) ->
+    to_details_map(fetch(Id)).
+
 
 
 %% =============================================================================
@@ -615,10 +605,10 @@ do_lookup(Id) ->
 
 
 %% @private
-do_list_peer_ids([], _, _) ->
+do_list_peers([], _, _) ->
     ?EOT;
 
-do_list_peer_ids([Tab | Tabs], RealmUri, N)
+do_list_peers([Tab | Tabs], RealmUri, N)
 when is_binary(RealmUri) orelse RealmUri == '_' ->
     Pattern = #session{
         id = '$3',
@@ -647,28 +637,28 @@ when is_binary(RealmUri) orelse RealmUri == '_' ->
     case ets:select(Tab, MS, N) of
         {L, Cont} ->
             FunCont = fun() ->
-                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+                do_list_peers({continuation, Tabs, RealmUri, N, Cont})
             end,
            {L, FunCont};
         ?EOT ->
-            do_list_peer_ids(Tabs, RealmUri, N)
+            do_list_peers(Tabs, RealmUri, N)
     end.
 
 
 %% @private
-do_list_peer_ids({continuation, [], _, _, ?EOT}) ->
+do_list_peers({continuation, [], _, _, ?EOT}) ->
     ?EOT;
 
-do_list_peer_ids({continuation, Tabs, RealmUri, N, ?EOT}) ->
-    do_list_peer_ids(Tabs, RealmUri, N);
+do_list_peers({continuation, Tabs, RealmUri, N, ?EOT}) ->
+    do_list_peers(Tabs, RealmUri, N);
 
-do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont}) ->
+do_list_peers({continuation, Tabs, RealmUri, N, Cont}) ->
     case ets:select(Cont) of
         ?EOT ->
             ?EOT;
         {L, Cont} ->
             FunCont = fun() ->
-                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+                do_list_peers({continuation, Tabs, RealmUri, N, Cont})
             end,
             {L, FunCont}
     end.

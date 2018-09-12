@@ -151,7 +151,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
                 ?UNSUBSCRIBE, ReqId, #{}, ?WAMP_NO_SUCH_SUBSCRIPTION
             )
     end,
-    bondy:send(bondy_context:peer_id(Ctxt), Reply);
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply);
 
 handle_message(#publish{} = M, Ctxt) ->
     %% (RFC) Asynchronously notifies all subscribers of the published event.
@@ -173,14 +173,14 @@ handle_message(#publish{} = M, Ctxt) ->
     case publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) of
         {ok, PubId} when Acknowledge == true ->
             Reply = wamp_message:published(ReqId, PubId),
-            ok = bondy:send(bondy_context:peer_id(Ctxt), Reply),
+            ok = bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply),
             ok;
         {ok, _} ->
             ok;
         {error, not_authorized} when Acknowledge == true ->
             Reply = wamp_message:error(
                 ?PUBLISH, ReqId, #{}, ?WAMP_NOT_AUTHORIZED),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply);
         {error, Reason} when Acknowledge == true ->
             ErrorMap = bondy_error:map(?WAMP_CANCELLED, Reason),
             Reply = wamp_message:error(
@@ -191,7 +191,7 @@ handle_message(#publish{} = M, Ctxt) ->
                 [maps:get(<<"message">>, ErrorMap)],
                 ErrorMap
             ),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply);
         {error, _} ->
             ok
     end.
@@ -205,14 +205,14 @@ handle_message(#publish{} = M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec handle_peer_message(
     wamp_publish(),
-    To :: remote_peer_id(),
-    From :: remote_peer_id(),
+    To :: bondy_wamp_peer:remote(),
+    From :: bondy_wamp_peer:remote(),
     Opts :: map()) ->
     ok | no_return().
 
-handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
+handle_peer_message(#publish{} = M, Peer, _From,  Opts) ->
     PubId = maps:get(publication_id, Opts),
-    RealmUri = RealmUri = element(1, PeerId),
+    RealmUri = bondy_wamp_peer:realm_uri(Peer),
     TopicUri = M#publish.topic_uri,
     Args = M#publish.arguments,
     ArgsKW = M#publish.arguments_kw,
@@ -232,7 +232,8 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
                     ESession ->
                         Event = wamp_message:event(
                             SubsId, PubId, Opts, Args, ArgsKW),
-                        bondy:send(bondy_session:peer_id(ESession), Event),
+                        bondy_wamp_peer:send(
+                            bondy_session:peer(ESession), Event),
                         maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc)
                 end;
             _ ->
@@ -378,9 +379,9 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                                 NodeAcc;
                             ESession ->
                                 Event = wamp_message:event(
-                                    SubsId, PubId, Details, Args, ArgsKw),
-                                ok = bondy:send(
-                                    bondy_session:peer_id(ESession), Event),
+                                    SubsId, PubId, Opts, Args, ArgsKw),
+                                bondy_wamp_peer:send(
+                                    bondy_session:peer(ESession), Event),
                                     NodeAcc
                         end
                 end;
@@ -527,18 +528,18 @@ subscribe(M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
     Topic = M#subscribe.topic_uri,
-    PeerId = bondy_context:peer_id(Ctxt),
+    Peer = bondy_context:peer(Ctxt),
     %% TODO check authorization and reply with wamp.error.not_authorized if not
 
     case bondy_registry:add(subscription, Topic, Opts, Ctxt) of
         {ok, #{id := Id} = Details, true} ->
-            bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
+            bondy_wamp_peer:send(Peer, wamp_message:subscribed(ReqId, Id)),
             on_create(Details, Ctxt);
         {ok, #{id := Id}, false} ->
-            bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
+            bondy_wamp_peer:send(Peer, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Id, Ctxt);
         {error, {already_exists, #{id := Id}}} ->
-            bondy:send(PeerId, wamp_message:subscribed(ReqId, Id))
+            bondy_wamp_peer:send(Peer, wamp_message:subscribed(ReqId, Id))
     end.
 
 
@@ -561,7 +562,7 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     %% We forward the publication to all cluster peers.
     %% @TODO stop replicating individual remote subscribers and instead
     %% use a per node reference counter
-    Publisher = bondy_context:peer_id(Ctxt),
+    Publisher = bondy_context:peer(Ctxt),
     {ok, Good, Bad} = bondy_peer_wamp_forwarder:broadcast(
         Publisher, Nodes, M, Opts),
 

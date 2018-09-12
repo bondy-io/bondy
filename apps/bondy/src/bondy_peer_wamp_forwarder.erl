@@ -88,12 +88,12 @@
 -define(FORWARD_TIMEOUT, 5000).
 
 -record(peer_ack, {
-    from        ::  peer_id(),
+    from        ::  bondy_wamp_peer:t(),
     id          ::  id()
 }).
 
 -record(peer_error, {
-    from        ::  peer_id(),
+    from        ::  bondy_wamp_peer:t(),
     id          ::  id(),
     reason      ::  any()
 }).
@@ -153,8 +153,12 @@ start_link() ->
 %% This is equivalent to call async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
-    ok | no_return().
+-spec forward(
+    bondy_wamp_peer:remote(),
+    bondy_wamp_peer:remote(),
+    wamp_message(),
+    map()
+    ) -> ok | no_return().
 
 forward(From, To, Mssg, Opts) ->
     {ok, Id} = async_forward(From, To, Mssg, Opts),
@@ -167,8 +171,11 @@ forward(From, To, Mssg, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec async_forward(
-    remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
-    {ok, id()} | no_return().
+    bondy_wamp_peer:remote(),
+    bondy_wamp_peer:remote(),
+    wamp_message(),
+    map()
+    ) -> {ok, id()} | no_return().
 
 async_forward(From, To, Mssg, Opts) ->
     %% Remote monitoring is not possible given no connections are maintained
@@ -188,14 +195,15 @@ async_forward(From, To, Mssg, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec broadcast(peer_id(), [node()], wamp_message(), map()) ->
+-spec broadcast(bondy_wamp_peer:t(), [node()], wamp_message(), map()) ->
     {ok, Good :: [node()], Bad :: [node()]}.
 
-broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
+broadcast(From, Nodes, M, Opts) ->
+    RealmUri = bondy_wamp_peer:realm_uri(From),
     %% We forward the message to the other nodes
     IdNodes = [
         begin
-            To = {RealmUri, Node, undefined, undefined},
+            To = bondy_wamp_peer:new(RealmUri, Node),
             {ok, Id} = async_forward(From, To, M, Opts),
             {Id, Node}
         end
@@ -262,7 +270,9 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
 handle_cast({'receive', AckOrError, BinPid}, State)
 when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
     %% We are receving an ACK o Error for a message we have previously forwarded
-    {RealmUri, Node, _, _} = AckOrError#peer_ack.from,
+    From = AckOrError#peer_ack.from,
+    RealmUri = bondy_wamp_peer:realm_uri(From),
+    Node = bondy_wamp_peer:node(From),
 
     _ = case Node =:= bondy_peer_service:mynode() of
         true ->
@@ -278,7 +288,7 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
             Pid ! AckOrError;
         false ->
             _ = lager:error(
-                "Received a message targetted to another node; realm_uri=~p, message=~p",
+                "Received a message targeted to another node; realm_uri=~p, message=~p",
                 [RealmUri, AckOrError]
             )
     end,
@@ -361,10 +371,12 @@ receive_broadcast_acks([], _, Good, Bad) ->
 
 
 %% @private
-cast_message(#peer_ack{from = {_, Node, _, _}} = Mssg, BinPid) ->
+cast_message(#peer_ack{from = From} = Mssg, BinPid) ->
+    Node = bondy_wamp_peer:node(From),
     do_cast_message(Node, Mssg, BinPid);
 
-cast_message(#peer_error{from = {_, Node, _, _}} = Mssg, BinPid) ->
+cast_message(#peer_error{from = From} = Mssg, BinPid) ->
+    Node = bondy_wamp_peer:node(From),
     do_cast_message(Node, Mssg, BinPid);
 
 cast_message(Mssg, BinPid) ->

@@ -130,7 +130,7 @@ shutdown() ->
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
     ),
-    Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
+    Fun = fun(Peer) -> bondy_wamp_peer:send(Peer, M) end,
 
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
@@ -204,35 +204,36 @@ handle_peer_message(PM) ->
     bondy_peer_message:is_message(PM) orelse exit(badarg),
 
     Payload = bondy_peer_message:payload(PM),
-    PeerId = bondy_peer_message:to(PM),
+    Peer = bondy_peer_message:to(PM),
     From = bondy_peer_message:from(PM),
     Opts = bondy_peer_message:options(PM),
 
-    handle_peer_message(Payload, PeerId, From, Opts).
+    handle_peer_message(Payload, Peer, From, Opts).
 
 
--spec handle_peer_message(wamp_message(), peer_id(), remote_peer_id(), map()) ->
+-spec handle_peer_message(
+    wamp_message(), bondy_wamp_peer:t(), bondy_wamp_peer:remote(), map()) ->
     ok | no_return().
 
-handle_peer_message(#publish{} = M, PeerId, From, Opts) ->
-    bondy_broker:handle_peer_message(M, PeerId, From, Opts);
+handle_peer_message(#publish{} = M, Peer, From, Opts) ->
+    bondy_broker:handle_peer_message(M, Peer, From, Opts);
 
-handle_peer_message(#error{} = M, PeerId, From, Opts) ->
+handle_peer_message(#error{} = M, Peer, From, Opts) ->
     %% This is a CALL, INVOCATION or INTERRUPT error
     %% see bondy_peer_message for more details
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+    bondy_dealer:handle_peer_message(M, Peer, From, Opts);
 
-handle_peer_message(#interrupt{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+handle_peer_message(#interrupt{} = M, Peer, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, Peer, From, Opts);
 
-handle_peer_message(#call{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+handle_peer_message(#call{} = M, Peer, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, Peer, From, Opts);
 
-handle_peer_message(#invocation{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+handle_peer_message(#invocation{} = M, Peer, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, Peer, From, Opts);
 
-handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts).
+handle_peer_message(#yield{} = M, Peer, From, Opts) ->
+    bondy_dealer:handle_peer_message(M, Peer, From, Opts).
 
 
 

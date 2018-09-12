@@ -23,7 +23,7 @@
 %% Entries are immutable.
 -record(entry, {
     key                     ::  entry_key(),
-    pid                     ::  pid(),
+    peer                    ::  bondy_wamp_peer:t(),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     created                 ::  calendar:date_time() | atom(),
@@ -68,7 +68,7 @@
 -export([options/1]).
 -export([pattern/4]).
 -export([pattern/6]).
--export([peer_id/1]).
+-export([peer/1]).
 -export([pid/1]).
 -export([realm_uri/1]).
 -export([session_id/1]).
@@ -87,21 +87,25 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), bondy_wamp_peer:t(), uri(), map()) -> t().
 
-new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
+new(Type, Peer, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
-    new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options).
+    new(Type, RegId, Peer, Uri, Options).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), id(), bondy_wamp_peer:t(), uri(), map()) -> t().
 
-new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
+new(Type, RegId, Peer, Uri, Options) ->
     MatchPolicy = validate_match_policy(Options),
+    RealmUri = bondy_wamp_peer:realm_uri(Peer),
+    Node = bondy_wamp_peer:node(Peer),
+    SessionId = bondy_wamp_peer:session_id(Peer),
+
     Key = #entry_key{
         realm_uri = RealmUri,
         node = Node,
@@ -111,7 +115,7 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
     },
     #entry{
         key = Key,
-        pid = Pid,
+        peer = Peer,
         uri = Uri,
         match_policy = MatchPolicy,
         created = calendar:local_time(),
@@ -129,7 +133,7 @@ pattern(Type, RealmUri, EntryId, Options) ->
     MatchPolicy = validate_match_policy(pattern, Options),
     #entry{
         key = key_pattern(Type, RealmUri, '_', '_', EntryId),
-        pid = '_',
+        peer = '_',
         uri = '_',
         match_policy = MatchPolicy,
         created = '_',
@@ -146,7 +150,7 @@ pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
     MatchPolicy = validate_match_policy(pattern, Options),
     #entry{
         key = key_pattern(Type, RealmUri, Node, SessionId, '_'),
-        pid = '_',
+        peer = '_',
         uri = Uri,
         match_policy = MatchPolicy,
         created = '_',
@@ -247,7 +251,8 @@ is_local(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec pid(t() | entry_key()) -> pid().
-pid(#entry{pid = Val}) -> Val.
+pid(#entry{peer = Peer}) ->
+    bondy_wamp_peer:pid(Peer).
 
 
 %% -----------------------------------------------------------------------------
@@ -266,17 +271,11 @@ session_id(#entry_key{} = Key) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the peer_id() of the subscription or registration
+%% Returns the peer() of the subscription or registration
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(t() | entry_key()) -> peer_id().
-peer_id(#entry{key = Key} = Entry) ->
-    {
-        Key#entry_key.realm_uri,
-        Key#entry_key.node,
-        Key#entry_key.session_id,
-        Entry#entry.pid
-    }.
+-spec peer(t() | entry_key()) -> bondy_wamp_peer:t().
+peer(#entry{peer = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -385,7 +384,7 @@ to_map(#entry{key = Key} = E) ->
         node => Key#entry_key.node,
         created => E#entry.created,
         uri => E#entry.uri,
-        pid => list_to_binary(pid_to_list(E#entry.pid)),
+        pid => list_to_binary(pid_to_list(pid(E))),
         match => E#entry.match_policy,
         options => E#entry.options
     }.

@@ -37,8 +37,6 @@
 %% =============================================================================
 
 
-
-
 -define(DEALER_FEATURES, #{
     progressive_call_results => false,
     progressive_calls => false,
@@ -118,27 +116,13 @@
 -define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
 -define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
 
--type local_peer_id()   ::  {
-    Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  integer() | undefined,
-    Pid         ::  pid()
-}.
--type remote_peer_id()  ::  {
-    Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  integer() | undefined,
-    Pid         ::  pid() | list() |undefined
-}.
--type peer_id()         ::  local_peer_id() | remote_peer_id().
-
-
-
 
 
 %% =============================================================================
 %% UTILS
 %% =============================================================================
+
+
 
 -define(EOT, '$end_of_table').
 -define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).

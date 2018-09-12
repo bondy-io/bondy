@@ -48,6 +48,7 @@
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
+    transport_info => bondy_wamp_peer:transport_info(),
     encoding => binary() | json | msgpack
 }.
 
@@ -83,14 +84,16 @@
 init(Req, St0) ->
     Session = undefined, %TODO
     % SessionId = 1,
-    % Ctxt0 = bondy_context:set_peer(
-    %     bondy_context:new(), cowboy_req:peer(Req)),
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
         body_evaluated => false,
         api_context => init_context(Req),
-        session => Session,
-        encoding => undefined
+        transport_info => #{
+            connection_process => self(),
+            peername => cowboy_re:peer(Req),
+            encoding => undefined
+        },
+        session => Session
     },
     {cowboy_rest, Req, St1}.
 
@@ -179,7 +182,7 @@ previously_existed(Req, St) ->
 delete_resource(Req0, #{api_spec := Spec} = St0) ->
     Method = method(Req0),
     Enc = json,
-    St1 = St0#{encoding => Enc}, % TODO get this by parsing headers
+    St1 = set_encoding(Enc, St0), % TODO get this by parsing headers
     case perform_action(Method, maps:get(Method, Spec), St1) of
         {ok, Response, St2} ->
             Headers = maps:get(<<"headers">>, Response),
@@ -214,25 +217,25 @@ to_json(Req, St) ->
 
 
 to_msgpack(Req, St) ->
-    provide(Req, St#{encoding => msgpack}).
+    provide(Req, set_encoding(msgpack, St)).
 
 
 from_json(Req, St) ->
-    do_accept(Req, St#{encoding => json}).
+    do_accept(Req, set_encoding(json, St)).
 
 
 from_msgpack(Req, St) ->
-    do_accept(Req, St#{encoding => msgpack}).
+    do_accept(Req, set_encoding(msgpack, St)).
 
 
 from_form_urlencoded(Req, St) ->
-    do_accept(Req, St#{encoding => urlencoded}).
+    do_accept(Req, set_encoding(urlencoded, St)).
 
 
-accept(Req0, St0) ->
+accept(Req0, St) ->
     %% Encoding is not JSON, MSGPACK or URLEncoded
     ContentType = cowboy_req:header(<<"content-type">>, Req0),
-    do_accept(Req0, St0#{encoding => ContentType}).
+    do_accept(Req0, set_encoding(ContentType, St)).
 
 
 %% =============================================================================
@@ -292,7 +295,8 @@ do_is_authorised(Req, #{security := _} = St)  ->
 %% executing the configured action
 %% @end
 %% -----------------------------------------------------------------------------
-provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
+provide(Req0, #{api_spec := Spec} = St0)  ->
+    Enc = encoding(St0),
     Method = method(Req0),
     try perform_action(Method, maps:get(Method, Spec), St0) of
         {ok, Response, St1} ->
@@ -345,8 +349,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
 %% the configured action
 %% @end
 %% -----------------------------------------------------------------------------
-do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
-
+do_accept(Req0, #{api_spec := Spec} = St0) ->
+    Enc = encoding(St0),
     Method = method(Req0),
     try
         %% We now read the body from the request into the context
@@ -395,6 +399,25 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+%% @private
+encoding(#{transport_info := #{encoding := Val}}) -> Val.
+
+
+%% @private
+encoding(#{transport_info := #{encoding := Val}}, _) ->
+    Val;
+
+encoding(_, Default) ->
+    Default.
+
+
+%% @private
+set_encoding(Enc, #{transport_info := Info0} = St) ->
+    Info1 = maps:put(encoding, Enc, Info0),
+    maps:put(transport_info, Info1, St).
 
 
 take_status_code(Term) ->
@@ -465,12 +488,11 @@ init_context(Req) ->
     Id = opencensus:generate_trace_id(),
      M = #{
         %% Msgpack does not support 128-bit integers,
-        %% so for the time being we encod it as binary string
+        %% so for the time being we encode it as binary string
         <<"id">> => integer_to_binary(Id),
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),
-        <<"peer">> => Peer,
-        <<"peername">> => inet_utils:peername_to_binary(Peer),
+        <<"peername">> => Peer,
         <<"path">> => trim_trailing_slash(cowboy_req:path(Req)),
         <<"host">> => cowboy_req:host(Req),
         <<"port">> => cowboy_req:port(Req),
@@ -547,7 +569,7 @@ orelse Method =:= <<"put">> ->
     Ctxt = maps:get(api_context, St),
     Path = [<<"request">>, <<"body">>],
     Bin = maps_utils:get_path(Path, Ctxt),
-    Enc = maps:get(encoding, St),
+    Enc = encoding(St),
     try
         Body = bondy_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
@@ -664,27 +686,34 @@ perform_action(
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
-    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], Ctxt0),
     RealmUri = maps:get(realm_uri, St1),
-    WampCtxt0 = #{
-        peer => Peer,
-        node => bondy_peer_service:mynode(),
-        subprotocol => {http, text, maps:get(encoding, St0)},
-        realm_uri => RealmUri,
-        timeout => T,
-        session => bondy_session:new(Peer, RealmUri, #{
-            roles => #{
-                caller => #{
-                    features => #{
-                        call_timeout => true,
-                        call_canceling => false,
-                        caller_identification => true,
-                        call_trustlevels => true,
-                        progressive_call_results => false
-                    }
+    Node = bondy_peer_service:mynode(),
+    Session0 = bondy_session:new(RealmUri, #{
+        roles => #{
+            caller => #{
+                features => #{
+                    call_timeout => true,
+                    call_canceling => false,
+                    caller_identification => true,
+                    call_trustlevels => true,
+                    progressive_call_results => false
                 }
             }
-        })
+        }
+    }),
+    SessionId = bondy_session:id(Session0),
+    TransportInfo = maps:get(transport_info, St1),
+    Peer = bondy_wamp_peer:new(RealmUri, Node, SessionId, TransportInfo),
+    Session1 = bondy_session:set_peer(Session0, Peer),
+    %% We do not update the session as it is transient
+
+    WampCtxt0 = #{
+        node => Node,
+        subprotocol => {http, text, encoding(St0)},
+        realm_uri => RealmUri,
+        timeout => T,
+        peer => Peer,
+        session => Session1
     },
 
     case bondy:call(P, Opts, A, Akw, WampCtxt0) of
@@ -990,10 +1019,10 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Tail = [
         TraceId,
         maps:get(realm_uri, St, undefined),
-        maps:get(encoding, St, undefined),
+        encoding(St, undefined),
         Method,
         Scheme,
-        Peername,
+        inet_utils:peername_to_binary(Peername),
         Path,
         %% Headers,
         QueryString,
