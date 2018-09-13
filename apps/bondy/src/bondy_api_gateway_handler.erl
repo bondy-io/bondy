@@ -90,7 +90,7 @@ init(Req, St0) ->
         api_context => init_context(Req),
         transport_info => #{
             connection_process => self(),
-            peername => cowboy_re:peer(Req),
+            peername => cowboy_req:peer(Req),
             encoding => undefined
         },
         session => Session
