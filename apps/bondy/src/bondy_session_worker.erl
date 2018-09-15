@@ -1,4 +1,4 @@
--module(bondy_session_queue_server).
+-module(bondy_session_worker).
 -behaviour(gen_server).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
@@ -16,6 +16,7 @@
 
 %% API
 -export([start_link/2]).
+-export([handle_incoming/3]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -42,6 +43,17 @@ start_link(SessionId, Peer) ->
         {via, gproc, {n, l, SessionId}}, ?MODULE, {SessionId, Peer}, []).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_incoming(pid() | id(), binary(), bondy_context:t()) ->
+    ok.
+
+handle_incoming(Server, Data, Ctxt) ->
+    gen_server:cast(Server, {incoming, Data, Ctxt}).
+
+
 
 %% =============================================================================
 %% GEN SERVER CALLBACKS
@@ -63,6 +75,16 @@ handle_call(Event, From, State) ->
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
     {noreply, State}.
 
+
+handle_cast({incoming, Data, Ctxt}, State) ->
+    Subproto = bondy_context:subprotocol(Ctxt),
+    try wamp_encoding:decode(Subproto, Data) of
+        {[M], <<>>} -> bondy_router:forward(M, Ctxt)
+    catch
+        _:Reason ->
+            lager:error("Error while decoding meesage; reason=~p", [Reason])
+    end,
+    {noreply, State};
 
 handle_cast(Event, State) ->
     _ = lager:error(
