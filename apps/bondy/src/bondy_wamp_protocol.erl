@@ -28,13 +28,10 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SHUTDOWN_TIMEOUT, 5000).
--define(IS_WAMP_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
 
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
-    transport               ::  module(),
-    socket                  ::  any() | undefined,
-    encoding                ::  encoding(),
+    transport_info          ::  bondy_wamp_peer:transport_info(),
     authmethod              ::  any(),
     state_name = closed     ::  state_name(),
     context                 ::  bondy_context:t() | undefined
@@ -68,7 +65,6 @@
 -export([handle_inbound/2]).
 -export([handle_outbound/2]).
 -export([terminate/1]).
--export([validate_subprotocol/1]).
 
 %% PRIVATE
 -export([closed/3]).
@@ -98,7 +94,7 @@
     ) -> {ok, state()} | {error, any(), state()}.
 
 init(Term, Pid, Peername, Opts) ->
-    case validate_subprotocol(Term) of
+    case wamp_subprotocol:validate(Term) of
         {ok, Subproto} ->
             do_init(Subproto, Pid, Peername, Opts);
         {error, Reason} ->
@@ -114,7 +110,7 @@ init(Term, Pid, Peername, Opts) ->
     {ok, state()} | {error, any(), state()}.
 
 init(Term, Pid, Transport, Socket, Opts) ->
-    case validate_subprotocol(Term) of
+    case wamp_subprotocol:validate(Term) of
         {ok, Subproto} ->
             do_init(Subproto, Pid, Transport, Socket, Opts);
         {error, Reason} ->
@@ -162,38 +158,6 @@ terminate(St) ->
     bondy_context:close(St#wamp_state.context).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec validate_subprotocol(binary() | subprotocol()) ->
-    {ok, subprotocol()} | {error, invalid_subprotocol}.
-
-validate_subprotocol(T) when is_binary(T) ->
-    validate_subprotocol(subprotocol(T));
-
-validate_subprotocol({ws, text, json} = S) ->
-    {ok, S};
-validate_subprotocol({ws, text, json_batched} = S) ->
-    {ok, S};
-validate_subprotocol({ws, binary, msgpack_batched} = S) ->
-    {ok, S};
-validate_subprotocol({ws, binary, bert_batched} = S) ->
-    {ok, S};
-validate_subprotocol({ws, binary, erl_batched} = S) ->
-    {ok, S};
-validate_subprotocol({raw, binary, json} = S) ->
-    {ok, S};
-validate_subprotocol({raw, binary, erl} = S) ->
-    {ok, S};
-validate_subprotocol({T, binary, msgpack} = S) when ?IS_WAMP_TRANSPORT(T) ->
-    {ok, S};
-validate_subprotocol({T, binary, bert} = S) when ?IS_WAMP_TRANSPORT(T) ->
-    {ok, S};
-validate_subprotocol({error, _} = Error) ->
-    Error;
-validate_subprotocol(_) ->
-    {error, invalid_subprotocol}.
 
 
 %% -----------------------------------------------------------------------------
@@ -330,17 +294,39 @@ failed(in, Data, St) ->
     | {stop, state_name(),state()}
     | {stop, state_name(), [binary()], state()}
     | {reply, state_name(), [binary()], state()}.
-%% INBOUND
 
-established(in, Data, St) ->
+%% INBOUND
+established(in, Data, St) when is_binary(Data) ->
     %% DO this in the session process (for calls)
     %% and spawn a process from there for all other messages
-    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
-        {Messages, <<>>} -> established(in, Messages, St, [])
+    Subproto = St#wamp_state.subprotocol,
+
+    try
+        case wamp_encoding:decode_message_name(Subproto, Data) of
+            Name when Name == call orelse
+            Name == register orelse
+            Name == goodbye ->
+                %% Serialise it to keep WAMP invocation order guarantee
+                {Messages, <<>>} = wamp_encoding:decode(Subproto, Data),
+                established(in, Messages, St, []);
+            _ ->
+                %% Handle asynchronously
+                case bondy_router:async_forward(Data, St#wamp_state.context) of
+                    {ok, Ctxt} ->
+                        {ok, established, update_context(Ctxt, St)};
+                    {reply, M, Ctxt} ->
+                        Bin = wamp_encoding:encode(M, encoding(St)),
+                        {reply, established, [Bin], update_context(Ctxt, St)};
+                    {stop, M, Ctxt} ->
+                        Bin = wamp_encoding:encode(M, encoding(St)),
+                        {stop, failed, [Bin], update_context(Ctxt, St)}
+                end
+        end
     catch
         _:Reason ->
             abort(Reason, St)
     end;
+
 
 %% OUTBOUND
 established(out, Bin, St) when is_binary(Bin) ->
@@ -430,7 +416,7 @@ closed(in, [#hello{realm_uri = Uri} = M|_], St0, _) ->
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
+    ok = bondy_stats:update({wamp_message, M, Ctxt0}),
 
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
@@ -519,6 +505,7 @@ challenging(_, [], St, Acc) ->
 
 challenging(in, [#authenticate{} = M|_], St, _) ->
     %% Client is responding to a challenge
+    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
 
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
 
@@ -601,7 +588,7 @@ established(
     [#authenticate{} = M|_],
     #wamp_state{context = #{session := _}} = St,
     Acc) ->
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
     %% Client already has a session so is already authenticated.
     Bin = abort_error_bin(
         ?WAMP_PROTOCOL_VIOLATION,
@@ -619,7 +606,7 @@ established(in, [#goodbye{}|_], St0, Acc) ->
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
     {stop, closed, lists:reverse([Bin|Acc]), St0};
 
-established(in, [H|T], #wamp_state{context = #{session := _}} = St, Acc) ->
+established(in, [H|T], St, Acc) ->
     %% We have a session, so we route the messages
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
@@ -727,6 +714,7 @@ open_session(St0) ->
 
         %% We open (store) a session
         _Session = bondy_session:open(Id, Peer, Uri, Details),
+        {ok, _} = bondy_session_queue_server:start_link(Id, Peer),
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
@@ -912,32 +900,20 @@ get_realm(St) ->
 %% =============================================================================
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec subprotocol(binary()) ->
-    bondy_wamp_protocol:subprotocol() | {error, invalid_subprotocol}.
-
-subprotocol(?WAMP2_JSON) ->                 {ws, text, json};
-subprotocol(?WAMP2_MSGPACK) ->              {ws, binary, msgpack};
-subprotocol(?WAMP2_JSON_BATCHED) ->         {ws, text, json_batched};
-subprotocol(?WAMP2_MSGPACK_BATCHED) ->      {ws, binary, msgpack_batched};
-subprotocol(?WAMP2_BERT) ->                 {ws, binary, bert};
-subprotocol(?WAMP2_ERL) ->                  {ws, binary, erl};
-subprotocol(?WAMP2_BERT_BATCHED) ->         {ws, binary, bert_batched};
-subprotocol(?WAMP2_ERL_BATCHED) ->          {ws, binary, erl_batched};
-subprotocol(_) ->                           {error, invalid_subprotocol}.
-
-
-
-
 %% @private
 encoding({_, _, E}) ->
     E;
 
 encoding(#wamp_state{subprotocol = Subprotocol}) ->
     encoding(Subprotocol).
+
+
+%% @private
+transport({T, _, _}) ->
+    T;
+transport(#wamp_state{subprotocol = Subprotocol}) ->
+
+    transport(Subprotocol).
 
 
 %% @private
@@ -950,23 +926,26 @@ do_init(Subproto, Pid, Peername, _Opts) ->
     Ctxt = bondy_context:new(Subproto, TransportInfo),
     State = #wamp_state{
         subprotocol = Subproto,
+        transport_info = TransportInfo,
         context = Ctxt
     },
     {ok, State}.
 
 
-do_init(Subproto, Pid, Transport, Socket, _Opts) ->
+do_init(Subproto, Pid, TransportMod, Socket, _Opts) ->
     {ok, Peername} = inet:peername(Socket),
     TransportInfo = #{
         peername => Peername,
         encoding => encoding(Subproto),
         connection_process => Pid,
-        transport => Transport,
+        transport => transport(Subproto),
+        transport_mod => TransportMod,
         socket => Socket
     },
     Ctxt = bondy_context:new(Subproto, TransportInfo),
     State = #wamp_state{
         subprotocol = Subproto,
+        transport_info = TransportInfo,
         context = Ctxt
     },
     {ok, State}.

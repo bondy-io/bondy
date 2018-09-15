@@ -525,7 +525,7 @@
   {datatype, bytesize}
 ]}.
 
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
+%% If on, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "wamp.tcp.nodelay", "bondy.wamp_tcp.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
@@ -535,7 +535,7 @@
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "wamp.tcp.backlog", "bondy.wamp_tcp.socket_opts.backlog", [
   {datatype, integer},
-  {default, 1024}
+  {default, 2048}
 ]}.
 
 

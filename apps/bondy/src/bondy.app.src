@@ -41,7 +41,6 @@
         cowboy,
         cuttlefish,
         erlang_term,
-        exometer_core,
         hackney,
         jose,
         jsx,

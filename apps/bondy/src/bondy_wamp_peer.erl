@@ -56,6 +56,12 @@
         required => false,
         allow_null => false,
         allow_undefined => true,
+        datatype => {in, [ws, raw, http]}
+    },
+    transport_mod => #{
+        required => false,
+        allow_null => false,
+        allow_undefined => true,
         datatype => atom
     },
     socket => #{
@@ -73,7 +79,8 @@
     pid                     ::  pid(), % connection pid
     peername                ::  {inet:ip_address(), non_neg_integer()},
     encoding                ::  encoding(),
-    transport               ::  module() | undefined,
+    transport               ::  transport() | http,
+    transport_mod           ::  module() | undefined,
     socket                  ::  any() | undefined
 }).
 
@@ -90,7 +97,8 @@
 -type remote()              ::  #bondy_remote_wamp_peer{}.
 -type transport_info()      ::  #{
     peername => {inet:ip_address(), non_neg_integer()},
-    module => module(),
+    transport => transport(),
+    transport_mod => module(),
     socket => any(),
     connection_process => pid(),
     peername => {inet:ip_address(), non_neg_integer()},
@@ -161,8 +169,6 @@ new(Realm, Node, SessionId, TransportInfo) when is_map(TransportInfo), is_intege
     #{
         peername := Peername,
         encoding := Encoding,
-        transport := Mod,
-        socket := Socket,
         connection_process := Pid
     } = validate_transport(TransportInfo, ?LOCAL_TRANSPORT_SPEC),
     #bondy_local_wamp_peer{
@@ -172,8 +178,9 @@ new(Realm, Node, SessionId, TransportInfo) when is_map(TransportInfo), is_intege
         pid = Pid,
         peername = Peername,
         encoding = Encoding,
-        transport = Mod,
-        socket = Socket
+        transport_mod = maps:get(transport_mod, TransportInfo, undefined),
+        transport = maps:get(transport, TransportInfo, undefined),
+        socket = maps:get(socket, TransportInfo, undefined)
     };
 
 new(Realm, Node, SessionId, Pid) when is_pid(Pid) orelse Pid =:= undefined ->
@@ -422,6 +429,29 @@ when Pid =:= self() ->
     %% so we will not get an ack, the ack is implicit
     ok;
 
+do_send(
+    #bondy_local_wamp_peer{
+        transport = raw, transport_mod = Mod, socket = Socket
+    } = Peer,
+    M, Opts)
+    when Mod /= undefined andalso
+    Socket /= undefined andalso
+    not is_record(M, goodbye) ->
+    %% We encode and send the message directly to the raw socket
+    %% unless it fails in which case we try to enqueue
+
+    Enc = Peer#bondy_local_wamp_peer.encoding,
+    Bin = wamp_encoding:encode(M, Enc),
+
+    case Mod:send(Socket, ?RAW_FRAME(Bin)) of
+        ok ->
+            ok;
+        {error, Reason} ->
+            Enqueue = maps:get(enqueue, Opts) andalso is_record(M, event),
+            SessionId =  Peer#bondy_local_wamp_peer.session_id,
+            maybe_enqueue(Enqueue, SessionId, M, {socket_error, Reason})
+    end;
+
 do_send(#bondy_local_wamp_peer{} = Peer, M, Opts) ->
     Pid = Peer#bondy_local_wamp_peer.pid,
     SessionId = Peer#bondy_local_wamp_peer.session_id,
@@ -478,7 +508,7 @@ maybe_enqueue(false, SessionId, M, Reason) ->
 %% @private
 validate_transport(Map0, Spec) ->
     Map1 = maps_utils:validate(Map0, Spec),
-    case maps:get(socket, Map1) of
+    case maps:get(socket, Map1, undefined) of
         undefined ->
             Map1;
         Socket ->

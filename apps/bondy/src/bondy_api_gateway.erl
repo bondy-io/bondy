@@ -757,13 +757,20 @@ transport_opts(Name) ->
     ].
 
 normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
+    Snd = lists:keyfind(sndbuf, 1, Opts),
+    Rcv = lists:keyfind(recbuf, 1, Opts),
+    case Snd =/= false andalso Rcv =/= false of
         true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            {sndbuf, Sndbuf} = Snd,
+            {recbuf, Recbuf} = Rcv,
+            Buffer0 = case  lists:keyfind(buffer, 1, Opts) of
+                {buffer, Val} ->
+                    Val;
+                false ->
+                    0
+            end,
             Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+            lists:keyreplace(buffer, 1, Opts, {buffer, Buffer1});
         false ->
             Opts
     end.

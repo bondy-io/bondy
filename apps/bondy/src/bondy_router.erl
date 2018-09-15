@@ -105,6 +105,7 @@
 %% API
 -export([close_context/1]).
 -export([forward/2]).
+-export([async_forward/2]).
 -export([handle_peer_message/1]).
 -export([roles/0]).
 -export([agent/0]).
@@ -190,8 +191,8 @@ agent() ->
 forward(M, #{session := _} = Ctxt0) ->
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
-    ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
-    do_forward(M, Ctxt1).
+    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
+    do_forward(M, Ctxt0).
 
 
 %% -----------------------------------------------------------------------------
@@ -331,6 +332,11 @@ do_forward(M, Ctxt) ->
 
 
 %% @private
+async_forward(Data, Ctxt0) when is_binary(Data) ->
+    Subproto = bondy_context:subprotocol(Ctxt0),
+    {[M], <<>>} = wamp_encoding:decode(Subproto, Data),
+    async_forward(M, Ctxt0);
+
 async_forward(M, Ctxt0) ->
     %% Client already has a session.
     %% RFC: By default, publications are unacknowledged, and the _Broker_ will

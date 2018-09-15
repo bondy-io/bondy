@@ -21,6 +21,55 @@
 %% =============================================================================
 %% @doc
 %% A ranch handler for the wamp protocol over either tcp or tls transports.
+%%
+%%                    +--------------------------+
+%%                    |                          |
+%%                    |                          |
+%%             +----->|  bondy_wamp_raw_handler  |-------+
+%%             |      |                          |       |
+%%             |      |                          |       |
+%%             |      +--------------------------+       |
+%%             |      |             ^                    |
+%%             |      |             |                    |
+%%             |      |             |   + - - - - - - - -|- - - - - - - - - - -
+%%             |      |             |    worker pool     |                     |
+%%             |     (1)            |   |                |
+%%             |      |            (2)                   |                     |
+%%             |      |             |   |                |
+%%             |      |             |                    |                     |
+%%             |      v             |   |                v
+%%     +---------------+            |        +-----------------------+         |
+%%     |               |            |   |    |                       + +
+%%     |               |            |        |                       | - +     |
+%%     |    gen_tcp    |<-----(3)---+---+----|        worker         | |
+%%     |               |                     |                       |   |     |
+%%     |               |                |    |                       | |
+%%     +---------------+                     +-----------------------+   |     |
+%%             ^                        |      + - - - - + - - - - - - +
+%%             |                                 + - - - + - - - - - - - +     |
+%%                                      |                |
+%%            (5)                                        |                     |
+%%                                      |                |
+%%             |                                         |                     |
+%%             |                        + - - - - - - - -|- - - - - - - - - - -
+%%             |                                         |
+%%             |                                         |
+%%             |                                         |
+%%             |      +--------------------------+       |
+%%             |      |                          |       |
+%%             |      |                          |       |
+%%             +------|   session_queue_server   |<--(4)-+
+%%                    |                          |
+%%                    |                          |
+%%                    +--------------------------+
+%%
+%%
+%%  1. TransportMod:send(Socket, Data)
+%%  2. send(Peer.connection_process, M) -> (1)
+%%  3. (Peer.transport_mod):send(Peer.socket, Data)
+%%  4. enqueue(Peer.socket, M)
+%%  5. (Peer.transport_mod):send(Peer.socket, Data)
+%%
 %% @end
 %% =============================================================================
 -module(bondy_wamp_raw_handler).
@@ -39,7 +88,7 @@
 -record(state, {
     socket                  ::  gen_tcp:socket(),
     peername                ::  binary(),
-    transport               ::  module(),
+    transport_mod           ::  module(),
     frame_type              ::  frame_type(),
     encoding                ::  atom(),
     max_len                 ::  pos_integer(),
@@ -47,13 +96,15 @@
     ping_attempts = 0       ::  non_neg_integer(),
     ping_max_attempts = 2   ::  non_neg_integer(),
     hibernate = false       ::  boolean(),
-    start_time_secs              ::  integer(),
+    start_time_secs         ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     buffer = <<>>           ::  binary()
 }).
 -type state() :: #state{}.
 
 
+
+%% API
 -export([start_link/4]).
 -export([start_listeners/0]).
 -export([suspend_listeners/0]).
@@ -64,6 +115,7 @@
 -export([tls_connections/0]).
 
 
+%% GEN_SERVER CALLBACKS
 -export([init/1]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
@@ -188,7 +240,7 @@ init({Ref, Socket, Transport, _Opts0}) ->
         start_time_secs = erlang:monotonic_time(second),
         socket = Socket,
         peername = inet_utils:peername_to_binary(Peername),
-        transport = Transport
+        transport_mod = Transport
     },
     ok = notify_socket_opened(St),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
@@ -202,7 +254,7 @@ handle_info(
     %% initate a session
     case handle_handshake(MaxLen, Encoding, St0) of
         {ok, St1} ->
-            (St1#state.transport):setopts(Socket, [{active, once}]),
+            (St1#state.transport_mod):setopts(Socket, [{active, once}]),
             {noreply, St1, ?TIMEOUT};
         {stop, Reason, St1} ->
             {stop, Reason, St1}
@@ -230,7 +282,7 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
     St1 = St0#state{buffer = <<>>},
     case handle_data(<<Buffer/binary, Data/binary>>, St1) of
         {ok, St2} ->
-            (St2#state.transport):setopts(Socket, [{active, once}]),
+            (St2#state.transport_mod):setopts(Socket, [{active, once}]),
             {noreply, St2, ?TIMEOUT};
         {stop, Reason, St2} ->
             ok = close_socket(Reason, St2),
@@ -521,11 +573,11 @@ handle_handshake(Len, Enc, St) ->
 init_wamp(Len, Enc, St0) ->
     MaxLen = validate_max_len(Len),
     Socket = St0#state.socket,
-    Transport = St0#state.transport,
+    Mod = St0#state.transport_mod,
     {FrameType, EncName} = validate_encoding(Enc),
 
     Proto = {raw, FrameType, EncName},
-    case bondy_wamp_protocol:init(Proto, self(), Transport, Socket, #{}) of
+    case bondy_wamp_protocol:init(Proto, self(), Mod, Socket, #{}) of
         {ok, CBState} ->
             St1 = St0#state{
                 frame_type = FrameType,
@@ -564,7 +616,7 @@ send(Bin, St) ->
 -spec send_frame(binary(), state()) -> ok | {error, any()}.
 
 send_frame(Frame, St) when is_binary(Frame) ->
-    (St#state.transport):send(St#state.socket, Frame).
+    (St#state.transport_mod):send(St#state.socket, Frame).
 
 
 %% @private
@@ -665,7 +717,7 @@ close_socket(shutdown, St)  ->
     socket_closed(false, St);
 
 close_socket(Reason, St) ->
-    ok = (St#state.transport):close(St#state.socket),
+    ok = (St#state.transport_mod):close(St#state.socket),
     _ = log(
     _ = log(error, <<"TCP Connection closed, reason=~p">>, [Reason], St),
     socket_closed(true, St).
@@ -737,13 +789,20 @@ transport_opts(Name) ->
 
 %% @private
 normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
+    Snd = lists:keyfind(sndbuf, 1, Opts),
+    Rcv = lists:keyfind(recbuf, 1, Opts),
+    case Snd =/= false andalso Rcv =/= false of
         true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            {sndbuf, Sndbuf} = Snd,
+            {recbuf, Recbuf} = Rcv,
+            Buffer0 = case  lists:keyfind(buffer, 1, Opts) of
+                {buffer, Val} ->
+                    Val;
+                false ->
+                    0
+            end,
             Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+            lists:keyreplace(buffer, 1, Opts, {buffer, Buffer1});
         false ->
             Opts
     end.

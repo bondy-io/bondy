@@ -40,6 +40,9 @@
 -include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(TRANSPORT, http).
+-define(SUBPROTOCOL(X), {?TRANSPORT, text, X}).
+
 -type state() :: #{
     api_spec => map(),
     api_context => map(),
@@ -48,8 +51,7 @@
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
-    transport_info => bondy_wamp_peer:transport_info(),
-    encoding => binary() | json | msgpack
+    transport_info => bondy_wamp_peer:transport_info()
 }.
 
 
@@ -91,7 +93,8 @@ init(Req, St0) ->
         transport_info => #{
             connection_process => self(),
             peername => cowboy_req:peer(Req),
-            encoding => undefined
+            encoding => undefined,
+            transport => http
         },
         session => Session
     },
@@ -213,7 +216,7 @@ delete_completed(Req, St) ->
 
 
 to_json(Req, St) ->
-    provide(Req, St#{encoding => json}).
+    provide(Req, set_encoding(json, St)).
 
 
 to_msgpack(Req, St) ->
@@ -709,7 +712,7 @@ perform_action(
 
     WampCtxt0 = #{
         node => Node,
-        subprotocol => {http, text, encoding(St0)},
+        subprotocol => ?SUBPROTOCOL(encoding(St0)),
         realm_uri => RealmUri,
         timeout => T,
         peer => Peer,
