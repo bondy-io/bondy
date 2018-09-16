@@ -175,8 +175,6 @@ handle_message(#publish{} = M, Ctxt) ->
             Reply = wamp_message:published(ReqId, PubId),
             ok = bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply),
             ok;
-        {ok, _} ->
-            ok;
         {error, not_authorized} when Acknowledge == true ->
             Reply = wamp_message:error(
                 ?PUBLISH, ReqId, #{}, ?WAMP_NOT_AUTHORIZED),
@@ -192,7 +190,7 @@ handle_message(#publish{} = M, Ctxt) ->
                 ErrorMap
             ),
             bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply);
-        {error, _} ->
+        _ ->
             ok
     end.
 
