@@ -66,9 +66,10 @@
 -define(REFRESH_TOKEN_LEN,
     element(2, lists:keyfind(refresh_token_length, 1, ?ENV))
 ).
--define(LEEWAY_SECS, 2*60). % 2mins
 
--define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
+-define(NOW, erlang:system_time(second)).
+-define(LEEWAY_MSECS, 2*60). % 2mins
+-define(EXPIRY_TIME_MSECS(Ts, MSecs), Ts + MSecs + ?LEEWAY_MSECS).
 
 
 %% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, RefreshToken} ->
@@ -199,11 +200,11 @@ lookup_token(RealmUri, Issuer, Token) ->
 %% @end
 %% -----------------------------------------------------------------------------
 refresh_token(RealmUri, Issuer, Token) ->
-    Now = erlang:system_time(seconds),
+    Now = ?NOW,
     Secs = ?REFRESH_TOKEN_TTL,
     case lookup_token(RealmUri, Issuer, Token) of
         #bondy_oauth2_token{issued_at = Ts}
-        when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
+        when ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now  ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
             {error, oauth2_invalid_grant};
@@ -222,12 +223,15 @@ refresh_token(RealmUri, Issuer, Token) ->
                     {error, oauth2_invalid_grant};
                 _ ->
                     %% Issue new tokens
+
+                    %% We revoke the prev refresh token first becuase this also
+                    %% deletes the client_device_id index, if we do it later we
+                    %% would be deleting the new client_device_id index
+                    ok = revoke_refresh_token(RealmUri, Issuer, Token),
                     case
                         do_issue_token(bondy_realm:fetch(RealmUri), Data0, true)
                     of
                         {ok, _, _, _} = OK ->
-                            %% We revoke the prev refresh token
-                            ok = revoke_refresh_token(RealmUri, Issuer, Token),
                             OK;
                         {error, _} = Error ->
                             Error
@@ -503,7 +507,7 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     Iss = Data0#bondy_oauth2_token.issuer,
     Sub = Data0#bondy_oauth2_token.username,
     Meta = Data0#bondy_oauth2_token.meta,
-    Now = erlang:system_time(seconds),
+    Now = ?NOW,
     Secs = ?PASSWORD_GRANT_TTL,
 
     %% We generate and sign the JWT
@@ -523,7 +527,7 @@ do_issue_token(Realm, Data0, RefreshTokenFlag) ->
     JWT = sign(Key, Claims),
     RefreshToken = maybe_issue_refresh_token(RefreshTokenFlag, Uri, Now, Data0),
     ok = bondy_cache:put(
-        Uri, JWT, Claims , #{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
+        Uri, JWT, Claims , #{exp => ?EXPIRY_TIME_MSECS(Now, Secs)}),
     {ok, JWT, RefreshToken, Claims}.
 
 
@@ -665,9 +669,9 @@ do_verify_jwt(JWT, Match) ->
 %% @private
 maybe_cache({ok, Claims} = OK, JWT) ->
     #{<<"aud">> := RealmUri, <<"exp">> := Secs} = Claims,
-    Now = erlang:system_time(seconds),
+    Now = ?NOW,
     ok = bondy_cache:put(
-        RealmUri, JWT, Claims , #{exp => ?EXPIRY_TIME_SECS(Now, Secs)}),
+        RealmUri, JWT, Claims , #{exp => ?EXPIRY_TIME_MSECS(Now, Secs)}),
     OK;
 
 maybe_cache(Error, _) ->
@@ -676,8 +680,8 @@ maybe_cache(Error, _) ->
 
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
-    Now = erlang:system_time(seconds),
-    case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
+    Now = ?NOW,
+    case ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now of
         true ->
             %% ok = bondy_cache:remove(RealmUri, JWT),
             {error, oauth2_invalid_grant};
