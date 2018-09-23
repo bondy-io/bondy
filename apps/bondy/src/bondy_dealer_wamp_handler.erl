@@ -200,10 +200,10 @@ list(RealmUri, Fun) ->
                 {ok, [Fun(E) || E <- Entries]}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -233,10 +233,10 @@ summary(RealmUri) ->
                 {ok, Map}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -252,10 +252,10 @@ get(RealmUri, RegId, Details) ->
                 {ok, bondy_registry_entry:to_details_map(Entry)}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -271,10 +271,10 @@ lookup(RealmUri, Uri, Opts) ->
                 {ok, bondy_registry_entry:id(hd(Entries))}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -290,10 +290,10 @@ match(RealmUri, Uri, Opts) ->
                 {ok, [bondy_registry_entry:id(E) || E <- Entries]}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -309,10 +309,10 @@ list_callees(RealmUri) ->
                 {ok, Callees}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -326,10 +326,10 @@ list_callees(RealmUri, ProcedureUri) ->
                 {ok, Callees}
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, erlang:get_stacktrace()]
+                [Reason, ?STACKTRACE(Stacktrace)]
             ),
             {error, Reason}
     end.
@@ -346,7 +346,7 @@ list_registration_callees(_RealmUri, _RegId) ->
     %%             {ok, Sessions}
     %%     end
     %% catch
-    %%     _:Reason ->
+    %%     ?EXCEPTION(_, Reason, Stacktrace) ->
     %%         {error, Reason}
     %% end.
     {error, not_implemented}.
@@ -361,7 +361,7 @@ count_callees(_RealmUri, _Uri) ->
     %%             {ok, length(Entries)}
     %%     end
     %% catch
-    %%     _:Reason ->
+    %%     ?EXCEPTION(_, Reason, Stacktrace) ->
     %%         {error, Reason}
     %% end.
     {error, not_implemented}.

@@ -99,9 +99,6 @@
 }).
 
 
--type event()       ::  {wamp_message(), bondy_context:t()}.
-
-
 %% API
 -export([close_context/1]).
 -export([forward/2]).
@@ -187,13 +184,48 @@ agent() ->
     | {reply, Reply :: wamp_message(), bondy_context:t()}
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
+forward(M, Ctxt) ->
+    ok = bondy_event_manager:notify({wamp, M, Ctxt}),
+    do_forward(M, Ctxt).
 
-forward(M, #{session := _} = Ctxt0) ->
-    %% Client has a session so this should be either a message
-    %% for broker or dealer roles
-    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
-    do_forward(M, Ctxt0).
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec async_forward(wamp_message() | binary(), bondy_context:t()) ->
+    {ok, bondy_context:t()}
+    | {reply, Reply :: wamp_message(), bondy_context:t()}
+    | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
+async_forward(M, Ctxt0) ->
+    %% Asynchronously forwards a message by either sending it to an
+    %% existing worker or spawning a new one depending on
+    %% bondy_broker_pool_type.
+    try bondy_router_worker:cast(fun() -> sync_forward(M, Ctxt0) end) of
+        ok ->
+            {ok, Ctxt0};
+        {error, overload} ->
+            _ = lager:info(
+                "Router pool overloaded, will route message synchronously; "
+                "message=~p", [M]
+            ),
+            %% @TODO publish metaevent and stats
+            %% @TODO use throttling and send error to caller conditionally
+            %% We do it synchronously i.e. blocking the caller
+            ok = sync_forward(M, Ctxt0),
+            {ok, Ctxt0}
+    catch
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
+            Ctxt = bondy_context:realm_uri(Ctxt0),
+            SessionId = bondy_context:session_id(Ctxt0),
+            _ = lager:error(
+                "Error while routing message; class=~p, reason=~p, message=~p"
+                " realm_uri=~p, session_id=~p, stacktrace=~p",
+                [Class, Reason, M, Ctxt, SessionId, ?STACKTRACE(Stacktrace)]
+            ),
+            %% TODO Maybe publish metaevent and stats
+            {ok, Ctxt0}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -250,12 +282,12 @@ handle_peer_message(#yield{} = M, Peer, From, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec acknowledge_message(map()) -> boolean().
-acknowledge_message(#publish{options = Opts}) ->
-    maps:get(acknowledge, Opts, false);
+%% -spec acknowledge_message(map()) -> boolean().
+%% acknowledge_message(#publish{options = Opts}) ->
+%%     maps:get(acknowledge, Opts, false);
 
-acknowledge_message(_) ->
-    false.
+%% acknowledge_message(_) ->
+%%     false.
 
 
 
@@ -279,29 +311,8 @@ do_forward(#register{} = M, Ctxt) ->
     %% before we reply here.
     %% At the moment this relies on Erlang's guaranteed causal delivery of
     %% messages between two processes even when in different nodes.
-
-    #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
-
-    Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
-        {ok, Map} ->
-            wamp_message:registered(ReqId, maps:get(id, Map));
-        {error, {not_authorized, Mssg}} ->
-            wamp_message:error(
-                ?REGISTER, ReqId,
-                #{},
-                ?WAMP_NOT_AUTHORIZED,
-                [Mssg]
-            );
-        {error, {procedure_already_exists, Mssg}} ->
-            wamp_message:error(
-                ?REGISTER,
-                ReqId,
-                #{},
-                ?WAMP_PROCEDURE_ALREADY_EXISTS,
-                [Mssg]
-            )
-    end,
-    {reply, Reply, Ctxt};
+    ok = sync_forward(M, Ctxt),
+    {ok, Ctxt};
 
 do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
     async_forward(M, Ctxt);
@@ -322,7 +333,7 @@ do_forward(#call{} = M, Ctxt0) ->
     %% to Procedure 2, and both calls are routed to Callee A, then Callee A
     %% will first receive an invocation corresponding to Call 1 and then Call
     %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
-    ok = sync_forward({M, Ctxt0}),
+    ok = sync_forward(M, Ctxt0),
     %% The invocation is always async and the result or error will be delivered
     %% asynchronously by the dealer.
     {ok, Ctxt0};
@@ -331,62 +342,6 @@ do_forward(M, Ctxt) ->
     async_forward(M, Ctxt).
 
 
-%% @private
-async_forward(Data, Ctxt0) when is_binary(Data) ->
-    Subproto = bondy_context:subprotocol(Ctxt0),
-    {[M], <<>>} = wamp_encoding:decode(Subproto, Data),
-    async_forward(M, Ctxt0);
-
-async_forward(M, Ctxt0) ->
-    %% Client already has a session.
-    %% RFC: By default, publications are unacknowledged, and the _Broker_ will
-    %% not respond, whether the publication was successful indeed or not.
-    %% This behavior can be changed with the option
-    %% "PUBLISH.Options.acknowledge|bool"
-    Acknowledge = acknowledge_message(M),
-    %% Asynchronously forwards a message by either sending it to an
-    %% existing worker or spawning a new one depending on
-    %% bondy_broker_pool_type.
-    Event = {M, Ctxt0},
-    try bondy_router_worker:cast(fun() -> sync_forward(Event) end) of
-        ok ->
-            {ok, Ctxt0};
-        {error, overload} ->
-            _ = lager:info(
-                "Router pool overloaded, will route message synchronously; "
-                "message=~p", [M]
-            ),
-            %% @TODO publish metaevent and stats
-            %% @TODO use throttling and send error to caller conditionally
-            %% We do it synchronously i.e. blocking the caller
-            ok = sync_forward(Event),
-            {ok, Ctxt0}
-    catch
-        ?EXCEPTION(error, Reason, _) when Acknowledge == true ->
-            %% TODO Maybe publish metaevent
-            %% REVIEW are we using the right error uri?
-            ErrorMap = bondy_error:map(Reason),
-            Reply = wamp_message:error(
-                ?UNSUBSCRIBE,
-                M#unsubscribe.request_id,
-                #{},
-                ?WAMP_CANCELLED,
-                [maps:get(<<"message">>, ErrorMap)],
-                #{error => ErrorMap}
-            ),
-            ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
-            {reply, Reply, Ctxt0};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
-            Ctxt = bondy_context:realm_uri(Ctxt0),
-            SessionId = bondy_context:session_id(Ctxt0),
-            _ = lager:error(
-                "Error while routing message; class=~p, reason=~p, message=~p"
-                " realm_uri=~p, session_id=~p, stacktrace=~p",
-                [Class, Reason, M, Ctxt, SessionId, ?STACKTRACE(Stacktrace)]
-            ),
-            %% TODO Maybe publish metaevent and stats
-            {ok, Ctxt0}
-    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -395,36 +350,41 @@ async_forward(M, Ctxt0) ->
 %% Synchronously forwards a message in the calling process.
 %% @end.
 %% -----------------------------------------------------------------------------
--spec sync_forward(event()) -> ok.
+-spec sync_forward(wamp_message() | binary(), bondy_context:t()) -> ok.
 
-sync_forward({#subscribe{} = M, Ctxt}) ->
+sync_forward(Data, Ctxt) when is_binary(Data) ->
+    Subproto = bondy_context:subprotocol(Ctxt),
+    {[M], <<>>} = wamp_encoding:decode(Subproto, Data),
+    sync_forward(M, Ctxt);
+
+sync_forward(#subscribe{} = M, Ctxt) ->
     bondy_broker:handle_message(M, Ctxt);
 
-sync_forward({#unsubscribe{} = M, Ctxt}) ->
+sync_forward(#unsubscribe{} = M, Ctxt) ->
     bondy_broker:handle_message(M, Ctxt);
 
-sync_forward({#publish{} = M, Ctxt}) ->
+sync_forward(#publish{} = M, Ctxt) ->
     bondy_broker:handle_message(M, Ctxt);
 
-sync_forward({#register{} = M, Ctxt}) ->
+sync_forward(#register{} = M, Ctxt) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({#unregister{} = M, Ctxt}) ->
+sync_forward(#unregister{} = M, Ctxt) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({#call{} = M, Ctxt}) ->
+sync_forward(#call{} = M, Ctxt) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({#cancel{} = M, Ctxt}) ->
+sync_forward(#cancel{} = M, Ctxt) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({#yield{} = M, Ctxt}) ->
+sync_forward(#yield{} = M, Ctxt) ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({#error{request_type = Type} = M, Ctxt})
+sync_forward(#error{request_type = Type} = M, Ctxt)
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
     bondy_dealer:handle_message(M, Ctxt);
 
-sync_forward({M, _Ctxt}) ->
+sync_forward(M, _Ctxt) ->
     error({unexpected_message, M}).
 

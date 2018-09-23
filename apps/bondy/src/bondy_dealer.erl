@@ -270,10 +270,10 @@ close_context(Ctxt) ->
         ok = bondy_rpc_promise:flush(bondy_context:peer(Ctxt)),
         Ctxt
     catch
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, erlang:get_stacktrace()]
+                [Class, Reason, ?STACKTRACE(Stacktrace)]
             ),
             Ctxt
     end.
@@ -305,6 +305,31 @@ is_feature_enabled(F) when is_binary(F) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+
+handle_message(#register{} = M, Ctxt) ->
+
+    #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
+
+    Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
+        {ok, Map} ->
+            wamp_message:registered(ReqId, maps:get(id, Map));
+        {error, {not_authorized, Mssg}} ->
+            wamp_message:error(
+                ?REGISTER, ReqId,
+                #{},
+                ?WAMP_NOT_AUTHORIZED,
+                [Mssg]
+            );
+        {error, {procedure_already_exists, Mssg}} ->
+            wamp_message:error(
+                ?REGISTER,
+                ReqId,
+                #{},
+                ?WAMP_PROCEDURE_ALREADY_EXISTS,
+                [Mssg]
+            )
+    end,
+    bondy_wamp_peer:send(bondy_context:peer(Ctxt), Reply);
 
 handle_message(#unregister{} = M, Ctxt) ->
     Reply = case unregister(M#unregister.registration_id, Ctxt) of
@@ -604,8 +629,10 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
             Promise = bondy_rpc_promise:new(
                 M#invocation.request_id, LocalCallee, Caller),
             Timeout = bondy_utils:timeout(Opts),
-
-            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
+            Fun = fun(_) ->
+                call_timeout(M, Timeout)
+            end,
+            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout, Fun),
             bondy_wamp_peer:send(Caller, LocalCallee, M, Opts)
     end.
 
@@ -1153,6 +1180,20 @@ unregister_error({not_authorized, Mssg}, M) ->
         M#unregister.request_id,
         #{},
         ?WAMP_NOT_AUTHORIZED,
+        [Mssg],
+        #{message => Mssg}
+    ).
+
+
+%% @private
+call_timeout(CallId, Timeout) ->
+    Mssg = iolist_to_binary(
+        <<"The call timeout after ", Timeout/integer, "msecs">>),
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        <<"wamp.error.timeout">>,
         [Mssg],
         #{message => Mssg}
     ).

@@ -4,6 +4,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(TIMEOUT, 20000).
+-define(NAME(Id), {n, l, Id}).
+-define(REF(Id), {via, gproc, ?NAME(Id)}).
 
 -record(state, {
     session_id      ::  id(),
@@ -12,11 +14,12 @@
     protocol_state  ::  bondy_wamp_protocol:state() | undefined
 }).
 
--type state()   ::  #state{}.
 
 %% API
 -export([start_link/2]).
 -export([handle_incoming/3]).
+-export([async_send/2]).
+-export([send/2]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -34,13 +37,13 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(SessionId, Peer) ->
-    gen_server:start_link(
-        {via, gproc, {n, l, SessionId}}, ?MODULE, {SessionId, Peer}, []).
+    gen_server:start_link(?REF(SessionId), ?MODULE, {SessionId, Peer}, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -50,8 +53,39 @@ start_link(SessionId, Peer) ->
 -spec handle_incoming(pid() | id(), binary(), bondy_context:t()) ->
     ok.
 
+handle_incoming(SessionId, Data, Ctxt) when is_integer(SessionId) ->
+    handle_incoming(?REF(SessionId), Data, Ctxt);
+
 handle_incoming(Server, Data, Ctxt) ->
     gen_server:cast(Server, {incoming, Data, Ctxt}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec async_send(pid() | id(), binary()) ->
+    ok.
+
+async_send(SessionId, Data) when is_integer(SessionId) ->
+    async_send(?REF(SessionId), Data);
+
+async_send(Server, Data) ->
+    gen_server:cast(Server, {send, Data}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec send(pid() | id(), binary()) ->
+    ok | {error, any()}.
+
+send(SessionId, Data) when is_integer(SessionId) ->
+    send(?REF(SessionId), Data);
+
+send(Server, Data) ->
+    gen_server:call(Server, {send, Data}).
 
 
 
@@ -70,6 +104,10 @@ init({SessionId, Peer}) ->
     {ok, St}.
 
 
+handle_call({send, Data}, _From, State) ->
+    Reply = do_send(Data, State),
+    {reply, Reply, State};
+
 handle_call(Event, From, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
@@ -86,25 +124,29 @@ handle_cast({incoming, Data, Ctxt}, State) ->
     end,
     {noreply, State};
 
+handle_cast({async_send, Data, _Ctxt}, State) ->
+    _ = do_send(Data, State),
+    {noreply, State};
+
 handle_cast(Event, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
 
-handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
-    %% Here we receive a message from the bondy_router in those cases
-    %% in which the router is embodied by our process i.e. the sync part
-    %% of a routing process, so we do not ack
-    handle_outbound(M, St);
+%% handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
+%%     %% Here we receive a message from the bondy_router in those cases
+%%     %% in which the router is embodied by our process i.e. the sync part
+%%     %% of a routing process, so we do not ack
+%%     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
-    %% Here we receive the messages that either the router or another peer
-    %% have sent to us using bondy_wamp_peer:send/2,3 which requires us to ack
-    %% its reception
-    ok = bondy_wamp_peer:ack(Pid, Ref),
-    %% We send the message to the peer
-    handle_outbound(M, St);
+%% handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
+%%     %% Here we receive the messages that either the router or another peer
+%%     %% have sent to us using bondy_wamp_peer:send/2,3 which requires us to ack
+%%     %% its reception
+%%     ok = bondy_wamp_peer:ack(Pid, Ref),
+%%     %% We send the message to the peer
+%%     handle_outbound(M, St);
 
 handle_info(Info, State) ->
     _ = lager:debug("Unexpected message, message=~p", [Info]),
@@ -126,26 +168,34 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
--spec handle_outbound(any(), state()) ->
-    {noreply, state(), timeout()}
-    | {stop, normal, state()}.
 
-handle_outbound(_M, St0) ->
-%%     case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
-%%         {reply, Bin, PSt} ->
-%%             St1 = St0#state{protocol_state = PSt},
-%%             ok = send(Bin, St1),
-%%             {noreply, St1, ?TIMEOUT};
-%%         {stop, PSt} ->
-%%             {stop, normal, St0#state{protocol_state = PSt}};
-%%         {stop, Bin, PSt} ->
-%%             ok = send(Bin, St0#state{protocol_state = PSt}),
-%%             {stop, normal, St0#state{protocol_state = PSt}};
-%%         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
-%%             %% We send ourselves a message to stop after Time
-%%             erlang:send_after(
-%%                 Time, self(), {stop, normal}),
-%%             ok = send(Bin, St0#state{protocol_state = PSt}),
-%%             {noreply, St0#state{protocol_state = PSt}}
-%%     end.
-    {noreply, St0}.
+%% @private
+do_send(Data, State) when is_binary(Data) ->
+    Peer = State#state.peer,
+    Socket = bondy_wamp_peer:socket(Peer),
+
+    %% Mod = bondy_wamp_peer:transport_mod(Peer),
+    %% case Mod:send(Socket, ?RAW_FRAME(Data)) of
+    %%     ok ->
+    %%         ok;
+    %%     {error, _} = Error ->
+    %%         Error
+    %% end.
+
+    try
+        case erlang:port_command(Socket, ?RAW_FRAME(Data), [nosuspend]) of
+            false ->
+                %% Port busy and nosuspend option passed
+                throw(busy);
+            true ->
+                receive
+                    {inet_reply, Socket, ok} ->
+                        ok;
+                    {inet_reply, Socket, Status} ->
+                        throw(Status)
+                end
+        end
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.

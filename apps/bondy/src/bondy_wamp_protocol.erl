@@ -30,11 +30,13 @@
 -define(SHUTDOWN_TIMEOUT, 5000).
 
 -record(wamp_state, {
-    subprotocol             ::  subprotocol() | undefined,
-    transport_info          ::  bondy_wamp_peer:transport_info(),
-    authmethod              ::  any(),
-    state_name = closed     ::  state_name(),
-    context                 ::  bondy_context:t() | undefined
+    subprotocol                     ::  subprotocol() | undefined,
+    transport_info                  ::  bondy_wamp_peer:transport_info(),
+    authmethod                      ::  any(),
+    state_name = closed             ::  state_name(),
+    context                         ::  bondy_context:t() | undefined,
+    session_worker                  ::  pid() | undefined,
+    invocation_ordering = true      ::  boolean()
 }).
 
 
@@ -302,26 +304,8 @@ established(in, Data, St) when is_binary(Data) ->
     Subproto = St#wamp_state.subprotocol,
 
     try
-        case wamp_encoding:decode_message_name(Subproto, Data) of
-            Name when Name == call orelse
-            Name == register orelse
-            Name == goodbye ->
-                %% Serialise it to keep WAMP invocation order guarantee
-                {Messages, <<>>} = wamp_encoding:decode(Subproto, Data),
-                established(in, Messages, St, []);
-            _ ->
-                %% Handle asynchronously
-                case bondy_router:async_forward(Data, St#wamp_state.context) of
-                    {ok, Ctxt} ->
-                        {ok, established, update_context(Ctxt, St)};
-                    {reply, M, Ctxt} ->
-                        Bin = wamp_encoding:encode(M, encoding(St)),
-                        {reply, established, [Bin], update_context(Ctxt, St)};
-                    {stop, M, Ctxt} ->
-                        Bin = wamp_encoding:encode(M, encoding(St)),
-                        {stop, failed, [Bin], update_context(Ctxt, St)}
-                end
-        end
+        Name = wamp_encoding:decode_message_name(Subproto, Data),
+        established(in, {Name, Data}, St, [])
     catch
         _:Reason ->
             abort(Reason, St)
@@ -345,6 +329,11 @@ established(out, #error{request_type = ?CALL} = M, St0) ->
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {reply, established, Bin, St1};
+
+established(out, {close, Reason}, St) ->
+    %% Bondy is shutting_down this session, due to a protocol error
+    %% found in the router
+    abort(Reason, St);
 
 established(out, #goodbye{} = M, St0) ->
     %% Bondy is shutting_down this session, we will stop when we
@@ -560,15 +549,76 @@ failed(_, _, State, _) ->
     | {stop, state_name(), [binary()], state()}
     | {reply, state_name(), [binary()], state()}.
 
-established(_, [], St, []) ->
-    %% We have no replies
-    {ok, established, St};
 
-established(_, [], St, Acc) ->
-    {reply, established, lists:reverse(Acc), St};
+established(in, {hello, Data}, St, Acc) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, Acc)
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end;
+
+established(in, {authenticate, Data}, St, Acc) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, Acc)
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end;
+
+established(in, {goodbye, Data}, St, Acc) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, Acc)
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end;
+
+
+%% established(
+%%     in, {call, Data}, #wamp_state{invocation_ordering = true} = St, Acc) ->
+%%     Ctxt0 = St#wamp_state.context,
+%%     Pid = St#wamp_state.session_worker,
+%%     ok = bondy_session_worker:handle_incoming(Pid, Data, Ctxt0),
+%%     established(in, [], St, Acc);
 
 established(
-    in, [#hello{} = M|_], #wamp_state{context = #{session := _}} = St0, Acc) ->
+    in, {call, Data}, #wamp_state{invocation_ordering = true} = St, Acc) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, Acc)
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end;
+
+%% established(in, {register, Data}, St, Acc) ->
+%%     Ctxt0 = St#wamp_state.context,
+%%     Pid = St#wamp_state.session_worker,
+%%     ok = bondy_session_worker:handle_incoming(Pid, Data, Ctxt0),
+%%     established(in, [], St, Acc);
+
+established(in, {register, Data}, St, Acc) ->
+    try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
+        {Messages, <<>>} -> established(in, Messages, St, Acc)
+    catch
+        _:Reason ->
+            abort(Reason, St)
+    end;
+
+established(in, {_Type, Data}, St, Acc) ->
+    Ctxt0 = St#wamp_state.context,
+    case bondy_router:async_forward(Data, Ctxt0) of
+        {ok, Ctxt1} ->
+            established(in, [], update_context(Ctxt1, St), Acc);
+        {reply, M, Ctxt1} ->
+            Bin = wamp_encoding:encode(M, encoding(St)),
+            established(in, [], update_context(Ctxt1, St), [Bin | Acc]);
+        {stop, M, Ctxt1} ->
+            Bin = wamp_encoding:encode(M, encoding(St)),
+            {stop, failed, [Bin | Acc], update_context(Ctxt1, St)}
+    end;
+
+established(in, [#hello{}|_], St0, Acc) ->
     %% Client already has a session!
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
@@ -583,12 +633,7 @@ established(
     ),
     {stop, failed, [Bin | Acc], St0};
 
-established(
-    in,
-    [#authenticate{} = M|_],
-    #wamp_state{context = #{session := _}} = St,
-    Acc) ->
-    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
+established(in, [#authenticate{}|_], St, Acc) ->
     %% Client already has a session so is already authenticated.
     Bin = abort_error_bin(
         ?WAMP_PROTOCOL_VIOLATION,
@@ -598,16 +643,24 @@ established(
     ),
     {stop, failed, [Bin | Acc], St};
 
-established(in, [#goodbye{}|_], St0, Acc) ->
+established(in, [#goodbye{} = M|_], St, Acc) ->
+    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
     %% Client initiated a goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = wamp_message:goodbye(
         #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
-    Bin = wamp_encoding:encode(Reply, encoding(St0)),
-    {stop, closed, lists:reverse([Bin|Acc]), St0};
+    Bin = wamp_encoding:encode(Reply, encoding(St)),
+    {stop, closed, lists:reverse([Bin|Acc]), St};
+
+established(_, [], St, []) ->
+    %% We have no replies
+    {ok, established, St};
+
+established(_, [], St, Acc) ->
+    {reply, established, lists:reverse(Acc), St};
 
 established(in, [H|T], St, Acc) ->
-    %% We have a session, so we route the messages
+    %% We route messages synchronously
     case bondy_router:forward(H, St#wamp_state.context) of
         {ok, Ctxt} ->
             established(in, T, update_context(Ctxt, St), Acc);
@@ -714,7 +767,10 @@ open_session(St0) ->
 
         %% We open (store) a session
         _Session = bondy_session:open(Id, Peer, Uri, Details),
-        {ok, _} = bondy_session_queue_server:start_link(Id, Peer),
+        %% We spawn link a session worker to serialise those messages which
+        %% require an ordering guarantee
+        {ok, Pid} = bondy_session_worker:start_link(Id, Peer),
+        St2 = St1#wamp_state{session_worker = Pid},
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
@@ -727,7 +783,7 @@ open_session(St0) ->
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
-        {reply, established, Bin, St1}
+        {reply, established, Bin, St2}
     catch
         ?EXCEPTION(error, {invalid_options, missing_client_role}, _) ->
             abort(
@@ -856,43 +912,6 @@ get_realm(St) ->
     end.
 
 
-%% do_async(NextState, Data, St) ->
-%%     Me = self(),
-%%     Ctxt0 = St#wamp_state.context,
-%%     Fun = fun() ->
-%%         try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
-%%             {Messages, <<>>} -> established(in, Messages, St, [])
-%%         catch
-%%             _:Reason ->
-%%                 abort(Reason, St)
-%%         end
-%%     end,
-
-%%     try bondy_router_worker:cast(Fun) of
-%%         ok ->
-%%             {ok, NextState, St};
-%%         {error, overload} ->
-%%             _ = lager:info(
-%%                 "Router pool overloaded, will route message synchronously; "
-%%                 "message=~p", [M]
-%%             ),
-%%             try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
-%%                 {Messages, <<>>} -> established(in, Messages, St, [])
-%%             catch
-%%                 _:Reason ->
-%%                     abort(Reason, St)
-%%             end
-%%     catch
-%%         Class:Reason ->
-%%             Uri = bondy_context:realm_uri(Ctxt0),
-%%             SessionId = bondy_context:session_id(Ctxt0),
-%%             _ = lager:error(
-%%                 "Error while handling data; class=~p, reason=~p"
-%%                 " realm_uri=~p, session_id=~p, stacktrace=~p",
-%%                 [Class, Reason, Uri, SessionId, erlang:get_stacktrace()]
-%%             ),
-%%             {ok, NextState, St}
-%%     end.
 
 
 %% =============================================================================

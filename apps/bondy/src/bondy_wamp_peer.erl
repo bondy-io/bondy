@@ -112,6 +112,7 @@
 -export_type([t/0]).
 
 -export([ack/2]).
+-export([encoding/1]).
 -export([is_local_connection_alive/1]).
 -export([is_local/1]).
 -export([is_peer/1]).
@@ -131,6 +132,7 @@
 -export([peername/1]).
 -export([to_remote/1]).
 -export([transport/1]).
+-export([transport_mod/1]).
 
 
 
@@ -262,6 +264,14 @@ node(#bondy_remote_wamp_peer{node = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+encoding(#bondy_local_wamp_peer{encoding = Val}) -> Val;
+encoding(#bondy_remote_wamp_peer{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 session_id(#bondy_local_wamp_peer{session_id = Val}) -> Val;
 session_id(#bondy_remote_wamp_peer{session_id = Val}) -> Val.
 
@@ -291,6 +301,14 @@ pid(#bondy_remote_wamp_peer{pid = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 transport(#bondy_local_wamp_peer{transport = Val}) -> Val;
 transport(#bondy_remote_wamp_peer{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+transport_mod(#bondy_local_wamp_peer{transport_mod = Val}) -> Val;
+transport_mod(#bondy_remote_wamp_peer{}) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -441,16 +459,54 @@ do_send(
     %% unless it fails in which case we try to enqueue
 
     Enc = Peer#bondy_local_wamp_peer.encoding,
-    Bin = wamp_encoding:encode(M, Enc),
+    SessionId =  Peer#bondy_local_wamp_peer.session_id,
+    Data = wamp_encoding:encode(M, Enc),
 
-    case Mod:send(Socket, ?RAW_FRAME(Bin)) of
+
+    case bondy_session_worker:send(SessionId, Data) of
         ok ->
             ok;
         {error, Reason} ->
             Enqueue = maps:get(enqueue, Opts) andalso is_record(M, event),
-            SessionId =  Peer#bondy_local_wamp_peer.session_id,
             maybe_enqueue(Enqueue, SessionId, M, {socket_error, Reason})
     end;
+
+    %% Alt 1
+    %% case Mod:send(Socket, ?RAW_FRAME(Data)) of
+    %%     ok ->
+    %%         ok;
+    %%     {error, Reason} ->
+    %%         Enqueue = maps:get(enqueue, Opts) andalso is_record(M, event),
+    %%         SessionId =  Peer#bondy_local_wamp_peer.session_id,
+    %%         maybe_enqueue(Enqueue, SessionId, M, {socket_error, Reason})
+    %% end;
+
+    %% Alt 2
+    %% try
+    %%     case erlang:port_command(Socket, ?RAW_FRAME(Data), [nosuspend]) of
+    %%         false ->
+    %%             %% Port busy and nosuspend option passed
+    %%             throw(busy);
+    %%         true ->
+    %%             receive
+    %%                 {inet_reply, Socket, ok} ->
+    %%                     ok;
+    %%                 {inet_reply, Socket, Status} ->
+    %%                     throw(Status)
+    %%             end
+    %%     end
+    %% catch
+    %%     throw:Reason ->
+    %%         Enqueue = maps:get(enqueue, Opts) andalso is_record(M, event),
+    %%         SessionId =  Peer#bondy_local_wamp_peer.session_id,
+    %%         maybe_enqueue(Enqueue, SessionId, M, {socket_error, Reason});
+    %%     error:_Error ->
+    %%         Reason = einval,
+    %%         Enqueue = maps:get(enqueue, Opts) andalso is_record(M, event),
+    %%         SessionId =  Peer#bondy_local_wamp_peer.session_id,
+    %%         maybe_enqueue(Enqueue, SessionId, M, {socket_error, Reason})
+    %% end;
+
 
 do_send(#bondy_local_wamp_peer{} = Peer, M, Opts) ->
     Pid = Peer#bondy_local_wamp_peer.pid,
@@ -461,7 +517,7 @@ do_send(#bondy_local_wamp_peer{} = Peer, M, Opts) ->
     %% the WAMP peer no longer exists?
     Enqueue = maps:get(enqueue, Opts),
 
-    MonitorRef = monitor(process, Pid),
+    MonitorRef = erlang:monitor(process, Pid),
 
     %% The following no longer applies, as the process should be local
     %% However, we keep it as it is still the right thing to do
@@ -482,11 +538,11 @@ do_send(#bondy_local_wamp_peer{} = Peer, M, Opts) ->
             maybe_enqueue(Enqueue, SessionId, M, Reason);
         {?BONDY_PEER_ACK, MonitorRef} ->
             %% The peer received the message and acked it using ack/2
-            true = demonitor(MonitorRef, [flush]),
+            true = erlang:demonitor(MonitorRef, [flush]),
             ok
     after
         Timeout ->
-            true = demonitor(MonitorRef, [flush]),
+            true = erlang:demonitor(MonitorRef, [flush]),
             maybe_enqueue(Enqueue, SessionId, M, timeout)
     end.
 
@@ -515,3 +571,5 @@ validate_transport(Map0, Spec) ->
             {ok, Peername} = inet:peername(Socket),
             maps:put(peername, Peername, Map1)
     end.
+
+

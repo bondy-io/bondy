@@ -16,6 +16,16 @@
 %%  limitations under the License.
 %% =============================================================================
 
+
+-ifdef(OTP_RELEASE). %% => OTP is 21 or higher
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(STACKTRACE(Stacktrace), Stacktrace).
+-else.
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(STACKTRACE(_), erlang:get_stacktrace()).
+-endif.
+
+
 -define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
 -define(BONDY_PRIV_REALM_URI, <<"com.leapsight.bondy.private">>).
 
