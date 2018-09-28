@@ -315,6 +315,7 @@ when is_function(Task, 2) orelse Task == undefined ->
                 Type, RealmUri, Node, SessionId, '_', '_'),
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [
+                {limit, 100},
                 {resolver, lww},
                 {allow_put, false},
                 {remove_tombstones, true}
