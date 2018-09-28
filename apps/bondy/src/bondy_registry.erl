@@ -47,10 +47,8 @@
 
 -define(PREFIX, registry).
 -define(FULLPREFIX(RealmUri), {?PREFIX, RealmUri}).
-
-
--define(SUBSCRIPTION_TABLE_NAME, bondy_subscription).
--define(REGISTRATION_TABLE_NAME, bondy_registration).
+-define(REGISTRATIONS_PREFIX(RealmUri), {registry_registrations, RealmUri}).
+-define(SUBSCRIPTIONS_PREFIX(RealmUri), {registry_subscriptions, RealmUri}).
 -define(SUBSCRIPTION_TRIE_NAME, bondy_subscription_trie).
 -define(REGISTRATION_TRIE_NAME, bondy_registration_trie).
 -define(MAX_LIMIT, 10000).
@@ -64,7 +62,7 @@
 -type eot()                 ::  ?EOT.
 -type continuation()        ::  {
     bondy_registry_entry:entry_type(),
-    any()
+    plum_db:continuation()
 }.
 
 
@@ -128,7 +126,16 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init() ->
-    gen_server:call(?MODULE, init_from_db, 10*60*1000).
+    case plum_db:prefix_type(?PREFIX) of
+        disk ->
+            Message = io_lib:format(
+                "Registry prefix ~p should be configured as ram or ram_disk in plum_db", [?PREFIX]
+            ),
+            exit(Message);
+        _ ->
+            gen_server:call(?MODULE, init_trie, 10*60*1000),
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -146,18 +153,17 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     Type = subscription,
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, undefined, Uri, Opts),
-    Tab = partition_table(Type, RealmUri),
 
-    case ets:match_object(Tab, Pattern) of
+    case plum_db:match(?SUBSCRIPTIONS_PREFIX(RealmUri), Pattern) of
         [] ->
             PeerId = {RealmUri, Node, undefined, Pid},
             RegId = bondy_utils:get_id(global),
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
-            %% We do not add to DB since that will broadcast the subscription
-            %% to other nodes
-            add_to_tuplespace(Entry);
+            %% REVIEW this  will broadcast the local subscription to other nodes
+            %% se we need to be sure not to duplicate events
+            do_add(Entry);
 
-        [Entry] ->
+        [{_, Entry}] ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
@@ -203,28 +209,37 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
-    %% Pattern = bondy_registry_entry:new(Type, PeerId, Uri, Options),
-    Pattern = case Type of
+    {Prefix, Pattern} = case Type of
         registration ->
             %% A session can register a procedure multiple times if
             %% shared_registration is enabled
             %% So we do not match SessionId
-            bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_');
+            {
+                ?REGISTRATIONS_PREFIX(RealmUri),
+                bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_')
+            };
+
         subscription ->
             {RealmUri, Node, SessionId, _} = PeerId,
-            bondy_registry_entry:pattern(
-                Type, RealmUri, Node, SessionId, Uri, '_')
+            {
+                ?SUBSCRIPTIONS_PREFIX(RealmUri),
+                bondy_registry_entry:pattern(
+                    Type, RealmUri, Node, SessionId, Uri, '_')
+            }
     end,
-    Tab = partition_table(Type, RealmUri),
 
-    case ets:match_object(Tab, Pattern) of
+    MatchOpts = [
+        {resolver, lww},
+        {remove_tombstones, true}
+    ],
+    case plum_db:match(Prefix, Pattern, MatchOpts) of
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
             Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
             do_add(Entry);
 
-        [Entry] when Type == subscription ->
+        [{_, Entry}] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
@@ -232,7 +247,7 @@ add(Type, Uri, Options, Ctxt) ->
             Map = bondy_registry_entry:to_details_map(Entry),
             {error, {already_exists, Map}};
 
-        [Entry | _] when Type == registration ->
+        [{_, Entry} | _] when Type == registration ->
             EOpts = bondy_registry_entry:options(Entry),
             SharedEnabled = bondy_context:is_feature_enabled(
                 Ctxt, callee, shared_registration),
@@ -298,10 +313,15 @@ when is_function(Task, 2) orelse Task == undefined ->
             Node = bondy_context:node(Ctxt),
             Pattern = bondy_registry_entry:pattern(
                 Type, RealmUri, Node, SessionId, '_', '_'),
-            Tab = partition_table(Type, RealmUri),
             MaybeFun = maybe_fun(Task, Ctxt),
-            do_remove_all(
-                ets:match_object(Tab, Pattern, 100), SessionId, MaybeFun)
+            MatchOpts = [
+                {resolver, lww},
+                {allow_put, false},
+                {remove_tombstones, true}
+            ],
+            Matches = plum_db:match(
+                full_prefix(Type, RealmUri), Pattern, MatchOpts),
+            do_remove_all(Matches, SessionId, MaybeFun)
     end;
 
 remove_all(_, _, _) ->
@@ -321,8 +341,14 @@ remove_all(_, _, _) ->
 remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, SessionId, '_', #{}),
-    Tab = partition_table(Type, RealmUri),
-    do_remove_all(ets:match_object(Tab, Pattern, 1), SessionId, undefined).
+    MatchOpts = [
+        {limit, 1},
+        {remove_tombstones, true},
+        {resolver, lww},
+        {allow_put, false}
+    ],
+    Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts),
+    do_remove_all(Matches, SessionId, undefined).
 
 
 %% -----------------------------------------------------------------------------
@@ -334,10 +360,10 @@ remove_all(Type, RealmUri, Node, SessionId) ->
 lookup(Key) ->
     Type = bondy_registry_entry:type(Key),
     RealmUri = bondy_registry_entry:realm_uri(Key),
-    case ets:lookup(partition_table(Type, RealmUri), Key) of
-        [] ->
+    case plum_db:get(full_prefix(Type, RealmUri), Key) of
+        undefined ->
             {error, not_found};
-        [Entry] ->
+        Entry ->
             Entry
     end.
 
@@ -357,10 +383,11 @@ lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
 lookup(Type, EntryId, RealmUri, Details) when is_integer(EntryId) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, EntryId, Details),
-    case ets:match_object(partition_table(Type, RealmUri), Pattern) of
+    MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
+    case plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts) of
         [] ->
             {error, not_found};
-        [Entry] ->
+        [{_, Entry}] ->
             Entry
     end.
 
@@ -372,10 +399,17 @@ lookup(Type, EntryId, RealmUri, Details) when is_integer(EntryId) ->
 -spec remove(bondy_registry_entry:t()) -> ok.
 
 remove(Entry) ->
-    Key = bondy_registry_entry:key(Entry),
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    _ = take_from_tuplespace(Key),
-    plum_db:delete(?FULLPREFIX(RealmUri), Key).
+    Key = bondy_registry_entry:key(Entry),
+    case plum_db:take(full_prefix(Entry), Key) of
+        undefined ->
+            ok;
+        {_, Entry} ->
+            Uri = bondy_registry_entry:uri(Entry),
+            ok = delete_from_trie(Entry),
+            _ = decr_counter(RealmUri, Uri, 1),
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -446,7 +480,9 @@ entries(Type, Ctxt) ->
 entries(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, SessionId, '_', #{}),
-    ets:match_object(partition_table(Type, RealmUri), Pattern).
+    Opts = [{remove_tombstones, true}, {resolver, lww}],
+    Matches = plum_db:match_object(full_prefix(Type, RealmUri), Pattern, Opts),
+    [V || {_, V} <- Matches].
 
 
 
@@ -469,7 +505,9 @@ entries(Type, RealmUri, Node, SessionId) ->
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, SessionId, '_', #{}),
-    ets:match_object(partition_table(Type, RealmUri), Pattern, Limit).
+    Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
+    Matches = plum_db:match_object(full_prefix(Type, RealmUri), Pattern, Opts),
+    [V || {_, V} <- Matches].
 
 
 
@@ -493,7 +531,7 @@ entries(?EOT) ->
     {[], ?EOT};
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
-    case ets:match_object(Cont) of
+    case plum_db:match_object(Cont) of
         ?EOT ->
             {[], ?EOT};
         {L, NewCont} ->
@@ -579,9 +617,9 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call(init_from_db, _From, State0) ->
-    _ = lager:info("Initialising registry from store."),
-    State = init_from_db(State0),
+handle_call(init_trie, _From, State0) ->
+    _ = lager:info("Initialising registry trie from store."),
+    State = init_trie(State0),
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
@@ -607,9 +645,9 @@ handle_info(
         false ->
             case maybe_resolve(Object) of
                 '$deleted' ->
-                    _ = take_from_tuplespace(Key);
+                    _ = delete_from_trie(Key);
                 Entry ->
-                    add_to_tuplespace(Entry)
+                    add_to_trie(Entry)
             end
     end,
     {noreply, State};
@@ -642,13 +680,16 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_from_db(State) ->
+init_trie(State0) ->
     Opts = [{resolver, lww}],
-    Iterator = plum_db:iterator({?PREFIX, undefined}, Opts),
-    init_from_db(Iterator, State).
+    Iterator0 = plum_db:iterator(?REGISTRATIONS_PREFIX('_'), Opts),
+    {ok, State1} = init_trie(Iterator0, State0),
+    Iterator1 = plum_db:iterator(?SUBSCRIPTIONS_PREFIX('_'), Opts),
+    init_trie(Iterator1, State1).
+
 
 %% @private
-init_from_db(Iterator, #state{start_time = Now} = State) ->
+init_trie(Iterator, #state{start_time = Now} = State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
             ok = plum_db:iterator_close(Iterator),
@@ -658,9 +699,9 @@ init_from_db(Iterator, #state{start_time = Now} = State) ->
                 {_, '$deleted'} ->
                     ok;
                 {_, Entry} ->
-                    maybe_add_to_tuplespace(Entry, Now)
+                    maybe_add_to_trie(Entry, Now)
             end,
-            init_from_db(plum_db:iterate(Iterator), State)
+            init_trie(plum_db:iterate(Iterator), State)
     end.
 
 
@@ -671,7 +712,7 @@ init_from_db(Iterator, #state{start_time = Now} = State) ->
 %% is restore from db to memory and that they are removed from the db.
 %% @end
 %% -----------------------------------------------------------------------------
-maybe_add_to_tuplespace(Entry, Now) ->
+maybe_add_to_trie(Entry, Now) ->
     MyNode = bondy_peer_service:mynode(),
     Node = bondy_registry_entry:node(Entry),
     Created = bondy_registry_entry:created(Entry),
@@ -681,40 +722,31 @@ maybe_add_to_tuplespace(Entry, Now) ->
             %% This entry should have been deleted when node crashed or shutdown
             _ = lager:debug(
                 "Removing stale entry from plum_db; entry=~p", [Entry]),
-            _ = remove(Entry),
+            _ = delete_from_trie(Entry),
             ok;
         false ->
-            _ = add_to_tuplespace(Entry),
+            _ = add_to_trie(Entry),
             ok
     end.
 
 
 %% @private
-take_from_tuplespace(Key) ->
-    RealmUri = bondy_registry_entry:realm_uri(Key),
-    Type = bondy_registry_entry:type(Key),
-    Tab = partition_table(Type, RealmUri),
-    %% We remove the entry from the registry space
-    case ets:take(Tab, Key) of
-        [] ->
-            {error, not_found};
-        [Entry] ->
-            %% We delete the entry from the registry trie
-            TrieKey = trie_key(Entry),
-            ok = case art_server:take(TrieKey, trie(Type)) of
-                {value, _} ->
-                    ok;
-                error ->
-                    _ = lager:debug(
-                        "Failed deleting element from trie; key=~p", [TrieKey]),
-                    ok
-            end,
+delete_from_trie(EntryOrKey) ->
+    RealmUri = bondy_registry_entry:realm_uri(EntryOrKey),
+    Type = bondy_registry_entry:type(EntryOrKey),
+    TrieKey = trie_key(EntryOrKey),
 
-            %% We decrement the Uri count
+    case art_server:take(TrieKey, trie(Type)) of
+        {value, Entry} ->
             Uri = bondy_registry_entry:uri(Entry),
-            decr_counter(Tab, {RealmUri, Uri}, 1),
-            {ok, Entry}
+            _ = decr_counter(RealmUri, Uri, 1),
+            ok;
+        error ->
+            _ = lager:debug(
+                "Failed deleting element from trie; key=~p", [TrieKey]),
+            ok
     end.
+
 
 
 %% @private
@@ -752,16 +784,16 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
 %% @private
 do_remove(Key, Ctxt, Task) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
-    case take_from_tuplespace(Key) of
-        {ok, Entry} ->
-            MaybeFun = maybe_fun(Task, Ctxt),
-            maybe_execute(MaybeFun, Entry);
-        {error, not_found} ->
-            ok
-    end,
+    Type = bondy_registry_entry:type(Key),
+    ok = delete_from_trie(Key),
     %% We delete the entry from plum_db. This will broadcast the delete
     %% amongst the nodes in the cluster
-    plum_db:delete(?FULLPREFIX(RealmUri), Key).
+    case plum_db:take(full_prefix(Type, RealmUri), Key) of
+        undefined ->
+            ok;
+        {_, Entry} ->
+            maybe_execute(maybe_fun(Task, Ctxt), Entry)
+    end.
 
 
 %% @private
@@ -772,31 +804,21 @@ do_remove_all({[], ?EOT}, _, _) ->
     ok;
 
 do_remove_all({[], Cont}, SessionId, Fun) ->
-    do_remove_all(ets:match(Cont), SessionId, Fun);
+    do_remove_all(plum_db:match(Cont), SessionId, Fun);
 
-do_remove_all({[Term|T], Cont}, SessionId, Fun) ->
-    Sid = bondy_registry_entry:session_id(Term),
+do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun) ->
+    Sid = bondy_registry_entry:session_id(Entry),
     case SessionId =:= Sid orelse SessionId == '_' of
         true ->
-            EntryKey = bondy_registry_entry:key(Term),
-            %% Term is entry_key
-            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-            case take_from_tuplespace(EntryKey) of
-                {ok, Term} ->
-                    %% We delete the entry from plum_db.
-                    %% This will broadcast the delete
-                    %% amongst the nodes in the cluster
-                    ok = plum_db:delete(?FULLPREFIX(RealmUri), EntryKey),
-                    %% Finally, we perform the Fun if any
-                    maybe_execute(Fun, Term);
-                {error, not_found} ->
-                    _ = lager:debug(
-                        "Failed deleting element from space; key=~p",
-                        [Term]
-                    ),
-                    ok
-            end,
-            %% We continue traversing the ets table
+            EntryKey = bondy_registry_entry:key(Entry),
+            ok = delete_from_trie(Entry),
+            %% We delete the entry from plum_db.
+            %% This will broadcast the delete
+            %% amongst the nodes in the cluster
+            ok = plum_db:delete(full_prefix(Entry), EntryKey),
+            %% Finally, we perform the Fun if any
+            ok = maybe_execute(Fun, Entry),
+            %% We continue traversing
             do_remove_all({T, Cont}, SessionId, Fun);
         false ->
             %% No longer our session
@@ -805,15 +827,17 @@ do_remove_all({[Term|T], Cont}, SessionId, Fun) ->
 
 
 %% @private
-incr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    ets:update_counter(Tab, Key, {3, N}, Default).
+incr_counter(RealmUri, Uri,  N) ->
+    Tab = tuplespace:locate_table(bondy_registry_state, RealmUri),
+    Default = {counter, Uri, 0},
+    ets:update_counter(Tab, Uri, {3, N}, Default).
 
 
 %% @private
-decr_counter(Tab, Key, N) ->
-    Default = {counter, Key, 0},
-    case ets:update_counter(Tab, Key, {3, -N, 0, 0}, Default) of
+decr_counter(RealmUri, Uri, N) ->
+    Tab = tuplespace:locate_table(bondy_registry_state, RealmUri),
+    Default = {counter, Uri, 0},
+    case ets:update_counter(Tab, Uri, {3, -N, 0, 0}, Default) of
         0 ->
             %% Other process might have concurrently incremented the count,
             %% so we do a match delete
@@ -829,13 +853,13 @@ decr_counter(Tab, Key, N) ->
 %% @doc Locates the tuplespace partition ets table name assigned to the Realm
 %% @end
 %% -----------------------------------------------------------------------------
--spec partition_table(bondy_registry_entry:entry_type(), uri() | undefined) ->
-    ets:tid().
-partition_table(subscription, RealmUri) ->
-    tuplespace:locate_table(?SUBSCRIPTION_TABLE_NAME, RealmUri);
+-spec prefix(bondy_registry_entry:entry_type(), uri() | '_') ->
+    term().
+prefix(subscription, RealmUri) ->
+    ?SUBSCRIPTIONS_PREFIX(RealmUri);
 
-partition_table(registration, RealmUri) ->
-    tuplespace:locate_table(?REGISTRATION_TABLE_NAME, RealmUri).
+prefix(registration, RealmUri) ->
+    ?REGISTRATIONS_PREFIX(RealmUri).
 
 
 %% @private
@@ -844,25 +868,21 @@ partition_table(registration, RealmUri) ->
 
 do_add(Entry) ->
     ok = add_to_db(Entry),
-    add_to_tuplespace(Entry).
+    add_to_trie(Entry).
 
 
 %% @private
-add_to_tuplespace(Entry) ->
+add_to_trie(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
     Type = bondy_registry_entry:type(Entry),
     EntryKey = bondy_registry_entry:key(Entry),
 
-    %% We insert the entry in tuplespace
-    SSTab = partition_table(Type, RealmUri),
-    true = ets:insert(SSTab, Entry),
-
     %% We add entry to the trie
     _ = art_server:set(trie_key(Entry), EntryKey, trie(Type)),
 
     Map = bondy_registry_entry:to_details_map(Entry),
-    IsFirstEntry = incr_counter(SSTab, {RealmUri, Uri}, 1) =:= 1,
+    IsFirstEntry = incr_counter(RealmUri, Uri, 1) =:= 1,
     {ok, Map, IsFirstEntry}.
 
 
@@ -871,23 +891,37 @@ add_to_db(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     %% We insert the entry in plum_db. This will broadcast the delete
     %% amongst the nodes in the cluster
+    Type = bondy_registry_entry:type(Entry),
     Key = bondy_registry_entry:key(Entry),
-    plum_db:put(?FULLPREFIX(RealmUri), Key, Entry).
+    plum_db:put(full_prefix(Type, RealmUri), Key, Entry).
 
 
 %% @private
+full_prefix(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Type = bondy_registry_entry:type(Entry),
+    full_prefix(Type, RealmUri).
+
+%% @private
+full_prefix(registration, RealmUri) -> ?REGISTRATIONS_PREFIX(RealmUri);
+full_prefix(subscription, RealmUri) -> ?SUBSCRIPTIONS_PREFIX(RealmUri).
+
 trie(registration) -> ?REGISTRATION_TRIE_NAME;
 trie(subscription) -> ?SUBSCRIPTION_TRIE_NAME.
 
 
--spec trie_key(bondy_registry_entry:t()) -> art:key().
-trie_key(Entry) ->
-    Policy = bondy_registry_entry:match_policy(Entry),
-    trie_key(Entry, Policy).
+-spec trie_key(bondy_registry_entry:t() | bondy_registry_entry:key()) ->
+    art:key().
+trie_key(EntryOrKey) ->
+    Policy = bondy_registry_entry:match_policy(EntryOrKey),
+    trie_key(EntryOrKey, Policy).
 
 
+%% @private
+-spec trie_key(
+    bondy_registry_entry:t() | bondy_registry_entry:key(), binary()) ->
+    art:key().
 
--spec trie_key(bondy_registry_entry:t(), binary()) -> art:key().
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Node = list_to_binary(atom_to_list(bondy_registry_entry:node(Entry))),
@@ -1000,10 +1034,10 @@ do_lookup_entries([], _, Acc) ->
 
 do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
     RealmUri = bondy_registry_entry:realm_uri(EntryKey),
-    case ets:lookup(partition_table(Type, RealmUri), EntryKey) of
-        [] ->
+    case plum_db:get(prefix(Type, RealmUri), EntryKey) of
+        undefined ->
             do_lookup_entries(T, Type, Acc);
-        [Entry] ->
+        Entry ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
 

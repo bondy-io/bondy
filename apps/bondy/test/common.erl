@@ -84,6 +84,31 @@
 ).
 
 -define(CONFIG, [
+    {plum_db, [
+        {store_open_retries_delay, 2000},
+        {store_open_retry_Limit, 30},
+        {data_exchange_timeout, 60000},
+        {hashtree_timer, 10000},
+        {partitions, 16},
+        {data_dir, "data"},
+        {prefixes, [
+            %% ram
+            {registry_registrations, ram},
+            {registry_subscriptions, ram},
+            %% ram_disk
+            {security, ram_disk},
+            {security_config, ram_disk},
+            {security_group_grants, ram_disk},
+            {security_groups, ram_disk},
+            {security_sources, ram_disk},
+            {security_status, ram_disk},
+            {security_user_grants, ram_disk},
+            {security_users, ram_disk},
+            %% disk
+            {api_gateway, disk},
+            {oauth2_refresh_tokens, disk}
+        ]}
+    ]},
 {lager,
     [{error_logger_hwm,100},
      {crash_log_count,5},
@@ -142,18 +167,14 @@
                named_table,public,
                {read_concurrency,true},
                {write_concurrency,true}]},
-          {bondy_subscription,
-              [ordered_set,
-               {keypos,2},
-               named_table,public,
-               {read_concurrency,true},
-               {write_concurrency,true}]},
-          {bondy_subscription_index,
-              [bag,
-               {keypos,2},
-               named_table,public,
-               {read_concurrency,true},
-               {write_concurrency,true}]},
+            {bondy_registry_state, [
+                set,
+                {keypos, 2},
+                named_table,
+                public,
+                {read_concurrency, true},
+                {write_concurrency, true}
+            ]},
           {bondy_registration,
               [ordered_set,
                {keypos,2},

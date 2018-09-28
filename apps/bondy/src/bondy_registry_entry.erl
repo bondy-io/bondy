@@ -35,7 +35,8 @@
     node                    ::  node(),
     session_id              ::  id() | '_' | undefined,   % the owner
     entry_id                ::  id() | '_',
-    type                    ::  entry_type()
+    type                    ::  entry_type(),
+    match_policy            ::  binary()
 }).
 
 
@@ -106,7 +107,8 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
         node = Node,
         session_id = SessionId,
         entry_id = RegId,
-        type = Type
+        type = Type,
+        match_policy = MatchPolicy
     },
     #entry{
         key = Key,
@@ -178,7 +180,8 @@ andalso (is_integer(EntryId) orelse EntryId == '_') ->
         node = Node,
         session_id = SessionId,
         entry_id = EntryId,
-        type = Type
+        type = Type,
+        match_policy = '_'
     }.
 
 
@@ -309,6 +312,7 @@ uri(#entry{uri = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_policy(t()) -> binary().
+match_policy(#entry_key{match_policy = Val}) -> Val;
 match_policy(#entry{match_policy = Val}) -> Val.
 
 

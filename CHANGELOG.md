@@ -1,5 +1,16 @@
 # CHANGELOG
 
+
+## 0.8.0
+
+This version introduces an incompatibility with previous versions data storage. If you want to upgrade an existing installation you will need to use the bondy_backup module's functions or the Admin Backup API.
+
+- Upgrade to plum_db 0.2.0 which introduces prefix types to determine which storage type to use with the following types supported: ram (ets-based storage), disk (leveledb) and ram_disk(ets and leveldb).
+    - Registry uses `ram` storage type
+    - All security resources use `ram_disk` storage type
+    - Api Gateway (specs) and OAuth2 tokens use `disk` storage type
+- Handling of migration in bondy_backup. To migrate from v0.7.1 perform a backup and then restore it on Bondy v0.7.2.
+
 ## 0.7.1
 - New Trie data structure for bondy_registry
     - Bondy now uses Leapsight's `art` library to implement the registry index structure use to match RPC calls and PubSub subscriptions. `art`  provides a single-writter, multi-reader Radix Trie following the Adaptive Radix Tree algorithm. The implementation uses one gen_server and one ets table per trie and currently supports WAMP `exact` and `prefix` matching strategies. `wildcard` matching support is on its way.

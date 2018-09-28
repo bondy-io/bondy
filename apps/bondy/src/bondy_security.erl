@@ -817,7 +817,7 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
 
     %% We only allow sources to be assigned to users, so don't check
     %% for valid group names
-    UnknownUsers = unknown_roles(Uri, UserList, user),
+    UnknownUsers = unknown_roles(UserList, ?USERS_PREFIX(RealmUri)),
 
     Valid = case UnknownUsers of
         [] ->
@@ -1501,6 +1501,10 @@ get_context(#{username := U, realm_uri := R}) ->
     get_context(R, U).
 
 
+full_prefix(user, RealmUri) -> ?USERS_PREFIX(RealmUri);
+full_prefix(group, RealmUri) -> ?GROUPS_PREFIX(RealmUri).
+
+
 accumulate_grants(RealmUri, Role, Type) ->
     %% The 'all' grants always apply
     All = lists:map(fun ({{_Role, Bucket}, Permissions}) ->
@@ -1514,16 +1518,20 @@ accumulate_grants([], Seen, Acc, _Type, _) ->
     {Acc, Seen};
 
 accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
-    Options = role_details(RealmUri, Role, Type),
+    FullPrefix = full_prefix(Type, RealmUri),
+    Options = role_details(FullPrefix, Role),
     Groups = [G || G <- lookup(?GROUPS, Options, []),
                         not lists:member(G, Seen),
                         group_exists(RealmUri, G)],
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
 
-    Grants = lists:map(fun ({{_Role, Bucket}, Permissions}) ->
-                               {{concat_role(Type, Role), Bucket}, Permissions}
-                       end, match_grants(RealmUri, {Role, '_'}, Type)),
+    Grants = lists:map(
+        fun ({{_Role, Bucket}, Permissions}) ->
+            {{concat_role(Type, Role), Bucket}, Permissions}
+        end,
+        match_grants(RealmUri, {Role, '_'}, Type)
+    ),
     accumulate_grants(Roles, NewSeen, [Grants|NewAcc], Type, RealmUri).
 
 
@@ -1595,7 +1603,7 @@ validate_groups_option(RealmUri, Options) ->
             %% Don't let the admin assign "all" as a container
             Groups = [to_lowercase_bin(G) || G <- L, G /= <<"all">>],
 
-            case unknown_roles(RealmUri, Groups, group) of
+            case unknown_roles(Groups, ?GROUPS_PREFIX(RealmUri)) of
                 [] ->
                     {ok, stash(?GROUPS, {?GROUPS, Groups},
                                Options)};
@@ -1758,56 +1766,55 @@ check_grant_blockers(UnknownRoles, NameOverlaps, {error, Error}) ->
 delete_group_from_roles(RealmUri, Groupname) ->
     %% delete the group out of any user or group's 'roles' option
     %% this is kind of a pain, as we have to iterate ALL roles
-    delete_group_from_roles(RealmUri, Groupname, ?USERS),
-    delete_group_from_roles(RealmUri, Groupname, ?GROUPS).
+    delete_group_from_roles(RealmUri, Groupname, user),
+    delete_group_from_roles(RealmUri, Groupname, group).
 
 delete_group_from_roles(RealmUri, Groupname, RoleType) ->
-    FP  = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
-    plum_db:fold(fun({_, [?TOMBSTONE]}, Acc) ->
-                                    Acc;
-                               ({Rolename, [Options]}, Acc) ->
-                                    case proplists:get_value(?GROUPS, Options) of
-                                        undefined ->
-                                            Acc;
-                                        Groups ->
-                                            case lists:member(Groupname,
-                                                              Groups) of
-                                                true ->
-                                                    NewGroups = lists:keystore(?GROUPS, 1, Options, {?GROUPS, Groups -- [Groupname]}),
-                                                    plum_db:put(
-                                                        FP, Rolename, NewGroups),
-                                                    Acc;
-                                                false ->
-                                                    Acc
-                                            end
-                                    end
-                            end, undefined,
-                            FP).
+    FP  = full_prefix(RoleType, RealmUri),
+    plum_db:fold(fun
+        ({_, [?TOMBSTONE]}, Acc) ->
+            Acc;
+        ({Rolename, [Options]}, Acc) ->
+            case proplists:get_value(?GROUPS, Options) of
+                undefined ->
+                    Acc;
+                Groups ->
+                    case lists:member(Groupname,
+                                        Groups) of
+                        true ->
+                            NewGroups = lists:keystore(?GROUPS, 1, Options, {?GROUPS, Groups -- [Groupname]}),
+                            plum_db:put(
+                                FP, Rolename, NewGroups),
+                            Acc;
+                        false ->
+                            Acc
+                    end
+            end
+        end,
+        undefined,
+        FP
+    ).
 
 
 delete_user_from_sources(RealmUri, Username) ->
     FP  = ?SOURCES_PREFIX(RealmUri),
-    plum_db:fold(fun({{User, _CIDR}=Key, _}, Acc)
-                                  when User == Username ->
-                                    plum_db:delete(FP, Key),
-                                    Acc;
-                               ({{_, _}, _}, Acc) ->
-                                    Acc
-                            end, [], FP).
+    plum_db:fold(fun
+        ({{User, _CIDR}=Key, _}, Acc) when User == Username ->
+            plum_db:delete(FP, Key),
+            Acc;
+        ({{_, _}, _}, Acc) ->
+            Acc
+        end,
+        [],
+        FP
+    ).
 
 %%%% Role identification functions
 
 %% Take a list of roles (users or groups) and return any that can't
 %% be found.
-unknown_roles(RealmUri, RoleList, user) ->
-    unknown_roles(RealmUri, RoleList, ?USERS);
-
-unknown_roles(RealmUri, RoleList, group) ->
-    unknown_roles(RealmUri, RoleList, ?GROUPS);
-
-unknown_roles(RealmUri, RoleList0, RoleType) ->
+unknown_roles(RoleList0, FullPrefix) ->
     RoleList = sets:to_list(sets:from_list(RoleList0)),
-    FP = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
     plum_db:fold(
         fun
             ({_, ['$deleted']}, Acc) ->
@@ -1816,13 +1823,13 @@ unknown_roles(RealmUri, RoleList0, RoleType) ->
                 Acc -- [Rolename]
         end,
         RoleList,
-        FP).
+        FullPrefix).
 
 user_details(RealmUri, U) ->
-    role_details(RealmUri, U, user).
+    role_details(?USERS_PREFIX(RealmUri), U).
 
 group_details(RealmUri, G) ->
-    role_details(RealmUri, G, group).
+    role_details(?GROUPS_PREFIX(RealmUri), G).
 
 is_prefixed(<<"user/", _Name/binary>>) ->
     true;
@@ -1841,14 +1848,14 @@ chop_name(Name) ->
 %% When we need to know whether a role name is a group or user (or
 %% both), use this
 role_type(RealmUri, <<"user/", Name/binary>>) ->
-    do_role_type(role_details(RealmUri, Name, user),
+    do_role_type(role_details(?USERS_PREFIX(RealmUri), Name),
               undefined);
 role_type(RealmUri, <<"group/", Name/binary>>) ->
     do_role_type(undefined,
-              role_details(RealmUri, Name, group));
+              role_details(?GROUPS_PREFIX(RealmUri), Name));
 role_type(RealmUri, Name) ->
-    do_role_type(role_details(RealmUri, Name, user),
-              role_details(RealmUri, Name, group)).
+    do_role_type(role_details(?USERS_PREFIX(RealmUri), Name),
+              role_details(?GROUPS_PREFIX(RealmUri), Name)).
 
 %% @private
 do_role_type(undefined, undefined) ->
@@ -1861,12 +1868,7 @@ do_role_type(_UserDetails, _GroupDetails) ->
     both.
 
 
-role_details(RealmUri, Rolename, user) ->
-    role_details(RealmUri, Rolename, ?USERS);
-role_details(RealmUri, Rolename, group) ->
-    role_details(RealmUri, Rolename, ?GROUPS);
-role_details(RealmUri, Rolename, RoleType) ->
-    FullPrefix = ?FULL_PREFIX(RealmUri, <<"security">>, RoleType),
+role_details(FullPrefix, Rolename) ->
     plum_db:get(FullPrefix, to_lowercase_bin(Rolename)).
 
 user_exists(RealmUri, Username) ->
@@ -1875,12 +1877,9 @@ user_exists(RealmUri, Username) ->
 group_exists(RealmUri, Groupname) ->
     role_exists(RealmUri, Groupname, group).
 
-role_exists(RealmUri, Rolename, user) ->
-    role_exists(RealmUri, Rolename, ?USERS);
-role_exists(RealmUri, Rolename, group) ->
-    role_exists(RealmUri, Rolename, ?GROUPS);
 role_exists(RealmUri, Rolename, RoleType) ->
-    case role_details(RealmUri, Rolename, RoleType) of
+    FullPrefix = full_prefix(RoleType, RealmUri),
+    case role_details(FullPrefix, Rolename) of
         undefined ->
             false;
         _ ->
