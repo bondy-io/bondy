@@ -82,7 +82,7 @@
 
 -define(REFRESH_TOKENS_PREFIX(Realm, Issuer, Sub),
     {oauth2_refresh_tokens,
-        <<Realm/binary, $,, Issuer/binary, $,, Issuer/binary>>}
+        <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
 ).
 
 
