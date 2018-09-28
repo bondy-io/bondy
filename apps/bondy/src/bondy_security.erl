@@ -73,30 +73,14 @@
 %% Note that Buckets are not buckets,
 %% these are the "resources" or assets being protected
 
--define(FULL_PREFIX(RealmUri, A, B),
-    {<<RealmUri/binary, $., A/binary>>, B}
-).
--define(USERS_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, ?USERS)
-).
--define(GROUPS_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, ?GROUPS)
-).
--define(SOURCES_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, <<"sources">>)
-).
--define(USER_GRANTS_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, <<"usergrants">>)
-).
--define(GROUP_GRANTS_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, <<"groupgrants">>)
-).
--define(STATUS_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, <<"status">>)
-).
--define(CONFIG_PREFIX(RealmUri),
-    ?FULL_PREFIX(RealmUri, <<"security">>, <<"config">>)
-).
+-define(USERS_PREFIX(RealmUri),         {security_users, RealmUri}).
+-define(GROUPS_PREFIX(RealmUri),        {security_groups, RealmUri}).
+-define(SOURCES_PREFIX(RealmUri),       {security_sources, RealmUri}).
+-define(USER_GRANTS_PREFIX(RealmUri),   {security_user_grants, RealmUri}).
+-define(GROUP_GRANTS_PREFIX(RealmUri),  {security_group_grants, RealmUri}).
+-define(STATUS_PREFIX(RealmUri),        {security_status, RealmUri}).
+-define(CONFIG_PREFIX(RealmUri),        {security_config, RealmUri}).
+
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 -type uri() :: binary() | string().

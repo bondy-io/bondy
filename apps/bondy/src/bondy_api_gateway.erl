@@ -28,7 +28,7 @@
 
 
 
--define(PREFIX, {global, api_specs}).
+-define(PREFIX, {api_gateway, api_specs}).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).

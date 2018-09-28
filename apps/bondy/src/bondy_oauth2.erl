@@ -77,11 +77,12 @@
 %% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, Sub} ->
 %% #bondy_oauth2_token{}
 -define(REFRESH_TOKENS_PREFIX(Realm, IssuerOrSub),
-    {<<Realm/binary, $., IssuerOrSub/binary>>, <<"refresh_tokens">>}
+    {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>}
 ).
 
 -define(REFRESH_TOKENS_PREFIX(Realm, Issuer, Sub),
-    {<<Realm/binary, $., Issuer/binary, $., Sub/binary>>, <<"refresh_tokens">>}
+    {oauth2_refresh_tokens,
+        <<Realm/binary, $,, Issuer/binary, $,, Issuer/binary>>}
 ).
 
 
