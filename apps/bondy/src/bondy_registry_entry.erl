@@ -35,8 +35,7 @@
     node                    ::  node(),
     session_id              ::  id() | '_' | undefined,   % the owner
     entry_id                ::  id() | '_',
-    type                    ::  entry_type(),
-    match_policy            ::  binary()
+    type                    ::  entry_type()
 }).
 
 
@@ -107,8 +106,7 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
         node = Node,
         session_id = SessionId,
         entry_id = RegId,
-        type = Type,
-        match_policy = MatchPolicy
+        type = Type
     },
     #entry{
         key = Key,
@@ -180,8 +178,7 @@ andalso (is_integer(EntryId) orelse EntryId == '_') ->
         node = Node,
         session_id = SessionId,
         entry_id = EntryId,
-        type = Type,
-        match_policy = '_'
+        type = Type
     }.
 
 
@@ -275,7 +272,7 @@ peer_id(#entry{key = Key} = Entry) ->
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec id(t() | entry_key()) -> id().
+-spec id(t() | entry_key()) -> id() | '_'.
 id(#entry{key = Key}) ->
     Key#entry_key.entry_id;
 
@@ -312,7 +309,6 @@ uri(#entry{uri = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_policy(t()) -> binary().
-match_policy(#entry_key{match_policy = Val}) -> Val;
 match_policy(#entry{match_policy = Val}) -> Val.
 
 

@@ -151,10 +151,15 @@ init() ->
 add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     Node = bondy_peer_service:mynode(),
     Type = subscription,
+
     Pattern = bondy_registry_entry:pattern(
         Type, RealmUri, Node, undefined, Uri, Opts),
+    TrieKey = trie_key(Pattern),
+    Trie = trie(Type),
 
-    case plum_db:match(?SUBSCRIPTIONS_PREFIX(RealmUri), Pattern) of
+    %% TODO us trie to find exising subscriptions
+
+    case art_server:match(TrieKey, Trie) of
         [] ->
             PeerId = {RealmUri, Node, undefined, Pid},
             RegId = bondy_utils:get_id(global),
@@ -209,30 +214,23 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 add(Type, Uri, Options, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     PeerId = bondy_context:peer_id(Ctxt),
-    {Prefix, Pattern} = case Type of
+    {RealmUri, Node, SessionId, _} = PeerId,
+    Pattern = case Type of
         registration ->
             %% A session can register a procedure multiple times if
             %% shared_registration is enabled
             %% So we do not match SessionId
-            {
-                ?REGISTRATIONS_PREFIX(RealmUri),
-                bondy_registry_entry:pattern(Type, RealmUri, '_', '_', Uri, '_')
-            };
+            bondy_registry_entry:pattern(
+                Type, RealmUri, '_', '_', Uri, Options);
 
         subscription ->
-            {RealmUri, Node, SessionId, _} = PeerId,
-            {
-                ?SUBSCRIPTIONS_PREFIX(RealmUri),
-                bondy_registry_entry:pattern(
-                    Type, RealmUri, Node, SessionId, Uri, '_')
-            }
+            bondy_registry_entry:pattern(
+                    Type, RealmUri, Node, SessionId, Uri, Options)
     end,
+    TrieKey = trie_key(Pattern),
+    Trie = trie(Type),
 
-    MatchOpts = [
-        {resolver, lww},
-        {remove_tombstones, true}
-    ],
-    case plum_db:match(Prefix, Pattern, MatchOpts) of
+    case art_server:match(TrieKey, Trie) of
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
@@ -253,7 +251,6 @@ add(Type, Uri, Options, Ctxt) ->
                 Ctxt, callee, shared_registration),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-            %% for an URI.
             %% Shared Registration (RFC 13.3.9)
             %% When shared registrations are supported, then the first
             %% Callee to register a procedure for a particular URI
@@ -285,8 +282,7 @@ add(Type, Uri, Options, Ctxt) ->
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove_all(bondy_registry_entry:entry_type(), bondy_context:t()) ->
-    ok.
+-spec remove_all(bondy_registry_entry:entry_type(), bondy_context:t()) -> ok.
 
 remove_all(Type, Ctxt) ->
     remove_all(Type, Ctxt, undefined).
@@ -311,8 +307,8 @@ when is_function(Task, 2) orelse Task == undefined ->
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
-            Pattern = bondy_registry_entry:pattern(
-                Type, RealmUri, Node, SessionId, '_', '_'),
+            Pattern = bondy_registry_entry:key_pattern(
+                Type, RealmUri, Node, SessionId, '_'),
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [
                 {limit, 100},
@@ -330,7 +326,8 @@ remove_all(_, _, _) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes all registry entries of type Type, for a {RealmUri, Node
+%% SessionId} relation.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove_all(
@@ -340,10 +337,10 @@ remove_all(_, _, _) ->
     SessionId :: id()) -> [bondy_registry_entry:t()].
 
 remove_all(Type, RealmUri, Node, SessionId) ->
-    Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, Node, SessionId, '_', #{}),
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, Node, SessionId, '_'),
     MatchOpts = [
-        {limit, 1},
+        {limit, 100},
         {remove_tombstones, true},
         {resolver, lww},
         {allow_put, false}
@@ -381,10 +378,11 @@ lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-lookup(Type, EntryId, RealmUri, Details) when is_integer(EntryId) ->
-    Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, EntryId, Details),
+lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, '_', '_', EntryId),
     MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
+    %% TODO match Details
     case plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts) of
         [] ->
             {error, not_found};
@@ -479,10 +477,10 @@ entries(Type, Ctxt) ->
     SessionId :: id()) -> [bondy_registry_entry:t()].
 
 entries(Type, RealmUri, Node, SessionId) ->
-    Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, Node, SessionId, '_', #{}),
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, Node, SessionId, '_'),
     Opts = [{remove_tombstones, true}, {resolver, lww}],
-    Matches = plum_db:match_object(full_prefix(Type, RealmUri), Pattern, Opts),
+    Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts),
     [V || {_, V} <- Matches].
 
 
@@ -504,10 +502,10 @@ entries(Type, RealmUri, Node, SessionId) ->
     {[bondy_registry_entry:t()], continuation() | eot()}.
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
-    Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, Node, SessionId, '_', #{}),
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, Node, SessionId, '_'),
     Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
-    Matches = plum_db:match_object(full_prefix(Type, RealmUri), Pattern, Opts),
+    Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts),
     [V || {_, V} <- Matches].
 
 
@@ -532,11 +530,11 @@ entries(?EOT) ->
     {[], ?EOT};
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
-    case plum_db:match_object(Cont) of
+    case plum_db:match(Cont) of
         ?EOT ->
             {[], ?EOT};
         {L, NewCont} ->
-            {L, {Type, NewCont}}
+            {[V || {_, V} <- L], {Type, NewCont}}
     end.
 
 
@@ -612,7 +610,16 @@ init([]) ->
 
     %% We subscribe to change notifications in plum_db_events. We get updates
     %% in handle_info so that we can we recompile the Cowboy dispatch tables
-    MS = [{ {{{?PREFIX, '_'}, '_'}, '_'}, [], [true] }],
+    MS = [{
+        {{{'$1', '_'}, '_'}, '_'},
+        [
+            {'orelse',
+                {'=:=', {const, registry_registrations}, '$1'},
+                {'=:=', {const, registry_subscriptions}, '$1'}
+            }
+        ],
+        [true]
+    }],
     ok = plum_db_events:subscribe(object_update, MS),
 
     {ok, #state{}}.
@@ -636,7 +643,8 @@ handle_cast(Event, State) ->
 
 
 handle_info(
-    {plum_db_event, object_update, {{{registry, _}, Key}, Object}}, State) ->
+    {plum_db_event, object_update, {{{_, _}, Key}, Obj, PrevObj}},
+    State) ->
     Node = bondy_registry_entry:node(Key),
     _ = case Node =:= bondy_peer_service:mynode() of
         true ->
@@ -644,9 +652,15 @@ handle_info(
             %% registrations. We do nothing.
             ok;
         false ->
-            case maybe_resolve(Object) of
+            case maybe_resolve(Obj) of
                 '$deleted' ->
-                    _ = delete_from_trie(Key);
+                    %% We do this since we need to know the Match Policy of the
+                    %% entry in order to generate the trie key and we want to
+                    %% avoid including yet another element to the entry_key
+                    Reconciled = plum_db_object:resolve(PrevObj, lww),
+                    OldEntry = plum_db_object:value(Reconciled),
+                    %% This works because registry entries are immutable
+                    _ = delete_from_trie(OldEntry);
                 Entry ->
                     add_to_trie(Entry)
             end
@@ -732,13 +746,15 @@ maybe_add_to_trie(Entry, Now) ->
 
 
 %% @private
-delete_from_trie(EntryOrKey) ->
-    RealmUri = bondy_registry_entry:realm_uri(EntryOrKey),
-    Type = bondy_registry_entry:type(EntryOrKey),
-    TrieKey = trie_key(EntryOrKey),
+delete_from_trie(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Type = bondy_registry_entry:type(Entry),
+    EntryKey = bondy_registry_entry:key(Entry),
+    TrieKey = trie_key(Entry),
 
     case art_server:take(TrieKey, trie(Type)) of
-        {value, Entry} ->
+        {value, EntryKey} ->
+            %% Entry should match because entries are immutable
             Uri = bondy_registry_entry:uri(Entry),
             _ = decr_counter(RealmUri, Uri, 1),
             ok;
@@ -786,13 +802,13 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
 do_remove(Key, Ctxt, Task) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Type = bondy_registry_entry:type(Key),
-    ok = delete_from_trie(Key),
     %% We delete the entry from plum_db. This will broadcast the delete
     %% amongst the nodes in the cluster
     case plum_db:take(full_prefix(Type, RealmUri), Key) of
         undefined ->
             ok;
         {_, Entry} ->
+            ok = delete_from_trie(Entry),
             maybe_execute(maybe_fun(Task, Ctxt), Entry)
     end.
 
@@ -913,9 +929,9 @@ trie(subscription) -> ?SUBSCRIPTION_TRIE_NAME.
 
 -spec trie_key(bondy_registry_entry:t() | bondy_registry_entry:key()) ->
     art:key().
-trie_key(EntryOrKey) ->
-    Policy = bondy_registry_entry:match_policy(EntryOrKey),
-    trie_key(EntryOrKey, Policy).
+trie_key(Entry) ->
+    Policy = bondy_registry_entry:match_policy(Entry),
+    trie_key(Entry, Policy).
 
 
 %% @private
@@ -927,10 +943,24 @@ trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Node = list_to_binary(atom_to_list(bondy_registry_entry:node(Entry))),
     SessionId = case bondy_registry_entry:session_id(Entry) of
-        undefined -> <<"undefined">>;
-        N -> integer_to_binary(N)
+        '_' ->
+            <<>>;
+        undefined ->
+            <<"undefined">>;
+        X ->
+            integer_to_binary(X)
     end,
-    Id = integer_to_binary(bondy_registry_entry:id(Entry)),
+    Id = case bondy_registry_entry:id(Entry) of
+        '_' ->
+            %% This will act as a pattern
+            <<>>;
+        _ when SessionId == <<>> ->
+            %% As we currently do not support wilcard matching in art, we turn
+            %% this into a prefix matching query
+            <<>>;
+        Y ->
+            integer_to_binary(Y)
+    end,
     Uri = bondy_registry_entry:uri(Entry),
 
     %% art uses $\31 for separating the suffixes of the key so we cannot

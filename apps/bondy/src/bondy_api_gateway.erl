@@ -319,7 +319,7 @@ handle_info(
     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
 
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables
