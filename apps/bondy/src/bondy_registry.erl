@@ -51,6 +51,7 @@
 -define(SUBSCRIPTIONS_PREFIX(RealmUri), {registry_subscriptions, RealmUri}).
 -define(SUBSCRIPTION_TRIE_NAME, bondy_subscription_trie).
 -define(REGISTRATION_TRIE_NAME, bondy_registration_trie).
+-define(TRIES, [?SUBSCRIPTION_TRIE_NAME, ?REGISTRATION_TRIE_NAME]).
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
@@ -82,6 +83,8 @@
 -export([entries/2]).
 -export([entries/4]).
 -export([entries/5]).
+-export([info/0]).
+-export([info/1]).
 -export([lookup/1]).
 -export([lookup/3]).
 -export([lookup/4]).
@@ -139,6 +142,23 @@ init() ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns information about the registry
+%% @end
+%% -----------------------------------------------------------------------------
+info() ->
+    [{Trie, art:info(Trie)} || Trie <- ?TRIES].
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+info(Trie) ->
+    art:info(Trie).
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc A function used internally by Bondy to register local subscribers
 %% and callees.
 %% @end
@@ -168,11 +188,13 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
             %% se we need to be sure not to duplicate events
             do_add(Entry);
 
-        [{_, Entry}] ->
+        [{_, EntryKey}] ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
+            FullPrefix = full_prefix(Type, RealmUri),
+            Entry =  plum_db:get(FullPrefix, EntryKey),
             Map = bondy_registry_entry:to_details_map(Entry),
             {error, {already_exists, Map}}
     end.
@@ -237,16 +259,18 @@ add(Type, Uri, Options, Ctxt) ->
             Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
             do_add(Entry);
 
-        [{_, Entry}] when Type == subscription ->
+        [{_, EntryKey}] when Type == subscription ->
             %% In case of receiving a "SUBSCRIBE" message from the same
             %% _Subscriber_ and to already added topic, _Broker_ should
             %% answer with "SUBSCRIBED" message, containing the existing
             %% "Subscription|id".
+            FullPrefix = full_prefix(Type, RealmUri),
+            Entry =  plum_db:get(FullPrefix, EntryKey),
             Map = bondy_registry_entry:to_details_map(Entry),
             {error, {already_exists, Map}};
 
-        [{_, Entry} | _] when Type == registration ->
-            EOpts = bondy_registry_entry:options(Entry),
+        [{_, EntryKey} | _] when Type == registration ->
+            EOpts = bondy_registry_entry:options(EntryKey),
             SharedEnabled = bondy_context:is_feature_enabled(
                 Ctxt, callee, shared_registration),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
@@ -270,6 +294,8 @@ add(Type, Uri, Options, Ctxt) ->
                         Type, PeerId, Uri, Options),
                     do_add(NewEntry);
                 false ->
+                    FullPrefix = full_prefix(Type, RealmUri),
+                    Entry =  plum_db:get(FullPrefix, EntryKey),
                     Map = bondy_registry_entry:to_details_map(Entry),
                     {error, {already_exists, Map}}
             end
@@ -605,8 +631,8 @@ init([]) ->
     process_flag(trap_exit, true),
 
     %% We initialise the tries
-    _ = art_sup:start_trie(?REGISTRATION_TRIE_NAME),
-    _ = art_sup:start_trie(?SUBSCRIPTION_TRIE_NAME),
+    {ok, _} = art_server_sup:start_trie(?REGISTRATION_TRIE_NAME),
+    {ok, _} = art_server_sup:start_trie(?SUBSCRIPTION_TRIE_NAME),
 
     %% We subscribe to change notifications in plum_db_events. We get updates
     %% in handle_info so that we can we recompile the Cowboy dispatch tables
@@ -1071,4 +1097,3 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
         Entry ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
-
