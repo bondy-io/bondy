@@ -256,7 +256,10 @@ init([]) ->
     %% recompile them and generate the Cowboy dispatch tables
     ok = plum_db_events:subscribe(exchange_started),
     ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
+    MS = [{
+        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+        {{?PREFIX, '_'}, '_', '_'}, [], [true]
+    }],
     ok = plum_db_events:subscribe(object_update, MS),
 
     {ok, #state{}}.

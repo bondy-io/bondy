@@ -41,17 +41,18 @@
 -include("bondy.hrl").
 
 
-%% -define(SUBSCRIPTION_DB_full_PREFIX, {global, bondy_subscription}).
-%% -define(REGISTRATION_DB_full_PREFIX, {global, bondy_registration}).
+%% PLUM_DB
+-define(REG_PREFIX, registry_registrations).
+-define(SUBS_PREFIX, registry_subscriptions).
+-define(PREFIXES, [?REG_PREFIX, ?SUBS_PREFIX]).
+-define(REG_FULL_PREFIX(RealmUri), {?REG_PREFIX, RealmUri}).
+-define(SUBS_FULL_PREFIX(RealmUri), {?SUBS_PREFIX, RealmUri}).
+%% ART TRIES
 -define(ANY, <<"*">>).
-
--define(PREFIX, registry).
--define(FULLPREFIX(RealmUri), {?PREFIX, RealmUri}).
--define(REGISTRATIONS_PREFIX(RealmUri), {registry_registrations, RealmUri}).
--define(SUBSCRIPTIONS_PREFIX(RealmUri), {registry_subscriptions, RealmUri}).
--define(SUBSCRIPTION_TRIE_NAME, bondy_subscription_trie).
--define(REGISTRATION_TRIE_NAME, bondy_registration_trie).
--define(TRIES, [?SUBSCRIPTION_TRIE_NAME, ?REGISTRATION_TRIE_NAME]).
+-define(SUBSCRIPTION_TRIE, bondy_subscription_trie).
+-define(REGISTRATION_TRIE, bondy_registration_trie).
+-define(TRIES, [?SUBSCRIPTION_TRIE, ?REGISTRATION_TRIE]).
+%% OTHER
 -define(MAX_LIMIT, 10000).
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
@@ -129,16 +130,23 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init() ->
-    case plum_db:prefix_type(?PREFIX) of
-        disk ->
-            Message = io_lib:format(
-                "Registry prefix ~p should be configured as ram or ram_disk in plum_db", [?PREFIX]
-            ),
-            exit(Message);
-        _ ->
-            gen_server:call(?MODULE, init_trie, 10*60*1000),
-            ok
-    end.
+    %% We first validate the config
+    [
+        begin
+            case plum_db:prefix_type(Prefix) of
+                disk ->
+                    Message = io_lib:format(
+                        "Registry prefix ~p should be configured as ram or ram_disk in plum_db",
+                        [Prefix]
+                    ),
+                    exit(Message);
+                _ ->
+                    ok
+            end
+        end || Prefix <- ?PREFIXES
+    ],
+    gen_server:call(?MODULE, init_tries, 10*60*1000).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -155,7 +163,6 @@ info() ->
 %% -----------------------------------------------------------------------------
 info(Trie) ->
     art:info(Trie).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -176,8 +183,6 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
         Type, RealmUri, Node, undefined, Uri, Opts),
     TrieKey = trie_key(Pattern),
     Trie = trie(Type),
-
-    %% TODO us trie to find exising subscriptions
 
     case art_server:match(TrieKey, Trie) of
         [] ->
@@ -631,17 +636,18 @@ init([]) ->
     process_flag(trap_exit, true),
 
     %% We initialise the tries
-    {ok, _} = art_server_sup:start_trie(?REGISTRATION_TRIE_NAME),
-    {ok, _} = art_server_sup:start_trie(?SUBSCRIPTION_TRIE_NAME),
+    {ok, _} = art_server_sup:start_trie(?REGISTRATION_TRIE),
+    {ok, _} = art_server_sup:start_trie(?SUBSCRIPTION_TRIE),
 
-    %% We subscribe to change notifications in plum_db_events. We get updates
-    %% in handle_info so that we can we recompile the Cowboy dispatch tables
+    %% We subscribe to plum_db_events change notifications. We get updates
+    %% in handle_info so that we can we update the tries
     MS = [{
-        {{{'$1', '_'}, '_'}, '_'},
+        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+        {{{'$1', '_'}, '_'}, '_', '_'},
         [
             {'orelse',
-                {'=:=', {const, registry_registrations}, '$1'},
-                {'=:=', {const, registry_subscriptions}, '$1'}
+                {'=:=', ?REG_PREFIX, '$1'},
+                {'=:=', ?SUBS_PREFIX, '$1'}
             }
         ],
         [true]
@@ -651,9 +657,9 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call(init_trie, _From, State0) ->
+handle_call(init_tries, _From, State0) ->
     _ = lager:info("Initialising registry trie from store."),
-    State = init_trie(State0),
+    State = init_tries(State0),
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
@@ -671,6 +677,10 @@ handle_cast(Event, State) ->
 handle_info(
     {plum_db_event, object_update, {{{_, _}, Key}, Obj, PrevObj}},
     State) ->
+    _ = lager:debug(
+        "Object update notification; object=~p, previous=~p",
+        [Obj, PrevObj]
+    ),
     Node = bondy_registry_entry:node(Key),
     _ = case Node =:= bondy_peer_service:mynode() of
         true ->
@@ -688,6 +698,7 @@ handle_info(
                     %% This works because registry entries are immutable
                     _ = delete_from_trie(OldEntry);
                 Entry ->
+                    %% We only add to trie
                     add_to_trie(Entry)
             end
     end,
@@ -721,16 +732,16 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_trie(State0) ->
+init_tries(State0) ->
     Opts = [{resolver, lww}],
-    Iterator0 = plum_db:iterator(?REGISTRATIONS_PREFIX('_'), Opts),
-    {ok, State1} = init_trie(Iterator0, State0),
-    Iterator1 = plum_db:iterator(?SUBSCRIPTIONS_PREFIX('_'), Opts),
-    init_trie(Iterator1, State1).
+    Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
+    {ok, State1} = init_tries(Iterator0, State0),
+    Iterator1 = plum_db:iterator(?SUBS_FULL_PREFIX('_'), Opts),
+    init_tries(Iterator1, State1).
 
 
 %% @private
-init_trie(Iterator, #state{start_time = Now} = State) ->
+init_tries(Iterator, #state{start_time = Now} = State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
             ok = plum_db:iterator_close(Iterator),
@@ -742,7 +753,7 @@ init_trie(Iterator, #state{start_time = Now} = State) ->
                 {_, Entry} ->
                     maybe_add_to_trie(Entry, Now)
             end,
-            init_trie(plum_db:iterate(Iterator), State)
+            init_tries(plum_db:iterate(Iterator), State)
     end.
 
 
@@ -899,10 +910,10 @@ decr_counter(RealmUri, Uri, N) ->
 -spec prefix(bondy_registry_entry:entry_type(), uri() | '_') ->
     term().
 prefix(subscription, RealmUri) ->
-    ?SUBSCRIPTIONS_PREFIX(RealmUri);
+    ?SUBS_FULL_PREFIX(RealmUri);
 
 prefix(registration, RealmUri) ->
-    ?REGISTRATIONS_PREFIX(RealmUri).
+    ?REG_FULL_PREFIX(RealmUri).
 
 
 %% @private
@@ -946,11 +957,11 @@ full_prefix(Entry) ->
     full_prefix(Type, RealmUri).
 
 %% @private
-full_prefix(registration, RealmUri) -> ?REGISTRATIONS_PREFIX(RealmUri);
-full_prefix(subscription, RealmUri) -> ?SUBSCRIPTIONS_PREFIX(RealmUri).
+full_prefix(registration, RealmUri) -> ?REG_FULL_PREFIX(RealmUri);
+full_prefix(subscription, RealmUri) -> ?SUBS_FULL_PREFIX(RealmUri).
 
-trie(registration) -> ?REGISTRATION_TRIE_NAME;
-trie(subscription) -> ?SUBSCRIPTION_TRIE_NAME.
+trie(registration) -> ?REGISTRATION_TRIE;
+trie(subscription) -> ?SUBSCRIPTION_TRIE.
 
 
 -spec trie_key(bondy_registry_entry:t() | bondy_registry_entry:key()) ->
