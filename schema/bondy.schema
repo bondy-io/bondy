@@ -655,6 +655,12 @@
 ]}.
 
 %% @see platform_bin_dir
+{mapping, "platform_tmp_dir", "bondy.platform_tmp_dir", [
+  {datatype, directory},
+  {default, "{{platform_tmp_dir}}"}
+]}.
+
+%% @see platform_bin_dir
 {mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
   {datatype, directory},
   {default, "{{platform_etc_dir}}"}
