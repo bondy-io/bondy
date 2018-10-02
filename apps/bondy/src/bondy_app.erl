@@ -66,7 +66,7 @@ start(_Type, Args) ->
 start_phase(init_registry, normal, []) ->
     %% During registry initialisation no client should be connected.
     %% This is a clean way of avoiding new registrations interfiering with
-    %% the previous registry restor and cleanup.
+    %% the previous registry restore and cleanup.
     bondy_registry:init();
 
 start_phase(enable_aae, normal, []) ->
