@@ -571,10 +571,11 @@ do_read_head(Log, Acc0) ->
 notify_backup_started(File) ->
     _ = lager:info("Started backup; filename=~p", [File]),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?BACKUP_STARTED, [File], #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
 
 
 %% @private
@@ -584,7 +585,7 @@ notify_backup_finished(Args) when length(Args) == 2 ->
         Args
     ),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?BACKUP_FINISHED, Args, #{},
         ?BONDY_PRIV_REALM_URI
     ),
@@ -598,10 +599,11 @@ notify_backup_error(Args) when length(Args) == 3 ->
         Args
     ),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?BACKUP_ERROR, Args, #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
 
 
 %% @private
@@ -611,10 +613,11 @@ notify_restore_started([Filename, _, _] = Args) ->
         Args
     ),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?RESTORE_STARTED, [Filename], #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
 
 
 %% @private
@@ -624,10 +627,11 @@ notify_restore_finished(Args) when length(Args) == 4 ->
         Args
     ),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?RESTORE_FINISHED, [Args], #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
 
 
 %% @private
@@ -637,7 +641,8 @@ notify_restore_error(Args)  when length(Args) == 3 ->
         Args
     ),
     %% @TODO Prometheus stats
-    bondy:publish(
+    _ = bondy:publish(
         #{}, ?RESTORE_ERROR, Args, #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
