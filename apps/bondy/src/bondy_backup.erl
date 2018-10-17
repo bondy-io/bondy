@@ -587,7 +587,8 @@ notify_backup_finished(Args) when length(Args) == 2 ->
     bondy:publish(
         #{}, ?BACKUP_FINISHED, Args, #{},
         ?BONDY_PRIV_REALM_URI
-    ).
+    ),
+    ok.
 
 
 %% @private
