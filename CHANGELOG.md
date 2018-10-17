@@ -9,7 +9,7 @@ This version introduces an incompatibility with previous versions data storage. 
     - Registry uses `ram` storage type
     - All security resources use `ram_disk` storage type
     - Api Gateway (specs) and OAuth2 tokens use `disk` storage type
-- Handling of migration in bondy_backup. To migrate from v0.7.1 perform a backup and then restore it on Bondy v0.7.2.
+- Handling of migration in bondy_backup. To migrate from v0.7.1 perform a backup on Bondy v0.7.1 and then restore it on Bondy v0.7.2.
 
 ## 0.7.1
 - New Trie data structure for bondy_registry
