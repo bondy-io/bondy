@@ -420,7 +420,8 @@ async_restore(#{filename := Filename}, State0) ->
         case do_restore(Filename) of
             {ok, _Counters} = OK ->
                 Me ! {restore_reply, OK, self()};
-            {error, _} = Error ->
+            {error, Reason} = Error ->
+                _ = lager:error("Error;reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
                 Me ! {restore_reply, Error, self()}
         end
     end),
@@ -504,12 +505,16 @@ restore_terms(
     restore_terms(T, Vsn, Counters#{read_count => N + 1});
 
 restore_terms([H|T], Vsn, #{read_count := N, merged_count := M} = Counters) ->
-    {PKey, Object} = migrate(Vsn, H),
-    case plum_db:merge({PKey, undefined}, Object) of
-        true ->
-            restore_terms(
-                T, Vsn, Counters#{read_count => N + 1, merged_count => M + 1});
-        false ->
+    case migrate(Vsn, H) of
+        {PKey, Object} ->
+            case plum_db:merge({PKey, undefined}, Object) of
+                true ->
+                    restore_terms(
+                        T, Vsn, Counters#{read_count => N + 1, merged_count => M + 1});
+                false ->
+                    restore_terms(T, Vsn, Counters#{read_count => N + 1})
+            end;
+        skip ->
             restore_terms(T, Vsn, Counters#{read_count => N + 1})
     end;
 
@@ -522,7 +527,12 @@ migrate(Vsn, KeyValue) when Vsn >= <<"1.2.0">> ->
     KeyValue;
 migrate(Vsn, {PKey, Object}) when Vsn < <<"1.2.0">> ->
     {Prefix, Key} = PKey,
-    {{rename_prefix(Prefix), Key}, migrate_object(Vsn, Object)}.
+    case rename_prefix(Prefix) of
+        skip ->
+            skip;
+        Renamed ->
+            {{Renamed, Key}, migrate_object(Vsn, Object)}
+    end.
 
 
 %% @private
@@ -538,43 +548,44 @@ rename_prefix({A, B}) when is_binary(A) ->
 
 %% @private
 rename_prefix(<<"groups">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_groups, Realm};
 
 rename_prefix(<<"users">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_users, Realm};
 
 rename_prefix(<<"sources">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_sources, Realm};
 
 rename_prefix(<<"usergrants">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_user_grants, Realm};
 
 rename_prefix(<<"groupgrants">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_group_grants, Realm};
 
 rename_prefix(<<"status">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_status, Realm};
 
 rename_prefix(<<"config">>, Bin) ->
-    [Realm, <<"security">>] = binary:split(Bin, <<$.>>, [global]),
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
     {security_config, Realm};
 
-rename_prefix(<<"refresh_tokens">>, Bin) ->
-    case binary:split(Bin, <<$.>>, [global]) of
-        [Realm, IssuerOrSub] ->
-            {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>};
-        [Realm, Issuer, Sub] ->
-            {oauth2_refresh_tokens,
-                <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
-    end.
-
-
+rename_prefix(<<"refresh_tokens">>, _Bin) ->
+    %% There is no sensible way to migrate this as we used
+    %% $. as separator before :-(
+    skip.
+    %% case binary:split(Bin, <<$.>>, [global]) of
+    %%     [Realm, IssuerOrSub] ->
+    %%         {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>};
+    %%     [Realm, Issuer, Sub] ->
+    %%         {oauth2_refresh_tokens,
+    %%             <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
+    %% end.
 
 
 %% @private
