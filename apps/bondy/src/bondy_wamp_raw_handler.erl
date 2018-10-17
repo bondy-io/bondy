@@ -293,7 +293,7 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
 handle_info({stop, Reason}, State) ->
     Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
     SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
-    _ = lager:debug(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
+    _ = lager:error(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
     {stop, normal, State};
 
 handle_info(Info, State) ->
