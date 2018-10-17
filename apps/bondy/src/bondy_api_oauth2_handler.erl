@@ -373,6 +373,7 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     case bondy_oauth2:refresh_token(Realm, Issuer, RT0) of
         {ok, JWT, RT1, Claims} ->
             Req1 = token_response(JWT, RT1, Claims, Req0),
+            ok = on_login(Realm, Issuer, #{}),
             {true, Req1, St0};
         {error, Error} ->
             Req1 = reply(Error, Req0),
@@ -398,6 +399,7 @@ issue_token(Type, Username, Req0, St0) ->
     case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Username, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
             Req1 = token_response(JWT, RefreshToken, Claims, Req0),
+            ok = on_login(RealmUri, Username, Meta),
             {true, Req1, St0};
         {error, Reason} ->
             Req1 = reply(Reason, Req0),
@@ -511,3 +513,9 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
             }
     end,
     prepare_request(Body1, #{}, Req0).
+
+
+%% @private
+on_login(RealmUri, Username, Meta) ->
+    Uri = <<"com.leapsight.bondy.security.user_logged_in">>,
+    bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri).
