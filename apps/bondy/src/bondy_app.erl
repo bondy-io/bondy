@@ -142,7 +142,7 @@ stop_router_services() ->
     ok = bondy_router:shutdown(),
 
     %% We sleep for a minute to allow all sessions to terminate gracefully
-    Time = 10000,
+    Time = 5000,
     _ = lager:info(
         "Awaiting ~p secs for clients graceful shutdown.",
         [trunc(Time/1000)]

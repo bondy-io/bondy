@@ -50,6 +50,7 @@
 
 -record(state, {
     socket                  ::  gen_tcp:socket(),
+    peername                ::  binary(),
     transport               ::  module(),
     frame_type              ::  frame_type(),
     encoding                ::  atom(),
@@ -185,9 +186,13 @@ init({Ref, Socket, Transport, _Opts0}) ->
     %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
     Transport:setopts(Socket, [{active, once}, {packet, 0}]),
+
+    {ok, Peername} = inet:peername(Socket),
+
     St = #state{
         start_time = erlang:monotonic_time(second),
         socket = Socket,
+        peername = inet_utils:peername_to_binary(Peername),
         transport = Transport
     },
     ok = socket_opened(St),
@@ -203,7 +208,6 @@ handle_info(
             (St1#state.transport):setopts(Socket, [{active, once}]),
             {noreply, St1, ?TIMEOUT};
         {stop, Reason, St1} ->
-            ok = close_socket(Reason, St1),
             {stop, Reason, St1}
     end;
 
@@ -231,7 +235,6 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
             (St2#state.transport):setopts(Socket, [{active, once}]),
             {noreply, St2, ?TIMEOUT};
         {stop, Reason, St2} ->
-            ok = close_socket(Reason, St2),
             {stop, Reason, St2}
     end;
 
@@ -250,16 +253,14 @@ handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% We send the message to the peer
     handle_outbound(M, St);
 
-handle_info({tcp_closed, Socket}, State) ->
-    _ = log(
-        info, "Connection closed by peer, socket='~p'", [Socket], State),
+handle_info({tcp_closed, _Socket}, State) ->
     ok = socket_closed(false, State),
     {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
     _ = log(
         error,
-        "Connection closing, error=tcp_error, reason=~p, socket='~p'",
+        "Connection closing due to tcp_error; reason=~p, socket='~p',",
         [Reason, Socket],
         State
     ),
@@ -267,7 +268,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
     {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
-    _ = log(debug, "Timeout. Sending first ping", [], State0),
+    _ = log(debug, "Connection timeout, sending first ping;", [], State0),
     {ok, State1} = send_ping(State0),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timet
     {noreply, State1};
@@ -276,44 +277,40 @@ handle_info(
     ping_timeout,
     #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
     _ = log(
-        error, "Raw TCP connection closing, reason=ping_timeout, attempts=~p", [N],
+        error, "Connection closing; reason=ping_timeout, attempts=~p,", [N],
         State
     ),
-    ok = close_socket(ping_timeout, State),
-    {stop, timeout, State#state{ping_sent = false}};
+    {stop, ping_timeout, State#state{ping_sent = false}};
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
-    _ = log(debug, "Ping timeout. Sending second ping", [], State),
+    _ = log(debug, "Ping timeout, sending second ping;", [], State),
     %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {noreply, State1};
 
 handle_info({stop, Reason}, State) ->
-    Peer = bondy_wamp_protocol:peer(State#state.protocol_state),
-    SessionId = bondy_wamp_protocol:session_id(State#state.protocol_state),
-    _ = lager:error(<<"Raw TCP WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
-    {stop, normal, State};
+    {stop, Reason, State};
 
 handle_info(Info, State) ->
-    _ = lager:error("Received unknown info, message='~p'", [Info]),
+    _ = lager:error("Received unknown info; message='~p'", [Info]),
     {noreply, State}.
 
 
 handle_call(Msg, From, State) ->
-    _ = lager:info("Received unknown call, message=~p, from=~p", [Msg, From]),
+    _ = lager:info("Received unknown call; message=~p, from=~p", [Msg, From]),
     {noreply, State, ?TIMEOUT}.
 
 
 handle_cast(Msg, State) ->
-    _ = lager:info("Received unknown cast, message=~p", [Msg]),
+    _ = lager:info("Received unknown cast; message=~p", [Msg]),
     {noreply, State, ?TIMEOUT}.
 
 
 terminate(Reason, St) ->
-    _ = lager:info("Terminating, reason=~p", [Reason]),
-    bondy_wamp_protocol:terminate(St#state.protocol_state).
+    ok = bondy_wamp_protocol:terminate(St#state.protocol_state),
+    close_socket(Reason, St).
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -369,12 +366,11 @@ when Len > MaxLen ->
     %% a Peer MUST fail the connection.
     _ = log(
         error,
-        "Client committed a WAMP protocol violation, "
-        "reason=maximum_message_length_exceeded, message_length=~p",
+        "Client committed a WAMP protocol violation; "
+        "reason=maximum_message_length_exceeded, message_length=~p,",
         [Len],
         St
     ),
-    ok = close_socket(maximum_message_length_exceeded, St),
     {stop, maximum_message_length_exceeded, St};
 
 handle_data(<<0:5, 0:3, Len:24, Data/binary>>, St)
@@ -409,7 +405,7 @@ handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
 
 handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
     %% We received a PONG
-    _ = log(debug, "Received pong", [], St),
+    _ = log(debug, "Received pong;", [], St),
     <<Payload:Len/binary, Rest/binary>> = Data,
     case St#state.ping_sent of
         {true, Payload, TimerRef} ->
@@ -420,13 +416,13 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
             _ = log(
                 error,
-                "Invalid pong message from peer, reason=invalid_payload, received=~p, expected=~p",
+                "Invalid pong message from peer; "
+                "reason=invalid_ping_response, received=~p, expected=~p,",
                 [Bin, Payload], St
             ),
-            ok = close_socket(invalid_ping_response, St),
             {stop, invalid_ping_response, St};
         false ->
-            _ = log(error, "Unrequested pong message from peer", [], St),
+            _ = log(error, "Unrequested pong message from peer;", [], St),
             %% Should we stop instead?
             handle_data(Rest, St)
     end;
@@ -438,7 +434,7 @@ handle_data(<<0:5, R:3, Len:24, Data/binary>>, St) when R > 2 ->
     ok = send_frame(error_number(use_of_reserved_bits), St),
     _ = log(
         error,
-        "Client committed a WAMP protocol violation and the message was dropped, reason=~p, value=~p, message=~p",
+        "Client committed a WAMP protocol violation, message dropped; reason=~p, value=~p, message=~p,",
         [use_of_reserved_bits, R, Mssg],
         St
     ),
@@ -516,12 +512,7 @@ init_wamp(Len, Enc, St0) ->
                     },
                     ok = send_frame(
                         <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
-                    _ = lager:info(
-                        "Established connection with peer, protocol=wamp,"
-                        " transport=raw, frame_type=~p, encoding=~p,"
-                        " message_max_length=~p, peer=~s",
-                        [FrameType, EncName, MaxLen, inet_utils:peername_to_binary(Peer)]
-                    ),
+                    _ = log(info, "Established connection with peer;", [], St1),
                     {ok, St1};
                 {error, Reason} ->
                     {stop, Reason, St0}
@@ -529,7 +520,7 @@ init_wamp(Len, Enc, St0) ->
         {ok, NonIPAddr} ->
             _ = lager:error(
                 "Unexpected peername when establishing connection,"
-                " received a non IP address of '~p', reason=invalid_socket,"
+                " received a non IP address of '~p'; reason=invalid_socket,"
                 " protocol=wamp, transport=raw, frame_type=~p, encoding=~p,"
                 " message_max_length=~p",
                 [NonIPAddr, FrameType, EncName, MaxLen]
@@ -571,9 +562,8 @@ send_ping(St) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Sends a ping message with a reference() as a payload to the client and sent
-%% ourselves a ping_timeout message in the future.
+%% @doc Sends a ping message with a reference() as a payload to the client and
+%% sent ourselves a ping_timeout message in the future.
 %% @end
 %% -----------------------------------------------------------------------------
 send_ping(Bin, St0) ->
@@ -588,6 +578,7 @@ send_ping(Bin, St0) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% The possible values for "LENGTH" are:
 %%
@@ -607,13 +598,18 @@ validate_max_len(_) ->
     throw(maximum_message_length_unacceptable).
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
 %% 0: illegal
 %% 1: JSON
 %% 2: MessagePack
 %% 3 - 15: reserved for future serializers
+%% @end
+%% -----------------------------------------------------------------------------
 validate_encoding(1) -> {binary, json};
 validate_encoding(2) -> {binary, msgpack};
-% validate_encoding(3) -> cbor;
+% validate_encoding(3) -> {binary, cbor};
 validate_encoding(4) -> {binary, bert};
 validate_encoding(15) -> {binary, erl};
 validate_encoding(_) ->
@@ -621,12 +617,17 @@ validate_encoding(_) ->
     throw(serializer_unsupported).
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
 %% 0: illegal (must not be used)
 %% 1: serializer unsupported
 %% 2: maximum message length unacceptable
 %% 3: use of reserved bits (unsupported feature)
 %% 4: maximum connection count reached
 %% 5 - 15: reserved for future errors
+%% @end
+%% -----------------------------------------------------------------------------
 error_number(serializer_unsupported) ->?RAW_ERROR(1);
 error_number(maximum_message_length_unacceptable) ->?RAW_ERROR(2);
 error_number(use_of_reserved_bits) ->?RAW_ERROR(3);
@@ -640,14 +641,21 @@ error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
 
 %% @private
-close_socket(Reason, St) when Reason =:= normal orelse Reason =:= shutdown ->
+close_socket(normal, St) ->
     ok = (St#state.transport):close(St#state.socket),
-    _ = log(info, <<"TCP Connection closed, reason=~p">>, [Reason], St),
+    _ = log(info, <<"Connection closed by peer; reason=~p,">>, [normal], St),
+    socket_closed(false, St);
+
+close_socket(shutdown, St)  ->
+    ok = (St#state.transport):close(St#state.socket),
+    _ = log(
+        info, <<"Connection closed by router; reason=~p,">>, [shutdown], St),
     socket_closed(false, St);
 
 close_socket(Reason, St) ->
     ok = (St#state.transport):close(St#state.socket),
-    _ = log(error, <<"TCP Connection closed, reason=~p">>, [Reason], St),
+    _ = log(
+        error, <<"Connection closed due to error; reason=~p,">>, [Reason], St),
     socket_closed(true, St).
 
 
@@ -657,36 +665,40 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
         Prefix,
         <<
-            ", transport=raw, frame_type=~p, encoding=~p"
-            ", message_max_length=~p, peer=~s"
+            " session_id=~p, peername=~s"
+            ", protocol=wamp, transport=raw, frame_type=~p, encoding=~p"
+            ", message_max_length=~p, socket=~p"
         >>
     ]),
-    Peername = inet_utils:peername_to_binary(
-        bondy_wamp_protocol:peer(St#state.protocol_state)),
+    SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
     Tail = [
+        SessionId,
+        St#state.peername,
         St#state.frame_type,
         St#state.encoding,
         St#state.max_len,
-        Peername
+        St#state.socket
     ],
     lager:log(Level, self(), Format, lists:append(Head, Tail)).
 
 
 %% @private
-socket_opened(_St) ->
-    _ = bondy_stats:socket_open(wamp, raw),
+socket_opened(St) ->
+    _ = bondy_stats:socket_open(wamp, raw, St#state.peername),
     ok.
+
 
 %% @private
 socket_closed(true, St) ->
-    ok = bondy_stats:socket_error(wamp, raw),
+    ok = bondy_stats:socket_error(wamp, raw, St#state.peername),
     socket_closed(false, St);
 
 socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    bondy_stats:socket_closed(wamp, raw, Seconds).
+    bondy_stats:socket_closed(wamp, raw, St#state.peername, Seconds).
 
 
+%% @private
 transport_opts(Name) ->
     {ok, Opts} = application:get_env(bondy, Name),
     {_, Port} = lists:keyfind(port, 1, Opts),
@@ -706,6 +718,7 @@ transport_opts(Name) ->
     ].
 
 
+%% @private
 normalise(Opts) ->
     Sndbuf = lists:keyfind(sndbuf, 1, Opts),
     Recbuf = lists:keyfind(recbuf, 1, Opts),

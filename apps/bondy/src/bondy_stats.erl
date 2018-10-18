@@ -27,9 +27,9 @@
 -export([system_version/0]).
 -export([update/1]).
 -export([update/2]).
--export([socket_open/2]).
--export([socket_closed/3]).
--export([socket_error/2]).
+-export([socket_open/3]).
+-export([socket_closed/4]).
+-export([socket_error/3]).
 
 
 %% =============================================================================
@@ -124,34 +124,34 @@ get_stats() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_open(atom(), atom()) -> ok.
+-spec socket_open(atom(), atom(), binary()) -> ok.
 
-socket_open(Protocol, Transport) ->
+socket_open(Protocol, Transport, Peername) ->
     %% Todo capture peername to feed Rate Limiting stats by IP
     %% but do not forward to prometheus
-    bondy_prometheus:socket_open(Protocol, Transport).
+    bondy_prometheus:socket_open(Protocol, Transport, Peername).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_closed(atom(), atom(), Duration :: integer()) -> ok.
+-spec socket_closed(atom(), atom(), binary(), Duration :: integer()) -> ok.
 
-socket_closed(Protocol, Transport, Duration) ->
+socket_closed(Protocol, Transport, Peername, Duration) ->
     %% Todo capture peername to feed Rate Limiting stats by IP
     %% but do not forward to prometheus
-    bondy_prometheus:socket_closed(Protocol, Transport, Duration).
+    bondy_prometheus:socket_closed(Protocol, Transport, Peername, Duration).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_error(atom(), atom()) -> ok.
+-spec socket_error(atom(), atom(), binary()) -> ok.
 
-socket_error(Protocol, Transport) ->
-    bondy_prometheus:socket_error(Protocol, Transport).
+socket_error(Protocol, Transport, Peername) ->
+    bondy_prometheus:socket_error(Protocol, Transport, Peername).
 
 
 %% -----------------------------------------------------------------------------
