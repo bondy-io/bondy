@@ -313,7 +313,7 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
     MonitorRef = monitor(process, Pid),
 
     %% The following no longer applies, as the process should be local
-    %% However, we keep it as it is still the right thing to do
+    %% However, we keep it as it still is the right thing to do.
     %% ----------------------
     %% If the monitor/2 call failed to set up a connection to a
     %% remote node, we don't want the '!' operator to attempt
