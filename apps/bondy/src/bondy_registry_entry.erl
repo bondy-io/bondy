@@ -64,6 +64,7 @@
 -export([new/4]).
 -export([new/5]).
 -export([node/1]).
+-export([is_local/1]).
 -export([options/1]).
 -export([pattern/4]).
 -export([pattern/6]).
@@ -225,6 +226,18 @@ node(#entry{key = Key}) ->
 
 node(#entry_key{} = Key) ->
     Key#entry_key.node.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns true if the entry represents a local peer
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_local(t() | entry_key()) -> boolean().
+is_local(#entry{key = Key}) ->
+    is_local(Key);
+
+is_local(#entry_key{} = Key) ->
+    bondy_peer_service:mynode() =:= Key#entry_key.node.
 
 
 %% -----------------------------------------------------------------------------
