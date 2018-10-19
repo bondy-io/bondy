@@ -64,9 +64,17 @@ start(_Type, Args) ->
     end.
 
 start_phase(init_registry, normal, []) ->
-    %% During registry initialisation no client should be connected.
-    %% This is a clean way of avoiding new registrations interfiering with
-    %% the previous registry restore and cleanup.
+    %% In previous versions of Bondy we piggy backed on a disk-only version of
+    %% plum_db to get registry syncrhonisation across the cluster.
+    %% During the previous registry initialisation no client should be
+    %% connected.
+    %% This was a clean way of avoiding new registrations interfiering with
+    %% the registry restore and cleanup.
+    %%
+    %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
+    %% longer store the registry on disk, but we restore everything from the
+    %% network. However, we kept this step as it is clean and allows us to do
+    %% some validations.
     bondy_registry:init();
 
 start_phase(enable_aae, normal, []) ->
