@@ -518,4 +518,5 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
 %% @private
 on_login(RealmUri, Username, Meta) ->
     Uri = <<"com.leapsight.bondy.security.user_logged_in">>,
-    bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri).
+    _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
+    ok.
