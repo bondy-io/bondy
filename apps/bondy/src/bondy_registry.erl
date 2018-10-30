@@ -187,7 +187,10 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     case art_server:match(TrieKey, Trie) of
         [] ->
             PeerId = {RealmUri, Node, undefined, Pid},
-            RegId = bondy_utils:get_id(global),
+            RegId = case maps:find(subscription_id, Opts) of
+                {ok, N} -> N;
+                error -> bondy_utils:get_id(global)
+            end,
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
             %% REVIEW this  will broadcast the local subscription to other nodes
             %% se we need to be sure not to duplicate events
@@ -1108,3 +1111,18 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
         Entry ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
+
+
+%% maybe_trigger_exchange(_) ->
+%%     PeerService = bondy_peer_service:peer_service(),
+%%     case PeerService:members() of
+%%         {ok, []} ->
+%%             ok;
+%%         {ok, _} ->
+%%             %% We give plumtree_broadcast time to process the event
+%%             %% and update its state
+%%             timer:sleep(1000),
+%%             %% We manually force an exchange
+%%             plumtree_broadcast ! exchange_tick,
+%%             ok
+%%     end.

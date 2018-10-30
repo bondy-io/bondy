@@ -158,14 +158,21 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% API - SUBSCRIBER ROLE
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Calls bondy_broker_events:subscribe/4.
+%% @end
+%% -----------------------------------------------------------------------------
 subscribe(RealmUri, Opts, TopicUri, Fun) ->
-    bondy_broker_events:subscribe(RealmUri, Opts, TopicUri, Fun).
+    bondy_broker:subscribe(RealmUri, Opts, TopicUri, Fun).
 
 
 
 %% =============================================================================
 %% API - PUBLISHER ROLE
 %% =============================================================================
+
 
 
 publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->

@@ -1,7 +1,8 @@
+
 %% =============================================================================
-%%  bondy_sup.erl -
+%%  bondy_broker_bridge_subscriber_sup.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -20,8 +21,9 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_sup).
+-module(bondy_subscribers_sup).
 -behaviour(supervisor).
+-include_lib("wamp/include/wamp.hrl").
 
 -define(CHILD(Id, Type, Args, Restart, Timeout), #{
     id => Id,
@@ -32,9 +34,11 @@
     modules => [Id]
 }).
 
-
 %% API
 -export([start_link/0]).
+-export([start_subscriber/4]).
+-export([terminate_subscriber/1]).
+
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
@@ -47,9 +51,31 @@
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_subscriber(uri(), map(), uri(), map() | function()) ->
+    {ok, pid()} | {error, any()}.
+
+start_subscriber(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
+    supervisor:start_child(?MODULE, [RealmUri, Opts, Topic, Fun]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+terminate_subscriber(Subscriber) when is_pid(Subscriber)->
+    supervisor:terminate_child(?MODULE, Subscriber).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
-
 
 
 
@@ -61,12 +87,16 @@ start_link() ->
 
 init([]) ->
     Children = [
-        ?CHILD(bondy_stats, worker, [], permanent, 5000),
-        ?CHILD(bondy_registry, worker, [], permanent, 5000),
-        ?CHILD(bondy_broker_events, worker, [], permanent, 5000),
-        ?CHILD(bondy_subscribers_sup, supervisor, [], permanent, infinity),
-        ?CHILD(bondy_peer_wamp_forwarder, worker, [], permanent, 5000),
-        ?CHILD(bondy_api_gateway, worker, [], permanent, 5000),
-        ?CHILD(bondy_backup, worker, [], permanent, 5000)
+        ?CHILD(bondy_subscriber, worker, [], transient, 5000)
     ],
-    {ok, {{one_for_one, 1, 5}, Children}}.
+    Specs = {{simple_one_for_one, 0, 1}, Children},
+    {ok, Specs}.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+

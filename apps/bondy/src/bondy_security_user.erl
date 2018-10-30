@@ -211,7 +211,7 @@ add_source(RealmUri, Username, CIDR, Source, Opts) ->
     CIDR :: bondy_security:cidr()) -> ok.
 
 remove_source(RealmUri, Username, CIDR) ->
-    bondy_security_source:remove_source(RealmUri, [Username], CIDR).
+    bondy_security_source:remove(RealmUri, [Username], CIDR).
 
 
 %% -----------------------------------------------------------------------------

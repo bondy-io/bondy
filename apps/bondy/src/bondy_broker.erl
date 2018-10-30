@@ -85,6 +85,7 @@
 -export([subscriptions/4]).
 -export([subscribe/4]).
 -export([unsubscribe/1]).
+-export([unsubscribe/2]).
 
 
 %% =============================================================================
@@ -301,7 +302,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% (RFC) When a single event matches more than one of a _Subscriber's_
     %% subscriptions, the event will be delivered for each subscription.
 
-    %% We should not send the publication to the published, so we exclude it
+    %% We should not send the publication to the publisher, so we exclude it
     %% (RFC) Note that the _Publisher_ of an event will never
     %% receive the published event even if the _Publisher_ is
     %% also a _Subscriber_ of the topic published to.
@@ -344,52 +345,53 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     end,
 
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
-    Node = bondy_peer_service:mynode(),
+    MyNode = bondy_peer_service:mynode(),
     PubId = bondy_utils:get_id(global),
 
-    Fun = fun(Entry, Acc) ->
+    Fun = fun(Entry, NodeAcc) ->
         case bondy_registry_entry:node(Entry) of
-            Node ->
+            MyNode ->
                 %% We publish to a local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
+                Pid = bondy_registry_entry:pid(Entry),
                 case bondy_registry_entry:session_id(Entry) of
                     undefined ->
-                        %% An internal PID subscriber
+                        %% A bondy_subscriber
                         Event = wamp_message:event(
                             SubsId, PubId, Opts, Args, ArgsKw),
-                        ok = bondy_broker_events:notify(Event),
-                        Acc;
+                        ok = bondy_subscriber:handle_event(Pid, Event),
+                        NodeAcc;
                     ESessionId ->
+                        %% A wamp peer
                         case bondy_session:lookup(ESessionId) of
                             {error, not_found} ->
-                                Acc;
+                                NodeAcc;
                             ESession ->
                                 Event = wamp_message:event(
                                     SubsId, PubId, Opts, Args, ArgsKw),
-                                bondy:send(
+                                ok = bondy:send(
                                     bondy_session:peer_id(ESession), Event),
-                                maps:update_with(
-                                    Node, fun(V) -> V + 1 end, 1, Acc)
+                                    NodeAcc
                         end
                 end;
-            Other ->
+            Node ->
                 %% We just acummulate the subscribers per peer, later we will
                 %% forward a single message to each peer.
-                maps:update_with(Other, fun(V) -> V + 1 end, 1, Acc)
+                maps:update_with(Node, fun(V) -> V + 1 end, 1, NodeAcc)
         end
     end,
 
     %% We send the event to the subscribers
-    Acc1 = publish_fold(Subs, Fun, #{}),
+    Nodes0 = publish_fold(Subs, Fun, #{}),
 
     %% If we have remote subscribers we forward the publication
     case bondy_peer_service:peers() of
         {ok, []} ->
             {ok, PubId};
         {ok, Peers} ->
-            Nodes = maps:keys(Acc1) -- [Node],
+            Nodes1 = maps:keys(Nodes0) -- [MyNode],
             Set = sets:intersection(
-                sets:from_list(Peers), sets:from_list(Nodes)),
+                sets:from_list(Peers), sets:from_list(Nodes1)),
             ok = case sets:size(Set) > 0 of
                 true ->
                     M = wamp_message:publish(
@@ -413,10 +415,11 @@ do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(uri(), map(), uri(), pid() | function()) ->
-    {ok, reference()} | {error, already_exists}.
+    {ok, id() | pid()} | {error, already_exists}.
 
-subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 1) ->
-    bondy_broker_events:subscribe(RealmUri, Opts, Topic, Fun);
+subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
+    %% bondy_broker_events:subscribe(RealmUri, Opts, Topic, Fun);
+    bondy_subscribers_sup:start_subscriber(RealmUri, Opts, Topic, Fun);
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     case
@@ -433,21 +436,44 @@ subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
 %% @doc For internal Bondy use
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id()) -> ok | {error, not_found}.
+-spec unsubscribe(id() | pid()) -> ok | {error, not_found}.
 
-unsubscribe(Ref) when is_reference(Ref) ->
-    bondy_broker_events:unsubscribe(Ref);
+unsubscribe(Subscriber) when is_pid(Subscriber) ->
+    bondy_subscribers_sup:terminate_subscriber(Subscriber).
 
-unsubscribe(Id) ->
-    case bondy_registry:remove(subscription, Id) of
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
+
+unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
+    case bondy_registry:lookup(subscription, RealmUri, SubsId) of
+        {error, not_found} = Error ->
+            Error;
+        Entry ->
+            case bondy_registry:remove(Entry) of
+                ok ->
+                    ok;
+                {ok, _} ->
+                    ok;
+                Error ->
+                    Error
+            end
+    end;
+
+unsubscribe(SubsId, Ctxt) ->
+    case bondy_registry:remove(subscription, SubsId, Ctxt) of
         ok ->
-            ok;
-        {ok, _} ->
-            ok;
+            on_unsubscribe(SubsId, Ctxt);
+        {ok, false} ->
+            on_unsubscribe(SubsId, Ctxt);
+        {ok, true} ->
+            on_delete(SubsId, Ctxt);
         Error ->
             Error
     end.
-
 
 
 %% =============================================================================
@@ -495,25 +521,6 @@ subscribe(M, Ctxt) ->
 unsubscribe_all(Ctxt) ->
     bondy_registry:remove_all(subscription, Ctxt).
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec unsubscribe(id(), bondy_context:t()) -> ok | {error, not_found}.
-
-unsubscribe(SubsId, Ctxt) ->
-    case bondy_registry:remove(subscription, SubsId, Ctxt) of
-        ok ->
-            on_unsubscribe(SubsId, Ctxt);
-        {ok, false} ->
-            on_unsubscribe(SubsId, Ctxt);
-        {ok, true} ->
-            on_delete(SubsId, Ctxt);
-        Error ->
-            Error
-    end.
 
 
 %% @private
@@ -656,6 +663,8 @@ publish_fold([H|T], Fun, Acc) ->
 
 publish_fold([], Fun, Acc) when is_function(Fun, 2) ->
     Acc.
+
+
 
 
 %% =============================================================================

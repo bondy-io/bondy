@@ -369,6 +369,7 @@ to_details_map(#entry{key = Key} = E) ->
         invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
     }.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Converts the entry into a map according to the WAMP protocol Details

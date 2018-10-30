@@ -133,6 +133,7 @@ socket_open(Procotol, Transport, Peername) ->
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
     prometheus_gauge:inc(bondy_sockets_total, Labels).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end

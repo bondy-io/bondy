@@ -22,7 +22,6 @@
 
 -export([bin_to_pid/1]).
 -export([decode/2]).
--export([encode/2]).
 -export([foreach/2]).
 -export([generate_fragment/1]).
 -export([get_flake_id/0]).
@@ -165,6 +164,12 @@ is_uuid(_) ->
 maybe_encode(_, <<>>) ->
     <<>>;
 
+maybe_encode(bert, Term) ->
+    bert:encode(Term);
+
+maybe_encode(erl, Term) ->
+   binary_to_term(Term);
+
 maybe_encode(json, Term) ->
     case jsx:is_json(Term) of
         true ->
@@ -175,11 +180,21 @@ maybe_encode(json, Term) ->
 
  maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
-     msgpack:pack(Term).
+     Opts = [{map_format, map}, {pack_str, from_binary}],
+     msgpack:pack(Term, Opts);
+
+maybe_encode(Enc, Term) when is_binary(Enc) ->
+    maybe_encode(list_to_atom(binary_to_list(Enc)), Term).
 
 
 
 %% @private
+decode(bert, Bin) ->
+    bert:decode(Bin);
+
+decode(erl, Bin) ->
+   binary_to_term(Bin);
+
 decode(json, <<>>) ->
     <<>>;
 
@@ -187,28 +202,17 @@ decode(json, Term) ->
     jsx:decode(Term, [return_maps]);
 
 decode(msgpack, Term) ->
-    Opts = [
-        {map_format, map},
-        {unpack_str, as_binary}
-    ],
+    Opts = [{map_format, map}, {unpack_str, as_binary}],
     {ok, Bin} = msgpack:unpack(Term, Opts),
     Bin;
+
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
 
 
 
-%% @private
-encode(json, Term) ->
-    jsx:encode(Term);
 
-encode(msgpack, Term) ->
-    Opts = [
-        {map_format, map},
-        {pack_str, from_binary}
-    ],
-    msgpack:pack(Term, Opts).
 
 %% -----------------------------------------------------------------------------
 %% @doc

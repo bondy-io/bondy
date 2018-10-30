@@ -55,6 +55,7 @@
         sidejob,
         uuid,
         %% Leapsight
+        mops,
         flake,
         tuplespace,
         art,
