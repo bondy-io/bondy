@@ -31,9 +31,9 @@
 -export([init/0]).
 -export([report/0]).
 -export([wamp_message/2]).
--export([socket_open/2]).
--export([socket_closed/3]).
--export([socket_error/2]).
+-export([socket_open/3]).
+-export([socket_closed/4]).
+-export([socket_error/3]).
 -export([days_duration_buckets/0]).
 -export([hours_duration_buckets/0]).
 -export([minutes_duration_buckets/0]).
@@ -125,22 +125,25 @@ microseconds_duration_buckets() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_open(Protocol :: atom(), Transport :: atom()) -> ok.
+-spec socket_open(
+    Protocol :: atom(), Transport :: atom(), Peername :: binary()) -> ok.
 
-socket_open(Procotol, Transport) ->
-    Labels = get_socket_labels(Procotol, Transport),
+socket_open(Procotol, Transport, Peername) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
     prometheus_gauge:inc(bondy_sockets_total, Labels).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec socket_closed(
-    Protocol :: atom(), Transport:: atom(), Seconds :: integer()) -> ok.
+    Protocol :: atom(), Transport:: atom(),
+    Peername :: binary(), Seconds :: integer()) -> ok.
 
-socket_closed(Procotol, Transport, Seconds) ->
-    Labels = get_socket_labels(Procotol, Transport),
+socket_closed(Procotol, Transport, Peername, Seconds) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     prometheus_histogram:observe(
@@ -151,10 +154,11 @@ socket_closed(Procotol, Transport, Seconds) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_error(Protocol :: atom(), Transport:: atom()) -> ok.
+-spec socket_error(
+    Protocol :: atom(), Transport:: atom(), Peername :: binary()) -> ok.
 
-socket_error(Procotol, Transport) ->
-    Labels = get_socket_labels(Procotol, Transport),
+socket_error(Procotol, Transport, Peername) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
     prometheus_gauge:dec(bondy_sockets_total, Labels).
 
@@ -266,11 +270,12 @@ get_labels(_) ->
    ?WAMP_MESSAGE_LABELS.
 
 
-get_socket_labels(Protocol, Transport) ->
+get_socket_labels(Protocol, Transport, Peername) ->
     [
         node_name(),
         Protocol,
-        Transport
+        Transport,
+        Peername
     ].
 
 
@@ -312,31 +317,31 @@ net_metrics() ->
         {name, bondy_sockets_total},
         {help,
             <<"The number of active sockets on a bondy node.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_opened_total},
         {help,
             <<"The number of sockets opened on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_closed_total},
         {help,
             <<"The number of sockets closed on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_socket_errors_total},
         {help,
             <<"The number of socket errors on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_histogram:declare([
         {name, bondy_socket_duration_seconds},
         {help,
             <<"A histogram of the duration of a socket.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
 
     %% Bytes

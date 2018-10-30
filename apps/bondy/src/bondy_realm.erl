@@ -51,7 +51,7 @@
 }).
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
--define(PREFIX, {global, realms}).
+-define(PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
     {{10, 0, 0, 0}, 8},
     {{172, 16, 0, 0}, 12},

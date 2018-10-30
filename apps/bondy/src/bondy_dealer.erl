@@ -1054,20 +1054,53 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 %% @private
 on_register(true, Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_create">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok;
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.registration.on_create">>,
+            SessionId = bondy_context:session_id(Ctxt),
+            RegId = maps:get(id, Map),
+            {ok, _} = bondy_broker:publish(
+                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+            ok;
+        false ->
+            ok
+    end;
 
 on_register(false, Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_register">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok.
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.registration.on_register">>,
+            SessionId = bondy_context:session_id(Ctxt),
+            RegId = maps:get(id, Map),
+            {ok, _} = bondy_broker:publish(
+                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+            ok;
+            false ->
+                ok
+        end.
+
 
 %% @private
 on_unregister(Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_unregister">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok.
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.registration.on_unregister">>,
+            SessionId = bondy_context:session_id(Ctxt),
+            RegId = maps:get(id, Map),
+            {ok, _} = bondy_broker:publish(
+                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+            ok;
+        false ->
+            ok
+    end.
+
+%% @private
+%% on_delete(Map, Ctxt) ->
+%%     Uri = <<"wamp.registration.on_delete">>,
+%%     SessionId = bondy_context:session_id(Ctxt),
+%%     RegId = maps:get(id, Map),
+%%     {ok, _} = bondy_broker:publish(#{}, Uri, [SessionId, RegId], Map, Ctxt),
+%%     ok.
 
 
 no_such_procedure(ProcUri, CallId) ->

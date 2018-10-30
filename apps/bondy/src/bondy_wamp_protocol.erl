@@ -300,14 +300,14 @@ handle_inbound_messages(
         #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
     St1 = St0#wamp_state{state_name = closed},
-    {stop, lists:reverse([Bin|Acc]), St1};
+    {stop, normal, lists:reverse([Bin|Acc]), St1};
 
 handle_inbound_messages(
     [#goodbye{}|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
     %% Client is replying to our goodbye, we ignore any subsequent messages
     %% We reply all previous messages and close
     St1 = St0#wamp_state{state_name = closed},
-    {stop, lists:reverse(Acc), St1};
+    {stop, shutdown, lists:reverse(Acc), St1};
 
 handle_inbound_messages(
     [#hello{} = M|_],
@@ -326,7 +326,7 @@ handle_inbound_messages(
         St0
     ),
     St1 = St0#wamp_state{state_name = closed},
-    {stop, [Bin | Acc], St1};
+    {stop, ?WAMP_PROTOCOL_VIOLATION, [Bin | Acc], St1};
 
 handle_inbound_messages(
     [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
@@ -515,14 +515,15 @@ open_session(St0) ->
                 ?WAMP_PROTOCOL_VIOLATION,
                 <<"No client roles provided. Please provide at least one client role.">>,
                 #{},
-                St0)
+                St0
+            )
     end.
 
 
 
 %% @private
 abort(Type, Reason, Details, St) ->
-    {stop, abort_error_bin(Type, Reason, Details, St), St}.
+    {stop, Reason, abort_error_bin(Type, Reason, Details, St), St}.
 
 
 %% @private

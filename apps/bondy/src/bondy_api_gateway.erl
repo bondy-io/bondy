@@ -28,7 +28,7 @@
 
 
 
--define(PREFIX, {global, api_specs}).
+-define(PREFIX, {api_gateway, api_specs}).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).
@@ -256,7 +256,10 @@ init([]) ->
     %% recompile them and generate the Cowboy dispatch tables
     ok = plum_db_events:subscribe(exchange_started),
     ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
+    MS = [{
+        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+        {{?PREFIX, '_'}, '_', '_'}, [], [true]
+    }],
     ok = plum_db_events:subscribe(object_update, MS),
 
     {ok, #state{}}.
@@ -319,7 +322,7 @@ handle_info(
     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
 
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables

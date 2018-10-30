@@ -17,24 +17,51 @@
 %% =============================================================================
 
 -module(bondy_stats).
+-behaviour(gen_server).
+
+-define(DEFAULT_TIME, 2000).
+
+-record(state, {
+    tick_time       ::  integer(),
+    time_ref        ::  reference()
+}).
 
 -export([get_stats/0]).
 -export([init/0]).
 -export([otp_release/0]).
+-export([socket_closed/4]).
+-export([socket_error/3]).
+-export([socket_open/3]).
+-export([start_link/0]).
 -export([sys_driver_version/0]).
 -export([sys_monitor_count/0]).
 -export([system_architecture/0]).
 -export([system_version/0]).
 -export([update/1]).
 -export([update/2]).
--export([socket_open/2]).
--export([socket_closed/3]).
--export([socket_error/2]).
+
+
+%% GEN_SERVER CALLBACKS
+-export([init/1]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+-export([handle_call/3]).
+-export([handle_cast/2]).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -124,34 +151,34 @@ get_stats() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_open(atom(), atom()) -> ok.
+-spec socket_open(atom(), atom(), binary()) -> ok.
 
-socket_open(Protocol, Transport) ->
+socket_open(Protocol, Transport, Peername) ->
     %% Todo capture peername to feed Rate Limiting stats by IP
     %% but do not forward to prometheus
-    bondy_prometheus:socket_open(Protocol, Transport).
+    bondy_prometheus:socket_open(Protocol, Transport, Peername).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_closed(atom(), atom(), Duration :: integer()) -> ok.
+-spec socket_closed(atom(), atom(), binary(), Duration :: integer()) -> ok.
 
-socket_closed(Protocol, Transport, Duration) ->
+socket_closed(Protocol, Transport, Peername, Duration) ->
     %% Todo capture peername to feed Rate Limiting stats by IP
     %% but do not forward to prometheus
-    bondy_prometheus:socket_closed(Protocol, Transport, Duration).
+    bondy_prometheus:socket_closed(Protocol, Transport, Peername, Duration).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec socket_error(atom(), atom()) -> ok.
+-spec socket_error(atom(), atom(), binary()) -> ok.
 
-socket_error(Protocol, Transport) ->
-    bondy_prometheus:socket_error(Protocol, Transport).
+socket_error(Protocol, Transport, Peername) ->
+    bondy_prometheus:socket_error(Protocol, Transport, Peername).
 
 
 %% -----------------------------------------------------------------------------
@@ -187,8 +214,67 @@ update(M, #{peer := {_IP, _}} = Ctxt) ->
 
 
 %% =============================================================================
+%% GEN_SERVER CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    %% Time = bondy_config:get(stats_collector_tick_time, 2000),
+    Time = ?DEFAULT_TIME,
+    TRef = schedule_tick(Time),
+    {ok, #state{tick_time = Time, time_ref = TRef}}.
+
+
+handle_call(Event, From, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    {noreply, State}.
+
+
+handle_cast(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {noreply, State}.
+
+
+handle_info(collect_stats, State) ->
+    collect_stats(State),
+    TRef = schedule_tick(State#state.tick_time),
+    {noreply, State#state{time_ref = TRef}};
+
+handle_info(Info, State) ->
+    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    {noreply, State}.
+
+
+terminate(_Reason, State) ->
+    _ = timer:cancel(State#state.time_ref),
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+
+
+%% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+
+%% @private
+collect_stats(_State) ->
+    ok.
+
+%% @private
+schedule_tick(Time) ->
+    erlang:send_after(Time, ?MODULE, collect_stats).
+
+
+
 
 %% @private
 baddress(T) when is_tuple(T), (tuple_size(T) == 4 orelse tuple_size(T) == 8) ->

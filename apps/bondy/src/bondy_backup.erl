@@ -325,7 +325,7 @@ do_backup(File, Ts) ->
             mod_vsn => mod_vsn(),
             node => erlang:node(),
             timestamp => Ts,
-            vsn => <<"1.1.0">>
+            vsn => <<"1.2.0">>
         }}
     ],
 
@@ -346,7 +346,7 @@ mod_vsn() ->
 
 %% @private
 build_backup(Log) ->
-    Iterator = plum_db:iterator({undefined, undefined}),
+    Iterator = plum_db:iterator({'_', '_'}),
     try
         Acc1 = build_backup(Iterator, Log, []),
         %% We log the remaining elements
@@ -369,13 +369,26 @@ build_backup(Iterator, Log, Acc0) ->
             %% iterator_element/1 gets the whole prefixed object without
             %% resolving conflicts
             E = plum_db:iterator_element(Iterator),
-            Acc1 = maybe_log([E | Acc0], Log),
-            build_backup(plum_db:iterate(Iterator), Log, Acc1)
+            Acc1 = maybe_add(E, Acc0),
+            Acc2 = maybe_log(Acc1, Log),
+            build_backup(plum_db:iterate(Iterator), Log, Acc2)
     end.
 
 
 %% @private
-maybe_log(Acc, Log) when length(Acc) =:= 100 ->
+maybe_add({{{registry_registrations, _}, _}, _}, Acc) ->
+    Acc;
+maybe_add({{{registry_subscriptions, _}, _}, _}, Acc) ->
+    Acc;
+maybe_add({{{registry, _}, _}, _}, Acc) ->
+    %% Legacy prefix
+    Acc;
+maybe_add(E, Acc) ->
+    [E | Acc].
+
+
+%% @private
+maybe_log(Acc, Log) when length(Acc) =:= 500 ->
     ok = log(Acc, Log),
     [];
 
@@ -407,7 +420,8 @@ async_restore(#{filename := Filename}, State0) ->
         case do_restore(Filename) of
             {ok, _Counters} = OK ->
                 Me ! {restore_reply, OK, self()};
-            {error, _} = Error ->
+            {error, Reason} = Error ->
+                _ = lager:error("Error;reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
                 Me ! {restore_reply, Error, self()}
         end
     end),
@@ -443,7 +457,8 @@ do_restore(Filename) ->
 do_restore_aux(Log) ->
     try
         Counters0 = #{read_count => 0, merged_count => 0},
-        restore_chunk({head, disk_log:chunk(Log, start)}, Log, Counters0)
+        restore_chunk(
+            {head, disk_log:chunk(Log, start)}, undefined, Log, Counters0)
     catch
         _:Reason ->
             {error, Reason}
@@ -454,54 +469,131 @@ do_restore_aux(Log) ->
 
 
 %% @private
-restore_chunk(eof, Log, Counters) ->
+restore_chunk(eof, _, Log, Counters) ->
     ok = disk_log:close(Log),
     {ok, Counters};
 
-restore_chunk({error, _} = Error, Log, _) ->
+restore_chunk({error, _} = Error, _, Log, _) ->
     _ = disk_log:close(Log),
     Error;
 
-restore_chunk({head, {Cont, [H|T]}}, Log, Counters) ->
+restore_chunk({head, {Cont, [H|T]}}, undefined, Log, Counters) ->
     ok = validate_head(H),
-    restore_chunk({Cont, T}, Log, Counters);
+    case maps:get(vsn, H) of
+        Vsn when Vsn >= <<"1.2.0">> ->
+            restore_chunk({Cont, T}, <<"1.2.0">>, Log, Counters);
+        Vsn ->
+            restore_chunk({Cont, T}, Vsn, Log, Counters)
+    end;
 
-restore_chunk({Cont, Terms}, Log, Counters0) ->
+restore_chunk({Cont, Terms}, Vsn, Log, Counters0) ->
     try
-        {ok, Counters} = restore_terms(Terms, Counters0),
-        restore_chunk(disk_log:chunk(Log, Cont), Log, Counters)
+        {ok, Counters} = restore_terms(Terms, Vsn, Counters0),
+        restore_chunk(disk_log:chunk(Log, Cont), Vsn, Log, Counters)
     catch
         _:Reason ->
             {error, Reason}
     end.
 
 
+
 %% @private
 restore_terms(
-    [{PKey, Object}|T], #{read_count := N, merged_count := M} = Counters) ->
-    case merge(PKey, Object) of
-        true ->
-            restore_terms(
-                T, Counters#{read_count => N + 1, merged_count => M + 1});
-        false ->
-            restore_terms(T, Counters#{read_count => N + 1})
+    [{{{registry, _}, _}, _}|T], Vsn,
+    #{read_count := N} = Counters) ->
+    %% Previous version of backup would backup the registry
+    restore_terms(T, Vsn, Counters#{read_count => N + 1});
+
+restore_terms([H|T], Vsn, #{read_count := N, merged_count := M} = Counters) ->
+    case migrate(Vsn, H) of
+        {PKey, Object} ->
+            case plum_db:merge({PKey, undefined}, Object) of
+                true ->
+                    restore_terms(
+                        T, Vsn, Counters#{read_count => N + 1, merged_count => M + 1});
+                false ->
+                    restore_terms(T, Vsn, Counters#{read_count => N + 1})
+            end;
+        skip ->
+            restore_terms(T, Vsn, Counters#{read_count => N + 1})
     end;
 
-restore_terms([], Counters) ->
+restore_terms([], _, Counters) ->
     {ok, Counters}.
 
 
-
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc We renamed to legacy plumtree metadata object
-%% @end
-%% -----------------------------------------------------------------------------
-merge(PKey, {metadata, _} = Object) ->
-    merge(PKey, setelement(1, Object, object));
+migrate(Vsn, KeyValue) when Vsn >= <<"1.2.0">> ->
+    KeyValue;
+migrate(Vsn, {PKey, Object}) when Vsn < <<"1.2.0">> ->
+    {Prefix, Key} = PKey,
+    case rename_prefix(Prefix) of
+        skip ->
+            skip;
+        Renamed ->
+            {{Renamed, Key}, migrate_object(Vsn, Object)}
+    end.
 
-merge(PKey, {object, _} = Object) ->
-    plum_db:merge({PKey, undefined}, Object).
+
+%% @private
+rename_prefix({global, realms}) ->
+    {security, realms};
+
+rename_prefix({global, api_specs}) ->
+    {api_gateway, api_specs};
+
+rename_prefix({A, B}) when is_binary(A) ->
+    rename_prefix(B, A).
+
+
+%% @private
+rename_prefix(<<"groups">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_groups, Realm};
+
+rename_prefix(<<"users">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_users, Realm};
+
+rename_prefix(<<"sources">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_sources, Realm};
+
+rename_prefix(<<"usergrants">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_user_grants, Realm};
+
+rename_prefix(<<"groupgrants">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_group_grants, Realm};
+
+rename_prefix(<<"status">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_status, Realm};
+
+rename_prefix(<<"config">>, Bin) ->
+    Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
+    {security_config, Realm};
+
+rename_prefix(<<"refresh_tokens">>, _Bin) ->
+    %% There is no sensible way to migrate this as we used
+    %% $. as separator before :-(
+    skip.
+    %% case binary:split(Bin, <<$.>>, [global]) of
+    %%     [Realm, IssuerOrSub] ->
+    %%         {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>};
+    %%     [Realm, Issuer, Sub] ->
+    %%         {oauth2_refresh_tokens,
+    %%             <<Realm/binary, $,, Issuer/binary, $,, Sub/binary>>}
+    %% end.
+
+
+%% @private
+migrate_object(_, {metadata, _} = Object) ->
+    %% For versions < 1.1.0
+    setelement(1, Object, object);
+migrate_object(_, {object, _} = Object) ->
+    Object.
 
 
 %% @private

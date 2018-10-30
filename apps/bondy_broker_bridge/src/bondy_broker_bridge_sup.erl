@@ -1,7 +1,7 @@
 %% =============================================================================
-%%  bondy_sup.erl -
+%%  bondy_broker_bridge_sup.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,11 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--module(bondy_sup).
+-module(bondy_broker_bridge_sup).
 -behaviour(supervisor).
 
 -define(CHILD(Id, Type, Args, Restart, Timeout), #{
@@ -32,23 +28,36 @@
     modules => [Id]
 }).
 
-
 %% API
 -export([start_link/0]).
+
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% add_sink_sup(Name, Config) ->
+%%     {error, not_implemented}.
 
 
 
@@ -61,12 +70,16 @@ start_link() ->
 
 init([]) ->
     Children = [
-        ?CHILD(bondy_stats, worker, [], permanent, 5000),
-        ?CHILD(bondy_registry, worker, [], permanent, 5000),
-        ?CHILD(bondy_broker_events, worker, [], permanent, 5000),
-        ?CHILD(bondy_subscribers_sup, supervisor, [], permanent, infinity),
-        ?CHILD(bondy_peer_wamp_forwarder, worker, [], permanent, 5000),
-        ?CHILD(bondy_api_gateway, worker, [], permanent, 5000),
-        ?CHILD(bondy_backup, worker, [], permanent, 5000)
+        ?CHILD(bondy_broker_bridge, worker, [], permanent, 5000)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
