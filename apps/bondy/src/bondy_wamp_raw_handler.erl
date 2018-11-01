@@ -665,15 +665,18 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
         Prefix,
         <<
-            " session_id=~p, peername=~s"
+            " session_id=~p, peername=~s, agent=~p"
             ", protocol=wamp, transport=raw, frame_type=~p, encoding=~p"
             ", message_max_length=~p, socket=~p"
         >>
     ]),
     SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
+    Agent = bondy_wamp_protocol:agent(St#state.protocol_state),
+
     Tail = [
         SessionId,
         St#state.peername,
+        Agent,
         St#state.frame_type,
         St#state.encoding,
         St#state.max_len,
