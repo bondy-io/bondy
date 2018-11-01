@@ -437,7 +437,7 @@ remove(Entry) ->
     case plum_db:take(full_prefix(Entry), Key) of
         undefined ->
             ok;
-        {_, Entry} ->
+        Entry ->
             Uri = bondy_registry_entry:uri(Entry),
             ok = delete_from_trie(Entry),
             _ = decr_counter(RealmUri, Uri, 1),
@@ -847,7 +847,7 @@ do_remove(Key, Ctxt, Task) ->
     case plum_db:take(full_prefix(Type, RealmUri), Key) of
         undefined ->
             ok;
-        {_, Entry} ->
+        Entry ->
             ok = delete_from_trie(Entry),
             maybe_execute(maybe_fun(Task, Ctxt), Entry)
     end.
