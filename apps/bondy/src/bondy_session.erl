@@ -149,6 +149,7 @@
 
 -export_type([peer/0]).
 
+-export([agent/1]).
 -export([close/1]).
 -export([created/1]).
 -export([fetch/1]).
@@ -272,6 +273,7 @@ update(#session{id = Id} = S) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(session()) -> ok.
+
 close(#session{id = Id} = S) ->
     {IP, _} = S#session.peer,
     Realm = S#session.realm_uri,
@@ -280,7 +282,13 @@ close(#session{id = Id} = S) ->
         {session_closed, Id, Realm, IP, Secs}),
     true = ets:delete(table(Id), Id),
     _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
-    ok.
+    ok;
+
+close(Id) ->
+    case lookup(Id) of
+        #session{} = Session -> close(Session);
+        _ -> ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -298,9 +306,11 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
+
 realm_uri(#session{realm_uri = Val}) ->
     Val;
-realm_uri(Id) ->
+
+realm_uri(Id) when is_integer(Id) ->
     #session{realm_uri = Val} = fetch(Id),
     Val.
 
@@ -310,8 +320,10 @@ realm_uri(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles(id() | session()) -> map().
+
 roles(#session{roles = Val}) ->
     Val;
+
 roles(Id) ->
     #session{roles = Val} = fetch(Id),
     Val.
@@ -329,7 +341,10 @@ peer_id(#session{} = S) ->
         S#session.node,
         S#session.id,
         S#session.pid
-    }.
+    };
+
+peer_id(Id) when is_integer(Id) ->
+    peer_id(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------
@@ -340,11 +355,12 @@ peer_id(#session{} = S) ->
 %% -----------------------------------------------------------------------------
 -spec pid(session()) -> pid().
 
-pid(Id) when is_integer(Id) ->
-    pid(fetch(Id));
-
 pid(#session{pid = Pid}) ->
-    Pid.
+    Pid;
+
+pid(Id) when is_integer(Id) ->
+    #session{pid = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -353,7 +369,26 @@ pid(#session{pid = Pid}) ->
 %% -----------------------------------------------------------------------------
 -spec created(session()) -> calendar:date_time().
 
-created(#session{created = Val}) -> Val.
+created(#session{created = Val}) ->
+    Val;
+
+created(Id) when is_integer(Id) ->
+    #session{created = Val} = fetch(Id),
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec agent(session()) -> binary() | undefined.
+
+agent(#session{agent = Val}) ->
+    Val;
+
+agent(Id) when is_integer(Id) ->
+    #session{agent = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -362,7 +397,12 @@ created(#session{created = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec peer(session()) -> peer().
 
-peer(#session{peer = Val}) -> Val.
+peer(#session{peer = Val}) ->
+    Val;
+
+peer(Id) when is_integer(Id) ->
+    #session{peer = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -374,9 +414,9 @@ peer(#session{peer = Val}) -> Val.
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
-incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, SessionId),
-    ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
+incr_seq(Id) when is_integer(Id), Id >= 0 ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    ets:update_counter(Tab, Id, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
 %% -----------------------------------------------------------------------------

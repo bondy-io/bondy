@@ -56,7 +56,7 @@
 }.
 -export_type([t/0]).
 
-
+-export([agent/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
@@ -222,6 +222,20 @@ roles(Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec realm_uri(t()) -> uri().
 realm_uri(#{realm_uri := Val}) -> Val.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the agent of the provided context or 'undefined'
+%% if there is none.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec agent(t()) -> binary() | undefined.
+agent(#{session := S}) ->
+    bondy_session:agent(S);
+agent(#{}) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
