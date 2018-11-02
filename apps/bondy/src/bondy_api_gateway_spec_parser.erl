@@ -1463,8 +1463,8 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
     Mod = bondy_api_gateway_handler,
-    %% State informally defined in bondy_api_gateway_handler
-    State = #{
+    %% Args required by bondy_api_gateway_handler
+    Args = #{
         api_spec => Spec3,
         realm_uri => Realm,
         deprecated => Deprecated,
@@ -1472,7 +1472,7 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
     },
     lists:flatten([
         [
-            {S, Host, Realm, AbsPath, Mod, State},
+            {S, Host, Realm, AbsPath, Mod, Args},
             security_scheme_rules(S, Host, BasePath, Realm, Sec)
         ] || S <- Schemes
     ]).
