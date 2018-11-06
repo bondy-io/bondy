@@ -302,6 +302,15 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% (RFC) When a single event matches more than one of a _Subscriber's_
     %% subscriptions, the event will be delivered for each subscription.
 
+    Details0 = #{
+        <<"timestamp">> => erlang:system_time(millisecond), %% added by us
+        <<"topic">> => TopicUri
+    },
+    Details = case maps:get(disclose_me, Opts, true) of
+        true -> Details0#{<<"publisher">> => bondy_context:session_id(Ctxt)};
+        false -> Details0
+    end,
+
     %% We should not send the publication to the publisher, so we exclude it
     %% (RFC) Note that the _Publisher_ of an event will never
     %% receive the published event even if the _Publisher_ is
@@ -319,6 +328,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% * if there is an exclude_authid attribute present, the Subscriber's
     %% authid is NOT in this list
     %% * if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list
+
 
     %% Subscriber Blacklisting: we only support sessionIds for now
     Exclusions0 = maps:get(exclude, Opts, []),
@@ -358,7 +368,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                     undefined ->
                         %% A bondy_subscriber
                         Event = wamp_message:event(
-                            SubsId, PubId, Opts, Args, ArgsKw),
+                            SubsId, PubId, Details, Args, ArgsKw),
                         ok = bondy_subscriber:handle_event(Pid, Event),
                         NodeAcc;
                     ESessionId ->
@@ -368,7 +378,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                                 NodeAcc;
                             ESession ->
                                 Event = wamp_message:event(
-                                    SubsId, PubId, Opts, Args, ArgsKw),
+                                    SubsId, PubId, Details, Args, ArgsKw),
                                 ok = bondy:send(
                                     bondy_session:peer_id(ESession), Event),
                                     NodeAcc

@@ -176,6 +176,30 @@ load(Map) when is_map(Map) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc
+%% ```
+%% [
+%%     #{
+%%         <<"backend">>: <<"bondy_kafka_bridge">>,
+%%         <<"realm_uri">>: <<"com.magenta.public">>,
+%%         <<"options">>: {
+%%             <<"match">>: <<"prefix">>
+%%         },
+%%         <<"topic">>: <<"com.magenta.account">>,
+%%         <<"action">>: {
+%%             <<"type">>: <<"produce">>,
+%%             <<"client_id">>: <<"default">>,
+%%             <<"topic">>: <<"com.magenta.wamp_events">>,
+%%             <<"partitioner">>: <<"fnv32a">>,
+%%             <<"key">>: <<"\"{{event.topic}}/{{event.publication_id}}\"">>,
+%%             <<"encoding": <<"json">>,
+%%             <<"value": <<"{{event}}">>
+%%         }
+%%     }
+%% ]
+%% @end
+%% -----------------------------------------------------------------------------
+%% -----------------------------------------------------------------------------
 %% @doc For internal Bondy use
 %% @end
 %% -----------------------------------------------------------------------------
@@ -402,16 +426,15 @@ plum_db_unsubscribe() ->
     ok.
 
 
-mops_ctxt(Event, RealmUri, _Opts, Topic) ->
+mops_ctxt(Event, RealmUri, _Opts, _TopicMatch) ->
     #{
         <<"event">> => #{
             <<"realm_uri">> => RealmUri,
-            <<"topic">> => Topic,
             <<"subscription_id">> => Event#event.subscription_id,
             <<"publication_id">> => Event#event.publication_id,
             <<"details">> => Event#event.details,
             <<"arguments">> => Event#event.arguments,
             <<"arguments_kw">> => Event#event.arguments_kw,
-            <<"timestamp">> => erlang:system_time(millisecond)
+            <<"processing_timestamp">> => erlang:system_time(millisecond)
         }
     }.
