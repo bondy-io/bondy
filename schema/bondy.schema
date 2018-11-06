@@ -695,7 +695,7 @@
 %% Defines the level of concurrency. Each partition has its own leveldb and
 %% ets instance.
 {mapping, "db.partitions", "plum_db.partitions", [
-  {default, 32},
+  {default, 16},
   {datatype, integer}
 ]}.
 
