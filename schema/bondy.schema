@@ -52,10 +52,10 @@
 ]}.
 
 
+
 %% =============================================================================
 %% LOAD REGULATION
 %% =============================================================================
-
 
 
 
@@ -459,11 +459,11 @@
 
 
 
-
-
 %% =============================================================================
 %% WAMP RAW SOCKET
 %% =============================================================================
+
+
 
 {mapping, "wamp.tcp.enabled", "bondy.wamp_tcp.enabled", [
   {default, on},
@@ -539,6 +539,7 @@
 %% =============================================================================
 %% WAMP TCP TLS
 %% =============================================================================
+
 
 
 {mapping, "wamp.tls.enabled", "bondy.wamp_tls.enabled", [
@@ -635,7 +636,6 @@
 
 
 
-
 %% =============================================================================
 %% DIRS
 %% =============================================================================
@@ -676,5 +676,51 @@
 {mapping, "platform_log_dir", "bondy.platform_log_dir", [
   {datatype, directory},
   {default, "{{platform_log_dir}}"}
+]}.
+
+
+
+
+
+%% =============================================================================
+%% DB
+%% =============================================================================
+
+
+{mapping, "db.data_dir", "plum_db.data_dir", [
+  {datatype, directory},
+  {default, "{{platform_data_dir}}"}
+]}.
+
+%% Defines the level of concurrency. Each partition has its own leveldb and
+%% ets instance.
+{mapping, "db.partitions", "plum_db.partitions", [
+  {default, 32},
+  {datatype, integer}
+]}.
+
+{mapping, "db.aae_enabled", "plum_db.aae_enabled", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+{mapping, "db.store_open_retry_Limit", "plum_db.store_open_retry_Limit", [
+  {default, 30},
+  {datatype, integer}
+]}.
+
+{mapping, "db.store_open_retries_delay", "plum_db.store_open_retries_delay", [
+  {default, "2s"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "db.data_exchange_timeout", "plum_db.data_exchange_timeout", [
+  {default, "1m"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "db.hashtree_timer", "plum_db.hashtree_timer", [
+  {default, "10s"},
+  {datatype, {duration, ms}}
 ]}.
 
