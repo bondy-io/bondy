@@ -16,7 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_oauth2).
 
 % -record(oauth2_credentials, {
@@ -559,7 +562,7 @@ maybe_issue_refresh_token(true, Uri, IssuedAt, Data0) ->
     Token.
 
 
-%% @private
+
 store_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
     Issuer = Data#bondy_oauth2_token.issuer,
     Username = Data#bondy_oauth2_token.username,
@@ -567,7 +570,12 @@ store_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
 
     %% 2. An index to find all refresh tokens issued for a Username
     %% A Username can have many active tokens per Iss (on different DeviceIds)
-    ok = plum_db:put(?REFRESH_TOKENS_PREFIX(Uri, Username), Token, Issuer),
+    ok = case Issuer == Username of
+        true ->
+            ok;
+        false ->
+            plum_db:put(?REFRESH_TOKENS_PREFIX(Uri, Username), Token, Issuer)
+    end,
 
     %% 2. We store an index to find the refresh token matching
     %% {Iss, Sub, DeviceId} or to iterate over all tokens for {Iss, Sub}
