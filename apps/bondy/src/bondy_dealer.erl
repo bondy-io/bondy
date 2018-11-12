@@ -405,9 +405,9 @@ handle_message(#yield{} = M, Ctxt0) ->
             Caller = bondy_rpc_promise:caller(Promise),
             case bondy_rpc_promise:call_id(Promise) of
                 undefined ->
-                    %% TODO make this explicit, at the moment a promise with
-                    %% undefined callId is a promise for a remote calle
                     %% The caller is remote, we fwd the yield to the peer node
+                    %% TODO make this explicit, at the moment a promise with
+                    %% undefined callId is a promise for a remote callee
                     bondy:send(Callee, Caller, M, #{});
                 CallId ->
                     Result = yield_to_result(CallId, M),
@@ -1044,8 +1044,6 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE: META EVENTS
 %% =============================================================================
@@ -1054,53 +1052,20 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 %% @private
 on_register(true, Map, Ctxt) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = <<"wamp.registration.on_create">>,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
-            {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
-            ok;
-        false ->
-            ok
-    end;
+    bondy_event_manager:notify({registration_created, Map, Ctxt});
 
 on_register(false, Map, Ctxt) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = <<"wamp.registration.on_register">>,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
-            {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
-            ok;
-            false ->
-                ok
-        end.
+    bondy_event_manager:notify({registration_added, Map, Ctxt}).
 
 
 %% @private
 on_unregister(Map, Ctxt) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = <<"wamp.registration.on_unregister">>,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
-            {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
-            ok;
-        false ->
-            ok
-    end.
+    bondy_event_manager:notify({registration_removed, Map, Ctxt}).
+
 
 %% @private
 %% on_delete(Map, Ctxt) ->
-%%     Uri = <<"wamp.registration.on_delete">>,
-%%     SessionId = bondy_context:session_id(Ctxt),
-%%     RegId = maps:get(id, Map),
-%%     {ok, _} = bondy_broker:publish(#{}, Uri, [SessionId, RegId], Map, Ctxt),
-%%     ok.
+%%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
 
 no_such_procedure(ProcUri, CallId) ->

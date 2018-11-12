@@ -305,10 +305,7 @@ add(Uri, Opts) ->
     case lookup(Uri) of
         {error, not_found} ->
             ok = plum_db:put(?PREFIX, Uri, Realm),
-            _ = bondy:publish(
-                #{}, ?REALM_ADDED, [Uri], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
+            ok = bondy_event_manager:notify({realm_added, Uri}),
             init(Realm);
         _ ->
             error({already_exist, Uri})
@@ -332,10 +329,7 @@ delete(?BONDY_PRIV_REALM_URI) ->
 delete(Uri) ->
     %% TODO if there are users in the realm, the caller will need to first explicitely delete hthe users so return {error, users_exist} or similar
     plum_db:delete(?PREFIX, Uri),
-    _ = bondy:publish(
-        #{}, ?REALM_DELETED, [Uri], #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
+    ok = bondy_event_manager:notify({realm_deleted, Uri}),
     % TODO we need to close all sessions for this realm
     ok.
 

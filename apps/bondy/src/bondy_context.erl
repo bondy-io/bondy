@@ -49,6 +49,7 @@
     roles => map(),
     challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
+    request_timestamp => integer(),
     request_timeout => non_neg_integer(),
     request_details => map(),
     %% Metadata
@@ -69,6 +70,7 @@
 -export([realm_uri/1]).
 -export([request_id/1]).
 -export([request_timeout/1]).
+-export([request_timestamp/1]).
 -export([reset/1]).
 -export([roles/1]).
 -export([session/1]).
@@ -76,10 +78,18 @@
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
+-export([set_request_timestamp/2]).
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
 -export([set_session/2]).
 -export([encoding/1]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -95,6 +105,7 @@ new() ->
         request_id => undefined,
         request_timeout => bondy_config:request_timeout()
     }.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -117,12 +128,13 @@ new(Peer, Subprotocol) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Resets the context. Returns a copy of Ctxt where the following attributes
-%% have been reset: request_id, request_timeout.
+%% have been reset: request_id, request_timeout, request_timestamp
 %% @end
 %% -----------------------------------------------------------------------------
 -spec reset(t()) -> t().
 reset(Ctxt) ->
     Ctxt#{
+        request_timestamp => undefined,
         request_id => undefined,
         request_timeout => 0
     }.
@@ -224,7 +236,6 @@ roles(Ctxt) ->
 realm_uri(#{realm_uri := Val}) -> Val.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the agent of the provided context or 'undefined'
@@ -303,7 +314,6 @@ session(#{session := S}) ->
 request_id(#{request_id := Val}) ->
     Val.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sets the current request id to the provided context.
@@ -332,6 +342,27 @@ request_timeout(#{request_timeout := Val}) ->
 -spec set_request_timeout(t(), non_neg_integer()) -> t().
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current request timestamp.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_timestamp(t()) -> integer().
+request_timestamp(#{request_timestamp := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request timeout to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_timestamp(t(), integer()) -> t().
+set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
+    Ctxt#{request_timestamp => Timestamp}.
 
 
 %% -----------------------------------------------------------------------------

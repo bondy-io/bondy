@@ -217,14 +217,14 @@ handle_inbound(Data, St) ->
 
 handle_outbound(#result{} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
+    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
 
 handle_outbound(#error{request_type = ?CALL} = M, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
+    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
     St1 = update_context(bondy_context:reset(Ctxt0), St0),
     Bin = wamp_encoding:encode(M, encoding(St1)),
     {ok, Bin, St1};
@@ -232,7 +232,7 @@ handle_outbound(#error{request_type = ?CALL} = M, St0) ->
 handle_outbound(#goodbye{} = M, St0) ->
     %% Bondy is shutting_down this session, we will stop when we
     %% get the client's goodbye response
-    ok = bondy_stats:update(M, St0#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{state_name = shutting_down},
     {stop, Bin, St1, ?SHUTDOWN_TIMEOUT};
@@ -240,7 +240,7 @@ handle_outbound(#goodbye{} = M, St0) ->
 handle_outbound(M, St) ->
     case wamp_message:is_message(M) of
         true ->
-            ok = bondy_stats:update(M, St#wamp_state.context),
+            ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
             Bin = wamp_encoding:encode(M, encoding(St)),
             {ok, Bin, St};
         false ->
@@ -328,7 +328,7 @@ handle_inbound_messages(
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
-    ok = bondy_stats:update(M, St0#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     %% We reply all previous messages plus an abort message and close
     Bin = abort_error_bin(
         ?WAMP_PROTOCOL_VIOLATION,
@@ -343,7 +343,7 @@ handle_inbound_messages(
     [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     abort(
         ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent a HELLO message more than once.">>,
@@ -355,7 +355,7 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update(M, Ctxt0),
+    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
 
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
@@ -366,7 +366,7 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
 handle_inbound_messages(
     [#authenticate{} = M|_],
     #wamp_state{state_name = established, context = #{session := _}} = St, _) ->
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     %% Client already has a session so is already authenticated.
     abort(
         ?WAMP_PROTOCOL_VIOLATION,
@@ -378,7 +378,7 @@ handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
     %% Client is responding to a challenge
 
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
 
     Sign = M#authenticate.signature,
     Ctxt0 = St#wamp_state.context,
@@ -402,7 +402,7 @@ handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = Name} = St, _)
     when Name =/= challenging ->
     %% Client has not been sent a challenge
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     abort(
         ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to request a session first by sending a HELLO message.">>,
@@ -474,7 +474,7 @@ maybe_open_session({error, {user_not_found, AuthId}, St}) ->
 
 maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
-    ok = bondy_stats:update(M, St0#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
     St1 = St0#wamp_state{state_name = challenging, authmethod = AuthMethod},
     {reply, Bin, St1}.
@@ -517,7 +517,7 @@ open_session(St0) ->
                 roles => bondy_router:roles()
             }
         ),
-        ok = bondy_stats:update(Welcome, Ctxt1),
+        ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
@@ -544,7 +544,7 @@ abort_error_bin(Type, Reason, Details0, St) ->
         timestamp => erlang:system_time(seconds)
     },
     M = wamp_message:abort(Details, Type),
-    ok = bondy_stats:update(M, St#wamp_state.context),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     wamp_encoding:encode(M, encoding(St)).
 
 

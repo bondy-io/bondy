@@ -187,15 +187,16 @@ agent() ->
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
 
-forward(M, #{session := _} = Ctxt) ->
+forward(M, #{session := _} = Ctxt0) ->
+    Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
     %% _ = lager:debug(
     %%     "Forwarding message; peer_id=~p, message=~p",
     %%     [bondy_context:peer_id(Ctxt), M]
     %% ),
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
-    ok = bondy_stats:update(M, Ctxt),
-    do_forward(M, Ctxt).
+    ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
+    do_forward(M, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
@@ -371,7 +372,7 @@ async_forward(M, Ctxt0) ->
                 [maps:get(<<"message">>, ErrorMap)],
                 #{error => ErrorMap}
             ),
-            ok = bondy_stats:update(Reply, Ctxt0),
+            ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
             {reply, Reply, Ctxt0};
         Class:Reason ->
             Ctxt = bondy_context:realm_uri(Ctxt0),

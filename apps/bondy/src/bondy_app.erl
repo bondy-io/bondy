@@ -50,8 +50,8 @@ start(_Type, Args) ->
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup_env(Args),
+            ok = setup_event_handlers(),
             ok = bondy_router_worker:start_pool(),
-            ok = bondy_stats:init(),
             ok = bondy_cli:register(),
             ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
@@ -65,7 +65,7 @@ start(_Type, Args) ->
 
 start_phase(init_registry, normal, []) ->
     %% In previous versions of Bondy we piggy backed on a disk-only version of
-    %% plum_db to get registry syncrhonisation across the cluster.
+    %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
     %% connected.
     %% This was a clean way of avoiding new registrations interfiering with
@@ -139,6 +139,7 @@ start_listeners() ->
     ok.
 
 
+%% @private
 stop_router_services() ->
     _ = lager:info("Initiating shutdown"),
     %% We stop accepting new connections on HTTP/Websockets
@@ -162,6 +163,15 @@ stop_router_services() ->
     ok = bondy_api_gateway:stop_listeners(),
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.
+
+
+%% @private
+setup_event_handlers() ->
+    _ = bondy_event_manager:swap_watched_handler(
+        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
+    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
+    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
     ok.
 
 

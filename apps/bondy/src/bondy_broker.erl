@@ -428,7 +428,7 @@ do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     {ok, id() | pid()} | {error, already_exists}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
-    %% bondy_broker_events:subscribe(RealmUri, Opts, Topic, Fun);
+    %% bondy_wamp_event_manager:subscribe(RealmUri, Opts, Topic, Fun);
     bondy_subscribers_sup:start_subscriber(RealmUri, Opts, Topic, Fun);
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->

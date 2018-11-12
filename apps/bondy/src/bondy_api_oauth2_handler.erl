@@ -517,6 +517,5 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
 
 %% @private
 on_login(RealmUri, Username, Meta) ->
-    Uri = <<"com.leapsight.bondy.security.user_logged_in">>,
-    _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
-    ok.
+    bondy_event_manager:notify(
+        {security_user_logged_in, RealmUri, Username, Meta}).

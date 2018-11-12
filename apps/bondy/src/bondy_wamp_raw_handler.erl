@@ -687,18 +687,20 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
 
 %% @private
 socket_opened(St) ->
-    _ = bondy_stats:socket_open(wamp, raw, St#state.peername),
-    ok.
+    Event = {socket_open, wamp, raw, St#state.peername},
+    bondy_event_manager:notify(Event).
 
 
 %% @private
 socket_closed(true, St) ->
-    ok = bondy_stats:socket_error(wamp, raw, St#state.peername),
+    Event = {socket_error, wamp, raw, St#state.peername},
+    ok = bondy_event_manager:notify(Event),
     socket_closed(false, St);
 
 socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    bondy_stats:socket_closed(wamp, raw, St#state.peername, Seconds).
+    Event = {socket_closed, wamp, raw, St#state.peername, Seconds},
+    bondy_event_manager:notify(Event).
 
 
 %% @private
