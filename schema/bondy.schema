@@ -54,10 +54,14 @@
 
 
 %% =============================================================================
-%% LOAD REGULATION
+%% OVERLOAD PROTECTION AND LOAD REGULATION
 %% =============================================================================
 
-
+{mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
+  {default, 8},
+  {datatype, integer},
+  hidden
+]}.
 
 {mapping, "load_regulation.enabled", "bondy.load_regulation_enabled", [
   {default, on},
