@@ -370,7 +370,7 @@ auth_with_data(UserData, M0) ->
         ({{_, _}, [?TOMBSTONE]}, Acc) ->
             Acc
     end,
-    Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri)),
+    Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri), ?FOLD_OPTS),
     Sources = sort_sources(Sources0),
     IP = proplists:get_value(ip, maps:get(conn_info, M0)),
     case match_source(Sources, maps:get(username, M0), IP) of
