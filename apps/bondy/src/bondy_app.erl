@@ -43,9 +43,9 @@
 
 start(_Type, Args) ->
     %% We disable it until the build_hashtrees start phase
-    Enabled = application:get_env(plum_db, aae_enabled, true),
+    Enabled = plum_db_config:get(aae_enabled, true),
     ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
-    ok = application:set_env(plum_db, aae_enabled, false),
+    ok = plum_db_config:set(aae_enabled, false),
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
@@ -79,7 +79,7 @@ start_phase(init_registry, normal, []) ->
 
 start_phase(enable_aae, normal, []) ->
     {ok, Enabled} = application:get_env(plum_db, priv_aae_enabled),
-    ok = application:set_env(plum_db, aae_enabled, Enabled),
+    ok = plum_db_config:set(aae_enabled, Enabled),
     ok;
 
 start_phase(init_listeners, normal, []) ->
