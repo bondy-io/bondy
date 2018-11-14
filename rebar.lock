@@ -85,7 +85,7 @@
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
  {<<"plum_db">>,
   {git,"git@gitlab.com:leapsight/plum_db.git",
-       {ref,"ed8f8962195416d1a2521370f2a4cf19ac077dcd"}},
+       {ref,"d68c65aaa4662a335d8755c87e3da093a6c246f6"}},
   0},
  {<<"plumtree">>,
   {git,"https://github.com/lasp-lang/plumtree.git",
