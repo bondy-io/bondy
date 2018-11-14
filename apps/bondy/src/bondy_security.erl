@@ -434,7 +434,7 @@ auth_with_source(certificate, _, M) ->
 auth_with_source(Source, UserData, M) ->
     %% check for a dynamically registered auth module
     Opts = maps:get(source_options, M),
-    AuthMods = app_helper:get_env(bondy, auth_mods, []),
+    AuthMods = application:get_env(bondy, auth_mods, []),
     Username = maps:get(username, M),
     case proplists:get_value(Source, AuthMods) of
         undefined ->
@@ -1630,7 +1630,7 @@ validate_password_option(Pass, Options) ->
 
 
 validate_permissions(Perms) ->
-    KnownPermissions = app_helper:get_env(bondy, permissions, []),
+    KnownPermissions = application:get_env(bondy, permissions, []),
     validate_permissions(Perms, KnownPermissions).
 
 
