@@ -3,10 +3,132 @@
 -include("bondy_broker_bridge.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(OPTIONS_SPEC, #{
+    %% How many acknowledgements the kafka broker should receive from the
+    %% clustered replicas before acking producer.
+    %%  0: the broker will not send any response
+    %%     (this is the only case where the broker will not reply to a request)
+    %%  1: The leader will wait the data is written to the local log before
+    %%     sending a response.
+    %% -1: If it is -1 the broker will block until the message is
+    %%     committed by all in sync replicas before acking.
+    <<"required_acks">> => #{
+        alias => required_acks,
+        required => true,
+        default => -1,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (<<"leader">>) -> {ok, -1};
+            (<<"none">>) -> {ok, 0};
+            (<<"all">>) -> {ok, 1};
+            (Val) when Val >= -1 andalso Val =< 1 -> true;
+            (_) -> false
+        end
+    },
+    %% Maximum time in milliseconds the broker can await the receipt of the
+    %% number of acknowledgements in RequiredAcks. The timeout is not an exact
+    %% limit on the request time for a few reasons: (1) it does not include
+    %% network latency, (2) the timer begins at the beginning of the processing
+    %% of this request so if many requests are queued due to broker overload
+    %% that wait time will not be included, (3) kafka leader will not terminate
+    %% a local write so if the local write time exceeds this timeout it will
+    %% not be respected.
+    <<"ack_timeout">> => #{
+        alias => ack_timeout,
+        required => true,
+        datatype => timeout,
+        default => 10000,
+        allow_null => false,
+        allow_undefined => false
+    },
+    %% max_retries (optional, default = 3):
+    %% If {max_retries, N} is given, the producer retry produce request for
+    %% N times before crashing in case of failures like connection being
+    %% shutdown by remote or exceptions received in produce response from kafka.
+    %% The special value N = -1 means 'retry indefinitely'
+    <<"max_retries">> => #{
+        alias => max_retries,
+        required => true,
+        default => 3,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (Val) when is_integer(Val) andalso Val >= -1 -> true;
+            (_) -> false
+        end
+    },
+    %% retry_backoff_ms (optional, default = 500);
+    %% Time in milli-seconds to sleep before retry the failed produce request.
+    <<"retry_backoff_ms">> => #{
+        alias => retry_backoff_ms,
+        required => true,
+        datatype => timeout,
+        default => 500,
+        allow_null => false,
+        allow_undefined => false
+    },
+    %% max_linger_ms (optional, default = 0):
+    %% Messages are allowed to 'linger' in buffer for this amount of
+    %% milli-seconds before being sent.
+    %% Definition of 'linger': A message is in 'linger' state when it is allowed
+    %% to be sent on-wire, but chosen not to (for better batching).
+    %% The default value is 0 for 2 reasons:
+    %% 1. Backward compatibility (for 2.x releases)
+    %% 2. Not to surprise `brod:produce_sync' callers
+    <<"max_linger_ms">> => #{
+        alias => max_linger_ms,
+        required => true,
+        datatype => timeout,
+        default => 0,
+        allow_null => false,
+        allow_undefined => false
+    },
+    %% max_linger_count (optional, default = 0):
+    %% At most this amount (count not size) of messages are allowed to 'linger'
+    %% in buffer. Messages will be sent regardless of 'linger' age when this
+    %% threshold is hit.
+    %% NOTE: It does not make sense to have this value set larger than
+    %%     `partition_buffer_limit'
+    <<"max_linger_count">> => #{
+        alias => max_linger_count,
+        required => true,
+        datatype => pos_integer,
+        default => 0,
+        allow_null => false,
+        allow_undefined => false
+    }
+}).
+
+-define(PARTITIONER_SPEC, #{
+    <<"algorithm">> => #{
+        alias => algorithm,
+        required => true,
+        default => <<"fnv32a">>,
+        datatype => {in, [
+            <<"random">>, <<"hash">>,
+            <<"fnv32">>, <<"fnv32a">>, <<"fnv32m">>,
+            <<"fnv64">>, <<"fnv64a">>,
+            <<"fnv128">>, <<"fnv128a">>
+        ]}
+    },
+    <<"value">> => #{
+        alias => value,
+        required => true,
+        allow_null => false,
+        allow_undefined => true,
+        default => undefined,
+        validator => fun
+            (undefined) -> true;
+            (Val) when is_binary(Val) -> true;
+            (_) -> false
+        end
+    }
+}).
 
 -define(ACTION_SPEC, #{
     <<"client_id">> => #{
-        alias => topic,
+        alias => client_id,
         required => true,
         default => undefined,
         allow_null => false,
@@ -27,22 +149,21 @@
         allow_undefined => false
     },
     <<"partition">> => #{
-        alias => topic,
+        alias => partition,
         required => false,
         datatype => integer,
         allow_null => false,
         allow_undefined => false
     },
     <<"partitioner">> => #{
-        alias => topic,
+        alias => partitioner,
         required => true,
-        default => <<"fnv32a">>,
-        datatype => {in, [
-            <<"random">>, <<"hash">>,
-            <<"fnv32">>, <<"fnv32a">>, <<"fnv32m">>,
-            <<"fnv64">>, <<"fnv64a">>,
-            <<"fnv128">>, <<"fnv128a">>
-        ]}
+        validator => ?PARTITIONER_SPEC
+    },
+    <<"options">> => #{
+        alias => options,
+        required => true,
+        validator => ?OPTIONS_SPEC
     },
     <<"key">> => #{
         alias => key,
@@ -169,6 +290,7 @@ apply_action(Action0, Ctxt) ->
 
 
 terminate(_Reason, _State) ->
+    _  = application:stop(brod),
     ok.
 
 
@@ -199,17 +321,20 @@ get_client() ->
 %% @doc Returns a brod partition() or partitioner()
 %% @end
 %% -----------------------------------------------------------------------------
-part(#{<<"partition">> := N}) -> N;
-part(#{<<"partitioner">> := <<"random">>}) -> random;
-part(#{<<"partitioner">> := <<"hash">>}) -> hash;
-part(#{<<"partitioner">> := Val, <<"key">> := Key}) ->
-    Type = list_to_atom(binary_to_list(Val)),
-    part_fun(hash:Type(Key)).
-
-
-%% @private
-part_fun(Hash) ->
-    fun(_Topic, PartCount, _Key, _Value) ->
-        Partition = Hash rem PartCount,
-        {ok, Partition}
+part(#{<<"partition">> := N}) ->
+    N;
+part(#{<<"partitioner">> := Map}) ->
+    case maps:get(<<"algorithm">>, Map) of
+        <<"random">> ->
+            random;
+        <<"hash">> ->
+            hash;
+        Other ->
+            Type = list_to_atom(binary_to_list(Other)),
+            Value = maps:get(<<"value">>, Map),
+            Hash = hash:Type(Value),
+            fun(_Topic, PartCount, _K, _V) ->
+                Partition = Hash rem PartCount,
+                {ok, Partition}
+            end
     end.
