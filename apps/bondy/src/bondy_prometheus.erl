@@ -36,8 +36,9 @@
 -define(METRIC_NAME_PREFIX, "bondy_").
 
 -define(WAMP_MESSAGE_LABELS, [
-    realm, node, protocol, transport, frame_type, encoding
+    realm, node, session_id, agent, peername, protocol, transport, frame_type, encoding
 ]).
+
 
 %% API
 -export([report/0]).
@@ -380,11 +381,15 @@ get_labels_values(Ctxt) ->
     [
         get_realm(Ctxt),
         node_name(),
+        bondy_context:session_id(Ctxt),
+        bondy_context:agent(Ctxt),
+        inet_utils:peername_to_binary(bondy_context:peer(Ctxt)),
         wamp,
         T,
         FT,
         E
     ].
+
 
 %% @private
 get_realm(Ctxt) ->
