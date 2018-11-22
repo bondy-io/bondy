@@ -365,9 +365,9 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
 auth_with_data(UserData, M0) ->
     Uri = maps:get(realm_uri, M0),
     F = fun
-        ({{Un, CIDR}, [{Source, Options}]}, Acc) ->
+        ({{Un, CIDR}, {Source, Options}}, Acc) ->
             [{Un, CIDR, Source, Options}|Acc];
-        ({{_, _}, [?TOMBSTONE]}, Acc) ->
+        ({{_, _}, ?TOMBSTONE}, Acc) ->
             Acc
     end,
     Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri), ?FOLD_OPTS),
