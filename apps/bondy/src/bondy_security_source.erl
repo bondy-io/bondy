@@ -99,7 +99,7 @@ list(RealmUri) ->
 to_map({Username, CIDR, Source, Opts} = _Obj) ->
     Map0 = proplists:get_value(<<"meta">>, Opts, #{}),
     {Addr, Mask} = CIDR,
-    CIDRStr = list_to_binary(
+    CIDRStr = iolist_to_binary(
         io_lib:format("~s/~B", [inet_parse:ntoa(Addr), Mask])),
     Map0#{
         <<"username">> => Username,

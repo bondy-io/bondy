@@ -206,9 +206,9 @@ map({Code, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
 
 map({_, _} = Error) ->
     #{
-        <<"code">> => unknwon_error,
-        <<"message">> => <<"An unknwon error ocurred.">>,
-        <<"description">> => io_lib:format("~p", [Error])
+        <<"code">> => unknown_error,
+        <<"message">> => <<"An unknown error ocurred.">>,
+        <<"description">> => iolist_to_binary(io_lib:format("~p", [Error]))
     };
 
 map({Code, Mssg, Desc}) ->

@@ -135,10 +135,10 @@ init() ->
         begin
             case plum_db:prefix_type(Prefix) of
                 disk ->
-                    Message = io_lib:format(
+                    Message = iolist_to_binary(io_lib:format(
                         "Registry prefix ~p should be configured as ram or ram_disk in plum_db",
                         [Prefix]
-                    ),
+                    )),
                     exit(Message);
                 _ ->
                     ok
