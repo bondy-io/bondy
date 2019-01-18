@@ -295,6 +295,12 @@ handle_event({wamp, #yield{} = M, Ctxt}, State) ->
     ok = observe_message(bondy_wamp_yield_messages_total, M, [], Ctxt),
     {ok, State};
 
+handle_event({send_error, Reason, M, Ctxt}, State) ->
+    MessageType = element(1, M),
+    Labels = [Reason, MessageType, get_labels_values(Ctxt)],
+    ok = prometheus_counter:inc(bondy_send_errors_total, Labels),
+    {ok, State};
+
 handle_event(_Event, State) ->
     {ok, State}.
 
@@ -325,6 +331,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 setup() ->
+    ok = declare_metrics(),
     ok = declare_net_metrics(),
     ok = declare_session_metrics(),
     ok = declare_wamp_metrics(),
@@ -408,6 +415,22 @@ observe_message(Metric, M, LabelsValues, Ctxt) ->
     ok = prometheus_counter:inc(bondy_wamp_messages_total, Labels),
     ok = prometheus_counter:inc(Metric, AllLabels),
     prometheus_histogram:observe(bondy_wamp_message_bytes, Labels, Size).
+
+
+declare_metrics() ->
+    _ = prometheus_counter:declare([
+        {name, bondy_errors_total},
+        {help,
+            <<"The total number of errors in a bondy node since reset.">>},
+        {labels, [reason | ?WAMP_MESSAGE_LABELS]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_send_errors_total},
+        {help,
+            <<"The total number of router send errors in a bondy node since reset.">>},
+        {labels, [reason, message_type | ?WAMP_MESSAGE_LABELS]}
+    ]),
+    ok.
 
 
 declare_net_metrics() ->

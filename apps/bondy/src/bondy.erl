@@ -230,41 +230,39 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                             [Timeout]
                         )
                     ),
-                    Error = #{
-                        error_uri => ?BONDY_ERROR_TIMEOUT,
-                        details => #{},
-                        arguments => [Mssg],
-                        arguments_kw => #{
-                            procedure_uri => ProcedureUri,
-                            timeout => Timeout
-                        }
+                    Args = [Mssg],
+                    ArgsKw = #{
+                        procedure_uri => ProcedureUri,
+                        timeout => Timeout
                     },
-                    {error, Error, Ctxt1}
+                    Error = wamp_message:error(
+                        ?CALL, ReqId, #{}, ?BONDY_ERROR_TIMEOUT, Args, ArgsKw),
+                    ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+                    {error, message_to_map(Error), Ctxt1}
             end;
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, message_to_map(Error), Ctxt1};
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = #{
-                error_uri => ?BONDY_INCONSISTENCY_ERROR,
-                details => #{},
-                arguments => [<<"Inconsistency error">>],
-                arguments_kw => #{}
-            },
-            {error, Error, Ctxt1};
+            Error = wamp_message:error(
+                ?CALL, ReqId, #{}, ?BONDY_INCONSISTENCY_ERROR,
+                [<<"Inconsistency error">>]
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            {error, message_to_map(Error), Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
             {error, message_to_map(Error), Ctxt1};
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = #{
-                error_uri => ?BONDY_INCONSISTENCY_ERROR,
-                details => #{},
-                arguments => [<<"Inconsistency error">>],
-                arguments_kw => #{}
-            },
-            {error, Error, Ctxt1}
+            Error = wamp_message:error(
+                ?CALL, ReqId, #{}, ?BONDY_INCONSISTENCY_ERROR,
+                [<<"Inconsistency error">>]
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            {error, message_to_map(Error), Ctxt1}
     end.
 
 
