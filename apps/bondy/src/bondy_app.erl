@@ -89,7 +89,7 @@ start_phase(enable_aae, normal, []) ->
 
 start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
-    %% the remaining HTTP, WS and TCP listeners
+    %% the remaining HTTP, WS and TCP listeners for clients to connect
     ok = bondy_wamp_raw_handler:start_listeners(),
     bondy_api_gateway:start_listeners().
 
