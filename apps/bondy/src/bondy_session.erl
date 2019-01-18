@@ -245,13 +245,15 @@ open(Peer, Realm, Opts) when is_map(Opts) ->
 open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
     open(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
 
-open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
+open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     S1 = new(Id, Peer, Realm, Opts),
+    Agent = S1#session.agent,
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = bondy_stats:update({session_opened, RealmUri, Id, IP}),
+            ok = bondy_event_manager:notify(
+                {session_opened, RealmUri, Id, Agent, Peer}),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -275,11 +277,12 @@ update(#session{id = Id} = S) ->
 -spec close(session()) -> ok.
 
 close(#session{id = Id} = S) ->
-    {IP, _} = S#session.peer,
     Realm = S#session.realm_uri,
+    Agent = S#session.agent,
+    Peer = S#session.peer,
     Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
-    ok = bondy_stats:update(
-        {session_closed, Id, Realm, IP, Secs}),
+    ok = bondy_event_manager:notify(
+        {session_closed, Id, Realm, Agent, Peer, Secs}),
     true = ets:delete(table(Id), Id),
     _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
     ok;

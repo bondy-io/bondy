@@ -22,6 +22,7 @@
 
 -export([bin_to_pid/1]).
 -export([decode/2]).
+-export([elapsed_time/2]).
 -export([foreach/2]).
 -export([generate_fragment/1]).
 -export([get_flake_id/0]).
@@ -257,6 +258,19 @@ timeout(#{timeout := 0}) ->
     infinity;
 timeout(_) ->
     bondy_config:wamp_call_timeout().
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the elapsed time since Timestamp expressed in the
+%% desired TimeUnit.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec elapsed_time(Timestamp :: integer(), TimeUnit :: erlang:time_unit()) ->
+    integer().
+
+elapsed_time(Timestamp, TimeUnit) ->
+    Nsecs = erlang:monotonic_time() - Timestamp,
+    erlang:convert_time_unit(Nsecs, nanosecond, TimeUnit).
 
 
 %% -----------------------------------------------------------------------------

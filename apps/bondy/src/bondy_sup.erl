@@ -23,14 +23,33 @@
 -module(bondy_sup).
 -behaviour(supervisor).
 
--define(CHILD(Id, Type, Args, Restart, Timeout), #{
+-define(SUPERVISOR(Id, Args, Restart, Timeout), #{
     id => Id,
     start => {Id, start_link, Args},
     restart => Restart,
     shutdown => Timeout,
-    type => Type,
+    type => supervisor,
     modules => [Id]
 }).
+
+-define(WORKER(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [Id]
+}).
+
+-define(EVENT_MANAGER(Id, Restart, Timeout), #{
+    id => Id,
+    start => {gen_event, start_link, [{local, Id}]},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [dynamic]
+}).
+
 
 
 %% API
@@ -61,12 +80,13 @@ start_link() ->
 
 init([]) ->
     Children = [
-        ?CHILD(bondy_stats, worker, [], permanent, 5000),
-        ?CHILD(bondy_registry, worker, [], permanent, 5000),
-        ?CHILD(bondy_broker_events, worker, [], permanent, 5000),
-        ?CHILD(bondy_subscribers_sup, supervisor, [], permanent, infinity),
-        ?CHILD(bondy_peer_wamp_forwarder, worker, [], permanent, 5000),
-        ?CHILD(bondy_api_gateway, worker, [], permanent, 5000),
-        ?CHILD(bondy_backup, worker, [], permanent, 5000)
+        ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
+        ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
+        ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
+        ?WORKER(bondy_registry, [], permanent, 5000),
+        ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
+        ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
+        ?WORKER(bondy_backup, [], permanent, 5000),
+        ?WORKER(bondy_api_gateway, [], permanent, 5000)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.

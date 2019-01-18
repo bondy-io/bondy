@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 0.8.1
+
+This version includes a complete redesign of event management and instrumentation.
+The new `bondy_event_manager` is now the way for the different subsystems to asynchronously publish events (notifications) and offload all instrumentation to event handlers:
+
+- `bondy_promethues` is an event handler that implements all promethues instrumentation
+- `bondy_wamp_meta_events` is an event handler that selectively re-published bondy events to WAMP Meta events.
+
+### New Modules
+
+- `bondy_event_manager` implements a form of supervised handlers similar to lager (logging library), by spawning a "watcher" processes per handler (module) under a supervision tree and restarting it when it crashes.
+
+- `bondy_alarm_handler` replaces sasl’s default alarm_handler.
+
+### Deprecated Modules
+
+`bondy_stats` containing legacy exometer instrumentation was removed.
 
 ## 0.8.0
 

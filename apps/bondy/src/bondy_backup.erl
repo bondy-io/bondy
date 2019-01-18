@@ -662,12 +662,7 @@ do_read_head(Log, Acc0) ->
 %% @private
 notify_backup_started(File) ->
     _ = lager:info("Started backup; filename=~p", [File]),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?BACKUP_STARTED, [File], #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_started, File}).
 
 
 %% @private
@@ -676,12 +671,7 @@ notify_backup_finished(Args) when length(Args) == 2 ->
         "Finished creating backup; filename=~p, elapsed_time_secs=~p",
         Args
     ),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?BACKUP_FINISHED, Args, #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_finished, Args}).
 
 
 %% @private
@@ -690,12 +680,7 @@ notify_backup_error(Args) when length(Args) == 3 ->
         "Error creating backup; filename=~p, reason=~p, elapsed_time_secs=~p",
         Args
     ),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?BACKUP_ERROR, Args, #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_finished, Args}).
 
 
 %% @private
@@ -704,12 +689,7 @@ notify_restore_started([Filename, _, _] = Args) ->
         "Backup restore started; filename=~p, recovered=~p, bad_bytes=~p",
         Args
     ),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?RESTORE_STARTED, [Filename], #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_restore_started, Filename}).
 
 
 %% @private
@@ -718,12 +698,7 @@ notify_restore_finished(Args) when length(Args) == 4 ->
         "Backup restore finished; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
         Args
     ),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?RESTORE_FINISHED, [Args], #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_restore_finished, Args}).
 
 
 %% @private
@@ -732,9 +707,4 @@ notify_restore_error(Args)  when length(Args) == 3 ->
         "Backup restore error; filename=~p, reason=~p, elapsed_time_secs=~p",
         Args
     ),
-    %% @TODO Prometheus stats
-    _ = bondy:publish(
-        #{}, ?RESTORE_ERROR, Args, #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    ok.
+    bondy_event_manager: notify({backup_restore_error, Args}).

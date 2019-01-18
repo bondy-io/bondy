@@ -138,10 +138,8 @@ add(RealmUri, User0) ->
 
         case bondy_security:add_user(RealmUri, Username, PL) of
             ok ->
-                _ = bondy:publish(
-                    #{}, ?USER_ADDED, [RealmUri, Username], #{},
-                    ?BONDY_PRIV_REALM_URI
-                ),
+                ok = bondy_event_manager:notify(
+                    {security_user_added, RealmUri, Username}),
                 {ok, fetch(RealmUri, Username)};
             Error ->
                 Error
@@ -166,10 +164,8 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
             {error, _} = Error ->
                 Error;
             ok ->
-                _ = bondy:publish(
-                    #{}, ?USER_UPDATED, [RealmUri, Username], #{},
-                    ?BONDY_PRIV_REALM_URI
-                ),
+                ok = bondy_event_manager:notify(
+                    {security_user_updated, RealmUri, Username}),
                 {ok, fetch(RealmUri, Username)}
         end
     catch
@@ -226,10 +222,8 @@ remove(RealmUri, #{<<"username">> := Username}) ->
 remove(RealmUri, Username) ->
     case bondy_security:del_user(RealmUri, Username) of
         ok ->
-            _ = bondy:publish(
-                #{}, ?USER_DELETED, [RealmUri, Username], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
+            ok = bondy_event_manager:notify(
+                    {security_user_deleted, RealmUri, Username}),
             ok;
         {error, _} = Error ->
             Error
@@ -302,11 +296,8 @@ password(RealmUri, Username) ->
 change_password(RealmUri, Username, New) when is_binary(New) ->
     case update(RealmUri, Username, #{password => New}) of
         {ok, _} ->
-            _ = bondy:publish(
-                #{}, ?PASSWORD_CHANGED, [RealmUri, Username], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
-            ok;
+            bondy_event_manager:notify(
+                {security_password_changed, RealmUri, Username});
         Error ->
             Error
     end.

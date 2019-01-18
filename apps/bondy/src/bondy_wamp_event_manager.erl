@@ -22,7 +22,7 @@
 %% @doc This module provides a bridge between WAMP events and OTP events.
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_broker_events).
+-module(bondy_wamp_event_manager).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 

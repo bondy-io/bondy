@@ -239,7 +239,7 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
     end;
 
 handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
-    %% Here we receive a message from the bondy_rotuer in those cases
+    %% Here we receive a message from the bondy_router in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls, so we do not ack
     %% TODO check if we still need this now that bondy:ack seems to handle this
@@ -461,19 +461,34 @@ handle_outbound(M, St0) ->
     case bondy_wamp_protocol:handle_outbound(M, St0#state.protocol_state) of
         {ok, Bin, PSt} ->
             St1 = St0#state{protocol_state = PSt},
-            ok = send(Bin, St1),
-            {noreply, St1, ?TIMEOUT};
+            case send(Bin, St1) of
+                ok ->
+                    {noreply, St1, ?TIMEOUT};
+                {error, Reason} ->
+                    {stop, Reason, St1}
+            end;
         {stop, PSt} ->
             {stop, normal, St0#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
-            ok = send(Bin, St0#state{protocol_state = PSt}),
-            {stop, normal, St0#state{protocol_state = PSt}};
+            St1 = St0#state{protocol_state = PSt},
+            case send(Bin, St1) of
+                ok ->
+                    {stop, normal, St1};
+                {error, Reason} ->
+                    {stop, Reason, St1}
+            end;
+
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
             %% We send ourselves a message to stop after Time
+            St1 = St0#state{protocol_state = PSt},
             erlang:send_after(
                 Time, self(), {stop, normal}),
-            ok = send(Bin, St0#state{protocol_state = PSt}),
-            {noreply, St0#state{protocol_state = PSt}}
+            case send(Bin, St1) of
+                ok ->
+                    {noreply, St1};
+                {error, Reason} ->
+                    {stop, Reason, St1}
+            end
     end.
 
 
@@ -687,18 +702,20 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
 
 %% @private
 socket_opened(St) ->
-    _ = bondy_stats:socket_open(wamp, raw, St#state.peername),
-    ok.
+    Event = {socket_open, wamp, raw, St#state.peername},
+    bondy_event_manager:notify(Event).
 
 
 %% @private
 socket_closed(true, St) ->
-    ok = bondy_stats:socket_error(wamp, raw, St#state.peername),
+    Event = {socket_error, wamp, raw, St#state.peername},
+    ok = bondy_event_manager:notify(Event),
     socket_closed(false, St);
 
 socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    bondy_stats:socket_closed(wamp, raw, St#state.peername, Seconds).
+    Event = {socket_closed, wamp, raw, St#state.peername, Seconds},
+    bondy_event_manager:notify(Event).
 
 
 %% @private

@@ -92,11 +92,7 @@ add(RealmUri, Group0) ->
         Group1 = maps_utils:validate(Group0, ?SPEC),
         {#{<<"name">> := Name}, Opts} = maps_utils:split([<<"name">>], Group1),
         bondy_security:add_group(RealmUri, Name, maps:to_list(Opts)),
-        _ = bondy:publish(
-            #{}, ?GROUP_ADDED, [RealmUri, Name], #{},
-            ?BONDY_PRIV_REALM_URI
-        ),
-        ok
+        bondy_event_manager:notify({security_group_added, RealmUri, Name})
     catch
         error:Reason ->
             {error, Reason}
@@ -113,11 +109,7 @@ update(RealmUri, Name, Group0) when is_binary(Name) ->
     try
         Group1 = maps_utils:validate(Group0, ?UPDATE_SPEC),
         bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1)),
-        _ = bondy:publish(
-            #{}, ?GROUP_UPDATED, [RealmUri, Name], #{},
-            ?BONDY_PRIV_REALM_URI
-        ),
-        ok
+        bondy_event_manager:notify({security_group_updated, RealmUri, Name})
     catch
         error:Reason ->
             {error, Reason}
@@ -132,11 +124,8 @@ update(RealmUri, Name, Group0) when is_binary(Name) ->
 remove(RealmUri, Name) when is_binary(Name) ->
     case bondy_security:del_group(RealmUri, Name) of
         ok ->
-            _ = bondy:publish(
-                #{}, ?GROUP_DELETED, [RealmUri, Name], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
-            ok;
+            bondy_event_manager:notify(
+                {security_group_deleted, RealmUri, Name});
         {error, {unknown_group, Name}} ->
             {error, unknown_group}
     end.

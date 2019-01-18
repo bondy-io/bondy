@@ -161,8 +161,12 @@ info() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-info(Trie) ->
-    art:info(Trie).
+info(?REGISTRATION_TRIE) ->
+    art:info(?REGISTRATION_TRIE);
+
+info(?SUBSCRIPTION_TRIE) ->
+    art:info(?SUBSCRIPTION_TRIE).
+
 
 
 %% -----------------------------------------------------------------------------

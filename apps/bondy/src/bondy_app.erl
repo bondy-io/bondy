@@ -50,8 +50,8 @@ start(_Type, Args) ->
     case bondy_sup:start_link() of
         {ok, Pid} ->
             ok = setup_env(Args),
+            ok = setup_event_handlers(),
             ok = bondy_router_worker:start_pool(),
-            ok = bondy_stats:init(),
             ok = bondy_cli:register(),
             ok = setup_partisan(),
             ok = maybe_init_bondy_realm(),
@@ -64,8 +64,11 @@ start(_Type, Args) ->
     end.
 
 start_phase(init_registry, normal, []) ->
+    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
+    %% This is to enable operations during startup and also heartbeats e.g. K8s.
+    _ = bondy_api_gateway:start_admin_listeners(),
     %% In previous versions of Bondy we piggy backed on a disk-only version of
-    %% plum_db to get registry syncrhonisation across the cluster.
+    %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
     %% connected.
     %% This was a clean way of avoiding new registrations interfiering with
@@ -75,6 +78,8 @@ start_phase(init_registry, normal, []) ->
     %% longer store the registry on disk, but we restore everything from the
     %% network. However, we kept this step as it is clean and allows us to do
     %% some validations.
+    %% TODO consider forcing an AAE exchange here to get a the registry in sync
+    %% with the cluster before init_listeners
     bondy_registry:init();
 
 start_phase(enable_aae, normal, []) ->
@@ -83,8 +88,10 @@ start_phase(enable_aae, normal, []) ->
     ok;
 
 start_phase(init_listeners, normal, []) ->
-    %% Now that the registry has been initialised we can setup the listeners
-    start_listeners().
+    %% Now that the registry has been initialised we can initialise
+    %% the remaining HTTP, WS and TCP listeners
+    ok = bondy_wamp_raw_handler:start_listeners(),
+    bondy_api_gateway:start_listeners().
 
 
 prep_stop(_State) ->
@@ -132,13 +139,6 @@ maybe_init_bondy_realm() ->
 
 
 %% @private
-start_listeners() ->
-    ok = bondy_wamp_raw_handler:start_listeners(),
-    _ = bondy_api_gateway:start_admin_listeners(),
-    _ = bondy_api_gateway:start_listeners(),
-    ok.
-
-
 stop_router_services() ->
     _ = lager:info("Initiating shutdown"),
     %% We stop accepting new connections on HTTP/Websockets
@@ -162,6 +162,15 @@ stop_router_services() ->
     ok = bondy_api_gateway:stop_listeners(),
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok.
+
+
+%% @private
+setup_event_handlers() ->
+    _ = bondy_event_manager:swap_watched_handler(
+        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
+    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
+    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
     ok.
 
 
