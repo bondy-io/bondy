@@ -174,8 +174,8 @@ resume_admin_listeners() ->
 -spec load(file:filename() | map()) ->
     ok | {error, invalid_specification_format | any()}.
 
-load(Map) when is_map(Map) ->
-    gen_server:call(?MODULE, {load, Map}).
+load(Term) when is_map(Term) orelse is_list(Term) ->
+    gen_server:call(?MODULE, {load, Term}).
 
 
 %% -----------------------------------------------------------------------------
