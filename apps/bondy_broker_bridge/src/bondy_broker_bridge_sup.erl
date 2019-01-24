@@ -74,7 +74,7 @@ start_link() ->
 
 init([]) ->
     Children = [
-        ?CHILD(bondy_broker_bridge, worker, [], permanent, 5000)
+        ?CHILD(bondy_broker_bridge_manager, worker, [], permanent, 5000)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.
 

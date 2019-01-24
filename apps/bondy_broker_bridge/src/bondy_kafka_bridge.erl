@@ -3,7 +3,55 @@
 -include("bondy_broker_bridge.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(OPTIONS_SPEC, #{
+-define(PRODUCE_OPTIONS_SPEC, ?BROD_OPTIONS_SPEC#{
+    %% The brod client to be used. This should have been configured through the
+    %% configuration files
+    <<"client_id">> => #{
+        alias => client_id,
+        required => true,
+        default => undefined,
+        allow_null => false,
+        validator => fun
+            (undefined) ->
+                get_client();
+            (Val) when is_atom(Val) ->
+                {ok, Val};
+            (Val) when is_binary(Val) ->
+                {ok, list_to_atom(binary_to_list(Val))}
+        end
+    },
+    %% Is this a sync or async produce
+    <<"acknowledge">> => #{
+        alias => acknowledge,
+        required => true,
+        default => false,
+        datatype => boolean,
+        allow_null => false,
+        allow_undefined => false
+    },
+    <<"partition">> => #{
+        alias => partition,
+        required => false,
+        datatype => integer,
+        allow_null => true,
+        allow_undefined => true
+    },
+    <<"partitioner">> => #{
+        alias => partitioner,
+        required => true,
+        validator => ?PARTITIONER_SPEC
+    },
+    %% How to encode the Value
+    <<"encoding">> => #{
+        alias => encoding,
+        required => true,
+        datatype => {in, [<<"json">>, <<"msgpack">>, <<"erl">>, <<"bert">>]},
+        allow_null => false,
+        allow_undefined => false
+    }
+}).
+
+-define(BROD_OPTIONS_SPEC, #{
     %% How many acknowledgements the kafka broker should receive from the
     %% clustered replicas before acking producer.
     %%  0: the broker will not send any response
@@ -115,31 +163,23 @@
     <<"value">> => #{
         alias => value,
         required => true,
-        allow_null => false,
+        allow_null => true,
         allow_undefined => true,
         default => undefined,
         validator => fun
-            (undefined) -> true;
-            (Val) when is_binary(Val) -> true;
-            (_) -> false
+            (null) -> {ok, undefined};
+            (_) -> true
         end
     }
 }).
 
--define(ACTION_SPEC, #{
-    <<"client_id">> => #{
-        alias => client_id,
+-define(PRODUCE_ACTION_SPEC, #{
+    <<"type">> => #{
+        alias => type,
         required => true,
-        default => undefined,
         allow_null => false,
-        validator => fun
-            (undefined) ->
-                get_client();
-            (Val) when is_atom(Val) ->
-                {ok, Val};
-            (Val) when is_binary(Val) ->
-                {ok, list_to_atom(binary_to_list(Val))}
-        end
+        allow_undefined => false,
+        datatype => {in, [<<"produce">>, <<"produce_sync">>]}
     },
     <<"topic">> => #{
         alias => topic,
@@ -148,31 +188,20 @@
         allow_null => false,
         allow_undefined => false
     },
-    <<"partition">> => #{
-        alias => partition,
-        required => false,
-        datatype => integer,
-        allow_null => false,
-        allow_undefined => false
-    },
-    <<"partitioner">> => #{
-        alias => partitioner,
-        required => true,
-        validator => ?PARTITIONER_SPEC
-    },
     <<"options">> => #{
         alias => options,
         required => true,
-        validator => ?OPTIONS_SPEC
+        validator => ?PRODUCE_OPTIONS_SPEC
     },
     <<"key">> => #{
         alias => key,
         required => true,
-        allow_null => false,
+        allow_null => true,
         allow_undefined => true,
         default => undefined,
         validator => fun
             (undefined) -> true;
+            (null) -> {ok, undefined};
             (Val) when is_binary(Val) -> true;
             (_) -> false
         end
@@ -180,29 +209,20 @@
     <<"value">> => #{
         alias => value,
         required => true,
-        datatype => [binary, list]
-    },
-    <<"acknowledge">> => #{
-        alias => acknowledge,
-        required => true,
-        default => false,
-        datatype => boolean,
-        allow_null => false,
-        allow_undefined => false
-    },
-    <<"encoding">> => #{
-        alias => encoding,
-        required => true,
-        datatype => {in, [<<"json">>, <<"msgpack">>, <<"erl">>, <<"bert">>]},
-        allow_null => false,
-        allow_undefined => false
+        allow_null => true,
+        allow_undefined => true,
+        default => undefined,
+        validator => fun
+            (null) -> {ok, undefined};
+            (_) -> true
+        end
     }
 }).
 
 
 -export([init/1]).
 -export([validate_action/1]).
--export([apply_action/2]).
+-export([apply_action/1]).
 -export([terminate/2]).
 
 
@@ -212,7 +232,10 @@
 %% =============================================================================
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc Initialises the Kafka clients provided by the configuration.
+%% @end
+%% -----------------------------------------------------------------------------
 init(Config) ->
     _ = [application:set_env(brod, K, V) || {K, V} <- Config],
 
@@ -238,8 +261,39 @@ init(Config) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Validates the action specification.
+%% An action spec is a map containing the following keys:
+%%
+%% * type :: binary() - either <<"produce">> or <<"produce_sync">>. Optional, the default value is <<"produce">>.
+%% * topic :: binary() - the Kafka topic we should produce to.
+%% * key :: binary() - the kafka message's key
+%% * value :: any() - the kafka message's value
+%% * options - a map containing the following keys
+%% ```erlang
+%% #{
+%%     <<"type">> <<"produce">>,
+%%     <<"topic": <<"com.magenta.wamp_events",
+%%     <<"key": "\"{{event.topic}}/{{event.publication_id}}\"",
+%%     <<"value": "{{event}}",
+%%     <<"options" : {
+%%         <<"client_id": "default",
+%%         <<"acknowledge": true,
+%%         <<"required_acks": "all",
+%%         <<"partition": null,
+%%         <<"partitioner": {
+%%             "algorithm": "fnv32a",
+%%             "value": "\"{{event.topic}}/{{event.publication_id}}\""
+%%         },
+%%         <<"encoding": "json"
+%%     }
+%% }
+%% ```
+%% @end
+%% -----------------------------------------------------------------------------
 validate_action(Action0) ->
-    try maps_utils:validate(Action0, ?ACTION_SPEC) of
+    %% maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC).
+    try maps_utils:validate(Action0, ?PRODUCE_ACTION_SPEC) of
         Action1 ->
             {ok, Action1}
     catch
@@ -248,44 +302,53 @@ validate_action(Action0) ->
     end.
 
 
-apply_action(Action0, Ctxt) ->
-    try mops:eval(Action0, Ctxt) of
+%% -----------------------------------------------------------------------------
+%% @doc Evaluates the action specification `Action' against the context
+%% `Ctxt' using `mops' and produces to Kafka.
+%% @end
+%% -----------------------------------------------------------------------------
+apply_action(Action) ->
+    try
         #{
-            <<"client_id">> := Client,
+            <<"type">> := ActionType,
             <<"topic">> := Topic,
             <<"key">> := Key,
             <<"value">> := Value,
-            <<"acknowledge">> := Ack,
-            <<"encoding">> := Enc
-        } = Action1 ->
-            Part = part(Action1),
-            Data = bondy_utils:maybe_encode(Enc, Value),
+            <<"options">> := Opts
+        } = Action,
+        #{
+            <<"client_id">> := Client,
+            <<"encoding">> := Enc,
+            <<"acknowledge">> := _Ack
+        } = Opts,
+        Part = partition(Opts),
+        Data = bondy_utils:maybe_encode(Enc, Value),
 
-            Res = case Ack of
-                true ->
-                    brod:produce_sync(Client, Topic, Part, Key, Data);
-                false ->
-                    brod:produce(Client, Topic, Part, Key, Data)
-            end,
+        Result = case ActionType of
+            <<"produce_sync">> ->
+                brod:produce_sync(Client, Topic, Part, Key, Data);
+            <<"produce">> ->
+                brod:produce(Client, Topic, Part, Key, Data)
+        end,
 
-            case Res of
-                ok ->
-                    ok;
-                {ok, _} ->
-                    ok;
-                {error, client_down} ->
-                    {retry, client_down};
-                {error, Reason} ->
-                    {error, Reason}
-            end
+        case Result of
+            ok ->
+                ok;
+            {ok, _} ->
+                ok;
+            {error, client_down} ->
+                {retry, client_down};
+            {error, Reason} ->
+                {error, Reason}
+        end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        ?EXCEPTION(_, EReason, Stacktrace) ->
             _ = lager:error(
                 "Error while evaluating action; reason=~p, "
                 "action=~p, stacktrace=~p",
-                [Reason, Action0, ?STACKTRACE(Stacktrace)]
+                [EReason, Action, ?STACKTRACE(Stacktrace)]
             ),
-            {error, Reason}
+            {error, EReason}
     end.
 
 
@@ -303,7 +366,7 @@ terminate(_Reason, _State) ->
 
 
 get_client() ->
-    case bondy_broker_bridge:backend(?MODULE) of
+    case bondy_broker_bridge_manager:backend(?MODULE) of
         undefined ->
             {error, not_found};
         PL ->
@@ -318,12 +381,13 @@ get_client() ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc Returns a brod partition() or partitioner()
+%% @doc Returns a brod partition() or partitioner().
 %% @end
 %% -----------------------------------------------------------------------------
-part(#{<<"partition">> := N}) ->
+partition(#{<<"partition">> := N}) when is_integer(N) ->
     N;
-part(#{<<"partitioner">> := Map}) ->
+
+partition(#{<<"partitioner">> := Map}) ->
     case maps:get(<<"algorithm">>, Map) of
         <<"random">> ->
             random;
@@ -331,10 +395,15 @@ part(#{<<"partitioner">> := Map}) ->
             hash;
         Other ->
             Type = list_to_atom(binary_to_list(Other)),
-            Value = maps:get(<<"value">>, Map),
-            Hash = hash:Type(Value),
-            fun(_Topic, PartCount, _K, _V) ->
-                Partition = Hash rem PartCount,
-                {ok, Partition}
+            PartValue = maps:get(<<"value">>, Map),
+
+            fun(_Topic, PartCount, K, _V) ->
+                Hash = case PartValue of
+                    undefined ->
+                        hash:Type(K);
+                    PartValue ->
+                        hash:Type(PartValue)
+                end,
+                {ok, Hash rem PartCount}
             end
     end.

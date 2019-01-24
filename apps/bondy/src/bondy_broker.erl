@@ -421,7 +421,13 @@ do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc For internal Bondy use
+%% @doc For internal use.
+%% If the last argument is a function, spawns a supervised instance of a
+%% bondy_subscriber by calling bondy_subscribers_sup:start_subscriber/4.
+%% The new process, calls subscribe/4 passing its pid as last argument.
+%%
+%% If the last argument is a pid, it registers the pid as a subscriber
+%% (a.k.a a local subscription)
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(uri(), map(), uri(), pid() | function()) ->
@@ -443,10 +449,12 @@ subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc For internal Bondy use
+%% @doc For internal Bondy use.
+%% Terminates the process identified by Pid by
+%% bondy_subscribers_sup:terminate_subscriber/1
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id() | pid()) -> ok | {error, not_found}.
+-spec unsubscribe(pid()) -> ok | {error, not_found}.
 
 unsubscribe(Subscriber) when is_pid(Subscriber) ->
     bondy_subscribers_sup:terminate_subscriber(Subscriber).

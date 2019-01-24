@@ -17,7 +17,9 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc An anonymous subscription
+%% @doc This module implements a local subscriber that subscribes to WAMP
+%% events and applies the user provided function when handling each event.
+%% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_subscriber).
@@ -66,7 +68,7 @@
     {ok, pid()} | {error, any()}.
 
 start_link(RealmUri, Opts0, Topic, Fun) ->
-    Id =bondy_utils:get_id(global),
+    Id = bondy_utils:get_id(global),
     Opts = maps:put(subscription_id, Id, Opts0),
     gen_server:start_link(
         {local, name(Id)}, ?MODULE, [RealmUri, Opts, Topic, Id, Fun], []).
@@ -186,9 +188,25 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info(Info, State) ->
-    _ = lager:debug("Unexpected event; event=~p", [Info]),
-    {noreply, State}.
+handle_info(Event, State) ->
+    case do_handle_event(Event, State) of
+        {ok, NewState} ->
+            {noreply, NewState};
+        {error, Reason, NewState} ->
+            _ = lager:error(
+                "Error while handling info event; reason=~p "
+                "realm_uri=~p, topic=~p, subscription_id=~p, pid=~p, event=~p",
+                [
+                    Reason,
+                    State#state.realm_uri,
+                    State#state.topic,
+                    State#state.subscription_id,
+                    self(),
+                    Event
+                ]
+            ),
+            {noreply, NewState}
+    end.
 
 
 terminate(normal, State) ->

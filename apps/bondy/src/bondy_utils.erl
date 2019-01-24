@@ -165,6 +165,9 @@ is_uuid(_) ->
 maybe_encode(_, <<>>) ->
     <<>>;
 
+maybe_encode(_, undefined) ->
+    <<>>;
+
 maybe_encode(bert, Term) ->
     bert:encode(Term);
 
