@@ -161,7 +161,7 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Calls bondy_wamp_event_manager:subscribe/4.
+%% @doc Calls bondy_broker:subscribe/4.
 %% @end
 %% -----------------------------------------------------------------------------
 subscribe(RealmUri, Opts, TopicUri, Fun) ->

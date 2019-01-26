@@ -1,6 +1,6 @@
 
 %% =============================================================================
-%%  bondy_broker_bridge_subscriber_sup.erl -
+%%  bondy_subscribers_sup.erl -
 %%
 %%  Copyright (c) 2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%

@@ -17,8 +17,8 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc This module implements a local subscriber that subscribes to WAMP
-%% events and applies the user provided function when handling each event.
+%% @doc This module implements a local WAMP subscriber that applies the user
+%% provided function when handling each event.
 %% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
 %% @end
 %% -----------------------------------------------------------------------------

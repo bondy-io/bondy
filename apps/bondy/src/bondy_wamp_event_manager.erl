@@ -82,7 +82,7 @@ add_sup_handler(Handler, Args) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Subscribe to a WAMP event with a  callback function.
+%% @doc Subscribe to a WAMP event with a callback function.
 %% The function needs to have two arguments representing the `topic_uri' and
 %% the `wamp_event()' that has been published.
 %% @end
