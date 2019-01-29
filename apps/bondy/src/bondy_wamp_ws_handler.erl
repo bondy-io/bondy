@@ -109,7 +109,8 @@ init(Req0, _) ->
                 {error, _Reason} ->
                     %% Returning ok will cause the handler to
                     %% stop in websocket_handle
-                    {ok, Req0, undefined}
+                    Req1 = cowboy_req:reply(400, Req0),
+                    {ok, Req1, undefined}
             end;
         {error, invalid_subprotocol} ->
             %% At the moment we only support WAMP, not plain WS
@@ -117,11 +118,13 @@ init(Req0, _) ->
                 <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            {ok, Req0, undefined};
+            Req1 = cowboy_req:reply(400, Req0),
+            {ok, Req1, undefined};
         {error, _Reason} ->
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            {ok, Req0, undefined}
+            Req1 = cowboy_req:reply(400, Req0),
+            {ok, Req1, undefined}
     end.
 
 
@@ -181,6 +184,9 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
             {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             self() ! {stop, normal},
+            reply(T, L, St#state{protocol_state = PSt});
+        {stop, Reason, L, PSt} ->
+            self() ! {stop, Reason},
             reply(T, L, St#state{protocol_state = PSt})
     end;
 
@@ -332,6 +338,9 @@ frame(Type, E) when Type == text orelse Type == binary ->
 
 
 %% @private
+do_terminate(undefined) ->
+    ok;
+
 do_terminate(St) ->
     bondy_wamp_protocol:terminate(St#state.protocol_state).
 
