@@ -950,11 +950,11 @@ from_file(Filename) ->
         _ ->
             {error, invalid_specification_format}
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
                 "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
             {error, invalid_specification_format};
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 
@@ -1093,7 +1093,7 @@ parse_version(V0, Ctxt0) ->
         try
             parse_path(P, Ctxt3)
         catch
-            error:{badkey, Key} ->
+            ?EXCEPTION(error, {badkey, Key}, _) ->
                 error({
                     badarg,
                     <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
@@ -1139,7 +1139,7 @@ parse_path(P0, Ctxt0) ->
             Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
-            error:{badkey, Key} ->
+            ?EXCEPTION(error, {badkey, Key}, _) ->
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,

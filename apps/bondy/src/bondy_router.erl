@@ -135,7 +135,7 @@ shutdown() ->
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             _ = lager:error(
                 "Error while shutting down router; reason=~p", [Reason])
     end,
@@ -360,7 +360,7 @@ async_forward(M, Ctxt0) ->
             ok = sync_forward(Event),
             {ok, Ctxt0}
     catch
-        error:Reason when Acknowledge == true ->
+        ?EXCEPTION(error, Reason, _) when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             ErrorMap = bondy_error:map(Reason),
@@ -374,13 +374,13 @@ async_forward(M, Ctxt0) ->
             ),
             ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
             {reply, Reply, Ctxt0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
             _ = lager:error(
                 "Error while routing message; class=~p, reason=~p, message=~p"
                 " realm_uri=~p, session_id=~p, stacktrace=~p",
-                [Class, Reason, M, Ctxt, SessionId, erlang:get_stacktrace()]
+                [Class, Reason, M, Ctxt, SessionId, ?STACKTRACE(Stacktrace)]
             ),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}

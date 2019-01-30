@@ -371,7 +371,7 @@ select_subprotocol(L) when is_list(L) ->
         ok = lists:foreach(Fun, L),
         {error, invalid_subprotocol}
     catch
-         throw:{ok, _SP, _X} = OK ->
+        ?EXCEPTION(throw, {ok, _SP, _X} = OK, _) ->
             OK
     end.
 

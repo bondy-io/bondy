@@ -136,7 +136,7 @@ backup(Map0) when is_map(Map0) ->
         Map1 ->
             gen_server:call(?MODULE, {backup, Map1})
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end;
 
@@ -164,7 +164,7 @@ status(Map0) when is_map(Map0) ->
         Map1 ->
             gen_server:call(?MODULE, {status, Map1})
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end;
 
@@ -182,7 +182,7 @@ restore(Map0) when is_map(Map0) ->
         Map1 ->
             gen_server:call(?MODULE, {restore, Map1})
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end;
 
@@ -352,7 +352,7 @@ build_backup(Log) ->
         %% We log the remaining elements
         log(Acc1, Log)
     catch
-        throw:Reason ->
+        ?EXCEPTION(throw, Reason, _) ->
             {error, Reason}
     after
         ok = plum_db:iterator_close(Iterator),
@@ -460,7 +460,7 @@ do_restore_aux(Log) ->
         restore_chunk(
             {head, disk_log:chunk(Log, start)}, undefined, Log, Counters0)
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     after
         _ = disk_log:close(Log)
@@ -491,7 +491,7 @@ restore_chunk({Cont, Terms}, Vsn, Log, Counters0) ->
         {ok, Counters} = restore_terms(Terms, Vsn, Counters0),
         restore_chunk(disk_log:chunk(Log, Cont), Vsn, Log, Counters)
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     end.
 
@@ -652,7 +652,7 @@ do_read_head(Log, Acc0) ->
                 Error
         end
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     after
         _ = disk_log:close(Log)

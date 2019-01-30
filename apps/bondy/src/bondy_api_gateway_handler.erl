@@ -134,11 +134,11 @@ is_authorized(Req0, St) ->
             try
                 do_is_authorised(Req0, St)
             catch
-                Class:Reason ->
+                ?EXCEPTION(Class, Reason, Stacktrace) ->
                     _ = log(
                         error,
                         "type=~p, reason=~p, stacktrace=~p",
-                        [Class, Reason, erlang:get_stacktrace()],
+                        [Class, Reason, ?STACKTRACE(Stacktrace)],
                         St
                     ),
                     {StatusCode, Body} = take_status_code(
@@ -316,16 +316,16 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St1}
     catch
-        throw:Reason ->
+        ?EXCEPTION(throw, Reason, _) ->
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St0
             ),
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
@@ -368,17 +368,17 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
-        throw:Reason ->
+        ?EXCEPTION(throw, Reason, _) ->
             {StatusCode1, Body} = take_status_code(
                 bondy_error:map(Reason), 400),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
@@ -552,12 +552,12 @@ orelse Method =:= <<"put">> ->
         Body = bondy_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
-        Class:Error ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "Error while decoding HTTP body, "
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Error, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St
             ),
             throw({badarg, {decoding, Enc}})
@@ -932,13 +932,13 @@ trim_trailing_slash(Bin) ->
 mops_eval(Expr, Ctxt) ->
     try mops:eval(Expr, Ctxt)
     catch
-        error:{badkey, Key} ->
+        ?EXCEPTION(error, {badkey, Key}, _) ->
             throw(#{
                 <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        error:{badkeypath, Path} ->
+        ?EXCEPTION(error, {badkeypath, Path}, _) ->
             throw(#{
                 <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,

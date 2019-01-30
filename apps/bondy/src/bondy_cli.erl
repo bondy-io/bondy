@@ -20,6 +20,7 @@
 
 -module(bondy_cli).
 -behaviour(clique_handler).
+-include("bondy.hrl").
 
 %% API
 -export([command/1]).
@@ -433,7 +434,7 @@ add_role(Realm, Name, Options, Fun) ->
             io:format("~n"),
             Error
     catch
-        throw:{error, {invalid_option, Option}} ->
+        ?EXCEPTION(throw, {error, {invalid_option, Option}}, _) ->
             io:format("Invalid option ~p, options are of the form key=value~n",
                       [Option]),
             error

@@ -29,6 +29,7 @@
 -behaviour(prometheus_collector).
 -include_lib("prometheus/include/prometheus.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -record(state, {}).
 
@@ -403,7 +404,7 @@ get_realm(Ctxt) ->
     try
         bondy_context:realm_uri(Ctxt)
     catch
-        _:_ ->
+        ?EXCEPTION(_, _, _) ->
             undefined
     end.
 

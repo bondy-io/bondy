@@ -69,7 +69,8 @@ do_collect(CB) ->
     ],
     lists:foreach(
         fun({Name, Help, Type, Fun}) ->
-            Data = try Fun()
+            Data = try
+                Fun()
             catch _:_ -> undefined
             end,
             MF = prometheus_model_helpers:create_mf(

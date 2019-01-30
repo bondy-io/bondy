@@ -19,7 +19,7 @@
 %% -------------------------------------------------------------------
 % -module(bondy_security).
 -module(bondy_security).
-
+-include("bondy.hrl").
 
 -define(GROUPS, <<"groups">>).
 -define(USERS, <<"users">>).
@@ -1649,7 +1649,7 @@ validate_permissions([Perm|T], Known) when is_binary(Perm) ->
                             {error, {unknown_permission, Perm}}
                     end
             catch
-                error:badarg ->
+                ?EXCEPTION(error, badarg, _) ->
                     {error, {unknown_permission, Perm}}
             end;
         _ ->
@@ -1931,7 +1931,7 @@ parse_ciphers(CipherList) ->
                             C ->
                                 {[C|Acc], Unknown}
                         catch
-                            _:_ ->
+                            ?EXCEPTION(_, _, _) ->
                                 %% function will function_clause on
                                 %% unsupported/unknown ciphers
                                 {Acc, [Cipher|Unknown]}

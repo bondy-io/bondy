@@ -310,10 +310,10 @@ accept(Req0, St) ->
                 revoke_token_flow(Data, Req1, St)
         end
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, Stacktrace) ->
             _ = lager:error(
                 "type=error, reason=~p, stacktrace:~p",
-                [Reason, erlang:get_stacktrace()]),
+                [Reason, ?STACKTRACE(Stacktrace)]),
             Req2 = reply(Reason, Req0),
             {false, Req2, St}
     end.
@@ -424,7 +424,11 @@ revoke_token_flow(Data0, Req0, St) ->
         Req1 = prepare_request(<<"true">>, #{}, Req0),
         {true, Req1, St}
     catch
-        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
+        ?EXCEPTION(
+            error,
+            #{code := invalid_datatype, key := <<"token_type_hint">>},
+            _
+        ) ->
             {stop, reply(unsupported_token_type, Req0), St}
     end.
 

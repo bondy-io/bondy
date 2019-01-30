@@ -21,6 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2).
+-include("bondy.hrl").
 
 % -record(oauth2_credentials, {
 %     id                  ::  binary(),
@@ -670,7 +671,7 @@ do_verify_jwt(JWT, Match) ->
                 end
         end
     catch
-        error:_ ->
+        ?EXCEPTION(error, _, _) ->
             {error, oauth2_invalid_grant}
     end.
 

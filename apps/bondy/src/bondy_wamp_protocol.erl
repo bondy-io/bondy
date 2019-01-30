@@ -191,13 +191,13 @@ handle_inbound(Data, St) ->
         {Messages, <<>>} ->
             handle_inbound_messages(Messages, St)
     catch
-        _:{unsupported_encoding, Format} ->
+        ?EXCEPTION(_, {unsupported_encoding, Format}, _) ->
             Mssg = <<"Unsupported message encoding">>,
             abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{encoding => Format}, St);
-        _:badarg ->
+        ?EXCEPTION(_, badarg, _) ->
             Mssg = <<"Error during message decoding">>,
             abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St);
-        _:function_clause ->
+        ?EXCEPTION(_, function_clause, _) ->
             Mssg = <<"Incompatible message">>,
             abort(?WAMP_PROTOCOL_VIOLATION, Mssg, #{}, St)
     end.
@@ -521,7 +521,7 @@ open_session(St0) ->
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
-        error:{invalid_options, missing_client_role} ->
+        ?EXCEPTION(error, {invalid_options, missing_client_role}, _) ->
             abort(
                 ?WAMP_PROTOCOL_VIOLATION,
                 <<"No client roles provided. Please provide at least one client role.">>,

@@ -94,7 +94,7 @@ add(RealmUri, Group0) ->
         bondy_security:add_group(RealmUri, Name, maps:to_list(Opts)),
         bondy_event_manager:notify({security_group_added, RealmUri, Name})
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 
@@ -111,7 +111,7 @@ update(RealmUri, Name, Group0) when is_binary(Name) ->
         bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1)),
         bondy_event_manager:notify({security_group_updated, RealmUri, Name})
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 

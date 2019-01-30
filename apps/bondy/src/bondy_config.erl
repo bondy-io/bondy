@@ -23,6 +23,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_config).
+-include("bondy.hrl").
 
 -define(APP, bondy).
 -define(DEFAULT_RESOURCE_SIZE, erlang:system_info(schedulers)).
@@ -115,7 +116,7 @@ tcp_port() ->
             Str -> list_to_integer(Str)
         end
     catch
-        _:_ -> Default
+        ?EXCEPTION(_, _, _) -> Default
     end.
 
 

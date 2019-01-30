@@ -250,11 +250,11 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
     try
         cast_message(Mssg, BinPid)
     catch
-        Error:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% @TODO publish metaevent
             _ = lager:error(
                 "Error handling cast, event=~p, error=~p, reason=~p",
-                [Event, Error, Reason]
+                [Event, Class, Reason]
             )
     end,
     {noreply, State};
@@ -305,14 +305,14 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
         {noreply, State}
 
     catch
-        throw:badarg ->
+        ?EXCEPTION(throw, badarg, _) ->
             ok = cast_message(peer_error(badarg, Mssg), BinPid),
             {noreply, State};
-        Error:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% TODO publish metaevent
             _ = lager:error(
                 "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Error, Reason, erlang:get_stacktrace()]),
+                [Class, Reason, ?STACKTRACE(Stacktrace)]),
             ok = cast_message(peer_error(Reason, Mssg), BinPid),
             {noreply, State}
     end.
@@ -351,7 +351,7 @@ receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
         ok ->
             receive_broadcast_acks(T, Timeout, [Node|Good], Bad)
     catch
-        _:_ ->
+        ?EXCEPTION(_, _, _) ->
             receive_broadcast_acks(T, Timeout, Good, [Node|Bad])
     end;
 

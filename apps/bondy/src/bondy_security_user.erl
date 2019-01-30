@@ -145,7 +145,7 @@ add(RealmUri, User0) ->
                 Error
         end
     catch
-        error:Reason when is_map(Reason) ->
+        ?EXCEPTION(error, Reason, _) when is_map(Reason) ->
             {error, Reason}
     end.
 
@@ -170,7 +170,7 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
         end
     catch
         %% Todo change to throw when upgrade to new utils
-        error:Reason when is_map(Reason) ->
+        ?EXCEPTION(error, Reason, _) when is_map(Reason) ->
             {error, Reason}
     end.
 

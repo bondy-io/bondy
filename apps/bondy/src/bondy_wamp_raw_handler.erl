@@ -502,7 +502,7 @@ handle_handshake(Len, Enc, St) ->
     try
         init_wamp(Len, Enc, St)
     catch
-        throw:Reason ->
+        ?EXCEPTION(throw, Reason, _) ->
             ok = send_frame(error_number(Reason), St),
             _ = lager:error("WAMP protocol error, reason=~p", [Reason]),
             {stop, Reason, St}

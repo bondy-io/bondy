@@ -443,7 +443,7 @@ load_spec(FName) ->
         [Spec] ->
             load(Spec)
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             {error, invalid_specification_format}
     end.
 
@@ -562,7 +562,7 @@ validate_spec(Map) ->
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
-        error:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     end.
 
@@ -591,7 +591,7 @@ load_dispatch_tables() ->
                 ),
                 {K, Ts, Parsed}
             catch
-                _:_ ->
+                ?EXCEPTION(_, _, _) ->
                     _ = delete(K),
                     _ = lager:warning(
                         "Removed invalid API Gateway specification from store"),
@@ -683,7 +683,7 @@ admin_spec() ->
         [Spec] ->
             Spec
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
                 "Error processing API Gateway Specification file. "
                 "File not found or invalid specification format, "
