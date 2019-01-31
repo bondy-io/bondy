@@ -34,19 +34,7 @@
 -define(TLS, wamp_tls).
 -define(TIMEOUT, ?PING_TIMEOUT * 2).
 -define(PING_TIMEOUT, 10000). % 10 secs
--define(RAW_MAGIC, 16#7F).
--define(RAW_MSG_PREFIX, <<0:5, 0:3>>).
--define(RAW_PING_PREFIX, <<0:5, 1:3>>).
--define(RAW_PONG_PREFIX, <<0:5, 2:3>>).
 
-%% 0: illegal (must not be used)
-%% 1: serializer unsupported
-%% 2: maximum message length unacceptable
-%% 3: use of reserved bits (unsupported feature)
-%% 4: maximum connection count reached
-%% 5 - 15: reserved for future errors
--define(RAW_ERROR(Upper), <<?RAW_MAGIC:8, Upper:4, 0:20>>).
--define(RAW_FRAME(Bin), <<(?RAW_MSG_PREFIX)/binary, (byte_size(Bin)):24, Bin/binary>>).
 
 -record(state, {
     socket                  ::  gen_tcp:socket(),
@@ -64,15 +52,6 @@
     buffer = <<>>           ::  binary()
 }).
 -type state() :: #state{}.
-
--type raw_error()           ::  invalid_response
-                                | invalid_socket
-                                | invalid_handshake
-                                | maximum_connection_count_reached
-                                | maximum_message_length_unacceptable
-                                | maximum_message_length_exceeded
-                                | serializer_unsupported
-                                | use_of_reserved_bits.
 
 
 -export([start_link/4]).
