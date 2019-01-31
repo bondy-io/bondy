@@ -9,7 +9,7 @@ Bondy is Apache2 licensed.
 **DOCS COMING SOON**
 
 ## Quick Start
-Bondy requires Erlang/OTP 19 (support for 20 and 21 on the way) and `rebar3`.
+Bondy requires Erlang/OTP 20.3.8 (support for 21 on the way) and `rebar3`.
 
 The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
 
