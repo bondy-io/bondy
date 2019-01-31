@@ -100,10 +100,10 @@ close_context(Ctxt) ->
         ok = unsubscribe_all(Ctxt),
         Ctxt
     catch
-    Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
         _ = lager:debug(
             "Error while closing context; class=~p, reason=~p, trace=~p",
-            [Class, Reason, erlang:get_stacktrace()]
+            [Class, Reason, ?STACKTRACE(Stacktrace)]
         ),
         Ctxt
     end.
@@ -280,8 +280,8 @@ when is_map(Ctxt) ->
     try
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
-        _:Reason ->
-            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, erlang:get_stacktrace()]),
+        ?EXCEPTION(_, Reason, Stacktrace) ->
+            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, ?STACKTRACE(Stacktrace)]),
             {error, Reason}
     end.
 
@@ -431,10 +431,22 @@ do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(uri(), map(), uri(), pid() | function()) ->
-    {ok, id() | pid()} | {error, already_exists}.
+    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
-    bondy_subscribers_sup:start_subscriber(RealmUri, Opts, Topic, Fun);
+    %% We preallocate an id so that we can keep the same even when the process
+    %% is restarted by the supervisor.
+    Id = case maps:find(subscription_id, Opts) of
+        {ok, Value} -> Value;
+        error -> bondy_utils:get_id(global)
+    end,
+
+    case
+        bondy_subscribers_sup:start_subscriber(Id, RealmUri, Opts, Topic, Fun)
+    of
+        {ok, Pid} -> {ok, Id, Pid};
+        Error -> Error
+    end;
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     case
@@ -454,6 +466,10 @@ subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unsubscribe(pid()) -> ok | {error, not_found}.
+
+unsubscribe(Subscriber) when is_integer(Subscriber) ->
+    bondy_subscribers_sup:terminate_subscriber(
+        bondy_subscriber:pid(Subscriber));
 
 unsubscribe(Subscriber) when is_pid(Subscriber) ->
     bondy_subscribers_sup:terminate_subscriber(Subscriber).

@@ -10,8 +10,8 @@
                 "options": {"match": "exact"}
             },
             "action": {
-                "type": "produce",
-                "topic": "com.magenta.wamp_events",
+                "type": "produce_sync",
+                "topic": "{{kafka.topics |> get(com.magenta.wamp_events)}}",
                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
                 "value": "{{event}}",
                 "options" : {

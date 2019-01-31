@@ -36,7 +36,7 @@
 
 %% API
 -export([start_link/0]).
--export([start_subscriber/4]).
+-export([start_subscriber/5]).
 -export([terminate_subscriber/1]).
 
 
@@ -55,11 +55,11 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_subscriber(uri(), map(), uri(), map() | function()) ->
+-spec start_subscriber(id(), uri(), map(), uri(), map() | function()) ->
     {ok, pid()} | {error, any()}.
 
-start_subscriber(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
-    supervisor:start_child(?MODULE, [RealmUri, Opts, Topic, Fun]).
+start_subscriber(Id, RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
+    supervisor:start_child(?MODULE, [Id, RealmUri, Opts, Topic, Fun]).
 
 
 %% -----------------------------------------------------------------------------

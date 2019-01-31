@@ -237,7 +237,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config) ->
-    _ = [application:set_env(brod, K, V) || {K, V} <- Config],
+    _ = [application:set_env(brod, K, V) || {K, V} <- Config, K =:= clients],
 
     try application:ensure_all_started(brod) of
         {ok, _} ->
@@ -252,11 +252,13 @@ init(Config) ->
                     end
                 end || {Name, Opts} <- Clients
             ],
-            ok;
+            Topics = maps:from_list(proplists:get_value(topics, Config, [])),
+            Ctxt = #{<<"kafka">> => #{<<"topics">> => Topics}},
+            {ok, Ctxt};
         Error ->
             Error
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     end.
 
@@ -297,7 +299,7 @@ validate_action(Action0) ->
         Action1 ->
             {ok, Action1}
     catch
-        error:Reason ->
+        ?EXCEPTION(_, Reason, _)->
             {error, Reason}
     end.
 

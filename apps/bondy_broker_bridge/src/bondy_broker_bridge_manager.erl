@@ -105,7 +105,7 @@
                             false -> {error, {unknown_bridge, Mod}}
                         end
                 catch
-                    _:_ -> false
+                    ?EXCEPTION(_, _, _) -> false
                 end;
             (Mod) when is_atom(Mod) ->
                 erlang:module_loaded(Mod)
@@ -128,7 +128,6 @@
         datatype => map
     }
 }).
-
 
 -define(MATCH_SPEC, #{
     <<"realm_uri">> => #{
@@ -153,26 +152,17 @@
     }
 }).
 
-%% -record(bridge_subscription, {}).
-
-
 -record(state, {
-    nodename                ::  binary(),
-    broker_agent            ::  binary(),
-    bridges = #{}           ::  #{Name :: module() => Config :: map()},
-    subscriptions = #{}     ::  #{Name :: pid() => reference()},
-    monitor_refs = #{}      ::  #{Name :: reference() => pid()},
+    nodename                        ::  binary(),
+    broker_agent                    ::  binary(),
+    bridges = #{}                   ::  #{module() => bridge()}
     %% Cluster sync state
-    exchange_ref            ::  {pid(), reference()} | undefined,
-    updated_specs = []      ::  list()
+    %% exchange_ref            ::  {pid(), reference()} | undefined,
+    %% updated_specs = []      ::  list()
 }).
 
--type bridge()             ::  map().
--type subscription_detail() ::  #{
-    monitor_ref => reference(),
-    spec => map()
-}.
-
+-type bridge()              ::  map().
+-type subscription_detail() ::  map().
 
 %% API
 -export([start_link/0]).
@@ -181,7 +171,6 @@
 -export([unsubscribe/1]).
 -export([bridges/0]).
 -export([bridge/1]).
--export([subscriptions/0]).
 -export([subscriptions/1]).
 -export([validate_spec/1]).
 
@@ -250,7 +239,7 @@ load(Term) when is_map(Term) orelse is_list(Term) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec subscribe(uri(), map(), uri(), Bridge :: module(), Spec :: map()) ->
-    {ok, pid()} | {error, already_exists}.
+    {ok, id()} | {error, already_exists}.
 
 subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
     gen_server:call(
@@ -261,20 +250,10 @@ subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(pid()) -> ok | {error, not_found}.
+-spec unsubscribe(id()) -> ok | {error, not_found}.
 
-unsubscribe(Pid) ->
-    gen_server:call(?MODULE, {unsubscribe, Pid}, ?TIMEOUT).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec subscriptions() -> [subscription_detail()].
-
-subscriptions() ->
-    lists:append([subscriptions(BridgeId) || BridgeId <- bridges()]).
+unsubscribe(Id) ->
+    gen_server:call(?MODULE, {unsubscribe, Id}, ?TIMEOUT).
 
 
 %% -----------------------------------------------------------------------------
@@ -297,10 +276,9 @@ validate_spec(Map) ->
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
         {ok, Val}
     catch
-        error:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     end.
-
 
 
 
@@ -316,13 +294,19 @@ init([]) ->
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     SpecFile = application:get_env(
         bondy_broker_bridge, subscribers_spec, undefined),
+    BridgesMap = maps:from_list(
+        [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
+    ),
     State0 = #state{
         nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
         broker_agent = bondy_router:agent(),
-        bridges = maps:from_list(Bridges)
+        bridges = BridgesMap
     },
 
-    ok = plum_db_subscribe(),
+    %% Uncomment the following if we decide to store config in plum_db
+    %% At the moment we are assumming bridges are only configured on startup
+    %% through a config file
+    %% ok = plum_db_subscribe(),
 
     case init_bridges(State0) of
         {ok, State1} ->
@@ -334,7 +318,7 @@ init([]) ->
 
 
 handle_call(bridges, _From, State) ->
-    Res = maps:to_list(State#state.bridges),
+    Res = bridges(State),
     {reply, Res, State};
 
 handle_call({bridge, Mod}, _From, State) ->
@@ -342,21 +326,21 @@ handle_call({bridge, Mod}, _From, State) ->
     {reply, Res, State};
 
 handle_call({subscriptions, Bridge}, _From, State) ->
-    Res = maps:get(Bridge, State#state.subscriptions, []),
+    Res = get_subscriptions(Bridge),
     {reply, Res, State};
 
 handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
     try do_subscribe(RealmUri, Opts, Topic, Bridge, Spec0, State) of
-        {Pid, NewState} ->
-            {reply, {ok, Pid}, NewState}
+        {ok, Id, _Pid} ->
+            {reply, {ok, Id}, State}
     catch
-        error:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {reply, {error, Reason}, State}
     end;
 
-handle_call({unsubscribe, Pid}, _From, State) ->
-    {Res, NewState} = do_unsubscribe(Pid, State),
-    {reply, Res, NewState};
+handle_call({unsubscribe, Id}, _From, State) ->
+    Res = bondy_broker:unsubscribe(Id),
+    {reply, Res, State};
 
 handle_call({load, Term}, _From, State) ->
     {Res, NewState} = load_spec(Term, State),
@@ -372,43 +356,49 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
-    Ref = erlang:monitor(process, Pid),
-    {noreply, State#state{exchange_ref = {Pid, Ref}}};
+%% handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
+%%     Ref = erlang:monitor(process, Pid),
+%%     {noreply, State#state{exchange_ref = {Pid, Ref}}};
 
-handle_info(
-    {plum_db_event, exchange_finished, {Pid, _Reason}},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
+%% handle_info(
+%%     {plum_db_event, exchange_finished, {Pid, _Reason}},
+%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
 
-    true = erlang:demonitor(Ref),
-    %% ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
+%%     true = erlang:demonitor(Ref),
+%%     %% ok = handle_spec_updates(State0),
+%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+%%     {noreply, State1};
 
-handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
-    %% We are receiving the notification after we recevied a DOWN message
-    %% we do nothing
+%% handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
+%%     %% We are receiving the notification after we recevied a DOWN message
+%%     %% we do nothing
+%%     {noreply, State};
+
+%% handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
+%%     %% We've got a notification that an API Spec object has been updated
+%%     %% in the database via cluster replication, so we need to rebuild the
+%%     %% Cowboy dispatch tables
+%%     %% But since Specs depend on other objects being present and we also want
+%%     %% to avoid rebuilding the dispatch table multiple times, we just set a
+%%     %% flag on the state to rebuild the dispatch tables once we received an
+%%     %% exchange_finished event,
+%%     _ = lager:info("API Spec object_update received; key=~p", [Key]),
+%%     Acc = State#state.updated_specs,
+%%     {noreply, State#state{updated_specs = [Key|Acc]}};
+
+%% handle_info(
+%%     {'DOWN', Ref, process, Pid, _Reason},
+%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+%%     %% ok = handle_spec_updates(State0),
+%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+%%     {noreply, State1};
+
+handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
+    _ = lager:debug("Subscriber down, pid=~p", [Pid]),
+    %% TODO
     {noreply, State};
 
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-    %% ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
-
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
-    %% We've got a notification that an API Spec object has been updated
-    %% in the database via cluster replication, so we need to rebuild the
-    %% Cowboy dispatch tables
-    %% But since Specs depend on other objects being present and we also want
-    %% to avoid rebuilding the dispatch table multiple times, we just set a
-    %% flag on the state to rebuild the dispatch tables once we received an
-    %% exchange_finished event,
-    _ = lager:info("API Spec object_update received; key=~p", [Key]),
-    Acc = State#state.updated_specs,
-    {noreply, State#state{updated_specs = [Key|Acc]}};
 
 handle_info(Info, State) ->
     _ = lager:debug("Unexpected event, event=~p, state=~p", [Info, State]),
@@ -416,13 +406,13 @@ handle_info(Info, State) ->
 
 
 terminate(normal, State) ->
-    do_terminate(State);
+    do_terminate(normal, State);
 terminate(shutdown, State) ->
-    do_terminate(State);
+    do_terminate(shutdown, State);
 terminate({shutdown, _}, State) ->
-    do_terminate(State);
-terminate(_Reason, State) ->
-    do_terminate(State).
+    do_terminate(shutdown, State);
+terminate(Reason, State) ->
+    do_terminate(Reason, State).
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -441,26 +431,31 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 init_bridges(State) ->
     try
-         Bridges = maps:to_list(State#state.bridges),
-        _ = [
-                begin
-                    case Mod:init(Config) of
-                        ok -> ok;
-                        {error, Reason} -> error(Reason)
-                    end
-                end || {Mod, Config} <- Bridges
-        ],
-        {ok, State}
+        Bridges0 = State#state.bridges,
+        Fun = fun(Mod, #{config := Config} = Bridge, Acc) ->
+            case Mod:init(Config) of
+                {ok, Ctxt} when is_map(Ctxt) ->
+                    maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                {error, Reason} ->
+                    error(Reason)
+            end
+        end,
+        Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
+        {ok, State#state{bridges = Bridges1}}
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, Stacktrace) ->
+            _ = lager:error(
+                "Error; reason ~p, stacktrace=~p",
+                [Reason, ?STACKTRACE(Stacktrace)]
+            ),
             {error, Reason}
     end.
 
 
 %% @private
-terminate_bridges(#state{bridges = Map} = State) ->
+terminate_bridges(Reason, #state{bridges = Map} = State) ->
     Fun = fun(Bridge, _Config, Acc) ->
-        ok = Bridge:terminate(),
+        ok = Bridge:terminate(Reason),
         Acc#state{bridges = maps:delete(Bridge, Map)}
     end,
     maps:fold(Fun, State, Map).
@@ -478,15 +473,15 @@ get_bridge(Mod, State) ->
 %% recompile them and generate the Cowboy dispatch tables
 %% @end
 %% -----------------------------------------------------------------------------
-plum_db_subscribe() ->
-    ok = plum_db_events:subscribe(exchange_started),
-    ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{
-        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-        {{?PREFIX, '_'}, '_', '_'}, [], [true]
-    }],
-    ok = plum_db_events:subscribe(object_update, MS),
-    ok.
+%% plum_db_subscribe() ->
+%%     ok = plum_db_events:subscribe(exchange_started),
+%%     ok = plum_db_events:subscribe(exchange_finished),
+%%     MS = [{
+%%         %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+%%         {{?PREFIX, '_'}, '_', '_'}, [], [true]
+%%     }],
+%%     ok = plum_db_events:subscribe(object_update, MS),
+%%     ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -495,18 +490,18 @@ plum_db_subscribe() ->
 %% by plum_db_subscribe/0
 %% @end
 %% -----------------------------------------------------------------------------
-plum_db_unsubscribe() ->
-    _ = plum_db_events:unsubscribe(exchange_started),
-    _ = plum_db_events:unsubscribe(exchange_finished),
-    _ = plum_db_events:unsubscribe(object_update),
-    ok.
+%% plum_db_unsubscribe() ->
+%%     _ = plum_db_events:unsubscribe(exchange_started),
+%%     _ = plum_db_events:unsubscribe(exchange_finished),
+%%     _ = plum_db_events:unsubscribe(object_update),
+%%     ok.
 
 
 %% @private
-do_terminate(State) ->
-    ok = plum_db_unsubscribe(),
-    NewState = unsubscribe_all(State),
-    _ = terminate_bridges(NewState),
+do_terminate(Reason, State) ->
+    %% ok = plum_db_unsubscribe(),
+    _ = unsubscribe_all(State),
+    _ = terminate_bridges(Reason, State),
     ok.
 
 
@@ -517,8 +512,8 @@ load_spec(Map, State) when is_map(Map) ->
             #{<<"subscriptions">> := Subscriptions} = Spec,
             %% We instantiate the subscribers
             Folder = fun(Subs, Acc) ->
-                {_, Acc1} = do_subscribe(Subs, Acc),
-                Acc1
+                {ok, _, _} = do_subscribe(Subs, Acc),
+                Acc
             end,
             NewState = lists:foldl(Folder, State, Subscriptions),
             %% We store the specification, see add/2 for an explanation
@@ -540,7 +535,7 @@ load_spec(FName, State) when is_list(FName) orelse is_binary(FName) ->
         [Spec] ->
             load_spec(Spec, State)
     catch
-        error:badarg ->
+        ?EXCEPTION(_, badarg, _) ->
             {{error, invalid_specification_format}, State}
     end;
 
@@ -557,9 +552,10 @@ load_spec(_, State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-mops_ctxt(Event, RealmUri, _Opts, Topic, State) ->
+mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     %% mops requiere binary keys
-    #{
+    Base = maps:get(ctxt, bridge(Bridge)),
+    Base#{
         <<"broker">> => #{
             <<"node">> => State#state.nodename,
             <<"agent">> => State#state.broker_agent
@@ -596,7 +592,7 @@ do_subscribe(Subscription, State) ->
     case get_bridge(Bridge, State) of
         undefined ->
             error({unknown_bridge, Bridge});
-        [_|_] ->
+        #{id := Bridge} ->
             do_subscribe(RealmUri, Opts, Topic, Bridge, Action, State)
     end.
 
@@ -607,27 +603,33 @@ do_subscribe(Subscription, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
-
     try
         %% We build the fun that we will use for the subscriber
         Fun = fun
             (Topic1, Event) when Topic1 == Topic ->
-                Ctxt = mops_ctxt(Event, RealmUri, Opts, Topic, State),
+                Ctxt = mops_ctxt(Event, RealmUri, Opts, Topic, Bridge, State),
                 Action1 = mops:eval(Action0, Ctxt),
                 case Bridge:validate_action(Action1) of
                     {ok, Action2} ->
+                        %% TODO: Also handle acknowledge to publisher when
+                        %% Action.options.acknowledge == true
                         Bridge:apply_action(Action2);
                     {error, Reason} ->
                         throw({invalid_action, Reason})
                 end;
             (_Topic1, {brod_produce_reply, _ ,brod_produce_req_acked}) ->
+                %% Required to handle in case of Action.type == produce (async)
                 ok
         end,
         %% We use bondy_broker subscribers, this is an intance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup
-        {ok, Pid} = bondy_broker:subscribe(RealmUri, Opts, Topic, Fun),
-        {Ref, NewState} = monitor_subscription(Pid, State),
-        {Pid, add_subscription(Pid, Ref, NewState)}
+        {ok, Id, Pid} = Res = bondy_broker:subscribe(
+            RealmUri, Opts, Topic, Fun),
+        %% Add to registry and set properties
+        true = gproc:reg_other({n, l, {subscriber, Id}}, Pid),
+        true = gproc:reg_other({r, l, subscription_id}, Pid, Id),
+        true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
+        Res
     catch
         ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
@@ -640,49 +642,39 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
     end.
 
 
-do_unsubscribe(Pid, #state{subscriptions = Map} = State) ->
-    case maps:find(Pid, Map) of
-        {ok, _Ref} ->
-            NewState = remove_subscription(
-                Pid, demonitor_subscription(Pid, State)),
-            _ =  bondy_broker:unsubscribe(Pid),
-            {ok, NewState};
-        error ->
-            {{error, not_found}, State}
-    end.
+
+%% @private
+unsubscribe_all(State) ->
+    _ = [bondy_broker:unsubscribe(Pid) || Pid <- all_subscribers(State)],
+    ok.
 
 
 %% @private
-unsubscribe_all(#state{subscriptions = Map} = State) ->
-    Fun = fun(Pid, _, Acc) ->
-        do_unsubscribe(Pid, Acc)
-    end,
-    maps:fold(Fun, State, Map).
+bridges(State) ->
+    maps:values(State#state.bridges).
 
 
 %% @private
-monitor_subscription(Pid, #state{monitor_refs = Map} = State) ->
-    Ref = erlang:monitor(process, Pid),
-    {Ref, State#state{monitor_refs = maps:put(Ref, Pid, Map)}}.
+all_subscribers(State) ->
+    Ids = maps:keys(State#state.bridges),
+    lists:append([subscribers(Id) || Id <- Ids]).
 
 
 %% @private
-demonitor_subscription(Pid, #state{monitor_refs = Map} = State) ->
-    case maps:find(Pid, Map) of
-        {ok, Ref} ->
-            true = erlang:demonitor(Ref),
-            State#state{monitor_refs = maps:delete(Ref, Map)};
-        _ ->
-            State
-    end.
+subscribers(Bridge) ->
+    %% {{{p,l,bondy_broker_bridge},<0.2738.0>},<0.2738.0>,Bridge},
+    MatchSpec = [{
+        {{r, l, bondy_broker_bridge}, '$1', Bridge},
+        [],
+        ['$1']
+    }],
+    gproc:select({l, resources}, MatchSpec).
 
 
 %% @private
-add_subscription(Pid, Ref, #state{subscriptions = Map} = State) ->
-    State#state{subscriptions = maps:put(Pid, Ref, Map)}.
+get_subscriptions(Bridge) ->
+    [{gproc:get_value({r, l, subscription_id}, Pid), Pid}
+        || Pid <- subscribers(Bridge)].
 
 
-%% @private
-remove_subscription(Pid, #state{subscriptions = Map} = State) ->
-    State#state{subscriptions = maps:delete(Pid, Map)}.
 

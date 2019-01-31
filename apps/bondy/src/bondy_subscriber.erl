@@ -40,9 +40,10 @@
 %% API
 -export([info/1]).
 -export([name/1]).
+-export([pid/1]).
 -export([handle_event/2]).
 -export([handle_event_sync/2]).
--export([start_link/4]).
+-export([start_link/5]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -64,14 +65,12 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_link(uri(), map(), uri(), function()) ->
+-spec start_link(id(), uri(), map(), uri(), function()) ->
     {ok, pid()} | {error, any()}.
 
-start_link(RealmUri, Opts0, Topic, Fun) ->
-    Id = bondy_utils:get_id(global),
-    Opts = maps:put(subscription_id, Id, Opts0),
+start_link(Id, RealmUri, Opts, Topic, Fun) ->
     gen_server:start_link(
-        {local, name(Id)}, ?MODULE, [RealmUri, Opts, Topic, Id, Fun], []).
+        {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []).
 
 
 %% -----------------------------------------------------------------------------
@@ -81,6 +80,14 @@ start_link(RealmUri, Opts0, Topic, Fun) ->
 %% @private
 name(Id) ->
     list_to_atom("bondy_subscriber_" ++ integer_to_list(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+pid(Id) ->
+    gproc:lookup_pid({n, l, {?MODULE, Id}}).
 
 
 %% -----------------------------------------------------------------------------
@@ -115,7 +122,8 @@ handle_event_sync(Subscriber, Event) ->
 
 
 
-init([RealmUri, Opts, Topic, Id, Fun]) when is_function(Fun, 2) ->
+init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
+    Opts = maps:put(subscription_id, Id, Opts0),
     {ok, Id} = bondy_broker:subscribe(RealmUri, Opts, Topic, self()),
     State = #state{
         realm_uri = RealmUri,
@@ -124,7 +132,6 @@ init([RealmUri, Opts, Topic, Id, Fun]) when is_function(Fun, 2) ->
         callback_fun = Fun,
         subscription_id = Id
     },
-    %% TODO maybe add Id as name for pid in gproc to enable unsubscribe
     {ok, State}.
 
 
