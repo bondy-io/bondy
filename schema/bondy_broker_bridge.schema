@@ -20,6 +20,5 @@
 
 %% @doc Default location for bondy_broker_bridge specification file
 {mapping, "broker_bridge.subscribers_spec", "bondy_broker_bridge.subscribers_spec", [
-  {datatype, file},
-  {default, "/Volumes/Work/Leapsight/bondy/apps/bondy_broker_bridge/test/config/example_broker_bridge_spec.json"}
+  {datatype, file}
 ]}.
