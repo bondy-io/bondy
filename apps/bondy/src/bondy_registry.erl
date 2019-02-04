@@ -696,7 +696,7 @@ handle_info(
             ok;
         false ->
             case maybe_resolve(Obj) of
-                '$deleted' ->
+                '$deleted' when PrevObj =/= undefined ->
                     %% We do this since we need to know the Match Policy of the
                     %% entry in order to generate the trie key and we want to
                     %% avoid including yet another element to the entry_key
@@ -704,6 +704,11 @@ handle_info(
                     OldEntry = plum_db_object:value(Reconciled),
                     %% This works because registry entries are immutable
                     _ = delete_from_trie(OldEntry);
+                '$deleted' when PrevObj == undefined ->
+                    %% We got a delete for an entry we do not know anymore.
+                    %% This happens when the registry has just been reset
+                    %% as we do not persist registrations any more
+                    ok;
                 Entry ->
                     %% We only add to trie
                     add_to_trie(Entry)
