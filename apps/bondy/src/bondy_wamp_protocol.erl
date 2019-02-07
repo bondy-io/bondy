@@ -405,7 +405,7 @@ closed(in, [#hello{realm_uri = Uri} = M|_], St0, _) ->
     %% This will return either reply with wamp_welcome() | wamp_challenge()
     %% or abort
     Ctxt0 = St0#wamp_state.context,
-    ok = bondy_stats:update({wamp_message, M, Ctxt0}),
+    ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
 
     Ctxt1 = Ctxt0#{realm_uri => Uri},
     St1 = update_context(Ctxt1, St0),
@@ -494,8 +494,6 @@ challenging(_, [], St, Acc) ->
 
 challenging(in, [#authenticate{} = M|_], St, _) ->
     %% Client is responding to a challenge
-    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
-
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
 
     Sign = M#authenticate.signature,
@@ -618,7 +616,7 @@ established(in, {_Type, Data}, St, Acc) ->
             {stop, failed, [Bin | Acc], update_context(Ctxt1, St)}
     end;
 
-established(in, [#hello{}|_], St0, Acc) ->
+established(in, [#hello{} = M|_], St0, Acc) ->
     %% Client already has a session!
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
@@ -644,7 +642,7 @@ established(in, [#authenticate{}|_], St, Acc) ->
     {stop, failed, [Bin | Acc], St};
 
 established(in, [#goodbye{} = M|_], St, Acc) ->
-    ok = bondy_stats:update({wamp_message, M, St#wamp_state.context}),
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     %% Client initiated a goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = wamp_message:goodbye(

@@ -27,8 +27,8 @@
     procedure_uri       ::  uri() | undefined,
     call_id             ::  id() | undefined,
     caller              ::  bondy_wamp_peer:t(),
-    callee              ::  bondy_wamp_peer:t()
-    timestamp                               :: integer()
+    callee              ::  bondy_wamp_peer:t(),
+    timestamp           :: integer()
 }).
 
 
@@ -110,8 +110,8 @@ new(InvocationId, CallId, ProcUri, Callee, Caller) ->
         procedure_uri = ProcUri,
         call_id = CallId,
         caller = Caller,
-        callee = Callee
-        timestamp = bondy_context:request_timestamp(Ctxt)
+        callee = Callee,
+        timestamp = erlang:monotonic_time()
     }.
 
 
@@ -152,6 +152,13 @@ callee(#bondy_rpc_promise{callee = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec caller(t()) -> bondy_wamp_peer:t().
 caller(#bondy_rpc_promise{caller = Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------

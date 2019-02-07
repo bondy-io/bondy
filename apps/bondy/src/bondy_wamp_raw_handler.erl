@@ -242,7 +242,7 @@ init({Ref, Socket, Transport, _Opts0}) ->
         peername = inet_utils:peername_to_binary(Peername),
         transport_mod = Transport
     },
-    ok = notify_socket_opened(St),
+    ok = socket_opened(St),
     gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
 
@@ -303,10 +303,9 @@ handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% We send the message to the peer
     handle_outbound(M, St);
 
-handle_info({tcp_closed, _Socket}, State) ->
-    _ = log(
-        info, "Connection closed by peer, socket='~p'", [Socket], State),
-    ok = notify_socket_closed(false, State),
+handle_info({tcp_closed, Socket}, State) ->
+    _ = log(info, "Connection closed by peer, socket='~p'", [Socket], State),
+    ok = socket_closed(false, State),
     {stop, normal, State};
 
 handle_info({tcp_error, Socket, Reason}, State) ->
@@ -316,7 +315,7 @@ handle_info({tcp_error, Socket, Reason}, State) ->
         [Reason, Socket],
         State
     ),
-    ok = notify_socket_closed(true, State),
+    ok = socket_closed(true, State),
     {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
@@ -706,19 +705,18 @@ error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 
 %% @private
 close_socket(normal, St) ->
-    ok = (St#state.transport):close(St#state.socket),
-    _ = log(info, <<"TCP Connection closed, reason=~p">>, [Reason], St),
+    ok = (St#state.transport_mod):close(St#state.socket),
+    _ = log(info, <<"TCP Connection closed, reason=~p">>, [normal], St),
     socket_closed(false, St);
 
 close_socket(shutdown, St)  ->
-    ok = (St#state.transport):close(St#state.socket),
+    ok = (St#state.transport_mod):close(St#state.socket),
     _ = log(
         info, <<"Connection closed by router; reason=~p,">>, [shutdown], St),
     socket_closed(false, St);
 
 close_socket(Reason, St) ->
     ok = (St#state.transport_mod):close(St#state.socket),
-    _ = log(
     _ = log(error, <<"TCP Connection closed, reason=~p">>, [Reason], St),
     socket_closed(true, St).
 
@@ -762,7 +760,7 @@ socket_closed(true, St) ->
     socket_closed(false, St);
 
 socket_closed(false, St) ->
-    Seconds = erlang:monotonic_time(second) - St#state.start_time,
+    Seconds = erlang:monotonic_time(second) - St#state.start_time_secs,
     Event = {socket_closed, wamp, raw, peername(St#state.socket), Seconds},
     bondy_event_manager:notify(Event).
 

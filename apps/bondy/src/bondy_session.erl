@@ -145,7 +145,6 @@
                                         }
                                     }.
 
--export([agent/1]).
 -export([close/1]).
 -export([created/1]).
 -export([fetch/1]).
@@ -248,7 +247,7 @@ open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     S1 = new(Id, Realm, Opts),
     S2 = set_peer(S1, Peer),
-    {IP, _} = bondy_wamp_peer:peername(Peer),
+    Agent = S1#session.agent,
 
     case ets:insert_new(table(Id), S2) of
         true ->
@@ -275,12 +274,12 @@ update(#session{id = Id} = S) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(id() | session()) -> ok.
-
 close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
     Agent = S#session.agent,
     Peer = S#session.peer,
     Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
+
     ok = bondy_event_manager:notify(
         {session_closed, Id, Realm, Agent, Peer, Secs}),
     true = ets:delete(table(Id), Id),
@@ -292,6 +291,7 @@ close(Id) ->
         {error, not_found} -> ok;
         Session -> close(Session)
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -309,11 +309,10 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
-
 realm_uri(#session{realm_uri = Val}) ->
     Val;
 
-realm_uri(Id) when is_integer(Id) ->
+realm_uri(Id) ->
     #session{realm_uri = Val} = fetch(Id),
     Val.
 
@@ -323,7 +322,6 @@ realm_uri(Id) when is_integer(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles(id() | session()) -> map().
-
 roles(#session{roles = Val}) ->
     Val;
 
@@ -363,18 +361,6 @@ set_peer(Id, Peer) ->
     set_peer(fetch(Id), Peer).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec agent(session()) -> binary() | undefined.
-agent(#session{agent = Val}) ->
-    Val;
-
-agent(Id) when is_integer(Id) ->
-    #session{agent = Val} = fetch(Id),
-    Val.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -395,9 +381,9 @@ created(Id) -> created(fetch(Id)).
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
-incr_seq(Id) when is_integer(Id), Id >= 0 ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
-    ets:update_counter(Tab, Id, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
+incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, SessionId),
+    ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
 %% -----------------------------------------------------------------------------

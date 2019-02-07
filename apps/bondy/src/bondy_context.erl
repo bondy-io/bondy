@@ -83,7 +83,6 @@
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
--export([set_subprotocol/2]).
 -export([set_session_id/2]).
 -export([set_session/2]).
 -export([subprotocol/1]).
