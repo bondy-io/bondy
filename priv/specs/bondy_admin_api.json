@@ -3,6 +3,12 @@
     "name": "Bondy Admin API",
     "host" : "_",
     "realm_uri" : "com.leapsight.bondy",
+    "status_codes" : {
+        "com.leapsight.bondy.error.badarg" : 400,
+        "com.leapsight.bondy.error.not_found" : 404,
+        "com.leapsight.bondy.error.role_exists": 400,
+        "com.leapsight.bondy.error.unknown_user": 400
+    },
     "variables" : {
         "oauth2" : {
             "type" : "oauth2",
@@ -16,12 +22,6 @@
         "query_match" :
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
         "schemes" : ["http"],
-        "error_codes" : {
-            "com.leapsight.bondy.error.badarg" : 400,
-            "com.leapsight.bondy.error.not_found" : 404,
-            "com.leapsight.bondy.error.role_exists": 400,
-            "com.leapsight.bondy.error.unknown_user": 400
-        },
         "cors_headers": {
             "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
@@ -71,7 +71,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -104,7 +104,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -137,7 +137,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -172,7 +172,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -205,7 +205,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -226,7 +226,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -259,7 +259,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -291,7 +291,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -323,7 +323,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -342,7 +342,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -376,7 +376,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -396,7 +396,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -416,7 +416,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -453,7 +453,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -489,7 +489,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -510,7 +510,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -547,7 +547,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -583,7 +583,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -604,7 +604,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -641,7 +641,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -663,7 +663,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -697,7 +697,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -719,7 +719,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -740,7 +740,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -777,7 +777,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -799,7 +799,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -833,7 +833,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -855,7 +855,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -876,7 +876,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -913,7 +913,7 @@
                         },
                         "response": {
                             "on_error": {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body": "{{variables.wamp_error_body}}"
                             },
                             "on_result": {

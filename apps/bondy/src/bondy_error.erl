@@ -55,6 +55,15 @@ code_to_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
     <<"com.leapsight.bondy.error.", R/binary>>;
 
+code_to_uri(<<"wamp.", _/binary>> = Reason) ->
+    Reason;
+
+code_to_uri(<<"bondy.", _/binary>> = Reason) ->
+    Reason;
+
+code_to_uri(<<"com.", _/binary>> = Reason) ->
+    Reason;
+
 code_to_uri(Reason) when is_binary(Reason) ->
     <<"com.leapsight.bondy.error.", Reason/binary>>.
 
@@ -154,6 +163,14 @@ map(oauth2_invalid_scope) ->
 map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
     maps:put(<<"message">>, Msg, map(oauth2_invalid_client));
+
+map({no_such_realm, Uri}) ->
+
+    #{
+        <<"code">> => ?WAMP_NO_SUCH_REALM,
+        <<"message">> => <<"There is no realm named ", $', Uri/binary, $'>>,
+        <<"description">> => <<"The request cannot be executed because the realm provided does not exist.">>
+    };
 
 map({badarg, {decoding, json}}) ->
     #{

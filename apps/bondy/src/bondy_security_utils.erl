@@ -21,7 +21,8 @@
 -include("bondy.hrl").
 
 -type auth_error_reason()           ::  bondy_oauth2:error()
-                                        | invalid_scheme.
+                                        | invalid_scheme
+                                        | no_such_realm.
 
 -type auth_scheme()                 ::  wampcra | basic | bearer | digest.
 -type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}

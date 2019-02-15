@@ -309,7 +309,7 @@ start_listeners([]) ->
     ok;
 
 start_listeners([H|T]) ->
-    {ok, Opts} = application:get_env(bondy, H),
+    Opts = bondy_config:get(H),
     case lists:keyfind(enabled, 1, Opts) of
         {_, true} ->
             {ok, _} = ranch:start_listener(
@@ -562,7 +562,7 @@ send_ping(St) ->
 %% -----------------------------------------------------------------------------
 send_ping(Bin, St0) ->
     ok = send_frame(<<0:5, 1:3, (byte_size(Bin)):24, Bin/binary>>, St0),
-    Timeout = application:get_env(bondy, ping_timeout, ?PING_TIMEOUT),
+    Timeout = bondy_config:get(ping_timeout, ?PING_TIMEOUT),
     TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
     St1 = St0#state{
         ping_sent = {true, Bin, TimerRef},
@@ -699,7 +699,7 @@ socket_closed(false, St) ->
 
 %% @private
 transport_opts(Name) ->
-    {ok, Opts} = application:get_env(bondy, Name),
+    Opts = bondy_config:get(Name),
     {_, Port} = lists:keyfind(port, 1, Opts),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),

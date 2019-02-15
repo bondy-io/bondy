@@ -161,10 +161,20 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec find_user(Realm :: binary(), Username :: string()) ->
-    options() | {error, not_found}.
+-spec find_user(RealmUri :: binary(), Username :: string()) ->
+    options() | {error, not_found | {no_such_realm, uri()}}.
 
-find_user(Realm, Username) ->
+find_user(RealmUri, Username) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        do_find_user(RealmUri, Username)
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
+
+%% @private
+do_find_user(Realm, Username) ->
     case user_details(Realm, Username) of
         undefined -> {error, not_found};
         Options -> Options
@@ -176,15 +186,25 @@ find_user(Realm, Username) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec find_one_user_by_metadata(binary(), metadata_key(), metadata_value()) ->
-    {Username :: string(), options()} | {error, not_found}.
+    {Username :: string(), options()}
+    | {error, not_found | {no_such_realm, uri()}}.
 
-find_one_user_by_metadata(Realm, Key, Value) ->
-    plum_db:fold(
-      fun(User, _Acc) -> return_if_user_matches_metadata(Key, Value, User) end,
-      {error, not_found},
-      ?USERS_PREFIX(Realm),
-      [{default, []} | ?FOLD_OPTS]
-    ).
+find_one_user_by_metadata(RealmUri, Key, Value) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+
+        plum_db:fold(
+            fun(User, _Acc) ->
+                return_if_user_matches_metadata(Key, Value, User)
+            end,
+            {error, not_found},
+            ?USERS_PREFIX(RealmUri),
+            [{default, []} | ?FOLD_OPTS]
+        )
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
 
 %% @private
 return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
@@ -195,6 +215,7 @@ return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
             {error, not_found}
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -202,17 +223,23 @@ return_if_user_matches_metadata(Key, Value, {_Username, Options} = User) ->
 -spec find_unique_user_by_metadata(
     binary(), metadata_key(), metadata_value()) ->
     {Username :: string() | binary(), options()}
-    | {error, not_found | not_unique}.
+    | {error, not_found | not_unique | {no_such_realm, uri()}}.
 
 find_unique_user_by_metadata(Realm, Key, Value) ->
-    R = to_lowercase_bin(Realm),
-    plum_db:fold(
-        fun (User, Acc) ->
-            accumulate_matching_user(Key, Value, User, Acc)
-        end,
-        {error, not_found},
-        ?USERS_PREFIX(R),
-        [{default, []} | ?FOLD_OPTS]).
+    try
+        _ = bondy_realm:fetch(Realm),
+        R = to_lowercase_bin(Realm),
+        plum_db:fold(
+            fun (User, Acc) ->
+                accumulate_matching_user(Key, Value, User, Acc)
+            end,
+            {error, not_found},
+            ?USERS_PREFIX(R),
+            [{default, []} | ?FOLD_OPTS])
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
 
 %% @private
 accumulate_matching_user(Key, Value, {_Username, Options} = User, Acc) ->
@@ -232,16 +259,20 @@ accumulate_matching_user(false, _, Acc) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec find_bucket_grants(binary(), bucket(), user | group) ->
-    [{RoleName :: string(), [permission()]}].
+    [{RoleName :: string(), [permission()]}] | {error, {no_such_realm, uri()}}.
 
-find_bucket_grants(Realm, Bucket, Type) ->
-    Grants = match_grants(Realm, {'_', Bucket}, Type),
-    lists:map(
-        fun ({{Role, _Bucket}, Permissions}) ->
-                {Role, Permissions}
-        end,
-        Grants
-    ).
+find_bucket_grants(RealmUri, Bucket, Type) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Grants = match_grants(RealmUri, {'_', Bucket}, Type),
+        lists:map(
+            fun ({{Role, _Bucket}, Permissions}) -> {Role, Permissions} end,
+            Grants
+        )
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
 
 
 
@@ -342,22 +373,28 @@ get_grants(#context{grants=Val}) ->
     Password::binary() | {hash, binary()},
     ConnInfo :: [{atom(), any()}]) ->
         {ok, context()} |
-        {error, {unknown_user, binary()} | missing_password | no_matching_sources }.
+        {error, {unknown_user, binary()} | {no_such_realm, uri()} | missing_password | no_matching_sources }.
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(Username),
-    case user_details(Uri, Name) of
-        undefined ->
-            {error, {unknown_user, Name}};
-        Data ->
-            M = #{
-                realm_uri => Uri,
-                username => Name,
-                password => Password,
-                conn_info => ConnInfo
-            },
-            auth_with_data(Data, M)
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        Name = to_lowercase_bin(Username),
+        case user_details(Uri, Name) of
+            undefined ->
+                {error, {unknown_user, Name}};
+            Data ->
+                M = #{
+                    realm_uri => Uri,
+                    username => Name,
+                    password => Password,
+                    conn_info => ConnInfo
+                },
+                auth_with_data(Data, M)
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -464,13 +501,14 @@ auth_with_source(Source, UserData, M) ->
     RealmUri :: binary(),
     Username :: string(),
     Options :: [{binary(), term()}]) ->
-    ok | {error, reserved_name | role_exists | illegal_name_char}.
+    ok | {error, {no_such_realm, uri()} | reserved_name | role_exists | illegal_name_char}.
 
 add_user(RealmUri, Username, Options) ->
     Uri = to_lowercase_bin(RealmUri),
     FP = ?USERS_PREFIX(Uri),
     add_role(
-        Uri, to_lowercase_bin(Username), Options, fun user_exists/2, FP).
+        RealmUri, to_lowercase_bin(Username), Options, fun user_exists/2, FP).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -478,16 +516,20 @@ add_user(RealmUri, Username, Options) ->
 %% -----------------------------------------------------------------------------
 -spec add_group(
     binary(), Groupname :: string(), Options :: [{string(), term()}]) ->
-    ok | {error, reserved_name | role_exists | illegal_name_char}.
-add_group(RealmUri, Groupname, Options) ->
-    Uri = to_lowercase_bin(RealmUri),
-    add_role(Uri, to_lowercase_bin(Groupname), Options, fun group_exists/2,
-             ?GROUPS_PREFIX(Uri)).
+    ok | {error, {no_such_realm, uri()} | reserved_name | role_exists | illegal_name_char}.
 
+add_group(RealmUri, Groupname, Options) ->
+    add_role(
+        RealmUri,
+        to_lowercase_bin(Groupname),
+        Options,
+        fun group_exists/2,
+        ?GROUPS_PREFIX(to_lowercase_bin(RealmUri))
+    ).
 
 %% @private
 -spec add_role(uri(), binary(), list(), function(), binary()) ->
-    ok | {error, reserved_name | role_exists | illegal_name_char}.
+    ok | {error, {no_such_realm, uri()} | reserved_name | role_exists | illegal_name_char}.
 
 add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
@@ -505,24 +547,31 @@ add_role(_, <<"any">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
 
 add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
-    Uri = to_lowercase_bin(RealmUri),
-    BinName = to_lowercase_bin(Name),
-    case illegal_name_chars(BinName) of
-        false ->
-            case ExistenceFun(Uri, BinName) of
-                false ->
-                    case validate_options(RealmUri, Options) of
-                        {ok, NewOptions} ->
-                            plum_db:put(Prefix, BinName, NewOptions),
-                            ok;
-                        Error ->
-                            Error
-                    end;
-                true ->
-                    {error, role_exists}
-            end;
-        true ->
-            {error, illegal_name_char}
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        BinName = to_lowercase_bin(Name),
+
+        case illegal_name_chars(BinName) of
+            false ->
+                case ExistenceFun(Uri, BinName) of
+                    false ->
+                        case validate_options(RealmUri, Options) of
+                            {ok, NewOptions} ->
+                                plum_db:put(Prefix, BinName, NewOptions),
+                                ok;
+                            Error ->
+                                Error
+                        end;
+                    true ->
+                        {error, role_exists}
+                end;
+            true ->
+                {error, illegal_name_char}
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -540,24 +589,31 @@ alter_user(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
 alter_user(RealmUri, Username, Options) when is_binary(Username) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(Username),
-    case user_details(Uri, Name) of
-        undefined ->
-            {error, {unknown_user, Name}};
-        UserData ->
-            case validate_options(RealmUri, Options) of
-                {ok, NewOptions} ->
-                    MergedOptions = lists:ukeymerge(1, lists:sort(NewOptions),
-                                                    lists:sort(UserData)),
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        Name = to_lowercase_bin(Username),
+        case user_details(Uri, Name) of
+            undefined ->
+                {error, {unknown_user, Name}};
+            UserData ->
+                case validate_options(RealmUri, Options) of
+                    {ok, NewOptions} ->
+                        MergedOptions = lists:ukeymerge(1, lists:sort(NewOptions),
+                                                        lists:sort(UserData)),
 
-                    plum_db:put(
-                        ?USERS_PREFIX(Uri), Name, MergedOptions),
-                    ok;
-                Error ->
-                    Error
-            end
+                        plum_db:put(
+                            ?USERS_PREFIX(Uri), Name, MergedOptions),
+                        ok;
+                    Error ->
+                        Error
+                end
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -574,22 +630,28 @@ alter_group(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
 alter_group(RealmUri, Groupname, Options) when is_binary(Groupname) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(Groupname),
-    case group_details(Uri, Groupname) of
-        undefined ->
-            {error, {unknown_group, Name}};
-        GroupData ->
-            case validate_groups_option(Uri, Options) of
-                {ok, NewOptions} ->
-                    MergedOptions = lists:ukeymerge(
-                        1, lists:sort(NewOptions), lists:sort(GroupData)),
-                    plum_db:put(
-                        ?GROUPS_PREFIX(Uri), Name, MergedOptions),
-                    ok;
-                Error ->
-                    Error
-            end
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        Name = to_lowercase_bin(Groupname),
+        case group_details(Uri, Groupname) of
+            undefined ->
+                {error, {unknown_group, Name}};
+            GroupData ->
+                case validate_groups_option(Uri, Options) of
+                    {ok, NewOptions} ->
+                        MergedOptions = lists:ukeymerge(
+                            1, lists:sort(NewOptions), lists:sort(GroupData)),
+                        plum_db:put(
+                            ?GROUPS_PREFIX(Uri), Name, MergedOptions),
+                        ok;
+                    Error ->
+                        Error
+                end
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -604,26 +666,32 @@ del_user(_, <<"all">>) ->
     {error, reserved_name};
 
 del_user(RealmUri, Username) when is_binary(Username) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(Username),
-    case user_exists(Uri, Name) of
-        false ->
-            {error, {unknown_user, Name}};
-        true ->
-            plum_db:delete(?USERS_PREFIX(RealmUri), Name),
-            %% delete any associated grants, so if a user with the same name
-            %% is added again, they don't pick up these grants
-            Prefix = ?USER_GRANTS_PREFIX(Uri),
-            plum_db:fold(fun({Key, _Value}, Acc) ->
-                                            %% apparently destructive
-                                            %% iteration is allowed
-                                            plum_db:delete(Prefix, Key),
-                                            Acc
-                                    end, undefined,
-                                    Prefix,
-                                    [{match, {Name, '_'}}]),
-            delete_user_from_sources(Uri, Name),
-            ok
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        Name = to_lowercase_bin(Username),
+        case user_exists(Uri, Name) of
+            false ->
+                {error, {unknown_user, Name}};
+            true ->
+                plum_db:delete(?USERS_PREFIX(RealmUri), Name),
+                %% delete any associated grants, so if a user with the same name
+                %% is added again, they don't pick up these grants
+                Prefix = ?USER_GRANTS_PREFIX(Uri),
+                plum_db:fold(fun({Key, _Value}, Acc) ->
+                                                %% apparently destructive
+                                                %% iteration is allowed
+                                                plum_db:delete(Prefix, Key),
+                                                Acc
+                                        end, undefined,
+                                        Prefix,
+                                        [{match, {Name, '_'}}]),
+                delete_user_from_sources(Uri, Name),
+                ok
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -638,27 +706,52 @@ del_group(_, <<"all">>) ->
     {error, reserved_name};
 
 del_group(RealmUri, Groupname) when is_binary(Groupname) ->
-    Uri = to_lowercase_bin(RealmUri),
-    Name = to_lowercase_bin(Groupname),
-    case group_exists(RealmUri, Name) of
-        false ->
-            {error, {unknown_group, Name}};
-        true ->
-            plum_db:delete(?GROUPS_PREFIX(Uri),
-                                      Name),
-            %% delete any associated grants, so if a user with the same name
-            %% is added again, they don't pick up these grants
-            Prefix = ?GROUP_GRANTS_PREFIX(Uri),
-            plum_db:fold(fun({Key, _Value}, Acc) ->
-                                            %% apparently destructive
-                                            %% iteration is allowed
-                                            plum_db:delete(Prefix, Key),
-                                            Acc
-                                    end, undefined,
-                                    Prefix,
-                                    [{match, {Name, '_'}}]),
-            delete_group_from_roles(Uri, Name),
-            ok
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        Name = to_lowercase_bin(Groupname),
+        case group_exists(RealmUri, Name) of
+            false ->
+                {error, {unknown_group, Name}};
+            true ->
+                plum_db:delete(?GROUPS_PREFIX(Uri),
+                                        Name),
+                %% delete any associated grants, so if a user with the same name
+                %% is added again, they don't pick up these grants
+                Prefix = ?GROUP_GRANTS_PREFIX(Uri),
+                plum_db:fold(fun({Key, _Value}, Acc) ->
+                                                %% apparently destructive
+                                                %% iteration is allowed
+                                                plum_db:delete(Prefix, Key),
+                                                Acc
+                                        end, undefined,
+                                        Prefix,
+                                        [{match, {Name, '_'}}]),
+                delete_group_from_roles(Uri, Name),
+                ok
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_grant(binary(), userlist(), bucket() | any, [binary()]) ->
+    ok | {error, term()}.
+
+add_grant(RealmUri, Usernames, Bucket, Grants) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        do_add_grant(RealmUri, Usernames, Bucket, Grants)
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -666,10 +759,7 @@ del_group(RealmUri, Groupname) when is_binary(Groupname) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add_grant(
-    binary(), userlist(), bucket() | any, [binary()]) -> ok | {error, term()}.
-
-add_grant(RealmUri, all, Bucket, Grants) when is_binary(Bucket) ->
+do_add_grant(RealmUri, all, Bucket, Grants) when is_binary(Bucket) ->
     %% all is always valid
     case validate_permissions(Grants) of
         ok ->
@@ -683,7 +773,8 @@ add_grant(RealmUri, all, Bucket, Grants) when is_binary(Bucket) ->
             Error
     end;
 
-add_grant(RealmUri, RoleList, Bucket, Grants)
+
+do_add_grant(RealmUri, RoleList, Bucket, Grants)
 when is_binary(RealmUri), is_binary(Bucket) ->
     Uri = to_lowercase_bin(RealmUri),
     RoleTypes = lists:map(
@@ -735,7 +826,18 @@ when is_binary(RealmUri), is_binary(Bucket) ->
 -spec add_revoke(
     binary(), userlist(), bucket() | any, [string()]) -> ok | {error, term()}.
 
-add_revoke(RealmUri, all, Bucket, Revokes) ->
+add_revoke(RealmUri, Usernames, Bucket, Revokes) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        do_add_revoke(RealmUri, Usernames, Bucket, Revokes)
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
+
+
+%% @private
+do_add_revoke(RealmUri, all, Bucket, Revokes) ->
     %% all is always valid
     case validate_permissions(Revokes) of
         ok ->
@@ -748,7 +850,8 @@ add_revoke(RealmUri, all, Bucket, Revokes) ->
         Error ->
             Error
     end;
-add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
+
+do_add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
     Uri = to_lowercase_bin(RealmUri),
     RoleTypes = lists:map(
         fun(Name) ->
@@ -801,7 +904,18 @@ add_revoke(RealmUri, RoleList, Bucket, Revokes) ->
     Source :: atom(),
     Options :: [{string(), term()}]) -> ok | {error, term()}.
 
-add_source(RealmUri, all, CIDR, Source, Options) ->
+add_source(RealmUri, Users, CIDR, Source, Options) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        do_add_source(RealmUri, Users, CIDR, Source, Options)
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
+
+
+%% @private
+do_add_source(RealmUri, all, CIDR, Source, Options) ->
     Uri = to_lowercase_bin(RealmUri),
     %% all is always valid
 
@@ -811,7 +925,7 @@ add_source(RealmUri, all, CIDR, Source, Options) ->
         ?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}, {Source, Options}),
     ok;
 
-add_source(RealmUri, Users, CIDR, Source, Options) ->
+do_add_source(RealmUri, Users, CIDR, Source, Options) ->
     Uri = to_lowercase_bin(RealmUri),
     UserList = lists:map(fun to_lowercase_bin/1, Users),
 
@@ -838,13 +952,28 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
             Error
     end.
 
-del_source(RealmUri, all, CIDR) ->
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+del_source(RealmUri, Users, CIDR) ->
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        do_del_source(RealmUri, Users, CIDR)
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
+    end.
+
+
+%% @private
+do_del_source(RealmUri, all, CIDR) ->
     Uri = to_lowercase_bin(RealmUri),
     %% all is always valid
     plum_db:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
     ok;
 
-del_source(RealmUri, Users, CIDR) ->
+do_del_source(RealmUri, Users, CIDR) ->
     Uri = to_lowercase_bin(RealmUri),
     UserList = lists:map(fun to_lowercase_bin/1, Users),
     _ = [plum_db:delete(
@@ -879,14 +1008,19 @@ enable(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 get_ciphers(RealmUri) ->
-    Uri = to_lowercase_bin(RealmUri),
-    case plum_db:get(?CONFIG_PREFIX(Uri), ciphers) of
-        undefined ->
-            ?DEFAULT_CIPHER_LIST;
-        Result ->
-            Result
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        case plum_db:get(?CONFIG_PREFIX(Uri), ciphers) of
+            undefined ->
+                ?DEFAULT_CIPHER_LIST;
+            Result ->
+                Result
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
-
 
 print_ciphers(RealmUri) ->
     Ciphers = get_ciphers(to_lowercase_bin(RealmUri)),
@@ -948,21 +1082,38 @@ status(RealmUri) ->
 
 
 
--spec lookup_user(binary(), binary()) -> tuple() | {error, not_found}.
+-spec lookup_user(binary(), binary()) ->
+    tuple() | {error, {no_such_realm, uri()} | not_found}.
+
 lookup_user(RealmUri, Username) when is_binary(RealmUri), is_binary(Username) ->
-    Uri = to_lowercase_bin(RealmUri),
-    U = to_lowercase_bin(Username),
-    case plum_db:get(?USERS_PREFIX(Uri), U) of
-        undefined -> {error, not_found};
-        Val -> {Username, Val}
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        U = to_lowercase_bin(Username),
+        case plum_db:get(?USERS_PREFIX(Uri), U) of
+            undefined -> {error, not_found};
+            Val -> {Username, Val}
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
--spec lookup_group(binary(), binary()) -> tuple() | {error, not_found}.
+
+-spec lookup_group(binary(), binary()) ->
+    tuple() | {error, {no_such_realm, uri()} | not_found}.
+
 lookup_group(RealmUri, Name) when is_binary(Name), is_binary(Name) ->
-    Uri = to_lowercase_bin(RealmUri),
-    case plum_db:get(?GROUPS_PREFIX(Uri), to_lowercase_bin(Name)) of
-        undefined -> {error, not_found};
-        Val -> {Name, Val}
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        Uri = to_lowercase_bin(RealmUri),
+        case plum_db:get(?GROUPS_PREFIX(Uri), to_lowercase_bin(Name)) of
+            undefined -> {error, not_found};
+            Val -> {Name, Val}
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 
@@ -1014,17 +1165,23 @@ list(RealmUri, source) when is_binary(RealmUri) ->
 
 lookup_user_sources(RealmUri, Username)
 when is_binary(RealmUri), is_binary(Username) ->
-    R = to_lowercase_bin(RealmUri),
-    U = to_lowercase_bin(Username),
-    L = plum_db:to_list(
-        ?SOURCES_PREFIX(R), [{match, {to_lowercase_bin(U), '_'}}]),
-    Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
-    case lists:filter(Pred, L) of
-        L ->
-            [{BinName, CIDR, Source, Options} ||
-                {{BinName, CIDR}, [{Source, Options}]} <- L];
-        [] ->
-            {error, not_found}
+    try
+        _ = bondy_realm:fetch(RealmUri),
+        R = to_lowercase_bin(RealmUri),
+        U = to_lowercase_bin(Username),
+        L = plum_db:to_list(
+            ?SOURCES_PREFIX(R), [{match, {to_lowercase_bin(U), '_'}}]),
+        Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
+        case lists:filter(Pred, L) of
+            L ->
+                [{BinName, CIDR, Source, Options} ||
+                    {{BinName, CIDR}, [{Source, Options}]} <- L];
+            [] ->
+                {error, not_found}
+        end
+    catch
+        ?EXCEPTION(_, {not_found, RealmUri}, _) ->
+            {error, {no_such_realm, RealmUri}}
     end.
 
 %% @private

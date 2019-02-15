@@ -127,26 +127,29 @@ options(Req, #{api_spec := Spec} = St) ->
 
 
 is_authorized(Req0, St) ->
-    case cowboy_req:method(Req0) of
-        <<"OPTIONS">> ->
-            {true, Req0, St};
-        _ ->
-            try
-                do_is_authorised(Req0, St)
-            catch
-                ?EXCEPTION(Class, Reason, Stacktrace) ->
-                    _ = log(
-                        error,
-                        "type=~p, reason=~p, stacktrace=~p",
-                        [Class, Reason, ?STACKTRACE(Stacktrace)],
-                        St
-                    ),
-                    {StatusCode, Body} = take_status_code(
-                        bondy_error:map(Reason), 500),
-                    Response = #{<<"body">> => Body, <<"headers">> => #{}},
-                    Req1 = reply(StatusCode, json, Response, Req0),
-                    {stop, Req1, St}
-            end
+    try
+        Realm = bondy_realm:fetch(maps:get(realm_uri, St)),
+        case cowboy_req:method(Req0) of
+            <<"OPTIONS">> -> {true, Req0, St};
+            _ -> do_is_authorised(Req0, Realm, St)
+        end
+    catch
+        ?EXCEPTION(error, no_such_realm = Reason, Stacktrace) ->
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, json, Response, Req0),
+            {stop, Req1, St};
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
+            _ = log(
+                error,
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                St
+            ),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, json, Response, Req0),
+            {stop, Req1, St}
     end.
 
 
@@ -240,11 +243,11 @@ accept(Req0, St0) ->
 %% =============================================================================
 
 %% @private
-do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
+do_is_authorised(
+    Req0, Realm, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-    Realm = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
     case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
         {ok, Claims} when is_map(Claims) ->
@@ -261,8 +264,8 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             },
             %% TODO update context
             {true, Req0, St1};
-        {error, unknown_realm} ->
-            {_, ErrorMap} = take_status_code(bondy_error:map(unknown_realm)),
+        {error, no_such_realm} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(no_such_realm)),
             Response = #{
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
@@ -276,12 +279,12 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             {stop, Req2, St0}
     end;
 
-do_is_authorised(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+do_is_authorised(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     {true, Req, St};
 
-do_is_authorised(Req, #{security := _} = St)  ->
+do_is_authorised(Req, _, #{security := _} = St)  ->
     {true, Req, St}.
 
 

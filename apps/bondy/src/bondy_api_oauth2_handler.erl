@@ -446,7 +446,7 @@ prepare_meta(_, Meta, _) ->
 %% @private
 -spec reply(integer(), cowboy_req:req()) -> cowboy_req:req().
 
-reply(unknown_realm, Req) ->
+reply(no_such_realm, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply({unknown_user, _}, Req) ->

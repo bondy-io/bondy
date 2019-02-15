@@ -54,7 +54,7 @@
 -define(FOLD_OPTS, [{resolver, lww}]).
 -define(TOMBSTONE, '$deleted').
 
--define(ENV, element(2, application:get_env(bondy, oauth2))).
+-define(ENV, bondy_config:get(oauth2)).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
     element(2, lists:keyfind(client_credentials_grant_duration, 1, ?ENV))
 ).
@@ -102,7 +102,7 @@
 
 -type token()           ::  #bondy_oauth2_token{}.
 -type grant_type()      ::  client_credentials | password | authorization_code.
--type error()           ::  oauth2_invalid_grant | unknown_realm.
+-type error()           ::  oauth2_invalid_grant | no_such_realm.
 -type token_type()      ::  access_token | refresh_token.
 
 -export_type([error/0]).
@@ -182,7 +182,7 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 issue_token(GrantType, RealmUri, Data0) ->
    case bondy_realm:lookup(RealmUri) of
         {error, not_found} ->
-           {error, unknown_realm};
+           {error, no_such_realm};
         Realm ->
             do_issue_token(Realm, Data0, supports_refresh_token(GrantType))
     end.
@@ -654,23 +654,21 @@ do_verify_jwt(JWT, Match) ->
             <<"aud">> := RealmUri,
             <<"kid">> := Kid
         } = Map,
-        case bondy_realm:lookup(RealmUri) of
-            {error, not_found} ->
-                {error, unknown_realm};
-            Realm ->
-                case bondy_realm:get_public_key(Realm, Kid) of
-                    undefined ->
-                        {error, oauth2_invalid_grant};
-                    JWK ->
-                        case jose_jwt:verify(JWK, JWT) of
-                            {true, {jose_jwt, Claims}, _} ->
-                                matches(Claims, Match);
-                            {false, {jose_jwt, _Claims}, _} ->
-                                {error, oauth2_invalid_grant}
-                        end
+        Realm = bondy_realm:fetch(RealmUri),
+        case bondy_realm:get_public_key(Realm, Kid) of
+            undefined ->
+                {error, oauth2_invalid_grant};
+            JWK ->
+                case jose_jwt:verify(JWK, JWT) of
+                    {true, {jose_jwt, Claims}, _} ->
+                        matches(Claims, Match);
+                    {false, {jose_jwt, _Claims}, _} ->
+                        {error, oauth2_invalid_grant}
                 end
         end
     catch
+        ?EXCEPTION(error, no_such_realm, _) ->
+            {error, no_such_realm};
         ?EXCEPTION(error, _, _) ->
             {error, oauth2_invalid_grant}
     end.

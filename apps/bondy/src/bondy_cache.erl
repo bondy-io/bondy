@@ -25,6 +25,7 @@
 -export([put/4]).
 -export([remove/2]).
 
+%% TODO Evict all caches for Session, User, Client and Realm once any of them are deleted
 
 -spec get(RealmUri :: binary(), any()) -> {ok, any()} | {error, not_found}.
 get(_, _) ->

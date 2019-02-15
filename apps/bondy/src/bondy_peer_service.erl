@@ -105,7 +105,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 peer_service() ->
-    application:get_env(bondy, peer_service, ?DEFAULT_PEER_SERVICE).
+    bondy_config:get(peer_service, ?DEFAULT_PEER_SERVICE).
 
 
 %% -----------------------------------------------------------------------------
