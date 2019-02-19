@@ -26,6 +26,7 @@
 -define(ADD_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"username">>,
         required => true,
         allow_null => true,
@@ -35,6 +36,7 @@
     },
     <<"client_secret">> => #{
         alias => client_secret,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"password">>,
         required => true,
         allow_null => false,
@@ -57,6 +59,7 @@
 -define(UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"password">>,
         required => false,
         allow_null => false,
