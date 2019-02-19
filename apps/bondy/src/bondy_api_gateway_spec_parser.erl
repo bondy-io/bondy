@@ -61,9 +61,11 @@
 ]).
 
 -define(DEFAULT_STATUS_CODES, #{
-    ?BONDY_BAD_GATEWAY_ERROR =>                    503,
-    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>       500,
-    ?BONDY_ERROR_TIMEOUT =>                        504,
+    ?BONDY_ALREADY_EXISTS_ERROR =>          400,
+    ?BONDY_NOT_FOUND_ERROR =>               404,
+    ?BONDY_BAD_GATEWAY_ERROR =>             503,
+    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>    500,
+    ?BONDY_ERROR_TIMEOUT =>                  504,
     ?WAMP_AUTHORIZATION_FAILED =>            403,
     ?WAMP_CANCELLED =>                       400,
     ?WAMP_CLOSE_REALM =>                     500,
