@@ -150,7 +150,7 @@ start_link() ->
 %% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
 %% message types. It will fail with an exception if another type is passed
 %% as the second argument.
-%% This is equivalent to call async_forward/3 and then yield/2.
+%% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
@@ -206,13 +206,12 @@ broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
     receive_broadcast_acks(IdNodes, Timeout, [], []).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 receive_ack(Id, Timeout) ->
-    %% Now we need to wait for the remote forwarder to send us an ACK
+    %% We wait for the remote forwarder to send us an ACK
     %% to be sure the wamp peer received the message
     receive
         #peer_ack{id = Id} ->
@@ -224,8 +223,6 @@ receive_ack(Id, Timeout) ->
             %% maybe_enqueue(Enqueue, SessionId, M, timeout)
             exit(timeout)
     end.
-
-
 
 
 
@@ -383,7 +380,7 @@ cast_message(Mssg, BinPid) ->
 
 %% @private
 do_cast_message(Node, Mssg, BinPid) ->
-    Channel = wamp_peer_messages,
+    Channel = channel(),
     ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
     Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
@@ -404,4 +401,14 @@ peer_error(Reason, Mssg) ->
         id = bondy_peer_message:id(Mssg),
         reason = Reason
     }.
+
+
+channel() ->
+    Channels = partisan_config:get(channels),
+    case lists:member(wamp_peer_messages, Channels) of
+        true ->
+            wamp_peer_messages;
+        false ->
+            default
+    end.
 
