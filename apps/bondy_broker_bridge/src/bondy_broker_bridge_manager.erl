@@ -24,7 +24,7 @@
 %% e.g. publish to another message broker.
 %%
 %% A subscription can be created at runtime using the `subscribe/5',
-%% or at system boot time by setting the application's `subscribers_spec'
+%% or at system boot time by setting the application's `config_file'
 %% environment variable which should have the filename of a valid
 %% Broker Bridge Specification File.
 %%
@@ -292,8 +292,6 @@ validate_spec(Map) ->
 init([]) ->
     %% We store the bridges configurations provided
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
-    SpecFile = application:get_env(
-        bondy_broker_bridge, subscribers_spec, undefined),
     BridgesMap = maps:from_list(
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
@@ -310,7 +308,9 @@ init([]) ->
 
     case init_bridges(State0) of
         {ok, State1} ->
-            load_spec(SpecFile, State1);
+            SpecFile = application:get_env(
+                bondy_broker_bridge, config_file, undefined),
+            load_config(SpecFile, State1);
         {error, _} = Error ->
             Error
     end.
@@ -343,7 +343,7 @@ handle_call({unsubscribe, Id}, _From, State) ->
     {reply, Res, State};
 
 handle_call({load, Term}, _From, State) ->
-    {Res, NewState} = load_spec(Term, State),
+    {Res, NewState} = load_config(Term, State),
     {reply, Res, NewState};
 
 handle_call(Event, From, State) ->
@@ -506,7 +506,7 @@ do_terminate(Reason, State) ->
 
 
 %% @private
-load_spec(Map, State) when is_map(Map) ->
+load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, Spec} ->
             #{<<"subscriptions">> := Subscriptions} = Spec,
@@ -528,22 +528,31 @@ load_spec(Map, State) when is_map(Map) ->
             {Error, State}
     end;
 
-load_spec(FName, State) when is_list(FName) orelse is_binary(FName) ->
-    _ = lager:info("Loading subscribers specification file; file=~p", [FName]),
-
+load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
     try jsx:consult(FName, [return_maps]) of
         [Spec] ->
-            load_spec(Spec, State)
+            _ = lager:info(
+                "Loading configuration file; path=~p", [FName]),
+            load_config(Spec, State)
     catch
-        ?EXCEPTION(_, badarg, _) ->
-            {{error, invalid_specification_format}, State}
+        ?EXCEPTION(error, badarg, _) ->
+            case filelib:is_file(FName) of
+                true ->
+                    {{error, invalid_specification_format}, State};
+                false ->
+                    _ = lager:info(
+                        "No configuration file found; path=~p",
+                        [FName]
+                    ),
+                    {ok, State}
+            end
     end;
 
-load_spec(undefined, State) ->
-    _ = lager:info("Subscribers specification file undefined"),
+load_config(undefined, State) ->
+    _ = lager:info("Broker Bridge configuration file undefined"),
     {ok, State};
 
-load_spec(_, State) ->
+load_config(_, State) ->
     {{error, badarg}, State}.
 
 

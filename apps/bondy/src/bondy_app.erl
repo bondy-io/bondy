@@ -21,11 +21,6 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
--define(BONDY_REALM, #{
-    <<"description">> => <<"The Bondy administrative realm.">>,
-    <<"authmethods">> => [?WAMPCRA_AUTH, ?TICKET_AUTH]
-}).
-
 
 -export([start/2]).
 -export([stop/1]).
@@ -42,22 +37,30 @@
 
 
 start(_Type, Args) ->
-    %% We disable it until the build_hashtrees start phase
+    %% We disable AAE until the build_hashtrees start phase is finished
     Enabled = plum_db_config:get(aae_enabled, true),
     ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
     ok = plum_db_config:set(aae_enabled, false),
 
+    %% We initialise the config, caching all values as code
+    ok = setup_env(Args),
+    ok = bondy_config:init(),
+
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = setup_env(Args),
-            ok = bondy_config:init(),
             ok = setup_event_handlers(),
             ok = bondy_router_worker:start_pool(),
             ok = bondy_cli:register(),
             ok = setup_partisan(),
-            ok = maybe_init_bondy_realm(),
+            ok = bondy_realm:apply_config(),
             ok = setup_internal_subscriptions(),
-            %% After we return OTP will call start_phase/3 based on
+            %% We load the Api Gateway config_file if there is one
+            ok = bondy_api_gateway:apply_config(),
+            %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
+            %% This is to enable operations during startup and also heartbeats
+            %% e.g. K8s liveness probe.
+            _ = bondy_api_gateway:start_admin_listeners(),
+            %% After we return, OTP will call start_phase/3 based on
             %% bondy.app.src config
             {ok, Pid};
         Other  ->
@@ -65,9 +68,6 @@ start(_Type, Args) ->
     end.
 
 start_phase(init_registry, normal, []) ->
-    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
-    %% This is to enable operations during startup and also heartbeats e.g. K8s.
-    _ = bondy_api_gateway:start_admin_listeners(),
     %% In previous versions of Bondy we piggy backed on a disk-only version of
     %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
@@ -78,7 +78,7 @@ start_phase(init_registry, normal, []) ->
     %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
     %% longer store the registry on disk, but we restore everything from the
     %% network. However, we kept this step as it is clean and allows us to do
-    %% some validations.
+    %% some validations and preparations.
     %% TODO consider forcing an AAE exchange here to get a the registry in sync
     %% with the cluster before init_listeners
     bondy_registry:init();
@@ -129,14 +129,6 @@ setup_env(Args) ->
 setup_partisan() ->
     Channels0 = partisan_config:get(channels, []),
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
-
-
-%% @private
-maybe_init_bondy_realm() ->
-    %% TODO Check what happens when we join the cluster and bondy realm was
-    %% already defined in my peers...we should not use LWW here.
-    _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
-    ok.
 
 
 %% @private

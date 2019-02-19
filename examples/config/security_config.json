@@ -1,0 +1,79 @@
+[
+    {
+        "uri" : "com.leapsight.test",
+        "description" : "A test realm",
+        "authmethods" : ["wampcra", "ticket", "anonymous"],
+        "security_enabled" : false,
+        "private_keys": [
+            "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
+            "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIL1pG+GIs/rAV7Gaev65hPpXeNeMFWUhOv8TnPD7dPY4oAoGCCqGSM49\nAwEHoUQDQgAEAEjB2EC5kchCFuylw7Qcna4ERPGzkogcoInYLEQI1Crkag2wiHKU\naziyiCgs/sM4qt1Tg47an53BYPPfBUJhIA==\n-----END EC PRIVATE KEY-----\n\n",
+            "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIAJRhRKd0kWLeSv+ZqxaNZjePVLKb37neKF6+Yvbb2hFoAoGCCqGSM49\nAwEHoUQDQgAEjHJMWbqcWPemB7X+a1eZ1ctcoTAxdJqffp1Yil/Pbqe7mZAZ7bie\nmurWvNW9c4x6qTuHv7jcBiwyBYho3FBlMw==\n-----END EC PRIVATE KEY-----\n\n"
+        ],
+        "users" : [
+            {
+                "username" : "peer1",
+                "password" : "changethispassword",
+                "groups" : ["microservices"],
+                "meta" : {}
+            },
+            {
+                "username" : "peer2",
+                "password" : "changethispassword",
+                "groups" : ["microservices"],
+                "meta" : {}
+            }
+        ],
+        "groups" : [
+            {
+                "name" : "microservices",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "account_admin",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "account_user",
+                "groups" : [],
+                "meta" : {}
+            }
+        ],
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "password",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["peer1", "peer2"],
+                "authmethod" : "trust",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            }
+        ],
+        "oauth2" : {
+            "clients" : [
+                {
+                    "client_id" : "webapp",
+                    "client_secret" : "secret",
+                    "description": "A test client",
+                    "groups":["admin"]
+                }
+            ],
+            "resource_owners" : [
+                {
+                    "username" : "user3@example.com",
+                    "password" : "1234",
+                    "groups" : ["account_admin"],
+                    "meta" : {
+                        "account_id" : "1",
+                        "user_id" : "1"
+                    }
+                }
+            ]
+        }
+    }
+]

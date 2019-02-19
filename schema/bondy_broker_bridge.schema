@@ -19,6 +19,7 @@
 
 
 %% @doc Default location for bondy_broker_bridge specification file
-{mapping, "broker_bridge.subscribers_spec", "bondy_broker_bridge.subscribers_spec", [
-  {datatype, file}
+{mapping, "broker_bridge.config_file", "bondy_broker_bridge.config_file", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/broker_bridge_config.json"}
 ]}.

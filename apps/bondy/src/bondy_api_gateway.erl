@@ -50,6 +50,7 @@
 -export([delete/1]).
 -export([dispatch_table/1]).
 -export([list/0]).
+-export([apply_config/0]).
 -export([load/1]).
 -export([lookup/1]).
 -export([rebuild_dispatch_tables/0]).
@@ -163,6 +164,20 @@ suspend_admin_listeners() ->
 
 resume_admin_listeners() ->
     gen_server:call(?MODULE, {resume_listeners, admin}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Parses the apis provided by the configuration file
+%% ('bondy.api_gateway.config_file'), stores the apis in the metadata store
+%% and calls rebuild_dispatch_tables/0.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec apply_config() ->
+    ok | {error, invalid_specification_format | any()}.
+
+apply_config() ->
+    gen_server:call(?MODULE, apply_config).
 
 
 %% -----------------------------------------------------------------------------
@@ -283,9 +298,19 @@ handle_call({stop_listeners, Type}, _From, State) ->
     Res = do_stop_listeners(Type),
     {reply, Res, State};
 
-handle_call({load, Map}, _From, State) ->
-    Res = load_spec(Map),
+handle_call(apply_config, _From, State) ->
+    Res = do_apply_config(),
     {reply, Res, State};
+
+handle_call({load, Map}, _From, State) ->
+    try
+        ok = load_spec(Map),
+        ok = rebuild_dispatch_tables(),
+        {reply, ok, State}
+    catch
+        ?EXCEPTION(_, Reason, _) ->
+            {reply, {error, Reason}, State}
+    end;
 
 handle_call(Event, From, State) ->
     _ = lager:error(
@@ -361,6 +386,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
 unsubscribe() ->
     _ = plum_db_events:unsubscribe(exchange_started),
     _ = plum_db_events:unsubscribe(exchange_finished),
@@ -425,17 +452,45 @@ do_stop_listeners(admin) ->
 
 
 %% @private
+-spec do_apply_config() -> ok | no_return().
+
+do_apply_config() ->
+    case bondy_config:get([api_gateway, config_file]) of
+        undefined ->
+            ok;
+        FName ->
+            try jsx:consult(FName, [return_maps]) of
+                [Specs] ->
+                    _ = lager:info(
+                        "Loading configuration file; path=~p", [FName]),
+                    _ = [ok = load_spec(Spec) || Spec <- Specs],
+                    rebuild_dispatch_tables()
+            catch
+                ?EXCEPTION(error, badarg, _) ->
+                    case filelib:is_file(FName) of
+                        true ->
+                            error(invalid_specification_format);
+                        false ->
+                            _ = lager:info(
+                                "No configuration file found; path=~p",
+                                [FName]
+                            ),
+                            ok
+                    end
+            end
+    end.
+
+
+%% @private
 load_spec(Map) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, #{<<"id">> := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
             ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
-            ok = add(
+            add(
                 Id,
                 maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
-            ),
-            %% We rebuild the dispatch table
-            rebuild_dispatch_tables();
+            );
         {error, _} = Error ->
             Error
     end;
