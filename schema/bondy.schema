@@ -22,9 +22,34 @@
 %% =============================================================================
 
 
+{mapping, "security.config_file", "bondy.security.config_file", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/security_config.json"}
+]}.
+
+%% @doc realm.<name>.config is an IP address and TCP port that the Riak
+%% HTTP interface will bind.
+%% {mapping, "security.realm.$name.config_file", "bondy.security.config_files", [
+%%   {datatype, file}
+%% ]}.
+
+%% {translation,
+%% "bondy.security.config_files",
+%% fun(Conf) ->
+%%   List = lists:filter(
+%%     fun({K, _V}) ->
+%%        cuttlefish_variable:is_fuzzy_match(
+%%          K, string:tokens("security.realm.$name.config_file", "."))
+%%     end,
+%%     Conf),
+%%   [ Config || {[_, _, _Name, _], Config} <- List ]
+%% end}.
+
+
+
 %% Whether to create a new realm or not when a session wants to connect
 %% to a non existing realm
-{mapping, "automatically_create_realms", "bondy.automatically_create_realms", [
+{mapping, "security.automatically_create_realms", "bondy.automatically_create_realms", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -50,7 +75,6 @@
   {datatype, {duration, ms}},
   hidden
 ]}.
-
 
 
 %% =============================================================================
@@ -322,6 +346,36 @@
   {datatype, integer},
   {default, 500000}
 ]}.
+
+
+
+
+%% =============================================================================
+%% API GATEWAY
+%% =============================================================================
+
+
+{mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/api_gateway_config.json"}
+]}.
+
+%% {mapping, "api_gateway.api.$name.config_file", "bondy.api_gateway.apis", [
+%%   {datatype, file}
+%% ]}.
+
+%% {translation,
+%% "bondy.api_gateway.apis",
+%% fun(Conf) ->
+%%   List = lists:filter(
+%%     fun({K, _V}) ->
+%%        cuttlefish_variable:is_fuzzy_match(
+%%          K, string:tokens("api_gateway.api.$name.config_file", "."))
+%%     end,
+%%     Conf),
+%%   [ Config || {[_, _, _, _], Config} <- List ]
+%% end}.
+
 
 
 %% SOCKET OPTS

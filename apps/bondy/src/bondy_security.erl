@@ -20,6 +20,8 @@
 % -module(bondy_security).
 -module(bondy_security).
 -include("bondy.hrl").
+-include("bondy_security.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -define(GROUPS, <<"groups">>).
 -define(USERS, <<"users">>).
@@ -83,7 +85,6 @@
 
 -define(FOLD_OPTS, [{resolver, lww}]).
 
--type uri() :: binary() | string().
 -type cidr() :: {inet:ip_address(), non_neg_integer()}.
 
 -export_type([cidr/0]).
@@ -420,9 +421,24 @@ auth_with_data(UserData, M0) ->
 
 
 %% @private
+auth_with_source(?ANON_AUTH, Data, M) ->
+    auth_with_source(trust, Data, M);
+
+auth_with_source(?TRUST_AUTH, Data, M) ->
+    auth_with_source(trust, Data, M);
+
 auth_with_source(trust, _, M) ->
     %% trust always authenticates
     {ok, get_context(M)};
+
+auth_with_source(?COOKIE_AUTH, UserData, M) ->
+    auth_with_source(password, UserData, M);
+
+auth_with_source(?TICKET_AUTH, UserData, M) ->
+    auth_with_source(password, UserData, M);
+
+auth_with_source(?WAMPCRA_AUTH, UserData, M) ->
+    auth_with_source(password, UserData, M);
 
 auth_with_source(password, UserData, M) ->
     % pull the password out of the userdata
@@ -452,6 +468,12 @@ auth_with_source(password, UserData, M) ->
                     {error, bad_password}
             end
     end;
+
+auth_with_source(?CERTIFICATE_AUTH, Data, M) ->
+    auth_with_source(certificate, Data, M);
+
+auth_with_source(?TLS_AUTH, Data, M) ->
+    auth_with_source(certificate, Data, M);
 
 auth_with_source(certificate, _, M) ->
     case proplists:get_value(common_name, maps:get(conn_info, M)) of
@@ -1163,15 +1185,21 @@ list(RealmUri, source) when is_binary(RealmUri) ->
     ).
 
 
-lookup_user_sources(RealmUri, Username)
-when is_binary(RealmUri), is_binary(Username) ->
+lookup_user_sources(RealmUri, all) when is_binary(RealmUri) ->
+    do_lookup_user_sources(RealmUri, all);
+
+lookup_user_sources(RealmUri, Username) when is_binary(Username) ->
+    do_lookup_user_sources(RealmUri, to_lowercase_bin(Username)).
+
+
+%% @private
+do_lookup_user_sources(RealmUri, Username) ->
     try
         _ = bondy_realm:fetch(RealmUri),
         R = to_lowercase_bin(RealmUri),
-        U = to_lowercase_bin(Username),
-        L = plum_db:to_list(
-            ?SOURCES_PREFIX(R), [{match, {to_lowercase_bin(U), '_'}}]),
+        L = plum_db:to_list(?SOURCES_PREFIX(R), [{match, {Username, '_'}}]),
         Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
+
         case lists:filter(Pred, L) of
             L ->
                 [{BinName, CIDR, Source, Options} ||

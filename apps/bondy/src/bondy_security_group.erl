@@ -21,59 +21,12 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
--define(SPEC, ?UPDATE_SPEC#{
-    <<"name">> => #{
-        alias => name,
-        key => <<"name">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary,
-        validator => fun(X) ->
-            {ok, ?CHARS2LIST(X)}
-        end
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => {list, binary},
-        default => []
-    },
-    <<"meta">> => #{
-        alias => meta,
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
-    }
-}).
 
--define(UPDATE_SPEC, #{
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => map
-    }
-}).
-
--type group() :: map().
+-type t() :: map().
 
 
 -export([add/2]).
+-export([add_or_update/2]).
 -export([update/3]).
 -export([fetch/2]).
 -export([list/1]).
@@ -85,14 +38,11 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri(), group()) -> ok.
+-spec add(uri(), t()) -> ok | {error, any()}.
 
-add(RealmUri, Group0) ->
+add(RealmUri, Group) ->
     try
-        Group1 = maps_utils:validate(Group0, ?SPEC),
-        {#{<<"name">> := Name}, Opts} = maps_utils:split([<<"name">>], Group1),
-        bondy_security:add_group(RealmUri, Name, maps:to_list(Opts)),
-        bondy_event_manager:notify({security_group_added, RealmUri, Name})
+        do_add(RealmUri, maps_utils:validate(Group, ?GROUP_SPEC))
     catch
         ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
@@ -103,11 +53,36 @@ add(RealmUri, Group0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), binary(), group()) -> ok.
+-spec add_or_update(uri(), t()) -> ok.
+
+add_or_update(RealmUri, Group) ->
+    try
+    #{<<"name">> := Name} = NewGroup = maps_utils:validate(Group, ?GROUP_SPEC),
+        case do_add(RealmUri, NewGroup) of
+            ok ->
+                ok;
+            {error, role_exists} ->
+                Res = update(
+                    RealmUri, Name, maps:without([<<"name">>], NewGroup)),
+                ok_or_error(Res);
+            {error, _} = Error ->
+                Error
+        end
+    catch
+        ?EXCEPTION(error, Reason, _) ->
+            {error, Reason}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(uri(), binary(), t()) -> ok.
 
 update(RealmUri, Name, Group0) when is_binary(Name) ->
     try
-        Group1 = maps_utils:validate(Group0, ?UPDATE_SPEC),
+        Group1 = maps_utils:validate(Group0, ?GROUP_UPDATE_SPEC),
         bondy_security:alter_group(RealmUri, Name, maps:to_list(Group1)),
         bondy_event_manager:notify({security_group_updated, RealmUri, Name})
     catch
@@ -135,7 +110,7 @@ remove(RealmUri, Name) when is_binary(Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri(), list() | binary()) -> group() | {error, not_found}.
+-spec lookup(uri(), list() | binary()) -> t() | {error, not_found}.
 
 lookup(RealmUri, Name) when is_binary(Name) ->
     case bondy_security:lookup_group(RealmUri, Name) of
@@ -150,7 +125,7 @@ lookup(RealmUri, Name) when is_binary(Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(uri(), list() | binary()) -> group() | no_return().
+-spec fetch(uri(), list() | binary()) -> t() | no_return().
 
 fetch(RealmUri, Name) ->
     case lookup(RealmUri, Name) of
@@ -163,7 +138,7 @@ fetch(RealmUri, Name) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list(uri()) -> list(group()).
+-spec list(uri()) -> list(t()).
 
 list(RealmUri) when is_binary(RealmUri) ->
     [to_map(Obj) || Obj <- bondy_security:list(RealmUri, group)].
@@ -177,6 +152,13 @@ list(RealmUri) when is_binary(RealmUri) ->
 
 
 
+%% @private
+do_add(RealmUri, Group) ->
+    {#{<<"name">> := Name}, NewGroup} = maps_utils:split([<<"name">>], Group),
+    Opts = maps:to_list(bondy_utils:to_binary_keys(NewGroup)),
+    bondy_security:add_group(RealmUri, Name, Opts),
+    bondy_event_manager:notify({security_group_added, RealmUri, Name}).
+
 
 %% @private
 to_map({Name, PL}) ->
@@ -186,5 +168,6 @@ to_map({Name, PL}) ->
         <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
     }.
 
-
-
+%% @private
+ok_or_error({ok, _}) -> ok;
+ok_or_error(Term) -> Term.

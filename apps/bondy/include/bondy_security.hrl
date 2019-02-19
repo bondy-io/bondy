@@ -47,6 +47,8 @@
 
 -define(LIST_REALMS,        <<"com.leapsight.bondy.security.list_realms">>).
 -define(CREATE_REALM,       <<"com.leapsight.bondy.security.create_realm">>).
+-define(UPDATE_REALM,       <<"com.leapsight.bondy.security.update_realm">>).
+-define(DELETE_REALM,       <<"com.leapsight.bondy.security.delete_realm">>).
 -define(ENABLE_SECURITY,    <<"com.leapsight.bondy.security.enable">>).
 -define(DISABLE_SECURITY,   <<"com.leapsight.bondy.security.disable">>).
 -define(SECURITY_STATUS,    <<"com.leapsight.bondy.security.status">>).
@@ -69,3 +71,382 @@
 -define(FIND_SOURCE,        <<"com.leapsight.bondy.security.find_source">>).
 -define(ADD_SOURCE,         <<"com.leapsight.bondy.security.add_source">>).
 -define(DELETE_SOURCE,      <<"com.leapsight.bondy.security.delete_source">>).
+
+
+
+
+
+%% =============================================================================
+%% SCHEMAS
+%% =============================================================================
+
+
+
+-define(TRUST_AUTH, <<"trust">>).
+-define(PASSWORD_AUTH, <<"password">>).
+-define(CERTIFICATE_AUTH, <<"certificate">>).
+-define(LDAP_AUTH, <<"ldap">>).
+
+-define(AUTH_METHODS_BIN, [
+    ?TRUST_AUTH,
+    ?PASSWORD_AUTH,
+    ?CERTIFICATE_AUTH,
+    ?LDAP_AUTH | ?WAMP_AUTH_METHODS
+]).
+
+-define(AUTH_METHODS_ATOM, [
+    trust,
+    password,
+    certificate,
+    ldap | ?WAMP_AUTH_METHODS_ATOM
+]).
+
+-define(WAMP_AUTH_METHODS_ATOM, [
+    anonymous,
+    cookie,
+    ticket,
+    tls,
+    wampcra
+]).
+
+
+-define(BONDY_REALM, #{
+    description => <<"The Bondy administrative realm.">>,
+    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH]
+}).
+
+-define(REALM_SPEC, #{
+    <<"uri">> => #{
+        alias => uri,
+        key => <<"uri">>,
+        required => true,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        key => <<"description">>,
+        required => true,
+        datatype => binary,
+        default => <<>>
+    },
+    <<"authmethods">> => #{
+        alias => authmethods,
+        key => <<"authmethods">>,
+        required => true,
+        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
+        default => ?WAMP_AUTH_METHODS
+    },
+    <<"security_enabled">> => #{
+        alias => security_enabled,
+        key => <<"security_enabled">>,
+        required => true,
+        datatype => boolean,
+        default => true
+    },
+    <<"users">> => #{
+        alias => users,
+        key => <<"users">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?USER_SPEC}
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?GROUP_SPEC}
+    },
+    <<"sources">> => #{
+        alias => sources,
+        key => <<"sources">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?SOURCE_SPEC}
+    },
+    <<"private_keys">> => #{
+        alias => private_keys,
+        key => <<"private_keys">>,
+        required => true,
+        allow_undefined => false,
+        allow_null => false,
+        datatype => {list, binary},
+        default => [
+            jose_jwk:generate_key({namedCurve, secp256r1})
+            || _ <- lists:seq(1, 3)
+        ],
+        validator => fun
+            ([]) ->
+                Keys = [
+                    jose_jwk:generate_key({namedCurve, secp256r1})
+                    || _ <- lists:seq(1, 3)
+                ],
+                {ok, Keys};
+            (Pems) when length(Pems) < 3 ->
+                false;
+            (Pems) ->
+                try
+                    Keys = lists:map(
+                        fun(Pem) ->
+                            case jose_jwk:from_pem(Pem) of
+                                {jose_jwk, _, _, _} = Key -> Key;
+                                _ -> false
+                            end
+                        end,
+                        Pems
+                    ),
+                    {ok, Keys}
+                catch
+                    ?EXCEPTION(_, _, _) ->
+                        false
+                end
+        end
+    }
+}).
+
+%% Override to make private_kesy requiered without a default
+%% Every node will load the config file and thus if we do not do this
+%% all of tehm will generate a differemt set ok keys concurrently.
+%% Even though the vsalue should converge, we would be wasting resources.
+-define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
+    <<"private_keys">> => #{
+        alias => private_keys,
+        key => <<"private_keys">>,
+        required => true,
+        allow_undefined => false,
+        allow_null => false,
+        datatype => {list, binary},
+        validator => fun
+            (Pems) when length(Pems) < 3 ->
+                false;
+            (Pems) ->
+                try
+                    Keys = lists:map(
+                        fun(Pem) ->
+                            case jose_jwk:from_pem(Pem) of
+                                {jose_jwk, _, _, _} = Key -> Key;
+                                _ -> false
+                            end
+                        end,
+                        Pems
+                    ),
+                    {ok, Keys}
+                catch
+                    ?EXCEPTION(_, _, _) ->
+                        false
+                end
+        end
+    }
+}).
+
+
+-define(VALIDATE_USERNAME, fun
+        (<<"all">>) ->
+            false;
+        ("all") ->
+            false;
+        (all) ->
+            false;
+        (_) ->
+            true
+    end
+).
+
+-define(USER_SPEC, #{
+    <<"username">> => #{
+        alias => username,
+        key => <<"username">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary,
+        validator => ?VALIDATE_USERNAME
+    },
+    <<"password">> => #{
+        alias => password,
+        key => <<"password">>,
+        required => true,
+        allow_null => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>, %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        default => [],
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => map,
+        default => #{}
+    }
+}).
+
+-define(USER_UPDATE_SPEC, #{
+    <<"password">> => #{
+        alias => password,
+        key => <<"password">>,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>, %% bondy_security requirement
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => false,
+        datatype => map
+    }
+}).
+
+-define(GROUP_SPEC, ?GROUP_UPDATE_SPEC#{
+    <<"name">> => #{
+        alias => name,
+        key => <<"name">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>, %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => {list, binary},
+        default => []
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => map,
+        default => #{}
+    }
+}).
+
+-define(GROUP_UPDATE_SPEC, #{
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>, %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => false,
+        datatype => {list, binary}
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => false,
+        datatype => map
+    }
+}).
+
+
+-define(SOURCE_SPEC, #{
+    <<"usernames">> => #{
+        alias => usernames,
+        key => <<"usernames">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => [
+            {in, [<<"all">>, all]},
+            {list, binary}
+        ],
+        validator => fun
+            (<<"all">>) ->
+                {ok, all};
+            ("all") ->
+                {ok, all};
+            (all) ->
+                true;
+            (List) ->
+                A = sets:from_list(List),
+                B = sets:from_list([<<"all">>, "all", all]),
+                sets:is_disjoint(A, B)
+        end
+    },
+    <<"authmethod">> => #{
+        alias => authmethod,
+        key => <<"authmethod">>,
+        required => true,
+        allow_null => false,
+        datatype => [{in, ?AUTH_METHODS_BIN}, {in, ?AUTH_METHODS_ATOM}],
+        validator => fun
+            (Bin) when is_binary(Bin) ->
+                try
+                    %% We turn auth method binary to atom format
+                    {ok, list_to_existing_atom(binary_to_list(Bin))}
+                catch
+                    ?EXCEPTION(_, _, _) ->
+                        false
+                end;
+            (_) ->
+                true
+        end
+    },
+    <<"cidr">> => #{
+        alias => cidr,
+        key => <<"cidr">>, %% bondy_security requirement
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        default => [],
+        datatype => [binary, tuple],
+        validator => fun
+            (Bin) when is_binary(Bin) ->
+                case re:split(Bin, "/", [{return, list}, {parts, 2}]) of
+                    [Prefix, LenStr] ->
+                        {ok, Addr} = inet:parse_address(Prefix),
+                        {PrefixLen, _} = string:to_integer(LenStr),
+                        {ok, {Addr, PrefixLen}};
+                    _ ->
+                        false
+                end;
+            ({IP, PrefixLen}) when PrefixLen >= 0 ->
+                case inet:ntoa(IP) of
+                    {error, einval} -> false;
+                    _ -> true
+                end;
+            (_) ->
+                false
+        end
+    },
+    <<"meta">> => #{
+        alias => meta,
+        key => <<"meta">>,
+        allow_null => false,
+        allow_undefined => false,
+        required => true,
+        datatype => map,
+        default => #{}
+    }
+}).
+
+

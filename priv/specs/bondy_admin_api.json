@@ -353,6 +353,83 @@
                         }
                     }
                 },
+
+                "/realms/:realm_uri" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.find_realm",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.realm_uri}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.update_realm",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.delete_realm",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.realm_uri}}"],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
                 "/realms/:realm_uri/security_enabled" : {
                     "is_collection" : false,
                     "options": {
