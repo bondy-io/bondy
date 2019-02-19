@@ -23,3 +23,157 @@
   {datatype, file},
   {default, "$(platform_etc_dir)/broker_bridge_config.json"}
 ]}.
+
+
+{mapping, "kafka_bridge.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.endpoints", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, ip},
+  {default, {"127.0.0.1", 9092}},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, {duration, s}},
+  {default, "10s"},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.max_metadata_sock_retry", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, integer},
+  {default, 5},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.reconnect_cool_down_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, {duration, s}},
+  {default, "10s"},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.auto_start_producers", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, flag},
+  {default, on},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.allow_topic_auto_creation", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, flag},
+  {default, off},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.producer.topic_restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, {duration, s}},
+  {default, "10s"},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.producer.partition_restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, {duration, s}},
+  {default, "2s"},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.producer.required_acks", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, integer},
+  {default, 1},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.socket.sndbuf", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, bytesize},
+  {include_default, "default"}
+]}.
+
+{mapping, "broker_bridge.kafka.clients.$name.socket.recbuf", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+  {datatype, bytesize},
+  {include_default, "default"}
+]}.
+
+
+{translation,
+"bondy_broker_bridge.bridges.bondy_kafka_bridge.clients",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix(
+        "broker_bridge.kafka.clients", Conf0),
+    Names = sets:to_list(
+        sets:from_list(
+            lists:foldl(
+                fun(X, Acc) -> [element(4, X) | Acc] end,
+                [],
+                [list_to_tuple(K) || {K, _} <- Conf]
+            )
+        )
+    ),
+    Fun = fun(Name, Acc) ->
+        %% Socket Opts
+        AllConf = cuttlefish_variable:filter_by_prefix(
+            "broker_bridge.kafka.clients." ++ Name, Conf),
+        SocketConf = cuttlefish_variable:filter_by_prefix(
+            "broker_bridge.kafka.clients." ++ Name ++ ".socket", AllConf),
+
+        Socket = lists:foldl(
+            fun
+                ({[_, _, _, Name, "socket", "sndbuf"], Val}, SAcc) ->
+                    [{sndbuff, Val} | SAcc];
+                ({[_, _, _, Name, "socket", "recbuf"], Val}, SAcc) ->
+                    [{recbuf, Val} | SAcc]
+            end,
+            [],
+            SocketConf
+        ),
+
+
+        %% Producer Opts
+        ProducerConf = cuttlefish_variable:filter_by_prefix(
+            "broker_bridge.kafka.clients." ++ Name ++ ".producer", AllConf),
+
+        Producer = lists:foldl(
+            fun({[_, _, _, Name, "producer", Key], Val}, PAcc) ->
+                case Key of
+                    "topic_restart_delay_seconds" ->
+                        [{topic_restart_delay_seconds, Val} | PAcc];
+                    "partition_restart_delay_seconds" ->
+                        [{partition_restart_delay_seconds, Val} | PAcc];
+                    "required_acks" ->
+                        [{required_acks, Val} | PAcc]
+                end
+            end,
+            [],
+            ProducerConf
+        ),
+
+        RestConf = sets:to_list(
+            sets:subtract(
+                sets:from_list(AllConf),
+                sets:union(
+                    sets:from_list(SocketConf),
+                    sets:from_list(ProducerConf)
+                )
+            )
+        ),
+        Rest = lists:foldl(
+            fun({[_, _, _, Name, Key], Val}, RAcc) ->
+                [{list_to_atom(Key), Val} | RAcc]
+            end,
+            [],
+            RestConf
+        ),
+
+        Client = {
+            list_to_atom(Name),
+            [
+                {extra_sock_opts, Socket},
+                {default_producer_config, Producer}
+                | Rest
+            ]
+        },
+
+        [Client | Acc]
+    end,
+    lists:foldl(Fun, [], Names)
+end}.

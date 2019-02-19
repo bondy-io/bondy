@@ -155,7 +155,8 @@
 -record(state, {
     nodename                        ::  binary(),
     broker_agent                    ::  binary(),
-    bridges = #{}                   ::  #{module() => bridge()}
+    bridges = #{}                   ::  #{module() => bridge()},
+    enabled = false                 ::  boolean()
     %% Cluster sync state
     %% exchange_ref            ::  {pid(), reference()} | undefined,
     %% updated_specs = []      ::  list()
@@ -291,11 +292,13 @@ validate_spec(Map) ->
 
 init([]) ->
     %% We store the bridges configurations provided
+    Enabled = application:get_env(bondy_broker_bridge, enabled, false),
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     BridgesMap = maps:from_list(
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
+        enabled = Enabled,
         nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
@@ -429,6 +432,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
+init_bridges(#state{enabled = false} = State) ->
+    {ok, State};
+
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
