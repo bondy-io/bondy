@@ -65,7 +65,7 @@ init() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(Key :: atom() | tuple()) -> term().
+-spec get(Key :: list() | atom() | tuple()) -> term().
 get([H|T]) ->
     case get(H) of
         Term when is_map(Term) ->
@@ -74,7 +74,7 @@ get([H|T]) ->
                 Value -> Value
             end;
         Term when is_list(Term) ->
-            get_path(Term, T, ?ERROR);
+            get_path(T, Term, ?ERROR);
         _ ->
             undefined
     end;
@@ -90,13 +90,13 @@ get(Key) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(Key :: atom() | tuple(), Default :: term()) -> term().
+-spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 get([H|T], Default) ->
     case get(H, Default) of
         Term when is_map(Term) ->
             maps_utils:get_path(T, Term, Default);
         Term when is_list(Term) ->
-            get_path(Term, T, Default);
+            get_path(T, Term, Default);
         _ ->
             Default
     end;
