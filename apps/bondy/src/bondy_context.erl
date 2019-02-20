@@ -103,7 +103,7 @@ new() ->
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         request_id => undefined,
-        request_timeout => bondy_config:request_timeout()
+        request_timeout => bondy_config:get(request_timeout)
     }.
 
 

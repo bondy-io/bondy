@@ -623,7 +623,7 @@ challenge(?TICKET_AUTH, _UserId, _Details, _St) ->
 %% @private
 get_realm(St) ->
     Uri = bondy_context:realm_uri(St#wamp_state.context),
-    case bondy_config:automatically_create_realms() of
+    case bondy_config:get(automatically_create_realms) of
         true ->
             %% We force the creation of a new realm if it does not exist
             bondy_realm:get(Uri);

@@ -19,33 +19,19 @@
 
 %% =============================================================================
 %% @doc
-%%
 %% @end
 %% =============================================================================
 -module(bondy_config).
 
 -define(ERROR, '$error_badarg').
 -define(APP, bondy).
--define(DEFAULT_RESOURCE_SIZE, erlang:system_info(schedulers)).
--define(DEFAULT_RESOURCE_CAPACITY, 10000). % max messages in process queue
--define(DEFAULT_POOL_TYPE, transient).
 
--export([priv_dir/0]).
 -export([get/1]).
 -export([get/2]).
-%% -export([set/2]).
--export([automatically_create_realms/0]).
--export([connection_lifetime/0]).
--export([coordinator_timeout/0]).
--export([is_router/0]).
--export([load_regulation_enabled/0]).
--export([router_pool/0]).
--export([request_timeout/0]).
--export([ws_compress_enabled/0]).
 -export([init/0]).
+-export([set/2]).
 
 -compile({no_auto_import, [get/1]}).
-
 
 
 
@@ -54,10 +40,13 @@
 %% =============================================================================
 
 
+
 init() ->
-    Config = application:get_all_env(bondy),
+    %% Init from environment
+    Config0 = application:get_all_env(bondy),
+    Config1 = [{priv_dir, priv_dir()} | Config0],
     %% We set configs at first level only
-    _ = [set(Key, Value) || {Key, Value} <- Config],
+    _ = [set(Key, Value) || {Key, Value} <- Config1],
     ok.
 
 
@@ -118,16 +107,15 @@ set(Key, Value) ->
     bondy_mochiglobal:put(Key, Value).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_router() -> boolean().
-is_router() ->
-    true.
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
 
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% Returns the app's priv dir
 %% @end
@@ -140,83 +128,6 @@ priv_dir() ->
         Val ->
             Val
     end.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% x-webkit-deflate-frame compression draft which is being used by some
-%% browsers to reduce the size of data being transmitted supported by Cowboy.
-%% @end
-%% -----------------------------------------------------------------------------
-ws_compress_enabled() -> true.
-
-
-
-%% =============================================================================
-%% REALMS
-%% =============================================================================
-
-
-automatically_create_realms() ->
-    get(automatically_create_realms).
-
-
-%% =============================================================================
-%% SESSION
-%% =============================================================================
-
--spec connection_lifetime() -> session | connection.
-connection_lifetime() ->
-    get(connection_lifetime).
-
-
-%% =============================================================================
-%% API : LOAD REGULATION
-%% =============================================================================
-
--spec load_regulation_enabled() -> boolean().
-load_regulation_enabled() ->
-    get(load_regulation_enabled).
-
-
--spec coordinator_timeout() -> pos_integer().
-coordinator_timeout() ->
-    get(coordinator_timeout).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns a proplist containing the following keys:
-%%
-%% * type - can be one of the following:
-%%     * permanent - the pool contains a (size) number of permanent workers
-%% under a supervision tree. This is the "events as messages" design pattern.
-%%      * transient - the pool contains a (size) number of supervisors each one
-%% supervision a transient process. This is the "events as messages" design
-%% pattern.
-%% * size - The number of workers used by the load regulation system
-%% for the provided pool
-%%% * capacity - The usage limit enforced by the load regulation system for the provided pool
-%% @end
-%% -----------------------------------------------------------------------------
--spec router_pool() -> list().
-router_pool() ->
-    get(router_pool).
-
-
-%% CALL
-
-request_timeout() ->
-    get(request_timeout).
-
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
 
 
 %% @private

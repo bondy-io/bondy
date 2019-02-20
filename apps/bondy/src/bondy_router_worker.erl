@@ -71,7 +71,7 @@ start_pool() ->
 %% @end
 %% -----------------------------------------------------------------------------
 cast(Fun) when is_function(Fun, 0) ->
-    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
+    {_, PoolType} = lists:keyfind(type, 1, bondy_config:get(router_pool)),
     case do_cast(PoolType, router_pool, Fun) of
         ok ->
             ok;
@@ -173,7 +173,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_start_pool() ->
-    Opts = bondy_config:router_pool(),
+    Opts = bondy_config:get(router_pool),
     {_, Size} = lists:keyfind(size, 1, Opts),
     {_, Capacity} = lists:keyfind(capacity, 1, Opts),
     case lists:keyfind(type, 1, Opts) of

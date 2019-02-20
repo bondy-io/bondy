@@ -76,10 +76,9 @@
     ]},
     {registry_manager_pool,[{capacity,1000},{size,8},{type,permanent}]},
     {router_pool,[{capacity,10000},{size,8},{type,permanent}]},
-    {coordinator_timeout,3000},
     {load_regulation_enabled,true},
     {request_timeout,300000},
-    {connection_lifetime,session},
+    {wamp_connection_lifetime,session},
     {automatically_create_realms,false}]
 ).
 

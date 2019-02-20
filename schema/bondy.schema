@@ -21,45 +21,43 @@
 %% SECURITY REALMS
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc The filename of a security JSON configuration file, which allows you to
+%% statically configure realms and its users, groups, sources and permissions.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "security.config_file", "bondy.security.config_file", [
   {datatype, file},
   {default, "$(platform_etc_dir)/security_config.json"}
 ]}.
 
-%% @doc realm.<name>.config is an IP address and TCP port that the Riak
-%% HTTP interface will bind.
-%% {mapping, "security.realm.$name.config_file", "bondy.security.config_files", [
-%%   {datatype, file}
-%% ]}.
-
-%% {translation,
-%% "bondy.security.config_files",
-%% fun(Conf) ->
-%%   List = lists:filter(
-%%     fun({K, _V}) ->
-%%        cuttlefish_variable:is_fuzzy_match(
-%%          K, string:tokens("security.realm.$name.config_file", "."))
-%%     end,
-%%     Conf),
-%%   [ Config || {[_, _, _Name, _], Config} <- List ]
-%% end}.
-
-
-
-%% Whether to create a new realm or not when a session wants to connect
-%% to a non existing realm
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy create's a new realm or not when a session wants
+%% to connect a non existing realm.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "security.automatically_create_realms", "bondy.automatically_create_realms", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
-%% Whether to create a new realm or not when a session wants to connect
-%% to a non existing realm
-%% Not currently working, leave the value as 'session'
-{mapping, "connection_lifetime", "bondy.connection_lifetime", [
+
+%% -----------------------------------------------------------------------------
+%% @doc Not currently working, leave the value as 'session'
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.connection_lifetime", "bondy.wamp_connection_lifetime", [
   {default, session},
-  {datatype, {enum, [session, connection]}},
+  %% {datatype, {enum, [session, connection]}},
+  {datatype, {enum, [session]}},
+  hidden
+]}.
+
+
+
+{mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
+  {default, "10s"}, % Long enough but not infinity
+  {datatype, {duration, ms}},
   hidden
 ]}.
 
@@ -70,75 +68,53 @@
 ]}.
 
 
-{mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
-  {default, "10s"}, % Long enough but not infinity
-  {datatype, {duration, ms}},
-  hidden
-]}.
-
 
 %% =============================================================================
 %% OVERLOAD PROTECTION AND LOAD REGULATION
 %% =============================================================================
 
-{mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
-  {default, 8},
-  {datatype, integer},
-  hidden
-]}.
-
+%% -----------------------------------------------------------------------------
+%% @doc Unused at the moment
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "load_regulation.enabled", "bondy.load_regulation_enabled", [
   {default, on},
-  {datatype, {flag, on, off}}
-]}.
-
-
-{mapping, "load_regulation.coordinator_timeout", "bondy.coordinator_timeout", [
-  {default, "3s"},
-  {datatype, {duration, ms}},
+  {datatype, {flag, on, off}},
   hidden
 ]}.
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.type", "bondy.router_pool.type", [
   {default, transient},
   {datatype, {enum, [permanent, transient]}},
   hidden
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc The size of the router process pool.
 %% The actual size will be the maximum between the configured value and
 %% the result of evaluating `erlang:system_info(schedulers)`
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
   {default, 8},
   {datatype, integer},
   hidden
 ]}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc The capacity of the router process pool, i.e. the maximum number of
+%% active erlang processes handling router events (default = 10000).
+%% Once the maximum has been reached, Bondy will respond with an overload error.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
   {default, 10000},
-  {datatype, integer},
-  hidden
-]}.
-
-%% It can only be permanent
-{mapping, "load_regulation.registry_manager.pool.type", "bondy.registry_manager_pool.type", [
-  {default, permanent},
-  {datatype, {enum, [permanent]}},
-  hidden
-]}.
-
-%% The actual size will be the maximum between the configured value and
-%% the result of evaluating `erlang:system_info(schedulers)`
-{mapping, "load_regulation.registry_manager.pool.size", "bondy.registry_manager_pool.size", [
-  {default, 8},
-  {datatype, integer},
-  hidden
-]}.
-
-{mapping, "load_regulation.registry_manager.pool.capacity", "bondy.registry_manager_pool.capacity", [
-  {default, 1000},
-  {datatype, integer},
-  hidden
+  {datatype, integer}
 ]}.
 
 
@@ -354,35 +330,26 @@
 %% API GATEWAY
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc The filename of a the API Gatyeway JSON configuration file, which
+%% allows you to statically configure the API GAteway with a list of API
+%% Specifications.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
   {datatype, file},
   {default, "$(platform_etc_dir)/api_gateway_config.json"}
 ]}.
 
-%% {mapping, "api_gateway.api.$name.config_file", "bondy.api_gateway.apis", [
-%%   {datatype, file}
-%% ]}.
-
-%% {translation,
-%% "bondy.api_gateway.apis",
-%% fun(Conf) ->
-%%   List = lists:filter(
-%%     fun({K, _V}) ->
-%%        cuttlefish_variable:is_fuzzy_match(
-%%          K, string:tokens("api_gateway.api.$name.config_file", "."))
-%%     end,
-%%     Conf),
-%%   [ Config || {[_, _, _, _], Config} <- List ]
-%% end}.
-
-
 
 %% SOCKET OPTS
 
-%% Enables/disables periodic transmission on a connected socket when no other
-%% data is exchanged. If the other end does not respond, the connection is
+%% -----------------------------------------------------------------------------
+%% @doc Enables/disables periodic transmission on a connected socket when no
+%% other data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "api_gateway.http.keepalive", "bondy.api_gateway_http.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, off}
@@ -750,10 +717,15 @@
   {default, "{{platform_data_dir}}"}
 ]}.
 
-%% Defines the level of concurrency. Each partition has its own leveldb and
-%% ets instance.
+%% -----------------------------------------------------------------------------
+%% @doc Defines the level of concurrency in plum_db (the local embedded
+%% database used by Bondy).
+%% Each partition has its own leveldb and ets instance.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "db.partitions", "plum_db.partitions", [
   {default, 16},
+  {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
@@ -782,3 +754,12 @@
   {datatype, {duration, ms}}
 ]}.
 
+
+
+
+%% =============================================================================
+%% VALIDATORS
+%% =============================================================================
+
+
+{validator, "pos_integer", "greater than 1", fun(Size) -> Size >= 1 end}.

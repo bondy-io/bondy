@@ -18,77 +18,167 @@
 
 
 
-%% @doc Default location for bondy_broker_bridge specification file
+
+%% =============================================================================
+%% BONDY BROKER BRIDGE CONFIGURATION
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The configuration filename for the Broker Bridge.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.config_file", "bondy_broker_bridge.config_file", [
   {datatype, file},
   {default, "$(platform_etc_dir)/broker_bridge_config.json"}
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc A mapping of names to kafka topics. This mapping is used by the JSON
+%% broker_bridge.config_file which defines the subscribers for each bridge.
+%%
+%% Example:
+%%
+%% broker_bridge.kafka.topics.important_events = "com.myapp.events.important"
+%%
+%% In the config_file you can use the mops expression
+%% `"{{kafka.topics |> get(important_events)}}"` to get the value
+%% "com.myapp.events.important" for the name "important_events".
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.kafka.topics.$name", "bondy_broker_bridge.bridges.bondy_kafka_bridge.topics", [
+  {datatype, string},
+  {default, "com.bondy.example"},
+  {include_default, "example"}
+]}.
+
+{translation,
+"bondy_broker_bridge.bridges.bondy_kafka_bridge.topics",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix(
+      "broker_bridge.kafka.topics", Conf0),
+    lists:foldl(
+        fun({[_, _, _, Key], Value}, Acc) ->
+          [{list_to_binary(Key), list_to_binary(Value)} | Acc]
+        end,
+        [],
+        Conf
+    )
+end}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "kafka_bridge.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
   {datatype, flag},
   {default, off}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.endpoints", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, ip},
   {default, {"127.0.0.1", 9092}},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, {duration, s}},
   {default, "10s"},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.max_metadata_sock_retry", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, integer},
   {default, 5},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.reconnect_cool_down_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, {duration, s}},
   {default, "10s"},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.auto_start_producers", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, flag},
   {default, on},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.allow_topic_auto_creation", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, flag},
   {default, off},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.producer.topic_restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, {duration, s}},
   {default, "10s"},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.producer.partition_restart_delay_seconds", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, {duration, s}},
   {default, "2s"},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.producer.required_acks", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, integer},
   {default, 1},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.socket.sndbuf", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, bytesize},
   {include_default, "default"}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.socket.recbuf", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, bytesize},
   {include_default, "default"}
