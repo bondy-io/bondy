@@ -79,7 +79,6 @@
 -export([update/2]).
 -export([uri/1]).
 
-
 %% -compile({no_auto_import, [put/2]}).
 
 
@@ -90,9 +89,6 @@
 -spec apply_config() -> ok | no_return().
 
 apply_config() ->
-    %% TODO Check what happens when we join the cluster and bondy realm was
-    %% already defined in my peers...we should not use LWW here.
-    _ = get(?BONDY_REALM_URI, ?BONDY_REALM),
     case bondy_config:get([security, config_file]) of
         undefined ->
             ok;

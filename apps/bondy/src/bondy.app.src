@@ -23,8 +23,10 @@
     {registered, []},
     {mod, {bondy_app, [{vsn, "0.8.1"}]}},
     {start_phases, [
+        {init_admin_listeners, []},
+        {configure_features, []},
         {init_registry, []},
-        {enable_aae, []},
+        {restore_aae_config, []},
         {init_listeners, []}
     ]},
     {applications,[
@@ -48,13 +50,13 @@
         lager,
         msgpack,
         opencensus,
-        plum_db,
         prometheus,
         redbug,
         observer_cli,
         sidejob,
         uuid,
         %% Leapsight
+        plum_db,
         mops,
         flake,
         tuplespace,

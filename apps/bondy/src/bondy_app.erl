@@ -24,9 +24,11 @@
 
 -export([start/2]).
 -export([stop/1]).
+-export([stop/0]).
 -export([start_phase/3]).
 -export([prep_stop/1]).
 -export([vsn/0]).
+
 
 
 
@@ -36,38 +38,80 @@
 
 
 
-start(_Type, Args) ->
-    %% We disable AAE until the build_hashtrees start phase is finished
-    Enabled = plum_db_config:get(aae_enabled, true),
-    ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
-    ok = plum_db_config:set(aae_enabled, false),
+%% -----------------------------------------------------------------------------
+%% @doc A convenience function. Calls `init:stop/0`
+%% @end
+%% -----------------------------------------------------------------------------
+stop() ->
+    init:stop().
 
-    %% We initialise the config, caching all values as code
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec vsn() -> list().
+vsn() ->
+    bondy_config:get(vsn, "undefined").
+
+
+
+%% =============================================================================
+%% APPLICATION BEHAVIOUR CALLBACKS
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Application behaviour callback
+%% @end
+%% -----------------------------------------------------------------------------
+start(_Type, Args) ->
+    %% We initialise the environment
     ok = setup_env(Args),
+    %% We initialise the config, caching all values as code
     ok = bondy_config:init(),
+    %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
+    %%  until we are ready
+    ok = disable_aae(),
+    %% We setup partisan options
+    ok = setup_partisan(),
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
+            ok = init_bondy_realm(),
             ok = setup_event_handlers(),
             ok = bondy_router_worker:start_pool(),
             ok = bondy_cli:register(),
-            ok = setup_partisan(),
-            ok = bondy_realm:apply_config(),
             ok = setup_internal_subscriptions(),
-            %% We load the Api Gateway config_file if there is one
-            ok = bondy_api_gateway:apply_config(),
-            %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
-            %% This is to enable operations during startup and also heartbeats
-            %% e.g. K8s liveness probe.
-            _ = bondy_api_gateway:start_admin_listeners(),
             %% After we return, OTP will call start_phase/3 based on
-            %% bondy.app.src config
+            %% bondy.app.src/start_phases
             {ok, Pid};
         Other  ->
             Other
     end.
 
-start_phase(init_registry, normal, []) ->
+
+%% -----------------------------------------------------------------------------
+%% @doc Application behaviour callback
+%% @end
+%% -----------------------------------------------------------------------------
+start_phase(init_admin_listeners = Name, normal, []) ->
+    _ = lager:info("Executing application start phase '~p'", [Name]),
+    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
+    %% This is to enable operations during startup and also heartbeats
+    %% e.g. K8s liveness probe.
+    bondy_api_gateway:start_admin_listeners();
+
+start_phase(configure_features = Name, normal, []) ->
+    _ = lager:info("Executing application start phase '~p'", [Name]),
+    ok = bondy_realm:apply_config(),
+    %% ok = bondy_oauth2:apply_config(),
+    ok = bondy_api_gateway:apply_config(),
+    ok;
+
+start_phase(init_registry = Name, normal, []) ->
+    _ = lager:info("Executing application start phase '~p'", [Name]),
     %% In previous versions of Bondy we piggy backed on a disk-only version of
     %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
@@ -83,29 +127,35 @@ start_phase(init_registry, normal, []) ->
     %% with the cluster before init_listeners
     bondy_registry:init();
 
-start_phase(enable_aae, normal, []) ->
+start_phase(restore_aae_config = Name, normal, []) ->
+    _ = lager:info("Executing application start phase '~p'", [Name]),
     {ok, Enabled} = application:get_env(plum_db, priv_aae_enabled),
     ok = plum_db_config:set(aae_enabled, Enabled),
     ok;
 
-start_phase(init_listeners, normal, []) ->
+start_phase(init_listeners = Name, normal, []) ->
+    _ = lager:info("Executing application start phase '~p'", [Name]),
     %% Now that the registry has been initialised we can initialise
     %% the remaining HTTP, WS and TCP listeners for clients to connect
     ok = bondy_wamp_raw_handler:start_listeners(),
-    bondy_api_gateway:start_listeners().
+    ok = bondy_api_gateway:start_listeners(),
+    ok.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Application behaviour callback
+%% @end
+%% -----------------------------------------------------------------------------
 prep_stop(_State) ->
     stop_router_services().
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Application behaviour callback
+%% @end
+%% -----------------------------------------------------------------------------
 stop(_State) ->
     ok.
-
-
--spec vsn() -> list().
-vsn() ->
-    application:get_env(bondy, vsn, "undefined").
 
 
 
@@ -113,6 +163,15 @@ vsn() ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+disable_aae() ->
+    _ = lager:info("Temporarily disabling plum_db AAE"),
+    Enabled = plum_db_config:get(aae_enabled, true),
+    ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
+    ok = plum_db_config:set(aae_enabled, false),
+    ok.
 
 
 %% @private
@@ -124,9 +183,15 @@ setup_env(Args) ->
             ok
     end.
 
+%% @private
+init_bondy_realm() ->
+    _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
+    ok.
+
 
 %% @private
 setup_partisan() ->
+    %% We add the wamp_peer_messages channel to the configured channels
     Channels0 = partisan_config:get(channels, []),
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
 
@@ -143,7 +208,7 @@ stop_router_services() ->
     ok = bondy_router:shutdown(),
 
     %% We sleep for a minute to allow all sessions to terminate gracefully
-    Time = 5000,
+    Time = bondy_config:get(graceful_shutdown, 5000),
     _ = lager:info(
         "Awaiting ~p secs for clients graceful shutdown.",
         [trunc(Time/1000)]
