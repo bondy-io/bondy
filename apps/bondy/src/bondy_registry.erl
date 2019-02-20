@@ -642,7 +642,7 @@ init([]) ->
     %% TODO DO NOT DO THIS, LOAD only data from particular node when we get an update from peerservice. Make sure we load before the first Exchange or actually force and exchange and then load.
     process_flag(trap_exit, true),
 
-    %% We initialise the tries
+    %% We initialise the tries. art tries survive registry crashes.
     {ok, _} = art_server_sup:start_trie(?REGISTRATION_TRIE),
     {ok, _} = art_server_sup:start_trie(?SUBSCRIPTION_TRIE),
 
