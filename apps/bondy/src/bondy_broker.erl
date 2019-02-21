@@ -83,6 +83,7 @@
 -export([subscriptions/1]).
 -export([subscriptions/3]).
 -export([subscriptions/4]).
+-export([subscribe/3]).
 -export([subscribe/4]).
 -export([unsubscribe/1]).
 -export([unsubscribe/2]).
@@ -418,6 +419,14 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+subscribe(RealmUri, Opts, Topic) ->
+    subscribe(RealmUri, Opts, Topic, self()).
 
 
 %% -----------------------------------------------------------------------------
