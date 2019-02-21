@@ -25,7 +25,7 @@
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
-
+-include("bondy_security.hrl").
 
 
 -define(PREFIX, {api_gateway, api_specs}).
@@ -36,7 +36,8 @@
 
 -record(state, {
     exchange_ref            ::  {pid(), reference()} | undefined,
-    updated_specs = []      ::  list()
+    updated_specs = []      ::  list(),
+    subscriptions = #{}     ::  #{id() => uri()}
 }).
 
 
@@ -194,7 +195,8 @@ load(Term) when is_map(Term) orelse is_list(Term) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the current dispatch configured in the HTTP server.
+%% @doc Returns the current dispatch configured in Cowboy for the
+%% given Listener.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table(listener()) -> any().
@@ -266,20 +268,8 @@ delete(Id) when is_binary(Id) ->
 
 
 init([]) ->
-    %% We subscribe to change notifications in plum_db_events, we are
-    %% interested in updates to API Specs coming from another node so that we
-    %% recompile them and generate the Cowboy dispatch tables
-    ok = plum_db_events:subscribe(exchange_started),
-    ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{
-        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-        {{?PREFIX, '_'}, '_', '_'}, [], [true]
-    }],
-    ok = plum_db_events:subscribe(object_update, MS),
-
-    %% TODO subscribe to {realm_deleted, Uri} and tear down all APIs for that realm when event occurs
-
-    {ok, #state{}}.
+    State = subscribe(#state{}),
+    {ok, State}.
 
 
 handle_call({start_listeners, Type}, _From, State) ->
@@ -318,6 +308,22 @@ handle_call(Event, From, State) ->
     {noreply, State}.
 
 
+handle_cast(#event{} = Event, State) ->
+    %% We informally implement bondy_subscriber
+    %% TODO make bondy_subscriber into a behaviour we implement and change
+    %% bondy_registry_entry to contain Callback Mod, change bondy_broker to
+    %% call CallbackMod:handle_event/2 instead of
+    %% bondy_subscriber:handle_event/2
+    Id = Event#event.subscription_id,
+    Topic = maps:get(Id, State#state.subscriptions, undefined),
+    NewState = case {Topic, Event#event.arguments} of
+        {undefined, _} ->
+            State;
+        {?REALM_DELETED, [Uri]} ->
+            on_realm_deleted(Uri, State)
+    end,
+    {noreply, NewState};
+
 handle_cast(Event, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
@@ -341,14 +347,6 @@ handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
     %% we do nothing
     {noreply, State};
 
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-    ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
-
 handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
@@ -361,17 +359,32 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
     Acc = State#state.updated_specs,
     {noreply, State#state{updated_specs = [Key|Acc]}};
 
+
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+    {noreply, State1};
+
 handle_info(Info, State) ->
     _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
     {noreply, State}.
 
 
-terminate(normal, _State) ->
-    unsubscribe();
-terminate(shutdown, _State) ->
-    unsubscribe();
-terminate({shutdown, _}, _State) ->
-    unsubscribe();
+terminate(normal, State) ->
+    _ = unsubscribe(State),
+    ok;
+
+terminate(shutdown, State) ->
+    _ = unsubscribe(State),
+    ok;
+
+terminate({shutdown, _}, State) ->
+    _ = unsubscribe(State),
+    ok;
+
 terminate(_Reason, _State) ->
     ok.
 
@@ -387,16 +400,43 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+subscribe(State) ->
+    %% We subscribe to change notifications in plum_db_events, we are
+    %% interested in updates to API Specs coming from another node so that we
+    %% recompile them and generate the Cowboy dispatch tables
+    ok = plum_db_events:subscribe(exchange_started),
+    ok = plum_db_events:subscribe(exchange_finished),
+    MS = [{
+        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+        {{?PREFIX, '_'}, '_', '_'}, [], [true]
+    }],
+    ok = plum_db_events:subscribe(object_update, MS),
 
-unsubscribe() ->
+    %% We subscribe WAMP events
+    Opts = #{
+        subscription_id => bondy_utils:get_id(global),
+        match => <<"exact">>
+    },
+    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?REALM_DELETED),
+    Subs = maps:put(Id, ?BONDY_PRIV_REALM_URI, State#state.subscriptions),
+
+    State#state{subscriptions = Subs}.
+
+
+%% @private
+unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(exchange_started),
     _ = plum_db_events:unsubscribe(exchange_finished),
     _ = plum_db_events:unsubscribe(object_update),
-    ok.
+
+    Ids = maps:keys(State#state.subscriptions),
+    _ = [bondy_broker:unsubscribe(Id, ?BONDY_PRIV_REALM_URI) ||  Id <- Ids],
+    State#state{subscriptions = #{}}.
 
 
 %% @private
 do_start_listeners(public) ->
+    _ = lager:info("Starting public HTTP/S listeners"),
     DTables = case load_dispatch_tables() of
         [] ->
             [
@@ -410,6 +450,7 @@ do_start_listeners(public) ->
     ok;
 
 do_start_listeners(admin) ->
+    _ = lager:info("Starting admin HTTP/S listeners"),
     DTables = parse_specs([admin_spec()], admin_base_routes()),
     _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok.
@@ -417,11 +458,13 @@ do_start_listeners(admin) ->
 
 %% @private
 do_suspend_listeners(public) ->
+    _ = lager:info("Suspending public HTTP/S listeners"),
     catch ranch:suspend_listener(?HTTP),
     catch ranch:suspend_listener(?HTTPS),
     ok;
 
 do_suspend_listeners(admin) ->
+    _ = lager:info("Suspending admin HTTP/S listeners"),
     catch ranch:suspend_listener(?ADMIN_HTTP),
     catch ranch:suspend_listener(?ADMIN_HTTPS),
     ok.
@@ -429,11 +472,13 @@ do_suspend_listeners(admin) ->
 
 %% @private
 do_resume_listeners(public) ->
+    _ = lager:info("Resuming public HTTP/S listeners"),
     catch ranch:resume_listener(?HTTP),
     catch ranch:resume_listener(?HTTPS),
     ok;
 
 do_resume_listeners(admin) ->
+    _ = lager:info("Resuming admin HTTP/S listeners"),
     catch ranch:resume_listener(?ADMIN_HTTP),
     catch ranch:resume_listener(?ADMIN_HTTPS),
     ok.
@@ -441,11 +486,13 @@ do_resume_listeners(admin) ->
 
 %% @private
 do_stop_listeners(public) ->
+    _ = lager:info("Stopping public HTTP/S listeners"),
     catch cowboy:stop_listener(?HTTP),
     catch cowboy:stop_listener(?HTTPS),
     ok;
 
 do_stop_listeners(admin) ->
+    _ = lager:info("Stopping admin HTTP/S listeners"),
     catch cowboy:stop_listener(?ADMIN_HTTP),
     catch cowboy:stop_listener(?ADMIN_HTTPS),
     ok.
@@ -504,6 +551,7 @@ load_spec(FName) ->
             {error, invalid_specification_format}
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% We store the API Spec in the metadata store. Notice that we store the JSON
@@ -514,7 +562,6 @@ load_spec(FName) ->
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     plum_db:put(?PREFIX, Id, Spec).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -824,3 +871,13 @@ normalise(Opts) ->
         false ->
             Opts
     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Tear down all APIs for that realm when event occurs
+%% @end
+%% -----------------------------------------------------------------------------
+on_realm_deleted(_RealmUri, State) ->
+    State.
