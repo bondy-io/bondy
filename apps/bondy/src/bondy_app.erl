@@ -248,16 +248,18 @@ stop_router_services() ->
     ok = bondy_router:shutdown(),
 
     %% We sleep for a minute to allow all sessions to terminate gracefully
-    Time = bondy_config:get(graceful_shutdown, 5000),
+    Secs = bondy_config:get(shutdown_grace_period),
     _ = lager:info(
-        "Awaiting ~p secs for clients graceful shutdown.",
-        [trunc(Time/1000)]
+        "Awaiting ~p secs for clients to gracefully disconnect.",
+        [Secs]
     ),
-    ok = timer:sleep(Time),
+    ok = timer:sleep(Secs * 1000),
     _ = lager:info("Terminating all client connections"),
 
     %% We force the HTTP/WS connections to stop
     ok = bondy_api_gateway:stop_listeners(),
+
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
+
     ok.
