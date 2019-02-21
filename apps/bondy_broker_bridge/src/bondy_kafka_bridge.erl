@@ -267,11 +267,12 @@ init(Config) ->
 %% @doc Validates the action specification.
 %% An action spec is a map containing the following keys:
 %%
-%% * type :: binary() - either <<"produce">> or <<"produce_sync">>. Optional, the default value is <<"produce">>.
-%% * topic :: binary() - the Kafka topic we should produce to.
-%% * key :: binary() - the kafka message's key
-%% * value :: any() - the kafka message's value
-%% * options - a map containing the following keys
+%% * `type :: binary()' - either `<<"produce">>' or `<<"produce_sync">>'. Optional, the default value is `<<"produce">>'.
+%% * `topic :: binary()' - the Kafka topic we should produce to.
+%% * `key :: binary()' - the kafka message's key
+%% * `value :: any()' - the kafka message's value
+%% * `options :: map()' - a map containing the following keys
+%%
 %% ```erlang
 %% #{
 %%     <<"type">> <<"produce">>,
@@ -287,10 +288,10 @@ init(Config) ->
 %%             "algorithm": "fnv32a",
 %%             "value": "\"{{event.topic}}/{{event.publication_id}}\""
 %%         },
-%%         <<"encoding": "json"
+%%         <<"encoding">>: <<"json">>
 %%     }
 %% }
-%% ```
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
 validate_action(Action0) ->

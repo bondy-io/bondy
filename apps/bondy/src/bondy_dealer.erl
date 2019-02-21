@@ -57,7 +57,7 @@
 %%    4.  "UNREGISTERED"
 %%    5.  "ERROR"
 %%
-%% <pre>
+%% ```
 %%        ,------.          ,------.               ,------.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `--+---'          `--+---'               `--+---'
@@ -82,7 +82,7 @@
 %%        |Caller|          |Dealer|               |Callee|
 %%        `------'          `------'               `------'
 %%
-%% </pre>
+%% '''
 %%
 %% # Calling and Invocations
 %%
@@ -100,7 +100,7 @@
 %%
 %%    5. "ERROR"
 %%
-%% <pre>
+%% ```
 %%        ,------.          ,------.          ,------.
 %%        |Caller|          |Dealer|          |Callee|
 %%        `--+---'          `--+---'          `--+---'
@@ -119,7 +119,7 @@
 %%        |Caller|          |Dealer|          |Callee|
 %%        `------'          `------'          `------'
 %%
-%% </pre>
+%% '''
 %%
 %%    The execution of remote procedure calls is asynchronous, and there
 %%    may be more than one call outstanding.  A call is called outstanding

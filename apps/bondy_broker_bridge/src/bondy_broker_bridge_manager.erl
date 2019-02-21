@@ -54,7 +54,7 @@
 %%         <<"processing_timestamp">> => integer()
 %%     }
 %% }.
-%% ```
+%% '''
 %%
 %% ## Broker Bridge Specification File.
 %%
@@ -470,37 +470,6 @@ terminate_bridges(Reason, #state{bridges = Map} = State) ->
 %% @private
 get_bridge(Mod, State) ->
     maps:get(Mod, State#state.bridges, undefined).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc We subscribe to change notifications in plum_db_events, we are
-%% interested in updates to Bridge Specs coming from another node so that we
-%% recompile them and generate the Cowboy dispatch tables
-%% @end
-%% -----------------------------------------------------------------------------
-%% plum_db_subscribe() ->
-%%     ok = plum_db_events:subscribe(exchange_started),
-%%     ok = plum_db_events:subscribe(exchange_finished),
-%%     MS = [{
-%%         %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
-%%         {{?PREFIX, '_'}, '_', '_'}, [], [true]
-%%     }],
-%%     ok = plum_db_events:subscribe(object_update, MS),
-%%     ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc Unsubscribes the process from the plum_db notifications that were setup
-%% by plum_db_subscribe/0
-%% @end
-%% -----------------------------------------------------------------------------
-%% plum_db_unsubscribe() ->
-%%     _ = plum_db_events:unsubscribe(exchange_started),
-%%     _ = plum_db_events:unsubscribe(exchange_finished),
-%%     _ = plum_db_events:unsubscribe(object_update),
-%%     ok.
 
 
 %% @private

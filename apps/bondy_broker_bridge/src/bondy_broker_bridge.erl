@@ -43,30 +43,27 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Initialises the external broker or system as an event sink.
+%% Initialises the external broker or system as an event sink.
 %% An implementation should use this callback for example to setup the
 %% environment, load any plugin code and connect to any external system.
-%% @end
 %% -----------------------------------------------------------------------------
 -callback init(Config :: any()) ->
     {ok, Ctxt :: #{binary() => any()}} | {error, Reason :: any()}.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Parses and validates the action `Action'.
+%% Parses and validates the action `Action'.
 %% This function is called before calling `apply_action/1`
 %%
 %% Use this function to define any default values required before
 %% `apply_action/1` gets called.
-%% @end
 %% -----------------------------------------------------------------------------
 -callback validate_action(Action :: map()) ->
     {ok, ValidAction :: map()} | {error, Reason :: any()}.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Evaluates the action `Action'.
-%% @end
+%% Evaluates the action `Action'.
 %% -----------------------------------------------------------------------------
 -callback apply_action(Action :: map()) ->
     ok
@@ -75,9 +72,8 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Terminates the broker bridge and all its subscribers.
+%% Terminates the broker bridge and all its subscribers.
 %% An implementer should use this call to cleanup the environment, tear down
 %% any plugin code and disconnect from external systems.
-%% @end
 %% -----------------------------------------------------------------------------
 -callback terminate(Reason :: any(), State :: any()) -> ok.

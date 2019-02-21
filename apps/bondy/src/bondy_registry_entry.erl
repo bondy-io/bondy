@@ -400,8 +400,6 @@ to_map(#entry{key = Key} = E) ->
 validate_match_policy(Options) ->
     validate_match_policy(key, Options).
 
-%% @private
--spec validate_match_policy(map()) -> binary().
 
 validate_match_policy(pattern, '_') ->
     '_';
