@@ -665,7 +665,6 @@ init([]) ->
 
 
 handle_call(init_tries, _From, State0) ->
-    _ = lager:info("Initialising registry trie from store."),
     State = init_tries(State0),
     {reply, ok, State};
 
@@ -745,6 +744,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 init_tries(State0) ->
+    _ = lager:info("Initialising registry trie from store."),
     Opts = [{resolver, lww}],
     Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
     {ok, State1} = init_tries(Iterator0, State0),
