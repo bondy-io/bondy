@@ -74,18 +74,19 @@ start(_Type, Args) ->
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %%  until we are ready
     ok = disable_aae(),
-    %% We setup partisan options
-    ok = setup_partisan(),
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
-            ok = init_bondy_realm(),
-            ok = setup_event_handlers(),
+            %% Please do not change the order of this function calls
+            %% unless, of course, you know exactly what you are doing.
             ok = bondy_router_worker:start_pool(),
             ok = bondy_cli:register(),
+            ok = setup_bondy_realm(),
+            ok = setup_event_handlers(),
             ok = setup_internal_subscriptions(),
+            ok = setup_partisan(),
             %% After we return, OTP will call start_phase/3 based on
-            %% bondy.app.src/start_phases
+            %% the order established in the start_phases in bondy.app.src
             {ok, Pid};
         Other  ->
             Other
@@ -96,22 +97,19 @@ start(_Type, Args) ->
 %% @doc Application behaviour callback
 %% @end
 %% -----------------------------------------------------------------------------
-start_phase(init_admin_listeners = Name, normal, []) ->
-    _ = lager:info("Executing application start phase '~p'", [Name]),
+start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable operations during startup and also heartbeats
     %% e.g. K8s liveness probe.
     bondy_api_gateway:start_admin_listeners();
 
-start_phase(configure_features = Name, normal, []) ->
-    _ = lager:info("Executing application start phase '~p'", [Name]),
+start_phase(configure_features, normal, []) ->
     ok = bondy_realm:apply_config(),
     %% ok = bondy_oauth2:apply_config(),
     ok = bondy_api_gateway:apply_config(),
     ok;
 
-start_phase(init_registry = Name, normal, []) ->
-    _ = lager:info("Executing application start phase '~p'", [Name]),
+start_phase(init_registry, normal, []) ->
     %% In previous versions of Bondy we piggy backed on a disk-only version of
     %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
@@ -127,14 +125,13 @@ start_phase(init_registry = Name, normal, []) ->
     %% with the cluster before init_listeners
     bondy_registry:init();
 
-start_phase(restore_aae_config = Name, normal, []) ->
-    _ = lager:info("Executing application start phase '~p'", [Name]),
+start_phase(restore_aae_config, normal, []) ->
     {ok, Enabled} = application:get_env(plum_db, priv_aae_enabled),
     ok = plum_db_config:set(aae_enabled, Enabled),
+    _ = lager:info("Restored plum_db AAE user configuration; status=~p", [Enabled]),
     ok;
 
-start_phase(init_listeners = Name, normal, []) ->
-    _ = lager:info("Executing application start phase '~p'", [Name]),
+start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
     %% the remaining HTTP, WS and TCP listeners for clients to connect
     ok = bondy_wamp_raw_handler:start_listeners(),
@@ -167,10 +164,10 @@ stop(_State) ->
 
 %% @private
 disable_aae() ->
-    _ = lager:info("Temporarily disabling plum_db AAE"),
     Enabled = plum_db_config:get(aae_enabled, true),
     ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
     ok = plum_db_config:set(aae_enabled, false),
+    _ = lager:info("Temporarily overriden user plum_db AAE configuration; status=disabled"),
     ok.
 
 
@@ -183,8 +180,10 @@ setup_env(Args) ->
             ok
     end.
 
+
 %% @private
-init_bondy_realm() ->
+setup_bondy_realm() ->
+    %% We do a get to force the creation of the bondy realm
     _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
     ok.
 
@@ -194,6 +193,47 @@ setup_partisan() ->
     %% We add the wamp_peer_messages channel to the configured channels
     Channels0 = partisan_config:get(channels, []),
     partisan_config:set(channels, [wamp_peer_messages | Channels0]).
+
+
+%% @private
+setup_event_handlers() ->
+    %% We replace the default OTP alarm handler with ours
+    _ = bondy_event_manager:swap_watched_handler(
+        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
+    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
+    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
+    ok.
+
+
+%% @private
+setup_internal_subscriptions() ->
+    %% TODO moved this into each app when we finish restructuring
+    Opts = #{match => <<"exact">>},
+    _ = bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_ADDED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    _ = bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_DELETED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?USER_UPDATED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    bondy:subscribe(
+        ?BONDY_PRIV_REALM_URI,
+        Opts,
+        ?PASSWORD_CHANGED,
+        fun bondy_api_gateway_wamp_handler:handle_event/2
+    ),
+    ok.
 
 
 %% @private
@@ -220,43 +260,4 @@ stop_router_services() ->
     ok = bondy_api_gateway:stop_listeners(),
     %% We force the TCP and TLS connections to stop
     ok = bondy_wamp_raw_handler:stop_listeners(),
-    ok.
-
-
-%% @private
-setup_event_handlers() ->
-    _ = bondy_event_manager:swap_watched_handler(
-        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
-    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
-    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
-    ok.
-
-
-%% TODO moved this into each app when we finish restructuring
-setup_internal_subscriptions() ->
-    Opts = #{match => <<"exact">>},
-    bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
-        Opts,
-        ?USER_ADDED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
-        Opts,
-        ?USER_DELETED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
-    ),
-    bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
-        Opts,
-        ?USER_UPDATED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
-    ),
-    bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
-        Opts,
-        ?PASSWORD_CHANGED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
-    ),
     ok.
