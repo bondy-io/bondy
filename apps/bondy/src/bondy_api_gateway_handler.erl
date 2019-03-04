@@ -119,7 +119,7 @@ options(Req, #{api_spec := Spec} = St) ->
     Headers1 = case maps:find(<<"access-control-allow-methods">>, Headers0) of
         {ok, _V} ->
             maps:put(<<"access-control-allow-methods">>, Allowed, Headers0);
-        false ->
+        error ->
             Headers0
     end,
     Headers2 = maps:put(<<"allow">>, Allowed, Headers1),

@@ -1169,7 +1169,7 @@ parse_path_elements([H|T], P0, Ctxt) ->
             case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
                 {ok, Val} ->
                     maps:put(H, Val, P0);
-                false ->
+                error ->
                     error({
                         badarg,
                         <<"The key ", H/binary, " does not exist in path.">>
