@@ -30,6 +30,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
@@ -61,31 +62,31 @@
 ]).
 
 -define(DEFAULT_STATUS_CODES, #{
-    ?BONDY_ALREADY_EXISTS_ERROR =>          400,
-    ?BONDY_NOT_FOUND_ERROR =>               404,
-    ?BONDY_BAD_GATEWAY_ERROR =>             503,
-    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>    500,
-    ?BONDY_ERROR_TIMEOUT =>                  504,
-    ?WAMP_AUTHORIZATION_FAILED =>            403,
-    ?WAMP_CANCELLED =>                       400,
-    ?WAMP_CLOSE_REALM =>                     500,
-    ?WAMP_DISCLOSE_ME_NOT_ALLOWED =>         400,
-    ?WAMP_GOODBYE_AND_OUT =>                 500,
-    ?WAMP_INVALID_ARGUMENT =>                400,
-    ?WAMP_INVALID_URI =>                     400,
-    ?WAMP_NET_FAILURE =>                     502,
-    ?WAMP_NOT_AUTHORIZED =>                  401,
-    ?WAMP_NO_ELIGIBLE_CALLE =>               502,
-    ?WAMP_NO_SUCH_PROCEDURE =>               501,
-    ?WAMP_NO_SUCH_REALM =>                   502,
-    ?WAMP_NO_SUCH_REGISTRATION =>            502,
-    ?WAMP_NO_SUCH_ROLE =>                    400,
-    ?WAMP_NO_SUCH_SESSION =>                 500,
-    ?WAMP_NO_SUCH_SUBSCRIPTION =>            502,
-    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME =>   400,
-    ?WAMP_OPTION_NOT_ALLOWED =>              400,
-    ?WAMP_PROCEDURE_ALREADY_EXISTS =>        400,
-    ?WAMP_SYSTEM_SHUTDOWN =>                 500
+    ?BONDY_ALREADY_EXISTS_ERROR =>              ?HTTP_BAD_REQUEST,
+    ?BONDY_NOT_FOUND_ERROR =>                   ?HTTP_NOT_FOUND,
+    ?BONDY_BAD_GATEWAY_ERROR =>                 ?HTTP_SERVICE_UNAVAILABLE,
+    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?BONDY_ERROR_TIMEOUT =>                     ?HTTP_GATEWAY_TIMEOUT,
+    ?WAMP_AUTHORIZATION_FAILED =>               ?HTTP_FORBIDDEN,
+    ?WAMP_CANCELLED =>                          ?HTTP_BAD_REQUEST,
+    ?WAMP_CLOSE_REALM =>                        ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_DISCLOSE_ME_NOT_ALLOWED =>            ?HTTP_BAD_REQUEST,
+    ?WAMP_GOODBYE_AND_OUT =>                    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_INVALID_ARGUMENT =>                   ?HTTP_BAD_REQUEST,
+    ?WAMP_INVALID_URI =>                        ?HTTP_BAD_REQUEST,
+    ?WAMP_NET_FAILURE =>                        ?HTTP_BAD_GATEWAY,
+    ?WAMP_NOT_AUTHORIZED =>                     ?HTTP_FORBIDDEN,
+    ?WAMP_NO_ELIGIBLE_CALLE =>                  ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_PROCEDURE =>                  ?HTTP_NOT_IMPLEMENTED,
+    ?WAMP_NO_SUCH_REALM =>                      ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_REGISTRATION =>               ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_ROLE =>                       ?HTTP_BAD_REQUEST,
+    ?WAMP_NO_SUCH_SESSION =>                    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_NO_SUCH_SUBSCRIPTION =>               ?HTTP_BAD_GATEWAY,
+    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME =>      ?HTTP_BAD_REQUEST,
+    ?WAMP_OPTION_NOT_ALLOWED =>                 ?HTTP_BAD_REQUEST,
+    ?WAMP_PROCEDURE_ALREADY_EXISTS =>           ?HTTP_BAD_REQUEST,
+    ?WAMP_SYSTEM_SHUTDOWN =>                    ?HTTP_INTERNAL_SERVER_ERROR
 }).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
