@@ -283,9 +283,9 @@ is_authorized(Req0, St0) ->
     end.
 
 
-rate_limited(_Req, _St) ->
+rate_limited(Req, St) ->
     %% Result :: false | {true, RetryAfter}
-    false.
+    {false, Req, St}.
 
 
 resource_exists(Req, St) ->

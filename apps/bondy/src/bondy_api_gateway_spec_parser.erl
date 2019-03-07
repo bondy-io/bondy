@@ -38,6 +38,7 @@
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(STATUS_CODES_KEY, <<"status_codes">>).
+-define(LANGUAGES_KEY, <<"languages">>).
 -define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
@@ -229,6 +230,14 @@
         allow_undefined => false,
         datatype => map,
         default => #{}
+    },
+    ?LANGUAGES_KEY => #{
+        alias => languages,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => [<<"en">>],
+        datatype => {list, binary}
     },
     <<"paths">> => #{
         alias => paths,
@@ -1063,6 +1072,7 @@ parse_host(Host0, Ctxt0) ->
     {Vars, Host1} = maps:take(?VARS_KEY, Host0),
     {Defs, Host2} = maps:take(?DEFAULTS_KEY, Host1),
     {Codes, Host3} = maps:take(?STATUS_CODES_KEY, Host2),
+
     Ctxt1 = Ctxt0#{
         ?VARS_KEY => Vars,
         ?DEFAULTS_KEY => Defs,
@@ -1089,7 +1099,7 @@ parse_version(V0, Ctxt0) ->
     %% We parse the status_codes and merge them into ctxt
     {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
     Codes0 = maps:get(?STATUS_CODES_KEY, Ctxt1),
-    Ctxt3 = maps:put(<<"status_codes">>, maps:merge(Codes0, Codes1), Ctxt2),
+    Ctxt3 = maps:put(?STATUS_CODES_KEY, maps:merge(Codes0, Codes1), Ctxt2),
 
     %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
@@ -1437,13 +1447,13 @@ do_dispatch_table(API) ->
 dispatch_table_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
 
-dispatch_table_version(Host, Realm, {_Name, Spec}) ->
+dispatch_table_version(Host, Realm, {_Name, Version}) ->
     #{
         <<"base_path">> := BasePath,
         <<"is_deprecated">> := Deprecated,
         <<"paths">> := Paths
-    } = Spec,
-    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P)
+    } = Version,
+    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
         || P <- maps:to_list(Paths)].
 
 
@@ -1451,10 +1461,12 @@ dispatch_table_version(Host, Realm, {_Name, Spec}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dispatch_table_path(binary(), binary(), boolean(), binary(), tuple()) ->
+-spec dispatch_table_path(
+    binary(), binary(), boolean(), binary(), tuple(), map()) ->
     [scheme_rule()] | no_return().
 
-dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
+dispatch_table_path(
+    Host, BasePath, Deprecated, Realm, {Path, Spec0}, Version) ->
     AbsPath = <<BasePath/binary, Path/binary>>,
     {Accepts, Spec1} = maps:take(<<"accepts">>, Spec0),
     {Provides, Spec2} = maps:take(<<"provides">>, Spec1),
@@ -1467,11 +1479,13 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
     Sec = maps:get(<<"security">>, Spec3),
     Mod = bondy_api_gateway_handler,
     %% Args required by bondy_api_gateway_handler
+    Languages = [string:lowercase(X) || X <- maps:get(?LANGUAGES_KEY, Version)],
     Args = #{
         api_spec => Spec3,
         realm_uri => Realm,
         deprecated => Deprecated,
-        security => Sec
+        security => Sec,
+        languages => Languages
     },
     lists:flatten([
         [

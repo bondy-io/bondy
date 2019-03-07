@@ -63,6 +63,7 @@
 -export([from_msgpack/2]).
 -export([init/2]).
 -export([is_authorized/2]).
+-export([languages_provided/2]).
 -export([options/2]).
 -export([previously_existed/2]).
 -export([provide/2]).
@@ -100,8 +101,8 @@ allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
-%% languages_provided(Req, St) ->
-%%     {Result, Req, State}.
+languages_provided(Req, #{languages := L} = St) ->
+    {L, Req, St}.
 
 
 content_types_accepted(Req, #{api_spec := Spec} = St) ->
@@ -154,9 +155,9 @@ is_authorized(Req0, St) ->
     end.
 
 
-rate_limited(_Req, _St) ->
+rate_limited(Req, St) ->
     %% Result :: false | {true, RetryAfter}
-    false.
+    {false, Req, St}.
 
 
 resource_exists(Req, #{api_spec := Spec} = St) ->
@@ -449,8 +450,6 @@ update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
     maps_utils:put_path([<<"action">>, <<"result">>], Result, Ctxt);
 
 update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
-    Lang = maps_utils:get_path(
-        [<<"headers">>, <<"accept-language">>], Req, <<"en">>),
     Map = #{
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
@@ -458,7 +457,7 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
         <<"username">> => maps:get(<<"sub">>, Claims),
         <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
         <<"groups">> => maps:get(<<"groups">>, Claims),
-        <<"locale">> => Lang,
+        <<"locale">> => maps:get(<<"language">>, Req),
         <<"meta">> => maps:get(<<"meta">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
@@ -472,7 +471,8 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
     Id = opencensus:generate_trace_id(),
-     M = #{
+
+    M = #{
         %% Msgpack does not support 128-bit integers,
         %% so for the time being we encod it as binary string
         <<"id">> => integer_to_binary(Id),
@@ -484,6 +484,7 @@ init_context(Req) ->
         <<"host">> => cowboy_req:host(Req),
         <<"port">> => cowboy_req:port(Req),
         <<"headers">> => cowboy_req:headers(Req),
+        <<"language">> => maps:get(language, Req, <<"en">>),
         <<"query_string">> => cowboy_req:qs(Req),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req)),
         <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req)),
