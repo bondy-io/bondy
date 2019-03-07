@@ -52,23 +52,24 @@
 }.
 
 
--export([init/2]).
+-export([accept/2]).
 -export([allowed_methods/2]).
--export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
--export([is_authorized/2]).
--export([resource_exists/2]).
--export([previously_existed/2]).
--export([to_json/2]).
--export([to_msgpack/2]).
--export([provide/2]).
+-export([delete_completed/2]).
+-export([delete_resource/2]).
+-export([from_form_urlencoded/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
--export([from_form_urlencoded/2]).
--export([accept/2]).
--export([delete_resource/2]).
--export([delete_completed/2]).
+-export([init/2]).
+-export([is_authorized/2]).
+-export([options/2]).
+-export([previously_existed/2]).
+-export([provide/2]).
+-export([rate_limited/2]).
+-export([resource_exists/2]).
+-export([to_json/2]).
+-export([to_msgpack/2]).
 
 
 
@@ -151,6 +152,11 @@ is_authorized(Req0, St) ->
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St}
     end.
+
+
+rate_limited(_Req, _St) ->
+    %% Result :: false | {true, RetryAfter}
+    false.
 
 
 resource_exists(Req, #{api_spec := Spec} = St) ->

@@ -203,16 +203,17 @@
 
 
 
--export([init/2]).
+-export([accept/2]).
 -export([allowed_methods/2]).
--export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
+-export([init/2]).
 -export([is_authorized/2]).
--export([resource_exists/2]).
--export([resource_existed/2]).
--export([accept/2]).
+-export([options/2]).
 -export([provide/2]).
+-export([rate_limited/2]).
+-export([resource_existed/2]).
+-export([resource_exists/2]).
 
 
 
@@ -280,6 +281,11 @@ is_authorized(Req0, St0) ->
                     {stop, Req1, St0}
             end
     end.
+
+
+rate_limited(_Req, _St) ->
+    %% Result :: false | {true, RetryAfter}
+    false.
 
 
 resource_exists(Req, St) ->
