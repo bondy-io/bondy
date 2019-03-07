@@ -1555,7 +1555,9 @@ prettyprint_permissions(Permissions, Width) ->
 
 prettyprint_permissions([], _Width, Acc) ->
     string:join([string:join(Line, ", ") || Line <- lists:reverse(Acc)], ",\n");
-prettyprint_permissions([Permission|Rest], Width, [H|T] =Acc) ->
+
+prettyprint_permissions([Bin|Rest], Width, [H|T] =Acc) ->
+    Permission = binary_to_list(Bin),
     case length(Permission) + lists:flatlength(H) + 2 + (2 * length(H)) > Width of
         true ->
             prettyprint_permissions(Rest, Width, [[Permission] | Acc]);
@@ -1814,31 +1816,28 @@ validate_password_option(Pass, Options) ->
     {ok, NewOptions}.
 
 
+
 validate_permissions(Perms) ->
-    KnownPermissions = application:get_env(bondy, permissions, []),
+    %% KnownPermissions = application:get_env(bondy, permissions, []),
+    %% We should ge the set of permissions from each subsystem / plugin
+    KnownPermissions = [
+        <<"wamp.register">>,
+        <<"wamp.call">>,
+        <<"wamp.subscribe">>,
+        <<"wamp.publish">>
+    ],
     validate_permissions(Perms, KnownPermissions).
 
 
 validate_permissions([], _) ->
     ok;
 
-validate_permissions([Perm|T], Known) when is_binary(Perm) ->
-    case binary:split(Perm, <<$.>>, [global]) of
-        [App, P] ->
-            try {list_to_existing_atom(App), list_to_existing_atom(P)} of
-                {AppAtom, PAtom} ->
-                    case lists:member(PAtom, lookup(AppAtom, Known, [])) of
-                        true ->
-                            validate_permissions(T, Known);
-                        false ->
-                            {error, {unknown_permission, Perm}}
-                    end
-            catch
-                ?EXCEPTION(error, badarg, _) ->
-                    {error, {unknown_permission, Perm}}
-            end;
-        _ ->
-            {error, {unknown_permission, Perm}}
+validate_permissions([H|T], Known) when is_binary(H) ->
+    case lists:member(H, Known) of
+        true ->
+            validate_permissions(T, Known);
+        false ->
+            {error, {unknown_permission, H}}
     end.
 
 

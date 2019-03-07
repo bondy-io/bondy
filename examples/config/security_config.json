@@ -54,6 +54,27 @@
                 "meta" : {}
             }
         ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.call",
+                    "wamp.subscribe"
+                ],
+                "uri" : "com.myexample",
+                "roles" : ["peer1"]
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.call",
+                    "wamp.subscribe",
+                    "wamp.publish"
+                ],
+                "uri" : "com.myexample",
+                "roles" : ["peer2"]
+            }
+        ],
         "oauth2" : {
             "clients" : [
                 {

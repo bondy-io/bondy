@@ -167,6 +167,14 @@
         datatype => list,
         validator => {list, ?SOURCE_SPEC}
     },
+    <<"grants">> => #{
+        alias => grants,
+        key => <<"grants">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?GRANT_SPEC}
+    },
     <<"private_keys">> => #{
         alias => private_keys,
         key => <<"private_keys">>,
@@ -449,4 +457,61 @@
     }
 }).
 
+
+
+-define(GRANT_SPEC, #{
+    <<"permissions">> => #{
+        alias => permissions,
+        key => <<"permissions">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list,
+            {in, [
+                <<"wamp.register">>,
+                <<"wamp.call">>,
+                <<"wamp.subscribe">>,
+                <<"wamp.publish">>
+            ]}
+        }
+    },
+    <<"uri">> => #{
+        alias => uri,
+        key => <<"uri">>,
+        required => true,
+        allow_null => false,
+        datatype => binary,
+        validator => fun
+            (<<"*">>) ->
+                {ok, all};
+            (<<"all">>) ->
+                {ok, all};
+            (all) ->
+                true;
+            (Uri) when is_binary(Uri) ->
+                true
+        end
+    },
+    <<"roles">> => #{
+        alias => roles,
+        key => <<"roles">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => [
+            {in, [<<"all">>, all]},
+            {list, binary}
+        ],
+        validator => fun
+            (<<"all">>) ->
+                {ok, all};
+            (all) ->
+                true;
+            (List) ->
+                A = sets:from_list(List),
+                B = sets:from_list([<<"all">>, all]),
+                sets:is_disjoint(A, B)
+        end
+    }
+}).
 

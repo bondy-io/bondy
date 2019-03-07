@@ -429,6 +429,7 @@ apply_config(Map0) ->
     ok = apply_config(groups, Map1),
     ok = apply_config(users, Map1),
     ok = apply_config(sources, Map1),
+    ok = apply_config(grants, Map1),
     ok.
 
 
@@ -451,6 +452,20 @@ apply_config(sources, #{<<"uri">> := Uri, <<"sources">> := Sources}) ->
     _ = [
         ok = maybe_error(bondy_security_source:add(Uri, Source))
         || Source <- Sources
+    ],
+    ok;
+
+apply_config(grants, #{<<"uri">> := RealmUri, <<"grants">> := Grants}) ->
+    _ = [
+        begin
+            #{
+               <<"permissions">> := Permissions,
+               <<"uri">> := Uri,
+               <<"roles">> := Roles
+            } = Grant,
+            ok = maybe_error(
+                bondy_security:add_grant(RealmUri, Roles, Uri, Permissions))
+        end || Grant <- Grants
     ],
     ok;
 
