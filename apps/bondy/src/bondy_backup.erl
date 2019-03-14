@@ -421,7 +421,7 @@ async_restore(#{filename := Filename}, State0) ->
             {ok, _Counters} = OK ->
                 Me ! {restore_reply, OK, self()};
             {error, Reason} = Error ->
-                _ = lager:error("Error;reason=~p, trace=~p", [Reason, erlang:get_stacktrace()]),
+                _ = lager:error("Error;reason=~p", [Reason]),
                 Me ! {restore_reply, Error, self()}
         end
     end),

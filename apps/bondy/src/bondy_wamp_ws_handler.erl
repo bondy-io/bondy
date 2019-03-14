@@ -263,22 +263,22 @@ terminate({error, _Other}, _Req, St) ->
 
 terminate({crash, error, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=error, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=error, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 
 terminate({crash, exit, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=exit, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=exit, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 
 terminate({crash, throw, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=throw, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=throw, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 

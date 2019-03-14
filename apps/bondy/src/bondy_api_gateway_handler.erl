@@ -136,7 +136,7 @@ is_authorized(Req0, St) ->
             _ -> do_is_authorised(Req0, Realm, St)
         end
     catch
-        ?EXCEPTION(error, no_such_realm = Reason, Stacktrace) ->
+        ?EXCEPTION(error, no_such_realm = Reason, _) ->
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),

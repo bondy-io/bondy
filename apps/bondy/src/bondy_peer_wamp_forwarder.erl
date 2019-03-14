@@ -250,8 +250,8 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
         ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% @TODO publish metaevent
             _ = lager:error(
-                "Error handling cast, event=~p, error=~p, reason=~p",
-                [Event, Class, Reason]
+                "Error handling cast, event=~p, error=~p, reason=~p, stacktrace=~p",
+                [Event, Class, Reason, ?STACKTRACE(Stacktrace)]
             )
     end,
     {noreply, State};

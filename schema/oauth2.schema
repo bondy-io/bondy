@@ -1,5 +1,14 @@
 %%-*- mode: erlang -*-
 
+
+
+%% @doc Default location for oauth2 configuration file
+{mapping, "oauth2.config_file", "bondy.oauth2.config_file", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/oauth2_config.json"}
+]}.
+
+
 {mapping, "oauth2.password_grant.duration", "bondy.oauth2.password_grant_duration",
 [
 {default, "15m"},
