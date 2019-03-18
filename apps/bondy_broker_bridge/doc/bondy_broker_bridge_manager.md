@@ -48,7 +48,7 @@ The mops context is map containing the following:
           <<"details">> => map(), % WAMP EVENT.details
           <<"arguments">> => list(),
           <<"arguments_kw">> => map(),
-          <<"processing_timestamp">> => integer()
+          <<"ingestion_timestamp">> => integer()
       }
   }.
 ```

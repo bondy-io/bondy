@@ -51,7 +51,7 @@
 %%         <<"details">> => map(), % WAMP EVENT.details
 %%         <<"arguments">> => list(),
 %%         <<"arguments_kw">> => map(),
-%%         <<"processing_timestamp">> => integer()
+%%         <<"ingestion_timestamp">> => integer()
 %%     }
 %% }.
 %% '''
@@ -410,10 +410,13 @@ handle_info(Info, State) ->
 
 terminate(normal, State) ->
     do_terminate(normal, State);
+
 terminate(shutdown, State) ->
     do_terminate(shutdown, State);
+
 terminate({shutdown, _}, State) ->
     do_terminate(shutdown, State);
+
 terminate(Reason, State) ->
     do_terminate(Reason, State).
 
@@ -552,7 +555,7 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
             <<"details">> => Event#event.details,
             <<"arguments">> => Event#event.arguments,
             <<"arguments_kw">> => Event#event.arguments_kw,
-            <<"processing_timestamp">> => erlang:system_time(millisecond)
+            <<"ingestion_timestamp">> => erlang:system_time(millisecond)
         }
     }.
 
