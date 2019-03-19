@@ -135,7 +135,7 @@ handle_event({event, Topic, #event{} = Event}, State) ->
 handle_call(Event, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
-    {noreply, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_info(_Info, State) ->

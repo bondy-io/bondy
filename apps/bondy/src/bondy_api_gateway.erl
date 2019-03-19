@@ -305,7 +305,7 @@ handle_call({load, Map}, _From, State) ->
 handle_call(Event, From, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
-    {noreply, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast(#event{} = Event, State) ->
@@ -326,7 +326,7 @@ handle_cast(#event{} = Event, State) ->
 
 handle_cast(Event, State) ->
     _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
 handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
@@ -385,7 +385,8 @@ terminate({shutdown, _}, State) ->
     _ = unsubscribe(State),
     ok;
 
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
+    _ = unsubscribe(State),
     ok.
 
 

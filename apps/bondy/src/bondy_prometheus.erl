@@ -309,7 +309,7 @@ handle_event(_Event, State) ->
 handle_call(Event, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p", [Event]),
-    {reply, ok, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_info(_Info, State) ->
