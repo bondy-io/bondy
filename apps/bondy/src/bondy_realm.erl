@@ -58,6 +58,7 @@
 
 -export([add/1]).
 -export([add/2]).
+-export([apply_config/0]).
 -export([auth_methods/1]).
 -export([delete/1]).
 -export([disable_security/1]).
@@ -68,7 +69,6 @@
 -export([get_private_key/2]).
 -export([get_public_key/2]).
 -export([get_random_kid/1]).
--export([apply_config/0]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
@@ -79,7 +79,12 @@
 -export([update/2]).
 -export([uri/1]).
 
-%% -compile({no_auto_import, [put/2]}).
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
