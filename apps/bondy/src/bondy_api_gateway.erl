@@ -80,7 +80,10 @@
 %% =============================================================================
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
@@ -294,9 +297,9 @@ handle_call(apply_config, _From, State) ->
 
 handle_call({load, Map}, _From, State) ->
     try
-        ok = load_spec(Map),
+        Res = load_spec(Map),
         ok = rebuild_dispatch_tables(),
-        {reply, ok, State}
+        {reply, Res, State}
     catch
         ?EXCEPTION(_, Reason, _) ->
             {reply, {error, Reason}, State}

@@ -214,6 +214,21 @@ map({request_error, {Key, _}, Desc}) when is_atom(Key), is_atom(Desc) ->
         <<"description">> => Desc
     };
 
+map({badarg, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
+    #{
+        <<"code">> => <<"badarg">>,
+        <<"message">> => Mssg,
+        <<"description">> => <<"">>
+    };
+
+map({badheader, Header, Desc})
+when is_binary(Desc); is_list(Desc); is_atom(Desc) ->
+    #{
+        <<"code">> => <<"badarg">>,
+        <<"message">> => <<"The header '", Header/binary, "' is malformed.">>,
+        <<"description">> => Desc
+    };
+
 map({Code, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
     #{
         <<"code">> => Code,

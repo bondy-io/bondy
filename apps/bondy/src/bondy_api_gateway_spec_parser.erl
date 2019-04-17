@@ -1654,8 +1654,10 @@ content_types_provided(Bin) ->
 check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
-            error(
-                {badarg,  <<"There is no realm named ", $', Uri/binary, $'>>});
+            Reason = {
+                badarg,  <<"There is no realm named ", $', Uri/binary, $'>>
+            },
+            error(Reason);
         _ ->
             ok
     end.
