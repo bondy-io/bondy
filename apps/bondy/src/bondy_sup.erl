@@ -80,6 +80,8 @@ start_link() ->
 
 init([]) ->
     Children = [
+        %% bondy_config_manager should be first
+        ?WORKER(bondy_config_manager, [], permanent, 30000),
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),

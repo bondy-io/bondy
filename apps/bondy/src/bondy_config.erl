@@ -45,8 +45,10 @@ init() ->
     %% Init from environment
     Config0 = application:get_all_env(bondy),
     Config1 = [{priv_dir, priv_dir()} | Config0],
+    %% We initialise the config, caching all values as code
     %% We set configs at first level only
     _ = [set(Key, Value) || {Key, Value} <- Config1],
+    _ = lager:info("Bondy configuration initialised"),
     ok.
 
 
@@ -55,6 +57,7 @@ init() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple()) -> term().
+
 get([H|T]) ->
     case get(H) of
         Term when is_map(Term) ->
@@ -80,6 +83,7 @@ get(Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
+
 get([H|T], Default) ->
     case get(H, Default) of
         Term when is_map(Term) ->
@@ -102,6 +106,7 @@ get(Key, Default) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set(Key :: atom() | tuple(), Default :: term()) -> ok.
+
 set(Key, Value) ->
     application:set_env(?APP, Key, Value),
     bondy_mochiglobal:put(Key, Value).

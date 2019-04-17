@@ -69,10 +69,8 @@ vsn() ->
 start(_Type, Args) ->
     %% We initialise the environment
     ok = setup_env(Args),
-    %% We initialise the config, caching all values as code
-    ok = bondy_config:init(),
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
-    %%  until we are ready
+    %% until we are ready to do it
     ok = disable_aae(),
 
     case bondy_sup:start_link() of
@@ -83,7 +81,7 @@ start(_Type, Args) ->
             ok = bondy_cli:register(),
             ok = setup_bondy_realm(),
             ok = setup_event_handlers(),
-            ok = setup_internal_subscriptions(),
+            ok = setup_wamp_subscriptions(),
             ok = setup_partisan(),
             %% After we return, OTP will call start_phase/3 based on
             %% the order established in the start_phases in bondy.app.src
@@ -99,8 +97,8 @@ start(_Type, Args) ->
 %% -----------------------------------------------------------------------------
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
-    %% This is to enable operations during startup and also heartbeats
-    %% e.g. K8s liveness probe.
+    %% This is to enable certain operations during startup i.e. heartbeats
+    %% and external liveness probe e.g. K8s
     bondy_api_gateway:start_admin_listeners();
 
 start_phase(configure_features, normal, []) ->
@@ -113,22 +111,18 @@ start_phase(init_registry, normal, []) ->
     %% In previous versions of Bondy we piggy backed on a disk-only version of
     %% plum_db to get registry synchronisation across the cluster.
     %% During the previous registry initialisation no client should be
-    %% connected.
-    %% This was a clean way of avoiding new registrations interfiering with
-    %% the registry restore and cleanup.
-    %%
+    %% connected. This was a clean way of avoiding new registrations
+    %% interfiering with the registry restore and cleanup.
     %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
-    %% longer store the registry on disk, but we restore everything from the
+    %% longer store the registry on disk, we restore everything from the
     %% network. However, we kept this step as it is clean and allows us to do
     %% some validations and preparations.
-    %% TODO consider forcing an AAE exchange here to get a the registry in sync
-    %% with the cluster before init_listeners
     bondy_registry:init();
 
 start_phase(restore_aae_config, normal, []) ->
-    {ok, Enabled} = application:get_env(plum_db, priv_aae_enabled),
-    ok = plum_db_config:set(aae_enabled, Enabled),
-    _ = lager:info("Restored plum_db AAE user configuration; status=~p", [Enabled]),
+    ok = maybe_enable_aae(),
+    %% TODO conditionally force an AAE exchange here to get a the
+    %% registry in sync with the cluster before init_listeners
     ok;
 
 start_phase(init_listeners, normal, []) ->
@@ -160,15 +154,6 @@ stop(_State) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
-disable_aae() ->
-    Enabled = plum_db_config:get(aae_enabled, true),
-    ok = application:set_env(plum_db, priv_aae_enabled, Enabled),
-    ok = plum_db_config:set(aae_enabled, false),
-    _ = lager:info("Temporarily overriden user plum_db AAE configuration; status=disabled"),
-    ok.
 
 
 %% @private
@@ -205,8 +190,12 @@ setup_event_handlers() ->
     ok.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-setup_internal_subscriptions() ->
+%% @doc Sets up the internal WAMP subscriptions.
+%% @end
+%% -----------------------------------------------------------------------------
+setup_wamp_subscriptions() ->
     %% TODO moved this into each app when we finish restructuring
     Opts = #{match => <<"exact">>},
     _ = bondy:subscribe(
@@ -221,13 +210,13 @@ setup_internal_subscriptions() ->
         ?USER_DELETED,
         fun bondy_api_gateway_wamp_handler:handle_event/2
     ),
-    bondy:subscribe(
+    _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?USER_UPDATED,
         fun bondy_api_gateway_wamp_handler:handle_event/2
     ),
-    bondy:subscribe(
+    _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?PASSWORD_CHANGED,
@@ -237,29 +226,59 @@ setup_internal_subscriptions() ->
 
 
 %% @private
+disable_aae() ->
+    case plum_db_config:get(aae_enabled, true) of
+        true ->
+            ok = application:set_env(plum_db, priv_aae_enabled, true),
+            ok = plum_db_config:set(aae_enabled, false),
+            _ = lager:info(
+                "Temporarily disabled active anti-entropy (AAE) during initialisation"),
+            ok;
+        false ->
+            ok
+    end.
+
+maybe_enable_aae() ->
+    case application:get_env(plum_db, priv_aae_enabled, false) of
+        true ->
+            ok = plum_db_config:set(aae_enabled, true),
+            _ = lager:info("Active anti-entropy (AAE) enabled");
+        false ->
+            ok
+    end.
+
+
+%% @private
 stop_router_services() ->
     _ = lager:info("Initiating shutdown"),
-    %% We stop accepting new connections on HTTP/Websockets
+
+    %% We stop accepting new connections on HTTP/S and WS/S
+    _ = lager:info("Suspending HTTP/S and WS/S listeners"),
     ok = bondy_api_gateway:suspend_listeners(),
+
     %% We stop accepting new connections on TCP/TLS
+    _ = lager:info("Suspending TCP/TLS listeners"),
     ok = bondy_wamp_raw_handler:suspend_listeners(),
 
-    %% We ask the router to shutdown which will send a goodbye to all sessions
+    %% We ask the router to shutdown. This will send a goodbye to all sessions
+    _ = lager:info("Shutting down all WAMP sessions"),
     ok = bondy_router:shutdown(),
 
-    %% We sleep for a minute to allow all sessions to terminate gracefully
+    %% We sleep for a while to allow all sessions to terminate gracefully
     Secs = bondy_config:get(shutdown_grace_period),
     _ = lager:info(
-        "Awaiting ~p secs for clients to gracefully disconnect.",
+        "Awaiting ~p secs for WAMP sessions to gracefully terminate",
         [Secs]
     ),
     ok = timer:sleep(Secs * 1000),
-    _ = lager:info("Terminating all client connections"),
 
-    %% We force the HTTP/WS connections to stop
+    %% We force the HTTP/S and WS/S connections to stop
+    _ = lager:info("Terminating all HTTP/S and WS/S connections"),
     ok = bondy_api_gateway:stop_listeners(),
 
-    %% We force the TCP and TLS connections to stop
+    %% We force the TCP/TLS connections to stop
+    _ = lager:info("Terminating all TCP/TLS connections"),
     ok = bondy_wamp_raw_handler:stop_listeners(),
 
+    _ = lager:info("Shutdown finished"),
     ok.
