@@ -20,7 +20,7 @@
 -module(bondy_security_source).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_Security.hrl").
+-include("bondy_security.hrl").
 
 -type source() :: map().
 
