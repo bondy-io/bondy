@@ -265,7 +265,7 @@ stop_router_services() ->
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully
-    Secs = bondy_config:get(shutdown_grace_period),
+    Secs = bondy_config:get(shutdown_grace_period, 5),
     _ = lager:info(
         "Awaiting ~p secs for WAMP sessions to gracefully terminate",
         [Secs]
