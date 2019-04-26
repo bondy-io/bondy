@@ -119,6 +119,7 @@
 -export([revoke_refresh_tokens/3]).
 -export([revoke_token/4]).
 -export([revoke_token/5]).
+-export([revoke_tokens/3]).
 -export([revoke_tokens/4]).
 -export([verify_jwt/2]).
 -export([verify_jwt/3]).
