@@ -153,7 +153,7 @@
 %% @doc http.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
-  {default, {{admin_api_http_port}} },
+  {default, "{{admin_api_http_port}}" },
   {datatype, integer},
   hidden
 ]}.
@@ -229,7 +229,7 @@
 %% @doc https.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
-  {default, {{admin_api_https_port}} },
+  {default, "{{admin_api_https_port}}" },
   {datatype, integer},
   hidden
 ]}.
@@ -323,7 +323,7 @@
 %% @doc api_gateway.http.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
-  {default, {{api_gateway_http_port}}},
+  {default, "{{api_gateway_http_port}}"},
   {datatype, integer},
   hidden
 ]}.
@@ -417,7 +417,7 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
-  {default, {{api_gateway_https_port}} },
+  {default, "{{api_gateway_https_port}}" },
   {datatype, integer},
   hidden
 ]}.
@@ -517,7 +517,7 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tcp.port", "bondy.wamp_tcp.port", [
-  {default, {{wamp_tcp_port}}},
+  {default, "{{wamp_tcp_port}}"},
   {datatype, integer}
 ]}.
 
@@ -595,7 +595,7 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tls.port", "bondy.wamp_tls.port", [
-  {default, {{wamp_tls_port}}},
+  {default, "{{wamp_tls_port}}"},
   {datatype, integer}
 ]}.
 
