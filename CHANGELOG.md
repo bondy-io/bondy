@@ -1,4 +1,8 @@
 # CHANGELOG
+## 0.8.2
+
+- Migration to OTP 21.3 or higher.
+- Upgraded all dependencies to support OTP 21
 
 ## 0.8.1
 
