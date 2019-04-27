@@ -131,9 +131,10 @@ options(Req, #{api_spec := Spec} = St) ->
 is_authorized(Req0, St) ->
     try
         Realm = bondy_realm:fetch(maps:get(realm_uri, St)),
+        RealmUri = bondy_realm:uri(Realm),
         case cowboy_req:method(Req0) of
             <<"OPTIONS">> -> {true, Req0, St};
-            _ -> do_is_authorised(Req0, Realm, St)
+            _ -> do_is_authorised(Req0, RealmUri, St)
         end
     catch
         ?EXCEPTION(error, no_such_realm = Reason, _) ->
