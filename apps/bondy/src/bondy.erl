@@ -244,18 +244,25 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                 Timeout ->
                     Mssg = iolist_to_binary(
                         io_lib:format(
-                            "The operation could not be completed in time "
+                            "The operation could not be completed in time"
                             " (~p milliseconds).",
                             [Timeout]
                         )
                     ),
-                    Args = [Mssg],
-                    ArgsKw = #{
+                    ErrorDetails = maps:new(),
+                    ErrorArgs = [Mssg],
+                    ErrorArgsKw = #{
                         procedure_uri => ProcedureUri,
                         timeout => Timeout
                     },
                     Error = wamp_message:error(
-                        ?CALL, ReqId, #{}, ?BONDY_ERROR_TIMEOUT, Args, ArgsKw),
+                        ?CALL,
+                        ReqId,
+                        ErrorDetails,
+                        ?BONDY_ERROR_TIMEOUT,
+                        ErrorArgs,
+                        ErrorArgsKw
+                    ),
                     ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
                     {error, message_to_map(Error), Ctxt1}
             end;
