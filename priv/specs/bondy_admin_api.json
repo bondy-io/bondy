@@ -46,7 +46,7 @@
             "defaults" : {
                 "timeout" : 20000
             },
-            "languages": ["en"],
+            "languages": ["en", "es-AR"],
             "paths" : {
                 "/services/create_backup" : {
                     "is_collection" : false,
