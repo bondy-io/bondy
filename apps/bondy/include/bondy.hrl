@@ -41,48 +41,48 @@
 
 
 -define(DEALER_FEATURES, #{
+    call_timeout => true,
+    shared_registration => true,
+    call_canceling => true,
+    pattern_based_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
-    call_canceling => false,
     caller_identification => false,
     call_trustlevels => false,
     registration_meta_api => false,
     registration_revocation => false,
     session_meta_api => false,
-    pattern_based_registration => true,
     reflection => false,
-    shared_registration => true,
     sharded_registration => false
 }).
 
 -define(CALLEE_FEATURES, #{
+    call_timeout => true,
+    call_canceling => true,
+    shared_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
-    call_canceling => false,
     caller_identification => false,
     call_trustlevels => false,
     registration_revocation => false,
     session_meta_api => false,
     pattern_based_registration => true,
-    shared_registration => true,
     sharded_registration => false
 }).
 
 -define(CALLER_FEATURES, #{
+    call_timeout => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
     call_canceling => false,
     caller_identification => false
 }).
 
 -define(BROKER_FEATURES, #{
-    event_history => false,
     pattern_based_subscription => true,
+    publisher_exclusion => true,
+    event_history => false,
     publication_trustlevels => false,
-    publisher_exclusion => false,
     publisher_identification => false,
     session_meta_api => false,
     sharded_subscription => false,
@@ -92,15 +92,15 @@
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
-    event_history => false,
     pattern_based_subscription => true,
+    event_history => false,
     publication_trustlevels => false,
     publisher_identification => false,
     sharded_subscription => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
-    publisher_exclusion => false,
+    publisher_exclusion => true,
     publisher_identification => false,
     subscriber_blackwhite_listing => false
 }).
