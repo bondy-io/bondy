@@ -47,6 +47,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_wamp_ws_handler).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -109,7 +110,7 @@ init(Req0, _) ->
                 {error, _Reason} ->
                     %% Returning ok will cause the handler to
                     %% stop in websocket_handle
-                    Req1 = cowboy_req:reply(400, Req0),
+                    Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
                     {ok, Req1, undefined}
             end;
         {error, invalid_subprotocol} ->
@@ -118,12 +119,12 @@ init(Req0, _) ->
                 <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            Req1 = cowboy_req:reply(400, Req0),
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
         {error, _Reason} ->
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            Req1 = cowboy_req:reply(400, Req0),
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined}
     end.
 

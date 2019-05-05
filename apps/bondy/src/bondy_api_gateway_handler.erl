@@ -36,9 +36,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
--include("bondy.hrl").
--include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("http_api.hrl").
+-include("bondy_api_gateway.hrl").
+-include("bondy.hrl").
 
 -type state() :: #{
     api_spec => map(),
@@ -138,7 +139,7 @@ is_authorized(Req0, St) ->
         end
     catch
         ?EXCEPTION(error, no_such_realm = Reason, _) ->
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St};
@@ -149,7 +150,7 @@ is_authorized(Req0, St) ->
                 [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St
             ),
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St}
@@ -202,7 +203,7 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             {stop, Req1, St2};
 
         {error, Response0, St2} ->
-            {StatusCode, Response1} = take_status_code(Response0, 500),
+            {StatusCode, Response1} = take_status_code(Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St2};
 
@@ -278,7 +279,7 @@ do_is_authorised(
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
             },
-            Req2 = reply(401, json, Response, Req0),
+            Req2 = reply(?HTTP_UNAUTHORIZED, json, Response, Req0),
             {stop, Req2, St0};
         {error, Reason} ->
             Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
@@ -319,7 +320,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St1};
 
         {error, Response0, St1} ->
-            {StatusCode, Response1} = take_status_code(Response0, 500),
+            {StatusCode, Response1} = take_status_code(Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St1};
 
@@ -328,7 +329,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St1}
     catch
         ?EXCEPTION(throw, Reason, _) ->
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
@@ -339,7 +340,8 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St0
             ),
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            {StatusCode, Body} = take_status_code(
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0}
@@ -371,7 +373,8 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
             {error, Response0, St2} ->
-                {HTTPCode, Response1} = take_status_code(Response0, 500),
+                {HTTPCode, Response1} = take_status_code(
+                    Response0, ?HTTP_INTERNAL_SERVER_ERROR),
                 Req2 = reply(HTTPCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
 
@@ -381,7 +384,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
     catch
         ?EXCEPTION(throw, Reason, _) ->
             {StatusCode1, Body} = take_status_code(
-                bondy_error:map(Reason), 400),
+                bondy_error:map(Reason), ?HTTP_BAD_REQUEST),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
@@ -393,7 +396,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
-                bondy_error:map(Reason), 500),
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0}
@@ -409,7 +412,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
 
 take_status_code(Term) ->
-    take_status_code(Term, 500).
+    take_status_code(Term, ?HTTP_INTERNAL_SERVER_ERROR).
 
 
 %% @private
@@ -714,7 +717,8 @@ perform_action(
             Ctxt1 = update_context({error, Error}, Ctxt0),
             Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
             St2 = maps:update(api_context, Ctxt1, St1),
-            {StatusCode1, Response1} = take_status_code(Response0, 500),
+            {StatusCode1, Response1} = take_status_code(
+                Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             {error, StatusCode1, Response1, St2}
     end.
 
@@ -722,7 +726,7 @@ perform_action(
 
 %% @private
 from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0)
-when StatusCode >= 400 andalso StatusCode < 600->
+when StatusCode >= 400 andalso StatusCode < 600 ->
     Ctxt0 = maps:get(api_context, St0),
     Error = #{
         <<"status_code">> => StatusCode,
@@ -774,7 +778,7 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
             <<"www-authenticate">> => Auth
         }
     },
-    reply(401, error_encoding(Enc), Resp, Req).
+    reply(?HTTP_UNAUTHORIZED, error_encoding(Enc), Resp, Req).
 
 
 %% @private
@@ -894,30 +898,77 @@ error_encoding(_Other) -> json.
 
 
 %% @private
-uri_to_status_code(timeout) ->                              504;
-uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->             503;
-uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                 504;
-uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->           403;
-uri_to_status_code(?WAMP_CANCELLED) ->                      400;
-uri_to_status_code(?WAMP_CLOSE_REALM) ->                    500;
-uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->        400;
-uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->                500;
-uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->               400;
-uri_to_status_code(?WAMP_INVALID_URI) ->                    400;
-uri_to_status_code(?WAMP_NET_FAILURE) ->                    502;
-uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->                 401;
-uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->              502;
-uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->              501;
-uri_to_status_code(?WAMP_NO_SUCH_REALM) ->                  502;
-uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->           502;
-uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->                   400;
-uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->                500;
-uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->           502;
-uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->  400;
-uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->             400;
-uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->       400;
-uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->                500;
-uri_to_status_code(_) ->                                    500.
+uri_to_status_code(timeout) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+
+uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+
+uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+
+uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->
+    ?HTTP_FORBIDDEN;
+
+uri_to_status_code(?WAMP_CANCELLED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_CLOSE_REALM) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_INVALID_URI) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_NET_FAILURE) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->
+    ?HTTP_UNAUTHORIZED;
+
+uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->
+    ?HTTP_NOT_IMPLEMENTED;
+
+uri_to_status_code(?WAMP_NO_SUCH_REALM) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(_) ->
+    ?HTTP_INTERNAL_SERVER_ERROR.
 
 
 %% @private

@@ -17,6 +17,7 @@
 %% =============================================================================
 
 -module(bondy_api_oauth2_handler).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_api_gateway.hrl").
 
@@ -514,7 +515,8 @@ reply(common_name_mismatch, Req) ->
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     ErrorMap = maps:without([<<"status_code">>], bondy_error:map(Error)),
-    cowboy_req:reply(401, prepare_request(ErrorMap, Headers, Req));
+    cowboy_req:reply(
+        ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req));
 
 reply(unsupported_token_type = Error, Req) ->
     {Code, Map} = maps:take(<<"status_code">>, bondy_error:map(Error)),
@@ -524,7 +526,7 @@ reply(Error, Req) ->
     Map0 = bondy_error:map(Error),
     {Code, Map1} = case maps:take(<<"status_code">>, Map0) of
         error ->
-            {400, Map0};
+            {?HTTP_BAD_REQUEST, Map0};
         Res ->
             Res
     end,
