@@ -338,7 +338,7 @@ do_is_authorized(Req0, St0) ->
                 {error, Reason} ->
                     _ = lager:info(
                         "API Client login failed due to invalid client ID; "
-                        "reason=~p, realm=~p, client_ip=~p",
+                        "reason=~p, realm=~p, client_ip=~s",
                         [Reason, St0#state.realm_uri, ClientIP]
                     ),
                     Req1 = reply(oauth2_invalid_client, Req0),
@@ -348,7 +348,7 @@ do_is_authorized(Req0, St0) ->
         ?EXCEPTION(_, {request_error, {header, H}, Desc}, _) ->
             _ = lager:info(
                 "API Client login failed due to bad request; "
-                "reason=badheader, header=~p, realm=~p, client_ip=~p ",
+                "reason=badheader, header=~p, realm=~p, client_ip=~s ",
                 [H, St0#state.realm_uri, ClientIP]
             ),
             Req1 = reply({badheader, H, Desc}, Req0),
