@@ -1,4 +1,4 @@
-%%
+%% =============================================================================
 %%  bondy_api_gateway_spec_parser.erl - parses the Bondy API Specification file
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
@@ -14,6 +14,7 @@
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
+%% =============================================================================
 
 %% -----------------------------------------------------------------------------
 %% @doc

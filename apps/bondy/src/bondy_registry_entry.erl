@@ -15,6 +15,11 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").

@@ -16,10 +16,8 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-%% =============================================================================
-%% @doc
-%% A Cowboy WS handler.
+%% -----------------------------------------------------------------------------
+%% @doc A Cowboy WS handler.
 %%
 %% Each WAMP message is transmitted as a separate WebSocket message
 %% (not WebSocket frame)
@@ -45,7 +43,7 @@
 %% identifiers for additional serialization formats with the official
 %% WebSocket subprotocol registry.
 %% @end
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_handler).
 -include("http_api.hrl").
 -include("bondy.hrl").
