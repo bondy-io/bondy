@@ -58,6 +58,7 @@
 -export_type([t/0]).
 
 -export([agent/1]).
+-export([authid/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
@@ -247,6 +248,15 @@ agent(#{session := S}) ->
     bondy_session:agent(S);
 agent(#{}) ->
     undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authid(t()) -> binary() | undefined.
+authid(#{authid := Val}) -> Val;
+authid(#{}) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
