@@ -60,14 +60,22 @@
                     "wamp.register",
                     "wamp.unregister"
                 ],
-                "uri" : "com.example.on_counter",
+                "uri" : "com.example.add2",
                 "roles" : ["peer1"]
+            },
+            {
+                "permissions" : [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe"
+                ],
+                "uri" : "com.example.on_counter",
+                "roles" : ["peer1", "peer2"]
             },
             {
                 "permissions" : [
                     "wamp.call"
                 ],
-                "uri" : "com.example.on_counter",
+                "uri" : "com.example.add2",
                 "roles" : ["peer1", "peer2"]
             }
         ],

@@ -36,6 +36,7 @@
 
 
 -export([authenticate/4]).
+-export([authorize/3]).
 
 
 %% =============================================================================
@@ -77,11 +78,45 @@ authenticate(_, _Scheme, _Realm, _Peer) ->
 
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns 'ok' or an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authorize(binary(), binary(), bondy_context:t()) ->
+    ok | no_return().
+
+authorize(Permission, Resource, Ctxt) ->
+    %% We could be cashing the security ctxt,
+    %% the data is in ets so it should be pretty fast.
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    IsEnabled = bondy_realm:is_security_enabled(RealmUri),
+    maybe_authorize(IsEnabled, Permission, Resource, Ctxt).
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 
+
+maybe_authorize(true, Permission, Resource, Ctxt) ->
+    Username = bondy_context:authid(Ctxt),
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    SecCtxt = bondy_security:get_context(RealmUri, Username),
+    case bondy_security:check_permission({Permission, Resource}, SecCtxt) of
+        {true, _SecCtxt1} ->
+            ok;
+        {false, Mssg, _SecCtxt1} ->
+            error({not_authorized, Mssg})
+    end;
+
+maybe_authorize(false, _, _, _) ->
+    ok.
+
+
 %% @private
 conn_info({IP, _Port}) ->
     [{ip, IP}].
+

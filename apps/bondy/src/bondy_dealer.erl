@@ -296,23 +296,35 @@ is_feature_enabled(F) when is_binary(F) ->
     maps:get(F, ?DEALER_FEATURES, false).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
-handle_message(#unregister{} = M, Ctxt) ->
-    Reply = case unregister(M#unregister.registration_id, Ctxt) of
-        ok ->
-            wamp_message:unregistered(M#unregister.request_id);
-        {error, Reason} ->
-            unregister_error(Reason, M)
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), Reply);
+handle_message(M, Ctxt) ->
+    try
+        do_handle_message(M, Ctxt)
+    catch
+        _:{not_authorized, Reason} ->
+            Reply = not_authorized_error(Reason, M, Ctxt),
+            bondy:send(bondy_context:peer_id(Ctxt), Reply);
+        throw:not_found ->
+            Reply = not_found_error(M, Ctxt),
+            bondy:send(bondy_context:peer_id(Ctxt), Reply)
+    end.
 
-handle_message(#cancel{} = M, Ctxt0) ->
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec do_handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+
+do_handle_message(#unregister{} = M, Ctxt) ->
+    unregister(M, Ctxt);
+
+do_handle_message(#cancel{} = M, Ctxt0) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
     CallId = M#cancel.request_id,
     Caller = bondy_context:peer_id(Ctxt0),
@@ -391,7 +403,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
             ok
     end;
 
-handle_message(#yield{} = M, Ctxt0) ->
+do_handle_message(#yield{} = M, Ctxt0) ->
     %% A Callee is replying to a previous wamp_invocation()
     %% which we generated based on a Caller wamp_call()
     %% We match the wamp_yield() with the originating wamp_invocation()
@@ -419,7 +431,7 @@ handle_message(#yield{} = M, Ctxt0) ->
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
-handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
+do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     Callee = bondy_context:peer_id(Ctxt0),
     Fun = fun
         (empty) ->
@@ -435,7 +447,7 @@ handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
-handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
+do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     %% A callee is responding with an error to an INTERRUPT message
     %% We need to turn this into a CANCEL error
     Callee = bondy_context:peer_id(Ctxt0),
@@ -453,23 +465,32 @@ handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     end,
     ok;
 
-handle_message(
-    #call{procedure_uri = <<"com.leapsight.bondy", _/binary>>} = M, Ctxt) ->
-    %% TODO
+do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
+    %% TODO Maybe
     %% ReqId = bondy_utils:get_id(global),
     %% spawn with pool -> bondy_dealer_wamp_handler:handle_call(M, Ctxt);
     %% {ok, ReqId, Ctxt}.
+    ok = bondy_security_utils:authorize(<<"wamp.call">>, Uri, Ctxt),
+    handle_call(M, Ctxt).
+
+
+%% @private
+handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
     bondy_dealer_wamp_handler:handle_call(M, Ctxt);
 
-handle_message(
-    #call{procedure_uri = <<"wamp.registration", _/binary>>} = M, Ctxt) ->
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
     bondy_dealer_wamp_handler:handle_call(M, Ctxt);
 
-handle_message(
+handle_call(
+    #call{procedure_uri = <<"wamp.registration.", _/binary>>} = M, Ctxt) ->
+    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+
+handle_call(
     #call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
     bondy_broker_wamp_handler:handle_call(M, Ctxt);
 
-handle_message(#call{} = M, Ctxt0) ->
+handle_call(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
@@ -670,21 +691,41 @@ register(ProcUri, Options, Ctxt) ->
 %% '{not_authorized, binary()}' error.
 %% @end
 %% -----------------------------------------------------------------------------
--spec unregister(id(), bondy_context:t()) ->
-    ok | {error, {not_authorized, binary()} | not_found}.
+-spec unregister(wamp_unregister(), bondy_context:t()) ->
+    ok | no_return().
 
-unregister(<<"com.leapsight.bondy.", _/binary>>, _) ->
-    {error,
-        {not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>}
-    };
-
-unregister(<<"wamp.", _/binary>>, _) ->
-    {error, {not_authorized, <<"Use of reserved namespace 'wamp'.">>}};
-
-unregister(RegId, Ctxt) ->
+unregister(#unregister{} = M, Ctxt) ->
+    RegId = M#unregister.registration_id,
+    RealmUri = bondy_context:realm_uri(Ctxt),
     %% TODO Shouldn't we restrict this operation to the peer who registered it?
-    %% or a Bondy Admin?
-    bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2).
+    %% and/or a Bondy Admin for revoke registration?
+    case bondy_registry:lookup(registration, RegId, RealmUri) of
+        {error, not_found} ->
+            throw(not_found);
+        Entry ->
+            unregister(bondy_registry_entry:uri(Entry), M, Ctxt)
+    end.
+
+
+%% @private
+unregister(<<"com.leapsight.bondy",  _/binary>>, _, _) ->
+    NS = <<"com.leapsight.bondy">>,
+    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
+
+unregister(<<"bondy",  _/binary>>, _, _) ->
+    NS = <<"bondy">>,
+    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
+
+unregister(<<"wamp", _/binary>>, _, _) ->
+    NS = <<"wamp">>,
+    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
+
+unregister(TopicUri, M, Ctxt) ->
+    RegId = M#unregister.request_id,
+    ok = bondy_security_utils:authorize(<<"wamp.unregister">>, TopicUri, Ctxt),
+    ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
+    Reply = wamp_message:unregistered(RegId),
+    bondy:send(bondy_context:peer_id(Ctxt), Reply).
 
 
 %% -----------------------------------------------------------------------------
@@ -1124,7 +1165,7 @@ yield_to_result(CallId, M) ->
 
 
 %% @private
-unregister_error(not_found, M) ->
+not_found_error(M, _Ctxt) ->
     Mssg = iolist_to_binary(
         <<"There are no registered procedures matching the id ",
         $', (M#unregister.registration_id)/integer, $'>>
@@ -1139,12 +1180,28 @@ unregister_error(not_found, M) ->
             message => Mssg,
             description => <<"The unregister request failed.">>
         }
-    );
+    ).
 
-unregister_error({not_authorized, Mssg}, M) ->
+
+%% @private
+not_authorized_error(Reason, #register{} = M, Ctxt) ->
+    not_authorized_error(?REGISTER, M#register.request_id, Reason, Ctxt);
+
+not_authorized_error(Reason, #unregister{} = M, Ctxt) ->
+    not_authorized_error(?UNREGISTER, M#unregister.request_id, Reason, Ctxt);
+
+not_authorized_error(Reason, #call{} = M, Ctxt) ->
+    not_authorized_error(?CALL, M#call.request_id, Reason, Ctxt);
+
+not_authorized_error(Reason, #cancel{} = M, Ctxt) ->
+    not_authorized_error(?CANCEL, M#cancel.request_id, Reason, Ctxt).
+
+
+%% @private
+not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
     wamp_message:error(
-        ?UNREGISTER,
-        M#unregister.request_id,
+        Type,
+        ReqId,
         #{},
         ?WAMP_NOT_AUTHORIZED,
         [Mssg],
