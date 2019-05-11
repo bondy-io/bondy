@@ -174,7 +174,6 @@
 -export([handle_message/2]).
 -export([handle_peer_message/4]).
 -export([is_feature_enabled/1]).
--export([register/3]).
 -export([registrations/1]).
 -export([registrations/3]).
 -export([registrations/4]).
@@ -183,6 +182,7 @@
 -export([callees/2]).
 -export([callees/3]).
 
+-compile({no_auto_import, [register/2]}).
 
 
 
@@ -316,13 +316,128 @@ handle_message(M, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Handles inbound messages received from a peer (node).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_peer_message(
+    wamp_message(),
+    To :: remote_peer_id(),
+    From :: remote_peer_id(),
+    Opts :: map()) ->
+    ok | no_return().
+
+
+
+handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
+    %% A remote callee is returning a yield to a local caller.
+    Fun = fun
+        (empty) ->
+            no_matching_promise(M);
+        ({ok, Promise}) ->
+            LocalCaller = bondy_rpc_promise:caller(Promise),
+            CallId = bondy_rpc_promise:call_id(Promise),
+            Result = yield_to_result(CallId, M),
+            bondy:send(Callee, LocalCaller, Result, #{})
+    end,
+    InvocationId = M#yield.request_id,
+    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
+    ok;
+
+handle_peer_message(
+    #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
+    %% A remote callee is returning an error to a local caller.
+    Fun = fun
+        (empty) ->
+            no_matching_promise(M);
+        ({ok, Promise}) ->
+            LocalCaller = bondy_rpc_promise:caller(Promise),
+            CallId = bondy_rpc_promise:call_id(Promise),
+            CallError = M#error{request_id = CallId, request_type = ?CALL},
+            bondy:send(Callee, LocalCaller, CallError, #{})
+    end,
+    InvocationId = M#error.request_id,
+    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
+    ok;
+
+handle_peer_message(
+    #error{request_type = ?CANCEL} = M, Caller, Callee, _Opts) ->
+    %% A CANCEL we made to a remote callee has failed.
+    %% We forward the error back to the local caller, keeping the promise to be
+    %% able to match the future yield message,
+    CallId = M#error.request_id,
+    case bondy_rpc_promise:peek_call(CallId, Caller) of
+        empty ->
+            no_matching_promise(M);
+        {ok, Promise} ->
+            LocalCaller = bondy_rpc_promise:caller(Promise),
+            bondy:send(Callee, LocalCaller, M, #{})
+    end,
+    ok;
+
+handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
+    %% A remote caller is cancelling a previous call-invocation
+    %% made to our local callee.
+    Fun = fun
+        (empty) ->
+            %% TODO We should reply with an error
+            no_matching_promise(M);
+        ({ok, Promise}) ->
+            LocalCallee = bondy_rpc_promise:callee(Promise),
+            bondy:send(Caller, LocalCallee, M, #{})
+    end,
+    InvocationId = M#interrupt.request_id,
+    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Caller, Fun),
+    ok;
+
+handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
+    %% A remote caller is making a call to a local callee.
+    %% We first need to find the registry entry to get the local callee
+    %% At the moment we might not get the Pid in the Calle tuple, so we fetch it
+    {RealmUri, Node, SessionId, _Pid} = Callee,
+    Key = bondy_registry_entry:key_pattern(
+        registration, RealmUri, Node, SessionId, M#invocation.registration_id),
+
+    %% We use lookup because the key is ground
+    case bondy_registry:lookup(Key) of
+        {error, not_found} ->
+            bondy:send(
+                Callee,
+                Caller,
+                no_eligible_callee(invocation, M#invocation.registration_id),
+                #{}
+            );
+        Entry ->
+            LocalCallee = bondy_registry_entry:peer_id(Entry),
+            %% We enqueue the invocation so that we can match it with the
+            %% YIELD or ERROR
+            Promise = bondy_rpc_promise:new(
+                M#invocation.request_id, LocalCallee, Caller),
+            Timeout = bondy_utils:timeout(Opts),
+
+            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
+            bondy:send(Caller, LocalCallee, M, Opts)
+    end.
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec do_handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
+do_handle_message(#register{} = M, Ctxt) ->
+    handle_register(M, Ctxt);
+
 do_handle_message(#unregister{} = M, Ctxt) ->
-    unregister(M, Ctxt);
+    handle_unregister(M, Ctxt);
 
 do_handle_message(#cancel{} = M, Ctxt0) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
@@ -522,118 +637,6 @@ handle_call(#call{} = M, Ctxt0) ->
     invoke(M#call.request_id, M#call.procedure_uri, Fun, M#call.options, Ctxt0).
 
 
-
-%% -----------------------------------------------------------------------------
-%% @doc Handles inbound messages received from a peer (node).
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_peer_message(
-    wamp_message(),
-    To :: remote_peer_id(),
-    From :: remote_peer_id(),
-    Opts :: map()) ->
-    ok | no_return().
-
-
-
-handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
-    %% A remote callee is returning a yield to a local caller.
-    Fun = fun
-        (empty) ->
-            no_matching_promise(M);
-        ({ok, Promise}) ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
-            CallId = bondy_rpc_promise:call_id(Promise),
-            Result = yield_to_result(CallId, M),
-            bondy:send(Callee, LocalCaller, Result, #{})
-    end,
-    InvocationId = M#yield.request_id,
-    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
-    ok;
-
-handle_peer_message(
-    #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
-    %% A remote callee is returning an error to a local caller.
-    Fun = fun
-        (empty) ->
-            no_matching_promise(M);
-        ({ok, Promise}) ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
-            CallId = bondy_rpc_promise:call_id(Promise),
-            CallError = M#error{request_id = CallId, request_type = ?CALL},
-            bondy:send(Callee, LocalCaller, CallError, #{})
-    end,
-    InvocationId = M#error.request_id,
-    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
-    ok;
-
-handle_peer_message(
-    #error{request_type = ?CANCEL} = M, Caller, Callee, _Opts) ->
-    %% A CANCEL we made to a remote callee has failed.
-    %% We forward the error back to the local caller, keeping the promise to be
-    %% able to match the future yield message,
-    CallId = M#error.request_id,
-    case bondy_rpc_promise:peek_call(CallId, Caller) of
-        empty ->
-            no_matching_promise(M);
-        {ok, Promise} ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, LocalCaller, M, #{})
-    end,
-    ok;
-
-handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
-    %% A remote caller is cancelling a previous call-invocation
-    %% made to our local callee.
-    Fun = fun
-        (empty) ->
-            %% TODO We should reply with an error
-            no_matching_promise(M);
-        ({ok, Promise}) ->
-            LocalCallee = bondy_rpc_promise:callee(Promise),
-            bondy:send(Caller, LocalCallee, M, #{})
-    end,
-    InvocationId = M#interrupt.request_id,
-    _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Caller, Fun),
-    ok;
-
-handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
-    %% A remote caller is making a call to a local callee.
-    %% We first need to find the registry entry to get the local callee
-    %% At the moment we might not get the Pid in the Calle tuple, so we fetch it
-    {RealmUri, Node, SessionId, _Pid} = Callee,
-    Key = bondy_registry_entry:key_pattern(
-        registration, RealmUri, Node, SessionId, M#invocation.registration_id),
-
-    %% We use lookup because the key is ground
-    case bondy_registry:lookup(Key) of
-        {error, not_found} ->
-            bondy:send(
-                Callee,
-                Caller,
-                no_eligible_callee(invocation, M#invocation.registration_id),
-                #{}
-            );
-        Entry ->
-            LocalCallee = bondy_registry_entry:peer_id(Entry),
-            %% We enqueue the invocation so that we can match it with the
-            %% YIELD or ERROR
-            Promise = bondy_rpc_promise:new(
-                M#invocation.request_id, LocalCallee, Caller),
-            Timeout = bondy_utils:timeout(Opts),
-
-            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
-            bondy:send(Caller, LocalCallee, M, Opts)
-    end.
-
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
 %% @private
 prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
@@ -654,32 +657,42 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% @doc
 %% Registers an RPC endpoint.
 %% If the registration already exists, it fails with a
-%% `{not_authorized | procedure_already_exists, binary()}' error.
+%% `{not_authorized | procedure_already_exists, binary()}' reason.
 %% @end
 %% -----------------------------------------------------------------------------
--spec register(uri(), map(), bondy_context:t()) ->
-    {ok, map()}
-    | {error, {not_authorized | procedure_already_exists, binary()}}.
+handle_register(#register{procedure_uri = <<"bondy.", _/binary>>}, _) ->
+    throw({not_authorized, <<"Use of reserved namespace 'bondy'.">>});
 
-register(<<"com.leapsight.bondy.", _/binary>>, _, _) ->
-    {error,
-        {not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>}
-    };
+handle_register(
+    #register{procedure_uri = <<"com.leapsight.bondy.", _/binary>>}, _) ->
+    throw({
+        not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>
+    });
 
-register(<<"wamp.", _/binary>>, _, _) ->
-    {error, {not_authorized, <<"Use of reserved namespace 'wamp'.">>}};
+handle_register(#register{procedure_uri = <<"wamp.", _/binary>>}, _) ->
+    throw({not_authorized, <<"Use of reserved namespace 'wamp'.">>});
 
-register(ProcUri, Options, Ctxt) ->
-    case bondy_registry:add(registration, ProcUri, Options, Ctxt) of
+handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
+    ok = bondy_security_utils:authorize(<<"wamp.register">>, Uri, Ctxt),
+
+    #register{options = Opts, request_id = ReqId} = M,
+    PeerId = bondy_context:peer_id(Ctxt),
+
+    case bondy_registry:add(registration, Uri, Opts, Ctxt) of
         {ok, Details, IsFirst} ->
             ok = on_register(IsFirst, Details, Ctxt),
-            {ok, Details};
+            Reply = wamp_message:registered(ReqId, maps:get(id, Details)),
+            bondy:send(PeerId, Reply);
         {error, {already_exists, #{match := Policy}}} ->
-            {error, {
-                procedure_already_exists,
-                <<"The procedure is already registered by another peer with policy ", $', Policy/binary, $', $.>>
-                }
-            }
+            Mssg = <<"The procedure is already registered by another peer with policy ", $', Policy/binary, $', $.>>,
+            Reply = wamp_message:error(
+                ?REGISTER,
+                ReqId,
+                #{},
+                ?WAMP_PROCEDURE_ALREADY_EXISTS,
+                [Mssg]
+            ),
+            bondy:send(PeerId, Reply)
     end.
 
 
@@ -691,10 +704,10 @@ register(ProcUri, Options, Ctxt) ->
 %% '{not_authorized, binary()}' error.
 %% @end
 %% -----------------------------------------------------------------------------
--spec unregister(wamp_unregister(), bondy_context:t()) ->
+-spec handle_unregister(wamp_unregister(), bondy_context:t()) ->
     ok | no_return().
 
-unregister(#unregister{} = M, Ctxt) ->
+handle_unregister(#unregister{} = M, Ctxt) ->
     RegId = M#unregister.registration_id,
     RealmUri = bondy_context:realm_uri(Ctxt),
     %% TODO Shouldn't we restrict this operation to the peer who registered it?
@@ -726,6 +739,7 @@ unregister(TopicUri, M, Ctxt) ->
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:peer_id(Ctxt), Reply).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1122,7 +1136,7 @@ no_such_procedure(ProcUri, CallId) ->
         [Mssg],
         #{
             message => Mssg,
-            description => <<"Either no registration exists for the requested procedure,the match policy used did not match any registered procedures.">>
+            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
         }
     ).
 
