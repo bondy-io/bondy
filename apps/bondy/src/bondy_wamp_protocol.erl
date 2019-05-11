@@ -586,7 +586,7 @@ maybe_auth_challenge(Details, Realm, St0) ->
 challenge(?WAMPCRA_AUTH, User, Details, St) ->
     %% id is the future session_id
     #{id := Id} = Ctxt = St#wamp_state.context,
-    #{username := UserId} = User,
+    #{<<"username">> := UserId} = User,
     Ch0 = #{
         challenge => #{
             authmethod => ?WAMPCRA_AUTH,
