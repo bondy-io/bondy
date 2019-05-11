@@ -54,6 +54,7 @@
 -export([del_user/2]).
 -export([disable/1]).
 -export([enable/1]).
+-export([get_context/2]).
 -export([find_user/2]).
 -export([find_one_user_by_metadata/3]).
 -export([find_unique_user_by_metadata/3]).
@@ -303,9 +304,10 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
                        Permission, "' on any"], utf8, utf8), Context}
     end;
 
-check_permission({Permission, Bucket}, #context{realm_uri = Uri} = Context0) ->
+check_permission(
+    {Permission, Resource}, #context{realm_uri = Uri} = Context0) ->
     Context = maybe_refresh_context(Uri, Context0),
-    MatchG = match_grant(Bucket, Context#context.grants),
+    MatchG = match_grant(Resource, Context#context.grants),
     case lists:member(Permission, MatchG) of
         true ->
             {true, Context};
@@ -315,7 +317,7 @@ check_permission({Permission, Bucket}, #context{realm_uri = Uri} = Context0) ->
                       ["Permission denied: User '",
                        Context#context.username, "' does not have '",
                        Permission, "' on ",
-                       bucket2iolist(Bucket)], utf8, utf8), Context}
+                       bucket2iolist(Resource)], utf8, utf8), Context}
     end.
 
 
@@ -1088,7 +1090,7 @@ disable(RealmUri) ->
 status(RealmUri) ->
     Uri = to_lowercase_bin(RealmUri),
     Enabled = plum_db:get(
-        ?STATUS_PREFIX(Uri), enabled, [{default, false}]),
+        ?STATUS_PREFIX(Uri), enabled, [{default, true}]),
     case Enabled of
         true ->
             enabled;
@@ -1688,6 +1690,7 @@ get_context(#{username := U, realm_uri := R}) ->
     get_context(R, U).
 
 
+
 full_prefix(user, RealmUri) -> ?USERS_PREFIX(RealmUri);
 full_prefix(group, RealmUri) -> ?GROUPS_PREFIX(RealmUri).
 
@@ -1822,8 +1825,11 @@ validate_permissions(Perms) ->
     %% We should ge the set of permissions from each subsystem / plugin
     KnownPermissions = [
         <<"wamp.register">>,
+        <<"wamp.unregister">>,
         <<"wamp.call">>,
+        <<"wamp.cancel">>,
         <<"wamp.subscribe">>,
+        <<"wamp.unsubscribe">>,
         <<"wamp.publish">>
     ],
     validate_permissions(Perms, KnownPermissions).

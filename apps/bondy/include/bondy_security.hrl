@@ -469,8 +469,11 @@
         datatype => {list,
             {in, [
                 <<"wamp.register">>,
+                <<"wamp.unregister">>,
                 <<"wamp.call">>,
+                <<"wamp.cancel">>,
                 <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
                 <<"wamp.publish">>
             ]}
         }

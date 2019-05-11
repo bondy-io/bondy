@@ -58,21 +58,17 @@
             {
                 "permissions" : [
                     "wamp.register",
-                    "wamp.call",
-                    "wamp.subscribe"
+                    "wamp.unregister"
                 ],
-                "uri" : "com.myexample",
+                "uri" : "com.example.on_counter",
                 "roles" : ["peer1"]
             },
             {
                 "permissions" : [
-                    "wamp.register",
-                    "wamp.call",
-                    "wamp.subscribe",
-                    "wamp.publish"
+                    "wamp.call"
                 ],
-                "uri" : "com.myexample",
-                "roles" : ["peer2"]
+                "uri" : "com.example.on_counter",
+                "roles" : ["peer1", "peer2"]
             }
         ],
         "oauth2" : {

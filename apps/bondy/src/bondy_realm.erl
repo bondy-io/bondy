@@ -137,7 +137,7 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_security_enabled(realm()) -> boolean().
+-spec is_security_enabled(realm() | uri()) -> boolean().
 is_security_enabled(R) ->
     security_status(R) =:= enabled.
 
@@ -146,8 +146,11 @@ is_security_enabled(R) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec security_status(realm()) -> enabled | disabled.
+-spec security_status(realm() | uri()) -> enabled | disabled.
 security_status(#realm{uri = Uri}) ->
+    security_status(Uri);
+
+security_status(Uri) when is_binary(Uri) ->
     bondy_security:status(Uri).
 
 
