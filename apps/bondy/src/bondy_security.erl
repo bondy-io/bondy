@@ -298,10 +298,17 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
             {true, Context};
         false ->
             %% no applicable grant
-            {false, unicode:characters_to_binary(
-                      ["Permission denied: User '",
-                       Context#context.username, "' does not have '",
-                       Permission, "' on any"], utf8, utf8), Context}
+            Mssg = unicode:characters_to_binary(
+                [
+                    "Permission denied: User '",
+                    Context#context.username,
+                    "' does not have permission '",
+                    Permission, "' on any"
+                ],
+                utf8,
+                utf8
+            ),
+            {false, Mssg, Context}
     end;
 
 check_permission(
