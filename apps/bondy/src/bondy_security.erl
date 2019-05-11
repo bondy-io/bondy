@@ -320,11 +320,18 @@ check_permission(
             {true, Context};
         false ->
             %% no applicable grant
-            {false, unicode:characters_to_binary(
-                      ["Permission denied: User '",
-                       Context#context.username, "' does not have '",
-                       Permission, "' on ",
-                       bucket2iolist(Resource)], utf8, utf8), Context}
+            Mssg = unicode:characters_to_binary(
+                [
+                    "Permission denied: User '",
+                    Context#context.username,
+                    "' does not have permission '",
+                    Permission, "' on ",
+                    bucket2iolist(Resource)
+                ],
+                utf8,
+                utf8
+            ),
+            {false, Mssg, Context}
     end.
 
 
