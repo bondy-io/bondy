@@ -33,6 +33,34 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
+-ifdef(OTP_RELEASE). %% => OTP is 21 or higher
+    -define(GET_SECURITY_STATUS(Uri),
+        try persistent_term:get({Uri, security_status}) of
+            Status -> Status
+        catch
+            error:badarg ->
+                Status = bondy_security:status(Uri),
+                persistent_term:put({Uri, security_status}, Status)
+        end
+    ).
+    -define(ENABLE_SECURITY(Uri),
+        bondy_security:enable(Uri),
+        persistent_term:put({Uri, security_status}, enabled)
+    ).
+    -define(DISABLE_SECURITY(Uri),
+        bondy_security:disable(Uri),
+        persistent_term:put({Uri, security_status}, disabled)
+    ).
+    -define(ERASE_SECURITY_STATUS(Uri),
+        _ = persistent_term:erase({Uri, security_status}),
+        ok
+    ).
+-else.
+    -define(GET_SECURITY_STATUS(Uri), bondy_security:status(Uri)).
+    -define(ENABLE_SECURITY(Uri), bondy_security:enable(Uri)).
+    -define(DISABLE_SECURITY(Uri), bondy_security:disable(Uri)).
+    -define(ERASE_SECURITY_STATUS(_), ok).
+-endif.
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {security, realms}).
@@ -138,6 +166,7 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_security_enabled(realm() | uri()) -> boolean().
+
 is_security_enabled(R) ->
     security_status(R) =:= enabled.
 
@@ -147,11 +176,12 @@ is_security_enabled(R) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec security_status(realm() | uri()) -> enabled | disabled.
+
 security_status(#realm{uri = Uri}) ->
     security_status(Uri);
 
 security_status(Uri) when is_binary(Uri) ->
-    bondy_security:status(Uri).
+    ?GET_SECURITY_STATUS(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -159,8 +189,9 @@ security_status(Uri) when is_binary(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec enable_security(realm()) -> ok.
+
 enable_security(#realm{uri = Uri}) ->
-    bondy_security:enable(Uri).
+    ?ENABLE_SECURITY(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -169,7 +200,7 @@ enable_security(#realm{uri = Uri}) ->
 %% -----------------------------------------------------------------------------
 -spec disable_security(realm()) -> ok.
 disable_security(#realm{uri = Uri}) ->
-    bondy_security:disable(Uri).
+    ?DISABLE_SECURITY(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -335,6 +366,7 @@ delete(Uri) ->
         true ->
             {error, active_users};
         false ->
+            ok = ?ERASE_SECURITY_STATUS(Uri),
             plum_db:delete(?PREFIX, Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
