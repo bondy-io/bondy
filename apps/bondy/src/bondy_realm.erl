@@ -40,7 +40,8 @@
         catch
             error:badarg ->
                 Status = bondy_security:status(Uri),
-                persistent_term:put({Uri, security_status}, Status)
+                ok = persistent_term:put({Uri, security_status}, Status),
+                Status
         end
     ).
     -define(ENABLE_SECURITY(Uri),
@@ -379,6 +380,7 @@ delete(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list() -> [realm()].
+
 list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
 
@@ -388,6 +390,7 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec select_auth_method(realm(), [binary()]) -> any().
+
 select_auth_method(Realm, []) ->
     select_auth_method(Realm, [?DEFAULT_AUTH_METHOD]);
 
