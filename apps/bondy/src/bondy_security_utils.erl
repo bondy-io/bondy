@@ -102,18 +102,27 @@ authorize(Permission, Resource, Ctxt) ->
 
 
 maybe_authorize(true, Permission, Resource, Ctxt) ->
-    Username = bondy_context:authid(Ctxt),
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    SecCtxt = bondy_security:get_context(RealmUri, Username),
+    case bondy_context:authid(Ctxt) of
+        undefined ->
+            error({not_authorized, <<"Not authenticated.">>});
+        Username ->
+            RealmUri = bondy_context:realm_uri(Ctxt),
+            SecCtxt = bondy_security:get_context(RealmUri, Username),
+            do_authorize(Permission, Resource, SecCtxt)
+    end;
+
+maybe_authorize(false, _, _, _) ->
+    ok.
+
+
+%% @private
+do_authorize(Permission, Resource, SecCtxt) ->
     case bondy_security:check_permission({Permission, Resource}, SecCtxt) of
         {true, _SecCtxt1} ->
             ok;
         {false, Mssg, _SecCtxt1} ->
             error({not_authorized, Mssg})
-    end;
-
-maybe_authorize(false, _, _, _) ->
-    ok.
+    end.
 
 
 %% @private
