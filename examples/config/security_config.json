@@ -48,6 +48,12 @@
                 "meta" : {}
             },
             {
+                "usernames" : "anonymous",
+                "authmethod" : "trust",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
                 "usernames" : ["peer1", "peer2"],
                 "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
@@ -58,10 +64,23 @@
             {
                 "permissions" : [
                     "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "*",
+                "roles" : "anonymous"
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
                     "wamp.unregister"
                 ],
                 "uri" : "com.example.add2",
-                "roles" : ["peer1", "peer2"]
+                "roles" : ["microservices"]
             },
             {
                 "permissions" : [

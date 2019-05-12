@@ -81,7 +81,6 @@
 %% =============================================================================
 
 
-
 -define(TRUST_AUTH, <<"trust">>).
 -define(PASSWORD_AUTH, <<"password">>).
 -define(CERTIFICATE_AUTH, <<"certificate">>).
@@ -375,6 +374,25 @@
     }
 }).
 
+-define(ROLES_DATATYPE, [
+    {in, [<<"all">>, all,  <<"anonymous">>, anonymous]},
+    {list, binary}
+]).
+
+-define(ROLES_VALIDATOR, fun
+    (<<"anonymous">>) ->
+        {ok, anonymous};
+    (<<"all">>) ->
+        {ok, all};
+    (all) ->
+        true;
+    (anonymous) ->
+        true;
+    (List) when is_list(List) ->
+        A = sets:from_list(List),
+        B = sets:from_list([<<"anonymous">>, <<"all">>]),
+        sets:is_disjoint(A, B)
+end).
 
 -define(SOURCE_SPEC, #{
     <<"usernames">> => #{
@@ -383,22 +401,10 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => [
-            {in, [<<"all">>, all]},
-            {list, binary}
-        ],
-        validator => fun
-            (<<"all">>) ->
-                {ok, all};
-            ("all") ->
-                {ok, all};
-            (all) ->
-                true;
-            (List) ->
-                A = sets:from_list(List),
-                B = sets:from_list([<<"all">>, "all", all]),
-                sets:is_disjoint(A, B)
-        end
+        datatype => ?ROLES_DATATYPE,
+        %% all or anonymous cannot be mixed with custom usernames
+        %% in the same rule
+        validator => ?ROLES_VALIDATOR
     },
     <<"authmethod">> => #{
         alias => authmethod,
@@ -486,7 +492,7 @@
         datatype => binary,
         validator => fun
             (<<"*">>) ->
-                {ok, all};
+                {ok, any};
             (<<"all">>) ->
                 {ok, all};
             (all) ->
@@ -501,20 +507,8 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => [
-            {in, [<<"all">>, all]},
-            {list, binary}
-        ],
-        validator => fun
-            (<<"all">>) ->
-                {ok, all};
-            (all) ->
-                true;
-            (List) ->
-                A = sets:from_list(List),
-                B = sets:from_list([<<"all">>, all]),
-                sets:is_disjoint(A, B)
-        end
+        datatype => ?ROLES_DATATYPE,
+        validator => ?ROLES_VALIDATOR
     }
 }).
 

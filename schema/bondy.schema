@@ -60,6 +60,15 @@
   {datatype, {flag, on, off}}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy allows the "anonymous" user
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.allow_anonymous_user", "bondy.allow_anonymous_user", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Not currently working, leave the value as 'session'

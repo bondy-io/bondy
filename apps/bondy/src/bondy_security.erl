@@ -153,7 +153,7 @@
 -type context() :: #context{}.
 -type bucket() :: {binary(), binary()} | binary().
 -type permission() :: {binary()} | {binary(), bucket()}.
--type userlist() :: all | [binary()].
+-type userlist() :: all | anonymous | [binary()].
 -type metadata_key() :: binary().
 -type metadata_value() :: term().
 -type options() :: [{metadata_key(), metadata_value()}].
@@ -569,6 +569,9 @@ add_group(RealmUri, Groupname, Options) ->
 -spec add_role(uri(), binary(), list(), function(), binary()) ->
     ok | {error, {no_such_realm, uri()} | reserved_name | role_exists | illegal_name_char}.
 
+add_role(_, <<"anonymous">>, _Options, _Fun, _Prefix) ->
+    {error, reserved_name};
+
 add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
 
@@ -623,6 +626,9 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     Options :: [{binary(), term()}]) ->
     ok | {error, term()}.
 
+alter_user(_, <<"anonymous">>, _Options) ->
+    {error, reserved_name};
+
 alter_user(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
@@ -664,6 +670,9 @@ alter_user(RealmUri, Username, Options) when is_binary(Username) ->
     Options :: [{binary(), term()}]) ->
     ok | {error, term()}.
 
+alter_group(_, <<"anonymous">>, _Options) ->
+    {error, reserved_name};
+
 alter_group(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
@@ -699,6 +708,9 @@ alter_group(RealmUri, Groupname, Options) when is_binary(Groupname) ->
 %% -----------------------------------------------------------------------------
 -spec del_user(RealmUri :: binary(), Username :: binary()) ->
     ok | {error, term()}.
+
+del_user(_, <<"anonymous">>) ->
+    {error, reserved_name};
 
 del_user(_, <<"all">>) ->
     {error, reserved_name};
@@ -739,6 +751,9 @@ del_user(RealmUri, Username) when is_binary(Username) ->
 %% -----------------------------------------------------------------------------
 -spec del_group(RealmUri :: binary(), Groupname :: binary()) ->
     ok | {error, term()}.
+
+del_group(_, <<"anonymous">>) ->
+    {error, reserved_name};
 
 del_group(_, <<"all">>) ->
     {error, reserved_name};
@@ -797,12 +812,13 @@ add_grant(RealmUri, Usernames, Bucket, Grants) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_add_grant(RealmUri, all, Bucket, Grants) when is_binary(Bucket) ->
-    %% all is always valid
+do_add_grant(RealmUri, Reserved, Bucket, Grants)
+when (Reserved == all orelse Reserved == anonymous) ->
+    %% all and anonymous are always valid
     case validate_permissions(Grants) of
         ok ->
             add_grant_int(
-                [{all, group}],
+                [{Reserved, group}],
                 to_lowercase_bin(RealmUri),
                 Bucket,
                 Grants
@@ -875,12 +891,13 @@ add_revoke(RealmUri, Usernames, Bucket, Revokes) ->
 
 
 %% @private
-do_add_revoke(RealmUri, all, Bucket, Revokes) ->
-    %% all is always valid
+do_add_revoke(RealmUri, Reserved, Bucket, Revokes)
+when (Reserved == all orelse Reserved == anonymous) andalso is_binary(Bucket) ->
+    %% all and anonymous are always valid
     case validate_permissions(Revokes) of
         ok ->
             add_revoke_int(
-                [{all, group}],
+                [{Reserved, group}],
                 to_lowercase_bin(RealmUri),
                 Bucket,
                 Revokes
@@ -953,14 +970,16 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
 
 
 %% @private
-do_add_source(RealmUri, all, CIDR, Source, Options) ->
+do_add_source(RealmUri, Reserved, CIDR, Source, Options)
+when (Reserved == all orelse Reserved == anonymous) ->
+
     Uri = to_lowercase_bin(RealmUri),
-    %% all is always valid
+    %% all and anonymous are always valid
 
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
     plum_db:put(
-        ?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}, {Source, Options}),
+        ?SOURCES_PREFIX(Uri), {Reserved, anchor_mask(CIDR)}, {Source, Options}),
     ok;
 
 do_add_source(RealmUri, Users, CIDR, Source, Options) ->
@@ -1005,10 +1024,11 @@ del_source(RealmUri, Users, CIDR) ->
 
 
 %% @private
-do_del_source(RealmUri, all, CIDR) ->
+do_del_source(RealmUri, Reserved, CIDR)
+when (Reserved == all orelse Reserved == anonymous) ->
     Uri = to_lowercase_bin(RealmUri),
-    %% all is always valid
-    plum_db:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
+    %% all and anonymous are always valid
+    plum_db:delete(?SOURCES_PREFIX(Uri), {Reserved, anchor_mask(CIDR)}),
     ok;
 
 do_del_source(RealmUri, Users, CIDR) ->
@@ -1201,8 +1221,10 @@ list(RealmUri, source) when is_binary(RealmUri) ->
     ).
 
 
-lookup_user_sources(RealmUri, all) when is_binary(RealmUri) ->
-    do_lookup_user_sources(RealmUri, all);
+lookup_user_sources(RealmUri, Reserved)
+when (Reserved == all orelse Reserved == anonymous)
+andalso is_binary(RealmUri) ->
+    do_lookup_user_sources(RealmUri, Reserved);
 
 lookup_user_sources(RealmUri, Username) when is_binary(Username) ->
     do_lookup_user_sources(RealmUri, to_lowercase_bin(Username)).
@@ -1283,6 +1305,10 @@ context_to_map(#context{} = Ctxt) ->
 
 prettyprint_users([all], _) ->
     "all";
+
+prettyprint_users([anonymous], _) ->
+    "anonymous";
+
 prettyprint_users(Users0, Width) ->
     %% my kingdom for an iolist join...
     Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
@@ -1804,8 +1830,11 @@ validate_groups_option(RealmUri, Options) ->
         undefined ->
             {ok, Options};
         L ->
-            %% Don't let the admin assign "all" as a container
-            Groups = [to_lowercase_bin(G) || G <- L, G /= <<"all">>],
+            %% Don't let the admin assign "all" or "anonymous" as a container
+            Groups = [
+                to_lowercase_bin(G)
+                || G <- L, G /= <<"all">>, G /= <<"anonymous">>
+            ],
 
             case unknown_roles(Groups, ?GROUPS_PREFIX(RealmUri)) of
                 [] ->
@@ -1865,9 +1894,12 @@ match_source([], _User, _PeerIP) ->
     {error, no_matching_sources};
 
 match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
-    case (UserName == all orelse
-          UserName == User) andalso
-        mask_address(IP, Mask) == mask_address(PeerIP, Mask) of
+    Result =
+        (UserName == all orelse UserName == anonymous orelse UserName == User)
+        andalso
+        mask_address(IP, Mask) == mask_address(PeerIP, Mask),
+
+    case Result of
         true ->
             {ok, Source, Options};
         false ->
@@ -1876,7 +1908,7 @@ match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
 
 sort_sources(Sources) ->
     %% sort sources first by userlist, so that 'all' matches come last
-    %% and then by CIDR, so that most sprcific masks come first
+    %% and then by CIDR, so that most specific masks come first
     Sources1 = lists:sort(fun({UserA, _, _, _}, {UserB, _, _, _}) ->
                     case {UserA, UserB} of
                         {all, all} ->

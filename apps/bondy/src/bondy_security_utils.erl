@@ -102,17 +102,26 @@ authorize(Permission, Resource, Ctxt) ->
 
 
 maybe_authorize(true, Permission, Resource, Ctxt) ->
-    case bondy_context:authid(Ctxt) of
-        undefined ->
-            error({not_authorized, <<"Not authenticated.">>});
-        Username ->
-            RealmUri = bondy_context:realm_uri(Ctxt),
-            SecCtxt = bondy_security:get_context(RealmUri, Username),
-            do_authorize(Permission, Resource, SecCtxt)
-    end;
+    AuthId = maybe_anonymous(bondy_context:authid(Ctxt)),
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    SecCtxt = bondy_security:get_context(RealmUri, AuthId),
+    do_authorize(Permission, Resource, SecCtxt);
 
 maybe_authorize(false, _, _, _) ->
     ok.
+
+
+%% @private
+maybe_anonymous(undefined) ->
+    case bondy_config:get(allow_anonymous_user, true) of
+        true ->
+            anonymous;
+        false ->
+            error({not_authorized, <<"Anonymous user not allowed.">>})
+    end;
+
+maybe_anonymous(AuthId) ->
+    AuthId.
 
 
 %% @private
