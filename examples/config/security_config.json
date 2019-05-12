@@ -61,7 +61,7 @@
                     "wamp.unregister"
                 ],
                 "uri" : "com.example.add2",
-                "roles" : ["peer1"]
+                "roles" : ["peer1", "peer2"]
             },
             {
                 "permissions" : [
