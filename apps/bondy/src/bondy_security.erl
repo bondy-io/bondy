@@ -290,7 +290,7 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
     Context = maybe_refresh_context(Uri, Context0),
     %% The user needs to have this permission applied *globally*
     %% This is for things like mapreduce with undetermined inputs or
-    %% permissions that don't tie to a particular bucket, like 'ping' and
+    %% permissions that don't tie to a particular resource, like 'ping' and
     %% 'stats'.
     MatchG = match_grant(any, Context#context.grants),
     case lists:member(Permission, MatchG) of
@@ -298,10 +298,11 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
             {true, Context};
         false ->
             %% no applicable grant
+            Username = to_bin(Context#context.username),
             Mssg = unicode:characters_to_binary(
                 [
                     "Permission denied: User '",
-                    Context#context.username,
+                    Username,
                     "' does not have permission '",
                     Permission, "' on any"
                 ],
@@ -320,10 +321,11 @@ check_permission(
             {true, Context};
         false ->
             %% no applicable grant
+            Username = to_bin(Context#context.username),
             Mssg = unicode:characters_to_binary(
                 [
                     "Permission denied: User '",
-                    Context#context.username,
+                    Username,
                     "' does not have permission '",
                     Permission, "' on ",
                     bucket2iolist(Resource)
@@ -812,7 +814,7 @@ add_grant(RealmUri, Usernames, Bucket, Grants) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_add_grant(RealmUri, Reserved, Bucket, Grants)
+do_add_grant(RealmUri, Reserved, Resource, Grants)
 when (Reserved == all orelse Reserved == anonymous) ->
     %% all and anonymous are always valid
     case validate_permissions(Grants) of
@@ -820,16 +822,15 @@ when (Reserved == all orelse Reserved == anonymous) ->
             add_grant_int(
                 [{Reserved, group}],
                 to_lowercase_bin(RealmUri),
-                Bucket,
+                maybe_prefix_resource(Resource),
                 Grants
             );
         Error ->
             Error
     end;
 
-
-do_add_grant(RealmUri, RoleList, Bucket, Grants)
-when is_binary(RealmUri), is_binary(Bucket) ->
+do_add_grant(RealmUri, RoleList, Resource, Grants)
+when is_binary(RealmUri), is_binary(Resource) ->
     Uri = to_lowercase_bin(RealmUri),
     RoleTypes = lists:map(
         fun(Name) ->
@@ -867,10 +868,22 @@ when is_binary(RealmUri), is_binary(Bucket) ->
         UnknownRoles, NameOverlaps, validate_permissions(Grants))
     of
         none ->
-            add_grant_int(RoleTypes, Uri, Bucket, Grants);
+            add_grant_int(
+                RoleTypes, Uri, maybe_prefix_resource(Resource), Grants);
         Error ->
             Error
     end.
+
+
+
+maybe_prefix_resource(Resource) when is_binary(Resource) ->
+    case binary:split(Resource, <<$*>>) of
+        [Resource] -> Resource;
+        [Prefix, <<>>] -> {match_prefix, Prefix}
+    end;
+
+maybe_prefix_resource(Resource) ->
+    Resource.
 
 
 %% -----------------------------------------------------------------------------
@@ -1669,33 +1682,49 @@ add_source_int([User|Users], Uri, CIDR, Source, Options) ->
         ?SOURCES_PREFIX(Uri), {User, CIDR}, {Source, Options}),
     add_source_int(Users, Uri, CIDR, Source, Options).
 
+
 add_grant_int([], _, _, _) ->
     ok;
-add_grant_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
-    Prefix = metadata_grant_prefix(RealmUri, RoleType),
-    BucketPermissions = case plum_db:get(Prefix, {Name, Bucket}) of
-                            undefined ->
-                                [];
-                            Perms ->
-                                Perms
-                        end,
-    NewPerms = lists:umerge(lists:sort(BucketPermissions),
-                            lists:sort(Permissions)),
-    plum_db:put(Prefix, {Name, Bucket}, NewPerms),
-    add_grant_int(Roles, RealmUri, Bucket, Permissions).
+add_grant_int([{RoleName, RoleType}|T], RealmUri, Resource, Permissions0) ->
+    DBPrefix = metadata_grant_prefix(RealmUri, RoleType),
+    Existing = case plum_db:get(DBPrefix, {RoleName, Resource}) of
+        undefined -> [];
+        List -> List
+    end,
 
-match_grant(Bucket, Grants) ->
+    Permissions1 = lists:umerge(lists:sort(Existing), lists:sort(Permissions0)),
+
+    plum_db:put(DBPrefix, {RoleName, Resource}, Permissions1),
+
+    add_grant_int(T, RealmUri, Resource, Permissions0).
+
+
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+match_grant(Resource, Grants) ->
     AnyGrants = proplists:get_value(any, Grants, []),
-    %% find the first grant that matches the bucket name and then merge in the
-    %% 'any' grants, if any
-    lists:umerge(lists:sort(lists:foldl(fun({B, P}, Acc) when Bucket == B ->
-                        P ++ Acc;
-                   ({B, P}, Acc) when element(1, Bucket) == B ->
-                        %% wildcard match against bucket type
-                        P ++ Acc;
-                   (_, Acc) ->
-                        Acc
-                end, [], Grants)), lists:sort(AnyGrants)).
+    %% find the first grant that matches the resource name
+    %% and then merge in the 'any' grants, if any
+    Fun = fun
+        ({B, P}, Acc) when Resource == B ->
+            P ++ Acc;
+        ({B, P}, Acc) when element(1, Resource) == B ->
+            %% wildcard match against bucket type
+            P ++ Acc;
+        (_, Acc) ->
+            Acc
+    end,
+    lists:umerge(
+        lists:sort(lists:foldl(Fun, [], Grants)),
+        lists:sort(AnyGrants)
+    ).
+
 
 maybe_refresh_context(RealmUri, Context) ->
     %% TODO replace this with a cluster metadata hash check, or something
@@ -1717,7 +1746,8 @@ concat_role(group, Name) ->
 %% Contexts are only valid until the GRANT epoch changes, and it will change
 %% whenever a GRANT or a REVOKE is performed. This is a little coarse grained
 %% right now, but it'll do for the moment.
-get_context(RealmUri, Username) when is_binary(Username) ->
+get_context(RealmUri, Username)
+when is_binary(Username) orelse Username == anonymous ->
     Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
     #context{
         realm_uri = to_lowercase_bin(RealmUri),
@@ -1749,10 +1779,12 @@ accumulate_grants([], Seen, Acc, _Type, _) ->
 
 accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
     FullPrefix = full_prefix(Type, RealmUri),
-    Options = role_details(FullPrefix, Role),
-    Groups = [G || G <- lookup(?GROUPS, Options, []),
-                        not lists:member(G, Seen),
-                        group_exists(RealmUri, G)],
+    Details = role_details(FullPrefix, Role),
+    Groups = [G ||
+        G <- lookup(?GROUPS, Details, []),
+        not lists:member(G, Seen),
+        group_exists(RealmUri, G)
+    ],
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
 
@@ -2104,6 +2136,9 @@ do_role_type(_UserDetails, _GroupDetails) ->
     both.
 
 
+role_details(_, anonymous) ->
+    [];
+
 role_details(FullPrefix, Rolename) ->
     plum_db:get(FullPrefix, to_lowercase_bin(Rolename)).
 
@@ -2131,11 +2166,18 @@ illegal_name_chars(Name) ->
     [Name] =/= string:tokens(Name, ?ILLEGAL).
 
 
+to_bin(anonymous) -> <<"anonymous">>;
+to_bin(Bin) when is_binary(Bin) -> Bin.
+
+
+%% @private
+to_lowercase_bin(anonymous) ->
+    anonymous;
 
 to_lowercase_bin(Name) when is_binary(Name) ->
     string:casefold(Name);
 
-to_lowercase_bin(Name) ->
+to_lowercase_bin(Name) when is_list(Name) ->
     unicode:characters_to_binary(
         string:casefold(Name), utf8, utf8).
 
