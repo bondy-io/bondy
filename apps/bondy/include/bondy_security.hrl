@@ -495,10 +495,17 @@ end).
                 {ok, any};
             (<<"all">>) ->
                 {ok, all};
+            (any) ->
+                true;
             (all) ->
                 true;
             (Uri) when is_binary(Uri) ->
-                true
+                Len = byte_size(Uri) - 1,
+                case binary:matches(Uri, [<<$*>>]) of
+                    [] -> true;
+                    [{Len, 1}] -> true; % a prefix match
+                    [_|_] -> false % illegal
+                end
         end
     },
     <<"roles">> => #{
