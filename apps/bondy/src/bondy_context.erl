@@ -70,6 +70,8 @@
 -export([peer_id/1]).
 -export([realm_uri/1]).
 -export([request_id/1]).
+-export([call_timeout/1]).
+-export([set_call_timeout/2]).
 -export([request_timeout/1]).
 -export([request_timestamp/1]).
 -export([reset/1]).
@@ -81,6 +83,7 @@
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
 -export([set_subprotocol/2]).
+-export([set_realm_uri/2]).
 -export([subprotocol/1]).
 -export([set_session/2]).
 -export([encoding/1]).
@@ -104,6 +107,7 @@ new() ->
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         request_id => undefined,
+        call_timeout => bondy_config:get(wamp_call_timeout),
         request_timeout => bondy_config:get(request_timeout)
     }.
 
@@ -239,6 +243,16 @@ realm_uri(#{realm_uri := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Sets the realm uri of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_realm_uri(t(), uri()) -> t().
+set_realm_uri(Ctxt, Uri) ->
+    Ctxt#{realm_uri => Uri}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Returns the agent of the provided context or 'undefined'
 %% if there is none.
 %% @end
@@ -353,6 +367,25 @@ request_timeout(#{request_timeout := Val}) ->
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current WAMP call timeout.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec call_timeout(t()) -> non_neg_integer().
+call_timeout(#{call_timeout := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current WAMP call timeout to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_call_timeout(t(), non_neg_integer()) -> t().
+set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    Ctxt#{call_timeout => Timeout}.
 
 
 %% -----------------------------------------------------------------------------

@@ -25,9 +25,6 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(SEND_TIMEOUT, 20000).
--define(CALL_TIMEOUT, 20000).
-
 -type wamp_error_map() :: #{
     error_uri => uri(),
     details => map(),
@@ -222,9 +219,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% TODO we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    Timeout = case maps:get(timeout, Opts, ?CALL_TIMEOUT) of
-        0 -> ?CALL_TIMEOUT;
-        Val -> Val
+    Timeout = case maps:find(call_timeout, Opts) of
+        {ok, 0} -> bondy_config:get(wamp_call_timeout);
+        {ok, Val} -> Val;
+        error -> bondy_config:get(wamp_call_timeout)
     end,
     ReqId = bondy_utils:get_id(global),
 

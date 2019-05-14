@@ -81,7 +81,7 @@
 ]}.
 
 {mapping, "request_timeout", "bondy.request_timeout", [
-  {default, "5m"}, % Long enough but not infinity
+  {default, "20s"}, % Long enough but not infinity
   {datatype, {duration, ms}},
   hidden
 ]}.
