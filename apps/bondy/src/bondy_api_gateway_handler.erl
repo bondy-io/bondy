@@ -663,7 +663,7 @@ perform_action(
     Method,
     #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec, St0) ->
     St1 = decode_body_in_context(Method, St0),
-    Ctxt0 = maps:get(api_context, St1),
+    ApiCtxt0 = maps:get(api_context, St1),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
     %% so we need to evaluate them passing the context
@@ -672,51 +672,50 @@ perform_action(
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
         <<"options">> := Opts,
+        %% TODO use retries
         <<"retries">> := _R,
-        <<"timeout">> := T
-    } = mops_eval(Act, Ctxt0),
+        <<"timeout">> := CallTimeout
+    } = mops_eval(Act, ApiCtxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
-    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], Ctxt0),
+    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
-    WampCtxt0 = #{
-        peer => Peer,
-        node => bondy_peer_service:mynode(),
-        subprotocol => {http, text, maps:get(encoding, St0)},
-        realm_uri => RealmUri,
-        timeout => T,
-        session => bondy_session:new(Peer, RealmUri, #{
-            roles => #{
-                caller => #{
-                    features => #{
-                        call_timeout => true,
-                        call_canceling => false,
-                        caller_identification => true,
-                        call_trustlevels => true,
-                        progressive_call_results => false
-                    }
+    SessionOpts = #{
+        roles => #{
+            caller => #{
+                features => #{
+                    call_timeout => true,
+                    caller_identification => true,
+                    call_trustlevels => true,
+                    call_canceling => false,
+                    progressive_call_results => false
                 }
             }
-        })
+        }
     },
+    Session = bondy_session:new(Peer, RealmUri, SessionOpts),
+    Subprotocol = {http, text, maps:get(encoding, St0)},
+    Ctxt0 = bondy_context:new(Peer, Subprotocol),
+    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
+    Ctxt2 = bondy_context:set_session(Ctxt1, Session),
+    Ctxt3 = bondy_context:set_call_timeout(Ctxt2, CallTimeout),
 
-    case bondy:call(P, Opts, A, Akw, WampCtxt0) of
-        {ok, Result0, _WampCtxt1} ->
+    case bondy:call(P, Opts, A, Akw, Ctxt3) of
+        {ok, Result0, _} ->
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
-            Ctxt1 = update_context({result, Result1}, Ctxt0),
-            Response = mops_eval(
-                maps:get(<<"on_result">>, RSpec), Ctxt1),
-            St2 = maps:update(api_context, Ctxt1, St1),
+            ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),
+            Response = mops_eval(maps:get(<<"on_result">>, RSpec), ApiCtxt1),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
-        {error, WampError0, _WampCtxt1} ->
+        {error, WampError0, _} ->
             StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
-            Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
-            St2 = maps:update(api_context, Ctxt1, St1),
+            ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
+            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), ApiCtxt1),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
             {StatusCode1, Response1} = take_status_code(
                 Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             {error, StatusCode1, Response1, St2}
