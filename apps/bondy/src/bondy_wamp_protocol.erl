@@ -357,7 +357,7 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     Ctxt0 = St0#wamp_state.context,
     ok = bondy_event_manager:notify({wamp, M, Ctxt0}),
 
-    Ctxt1 = Ctxt0#{realm_uri => Uri},
+    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
     St1 = update_context(Ctxt1, St0),
 
     maybe_open_session(
