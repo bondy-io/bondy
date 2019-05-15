@@ -28,7 +28,7 @@
 
 -export([handle_call/2]).
 
-
+%%TODO Replace all this logic with RBAC
 
 handle_call(#call{procedure_uri = ?CREATE_REALM} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
@@ -60,11 +60,16 @@ handle_call(#call{procedure_uri = ?DELETE_REALM} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
 handle_call(#call{procedure_uri = ?LIST_REALMS} = M, Ctxt) ->
-    R = bondy_wamp_utils:maybe_error(
-        catch [bondy_realm:to_map(X) || X <- bondy_realm:list()],
-        M
-    ),
+    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0, 0) of
+        {ok, []} ->
+            bondy_wamp_utils:maybe_error(
+                catch [bondy_realm:to_map(X) || X <- bondy_realm:list()],
+                M);
+        {error, WampError} ->
+            WampError
+    end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
+
 
 handle_call(#call{procedure_uri = ?ENABLE_SECURITY} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of

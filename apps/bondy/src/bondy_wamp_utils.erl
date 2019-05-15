@@ -152,11 +152,13 @@ when length(L) > Max ->
     ),
     {error, E};
 
-do_validate_call_args(#call{arguments = []} = M, Ctxt, _, _, AdminOnly) ->
+do_validate_call_args(#call{arguments = []} = M, Ctxt, Min, _, AdminOnly) ->
     %% We are missing the RealmUri argument, we default to the session's Realm
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
             {ok, [Uri]};
+        {true, ?BONDY_REALM_URI} when Min == 0 ->
+            {ok, []};
         {true, ?BONDY_REALM_URI} ->
             {ok, [?BONDY_REALM_URI]};
         {_, _} ->
