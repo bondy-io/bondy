@@ -60,6 +60,7 @@
 -export([agent/1]).
 -export([session_id/1]).
 -export([peer_id/1]).
+-export([context/1]).
 -export([handle_inbound/2]).
 -export([handle_outbound/2]).
 -export([terminate/1]).
@@ -127,6 +128,15 @@ session_id(#wamp_state{context = Ctxt}) ->
 
 peer_id(#wamp_state{context = Ctxt}) ->
     bondy_context:peer_id(Ctxt).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec context(state()) -> bondy_context:t().
+
+context(#wamp_state{context = Ctxt}) ->
+    Ctxt.
 
 
 %% -----------------------------------------------------------------------------
