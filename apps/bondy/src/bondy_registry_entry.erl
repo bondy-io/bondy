@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_registry_backend.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -15,6 +15,11 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -64,6 +69,7 @@
 -export([new/4]).
 -export([new/5]).
 -export([node/1]).
+-export([is_local/1]).
 -export([options/1]).
 -export([pattern/4]).
 -export([pattern/6]).
@@ -72,6 +78,7 @@
 -export([realm_uri/1]).
 -export([session_id/1]).
 -export([to_details_map/1]).
+-export([to_map/1]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -227,6 +234,18 @@ node(#entry_key{} = Key) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns true if the entry represents a local peer
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_local(t() | entry_key()) -> boolean().
+is_local(#entry{key = Key}) ->
+    is_local(Key);
+
+is_local(#entry_key{} = Key) ->
+    bondy_peer_service:mynode() =:= Key#entry_key.node.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the value of the subscription's or registration's session_id
 %% property.
@@ -271,7 +290,7 @@ peer_id(#entry{key = Key} = Entry) ->
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec id(t() | entry_key()) -> id().
+-spec id(t() | entry_key()) -> id() | '_'.
 id(#entry{key = Key}) ->
     Key#entry_key.entry_id;
 
@@ -356,6 +375,28 @@ to_details_map(#entry{key = Key} = E) ->
     }.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Converts the entry into a map according to the WAMP protocol Details
+%% dictionary format.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_map(t()) -> details_map().
+
+to_map(#entry{key = Key} = E) ->
+    #{
+        id =>  Key#entry_key.entry_id,
+        session_id => Key#entry_key.session_id,
+        node => Key#entry_key.node,
+        created => E#entry.created,
+        uri => E#entry.uri,
+        pid => list_to_binary(pid_to_list(E#entry.pid)),
+        match => E#entry.match_policy,
+        options => E#entry.options
+    }.
+
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -364,8 +405,6 @@ to_details_map(#entry{key = Key} = E) ->
 validate_match_policy(Options) ->
     validate_match_policy(key, Options).
 
-%% @private
--spec validate_match_policy(map()) -> binary().
 
 validate_match_policy(pattern, '_') ->
     '_';

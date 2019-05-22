@@ -3,6 +3,12 @@
     "name": "Bondy Admin API",
     "host" : "_",
     "realm_uri" : "com.leapsight.bondy",
+    "status_codes" : {
+        "com.leapsight.bondy.error.badarg" : 400,
+        "com.leapsight.bondy.error.not_found" : 404,
+        "com.leapsight.bondy.error.role_exists": 400,
+        "com.leapsight.bondy.error.unknown_user": 400
+    },
     "variables" : {
         "oauth2" : {
             "type" : "oauth2",
@@ -16,12 +22,6 @@
         "query_match" :
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
         "schemes" : ["http"],
-        "error_codes" : {
-            "com.leapsight.bondy.error.badarg" : 400,
-            "com.leapsight.bondy.error.not_found" : 404,
-            "com.leapsight.bondy.error.role_exists": 400,
-            "com.leapsight.bondy.error.unknown_user": 400
-        },
         "cors_headers": {
             "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
@@ -46,6 +46,7 @@
             "defaults" : {
                 "timeout" : 20000
             },
+            "languages": ["en", "es-AR"],
             "paths" : {
                 "/services/create_backup" : {
                     "is_collection" : false,
@@ -71,7 +72,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -104,7 +105,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -137,7 +138,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -172,7 +173,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -205,7 +206,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -226,7 +227,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -259,7 +260,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -291,7 +292,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -323,7 +324,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -342,11 +343,88 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
                                 "uri": "\"{{request.path}}/{{action.result.arguments |> head |> get('uri')}}\"",
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+
+                "/realms/:realm_uri" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get": {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.find_realm",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.realm_uri}}"],
+                            "arguments_kw" : {}
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "put" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.update_realm",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.body}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    },
+                    "delete" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.security.delete_realm",
+                            "options" : {},
+                            "arguments" : ["{{request.bindings.realm_uri}}"],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
                                 "body" :
                                     "{{action.result.arguments |> head}}"
                             }
@@ -376,7 +454,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -396,7 +474,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -416,7 +494,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -453,7 +531,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -489,7 +567,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -510,7 +588,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -547,7 +625,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -583,7 +661,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -604,7 +682,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -641,7 +719,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -663,7 +741,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -697,7 +775,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -719,7 +797,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -740,7 +818,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -777,7 +855,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -799,7 +877,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                               "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                               "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -833,7 +911,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -855,7 +933,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -876,7 +954,7 @@
                         },
                         "response" : {
                            "on_error" : {
-                                "status_code" : "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code" : "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
@@ -913,7 +991,7 @@
                         },
                         "response": {
                             "on_error": {
-                                "status_code": "{{variables.error_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body": "{{variables.wamp_error_body}}"
                             },
                             "on_result": {
@@ -922,7 +1000,113 @@
                         }
                     }
                 },
+                "/realms/:realm_uri/callees" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.callee.list",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/callees/:session_id" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.callee.get",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.session_id |> integer}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
                 "/realms/:realm_uri/registrations" : {
+                    "is_collection" : true,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "get" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "com.leapsight.bondy.registration.list",
+                            "options" : {},
+                            "arguments" : [
+                                "{{request.bindings.realm_uri}}"
+                            ],
+                            "arguments_kw" : {
+                            }
+                        },
+                        "response" : {
+                           "on_error" : {
+                                "body" : "{{variables.wamp_error_body}}"
+                            },
+                            "on_result" : {
+                                "body" :
+                                    "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/registrations_summary" : {
                     "is_collection" : true,
                     "options": {
                         "action": {},

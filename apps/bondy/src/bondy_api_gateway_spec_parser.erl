@@ -1,7 +1,7 @@
-%%
+%% =============================================================================
 %%  bondy_api_gateway_spec_parser.erl - parses the Bondy API Specification file
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
+%% =============================================================================
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -30,6 +31,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
@@ -37,6 +39,7 @@
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(STATUS_CODES_KEY, <<"status_codes">>).
+-define(LANGUAGES_KEY, <<"languages">>).
 -define(MOD_PREFIX, "bondy_api_gateway_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
@@ -61,29 +64,31 @@
 ]).
 
 -define(DEFAULT_STATUS_CODES, #{
-    ?BONDY_BAD_GATEWAY_ERROR =>                    503,
-    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>       500,
-    ?BONDY_ERROR_TIMEOUT =>                        504,
-    ?WAMP_AUTHORIZATION_FAILED =>            403,
-    ?WAMP_CANCELLED =>                       400,
-    ?WAMP_CLOSE_REALM =>                     500,
-    ?WAMP_DISCLOSE_ME_NOT_ALLOWED =>         400,
-    ?WAMP_GOODBYE_AND_OUT =>                 500,
-    ?WAMP_INVALID_ARGUMENT =>                400,
-    ?WAMP_INVALID_URI =>                     400,
-    ?WAMP_NET_FAILURE =>                     502,
-    ?WAMP_NOT_AUTHORIZED =>                  401,
-    ?WAMP_NO_ELIGIBLE_CALLE =>               502,
-    ?WAMP_NO_SUCH_PROCEDURE =>               501,
-    ?WAMP_NO_SUCH_REALM =>                   502,
-    ?WAMP_NO_SUCH_REGISTRATION =>            502,
-    ?WAMP_NO_SUCH_ROLE =>                    400,
-    ?WAMP_NO_SUCH_SESSION =>                 500,
-    ?WAMP_NO_SUCH_SUBSCRIPTION =>            502,
-    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME =>   400,
-    ?WAMP_OPTION_NOT_ALLOWED =>              400,
-    ?WAMP_PROCEDURE_ALREADY_EXISTS =>        400,
-    ?WAMP_SYSTEM_SHUTDOWN =>                 500
+    ?BONDY_ALREADY_EXISTS_ERROR =>              ?HTTP_BAD_REQUEST,
+    ?BONDY_NOT_FOUND_ERROR =>                   ?HTTP_NOT_FOUND,
+    ?BONDY_BAD_GATEWAY_ERROR =>                 ?HTTP_SERVICE_UNAVAILABLE,
+    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?BONDY_ERROR_TIMEOUT =>                     ?HTTP_GATEWAY_TIMEOUT,
+    ?WAMP_AUTHORIZATION_FAILED =>               ?HTTP_FORBIDDEN,
+    ?WAMP_CANCELLED =>                          ?HTTP_BAD_REQUEST,
+    ?WAMP_CLOSE_REALM =>                        ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_DISCLOSE_ME_NOT_ALLOWED =>            ?HTTP_BAD_REQUEST,
+    ?WAMP_GOODBYE_AND_OUT =>                    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_INVALID_ARGUMENT =>                   ?HTTP_BAD_REQUEST,
+    ?WAMP_INVALID_URI =>                        ?HTTP_BAD_REQUEST,
+    ?WAMP_NET_FAILURE =>                        ?HTTP_BAD_GATEWAY,
+    ?WAMP_NOT_AUTHORIZED =>                     ?HTTP_FORBIDDEN,
+    ?WAMP_NO_ELIGIBLE_CALLE =>                  ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_PROCEDURE =>                  ?HTTP_NOT_IMPLEMENTED,
+    ?WAMP_NO_SUCH_REALM =>                      ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_REGISTRATION =>               ?HTTP_BAD_GATEWAY,
+    ?WAMP_NO_SUCH_ROLE =>                       ?HTTP_BAD_REQUEST,
+    ?WAMP_NO_SUCH_SESSION =>                    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?WAMP_NO_SUCH_SUBSCRIPTION =>               ?HTTP_BAD_GATEWAY,
+    ?WAMP_OPTION_DISALLOWED_DISCLOSE_ME =>      ?HTTP_BAD_REQUEST,
+    ?WAMP_OPTION_NOT_ALLOWED =>                 ?HTTP_BAD_REQUEST,
+    ?WAMP_PROCEDURE_ALREADY_EXISTS =>           ?HTTP_BAD_REQUEST,
+    ?WAMP_SYSTEM_SHUTDOWN =>                    ?HTTP_INTERNAL_SERVER_ERROR
 }).
 
 -define(MOPS_PROXY_FUN_TYPE, tuple).
@@ -226,6 +231,14 @@
         allow_undefined => false,
         datatype => map,
         default => #{}
+    },
+    ?LANGUAGES_KEY => #{
+        alias => languages,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => [<<"en">>],
+        datatype => {list, binary}
     },
     <<"paths">> => #{
         alias => paths,
@@ -950,11 +963,11 @@ from_file(Filename) ->
         _ ->
             {error, invalid_specification_format}
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
                 "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
             {error, invalid_specification_format};
-        error:Reason ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 
@@ -1060,6 +1073,7 @@ parse_host(Host0, Ctxt0) ->
     {Vars, Host1} = maps:take(?VARS_KEY, Host0),
     {Defs, Host2} = maps:take(?DEFAULTS_KEY, Host1),
     {Codes, Host3} = maps:take(?STATUS_CODES_KEY, Host2),
+
     Ctxt1 = Ctxt0#{
         ?VARS_KEY => Vars,
         ?DEFAULTS_KEY => Defs,
@@ -1086,14 +1100,14 @@ parse_version(V0, Ctxt0) ->
     %% We parse the status_codes and merge them into ctxt
     {Codes1, V4} = maps:take(?STATUS_CODES_KEY, V3),
     Codes0 = maps:get(?STATUS_CODES_KEY, Ctxt1),
-    Ctxt3 = maps:put(<<"status_codes">>, maps:merge(Codes0, Codes1), Ctxt2),
+    Ctxt3 = maps:put(?STATUS_CODES_KEY, maps:merge(Codes0, Codes1), Ctxt2),
 
     %% Finally we parse the contained paths
     Fun = fun(Uri, P) ->
         try
             parse_path(P, Ctxt3)
         catch
-            error:{badkey, Key} ->
+            ?EXCEPTION(error, {badkey, Key}, _) ->
                 error({
                     badarg,
                     <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
@@ -1139,7 +1153,7 @@ parse_path(P0, Ctxt0) ->
             Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
-            error:{badkey, Key} ->
+            ?EXCEPTION(error, {badkey, Key}, _) ->
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
@@ -1167,7 +1181,7 @@ parse_path_elements([H|T], P0, Ctxt) ->
             case maps:find(H, maps:get(?DEFAULTS_KEY, Ctxt)) of
                 {ok, Val} ->
                     maps:put(H, Val, P0);
-                false ->
+                error ->
                     error({
                         badarg,
                         <<"The key ", H/binary, " does not exist in path.">>
@@ -1434,13 +1448,13 @@ do_dispatch_table(API) ->
 dispatch_table_version(_, _, {_, #{<<"is_active">> := false}}) ->
     [];
 
-dispatch_table_version(Host, Realm, {_Name, Spec}) ->
+dispatch_table_version(Host, Realm, {_Name, Version}) ->
     #{
         <<"base_path">> := BasePath,
         <<"is_deprecated">> := Deprecated,
         <<"paths">> := Paths
-    } = Spec,
-    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P)
+    } = Version,
+    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
         || P <- maps:to_list(Paths)].
 
 
@@ -1448,10 +1462,12 @@ dispatch_table_version(Host, Realm, {_Name, Spec}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec dispatch_table_path(binary(), binary(), boolean(), binary(), tuple()) ->
+-spec dispatch_table_path(
+    binary(), binary(), boolean(), binary(), tuple(), map()) ->
     [scheme_rule()] | no_return().
 
-dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
+dispatch_table_path(
+    Host, BasePath, Deprecated, Realm, {Path, Spec0}, Version) ->
     AbsPath = <<BasePath/binary, Path/binary>>,
     {Accepts, Spec1} = maps:take(<<"accepts">>, Spec0),
     {Provides, Spec2} = maps:take(<<"provides">>, Spec1),
@@ -1463,16 +1479,18 @@ dispatch_table_path(Host, BasePath, Deprecated, Realm, {Path, Spec0}) ->
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
     Mod = bondy_api_gateway_handler,
-    %% State informally defined in bondy_api_gateway_handler
-    State = #{
+    %% Args required by bondy_api_gateway_handler
+    Languages = [string:lowercase(X) || X <- maps:get(?LANGUAGES_KEY, Version)],
+    Args = #{
         api_spec => Spec3,
         realm_uri => Realm,
         deprecated => Deprecated,
-        security => Sec
+        security => Sec,
+        languages => Languages
     },
     lists:flatten([
         [
-            {S, Host, Realm, AbsPath, Mod, State},
+            {S, Host, Realm, AbsPath, Mod, Args},
             security_scheme_rules(S, Host, BasePath, Realm, Sec)
         ] || S <- Schemes
     ]).
@@ -1637,8 +1655,10 @@ content_types_provided(Bin) ->
 check_realm_exists(Uri) ->
     case bondy_realm:lookup(Uri) of
         {error, not_found} ->
-            error(
-                {badarg,  <<"There is no realm named ", $', Uri/binary, $'>>});
+            Reason = {
+                badarg,  <<"There is no realm named ", $', Uri/binary, $'>>
+            },
+            error(Reason);
         _ ->
             ok
     end.

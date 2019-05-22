@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_dealer.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@
 %%    4.  "UNREGISTERED"
 %%    5.  "ERROR"
 %%
-%% <pre>
+%% ```
 %%        ,------.          ,------.               ,------.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `--+---'          `--+---'               `--+---'
@@ -82,7 +82,7 @@
 %%        |Caller|          |Dealer|               |Callee|
 %%        `------'          `------'               `------'
 %%
-%% </pre>
+%% '''
 %%
 %% # Calling and Invocations
 %%
@@ -100,7 +100,7 @@
 %%
 %%    5. "ERROR"
 %%
-%% <pre>
+%% ```
 %%        ,------.          ,------.          ,------.
 %%        |Caller|          |Dealer|          |Callee|
 %%        `--+---'          `--+---'          `--+---'
@@ -119,7 +119,7 @@
 %%        |Caller|          |Dealer|          |Callee|
 %%        `------'          `------'          `------'
 %%
-%% </pre>
+%% '''
 %%
 %%    The execution of remote procedure calls is asynchronous, and there
 %%    may be more than one call outstanding.  A call is called outstanding
@@ -179,6 +179,9 @@
 -export([registrations/3]).
 -export([registrations/4]).
 -export([match_registrations/2]).
+-export([callees/1]).
+-export([callees/2]).
+-export([callees/3]).
 
 
 
@@ -187,6 +190,67 @@
 %% API
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri()) -> [map()] | no_return().
+
+callees(RealmUri) ->
+    case bondy_registry:entries(registration, RealmUri, '_', '_') of
+        [] ->
+            [];
+        Entries ->
+            All = [
+                {
+                    bondy_registry_entry:node(E),
+                    bondy_registry_entry:session_id(E)
+                } || E <- Entries
+            ],
+            [
+                #{node => N, session_id => S}
+                || {N, S} <- sets:to_list(sets:from_list(All))
+            ]
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri(), ProcedureUri :: uri()) ->
+    [map()] | no_return().
+
+callees(RealmUri, ProcedureUri) ->
+    callees(RealmUri, ProcedureUri, #{}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callees(RealmUri :: uri(), ProcedureUri :: uri(), Opts :: map()) ->
+    [map()] | no_return().
+
+callees(RealmUri, ProcedureUri, Opts) ->
+    case bondy_registry:match(registration, ProcedureUri, RealmUri, Opts) of
+        {[], '$end_of_table'} ->
+            [];
+        {Entries, '$end_of_table'} ->
+            All = [
+                {
+                    bondy_registry_entry:node(E),
+                    bondy_registry_entry:session_id(E)
+                } || E <- Entries
+            ],
+            [
+                #{node => N, session_id => S}
+                || {N, S} <- sets:to_list(sets:from_list(All))
+            ]
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -203,10 +267,10 @@ close_context(Ctxt) ->
         ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
         Ctxt
     catch
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = lager:error(
                 "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, erlang:get_stacktrace()]
+                [Class, Reason, ?STACKTRACE(Stacktrace)]
             ),
             Ctxt
     end.
@@ -240,34 +304,11 @@ is_feature_enabled(F) when is_binary(F) ->
 -spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
 handle_message(#unregister{} = M, Ctxt) ->
-    Reply  = case unregister(M#unregister.registration_id, Ctxt) of
+    Reply = case unregister(M#unregister.registration_id, Ctxt) of
         ok ->
             wamp_message:unregistered(M#unregister.request_id);
-        {error, {not_authorized, Mssg}} ->
-            wamp_message:error(
-                ?UNREGISTER,
-                M#unregister.request_id,
-                #{},
-                ?WAMP_NOT_AUTHORIZED,
-                [Mssg],
-                #{message => Mssg}
-            );
-        {error, not_found} ->
-            Mssg = iolist_to_binary(
-                <<"There are no registered procedures matching the id ",
-                $', (M#unregister.registration_id)/integer, $'>>
-            ),
-            wamp_message:error(
-                ?UNREGISTER,
-                M#unregister.request_id,
-                #{},
-                ?WAMP_NO_SUCH_REGISTRATION,
-                [Mssg],
-                #{
-                    message => Mssg,
-                    description => <<"The unregister request failed.">>
-                }
-            )
+        {error, Reason} ->
+            unregister_error(Reason, M)
     end,
     bondy:send(bondy_context:peer_id(Ctxt), Reply);
 
@@ -292,7 +333,7 @@ handle_message(#cancel{} = M, Ctxt0) ->
             %% canceled call. In this case the caller may receive RESULT or
             %% ERROR depending whether the callee finishes processing the
             %% invocation or the interrupt first.
-            %% We peek instead of dequeueing.
+            %% We thus peek (read) instead of dequeueing.
             Fun = fun(InvocationId, Callee, Ctxt1) ->
                 R = wamp_message:interrupt(InvocationId, Opts),
                 ok = bondy:send(Caller, Callee, R, #{}),
@@ -364,17 +405,12 @@ handle_message(#yield{} = M, Ctxt0) ->
             Caller = bondy_rpc_promise:caller(Promise),
             case bondy_rpc_promise:call_id(Promise) of
                 undefined ->
-                    %% TODO make this explicit, at the moment a promise with
-                    %% undefined callId is a promise for a remote calle
                     %% The caller is remote, we fwd the yield to the peer node
+                    %% TODO make this explicit, at the moment a promise with
+                    %% undefined callId is a promise for a remote callee
                     bondy:send(Callee, Caller, M, #{});
                 CallId ->
-                    Result = wamp_message:result(
-                        CallId,
-                        %% TODO check if yield.options should be assigned to result.details
-                        M#yield.options,
-                        M#yield.arguments,
-                        M#yield.arguments_kw),
+                    Result = yield_to_result(CallId, M),
                     bondy:send(Callee, Caller, Result, #{})
             end
     end,
@@ -438,11 +474,15 @@ handle_message(#call{} = M, Ctxt0) ->
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
+
+    %% TODO check if authorized and if not throw
+    %% wamp.error.not_authorized
+
     Caller = bondy_context:peer_id(Ctxt0),
     Fun = fun
         (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
         when is_integer(SessionId), is_pid(Pid) ->
-            %% TODO Revert to session Ids
+            %% TODO Revert to session-scoped Ids
             %% ReqId = bondy_utils:get_id({session, SessionId}),
             ReqId = bondy_utils:get_id(global),
             Args = M#call.arguments,
@@ -451,8 +491,6 @@ handle_message(#call{} = M, Ctxt0) ->
             RegOpts = bondy_registry_entry:options(Entry),
             CallOpts = M#call.options,
             Uri = M#call.procedure_uri,
-            %% TODO check if authorized and if not throw
-            %% wamp.error.not_authorized
             Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
             R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
             ok = bondy:send(Caller, Callee, R, #{}),
@@ -485,17 +523,10 @@ handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
         ({ok, Promise}) ->
             LocalCaller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
-            Result = wamp_message:result(
-                CallId,
-                %% TODO check if yield.options should be assigned to result.details
-                M#yield.options,
-                M#yield.arguments,
-                M#yield.arguments_kw
-            ),
+            Result = yield_to_result(CallId, M),
             bondy:send(Callee, LocalCaller, Result, #{})
     end,
     InvocationId = M#yield.request_id,
-    %% _ = bondy_rpc_promise:dequeue_call(CallId, Caller, Fun),
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
@@ -781,7 +812,6 @@ match_registrations({registration, _} = Cont) ->
 -spec invoke(id(), uri(), function(), map(), bondy_context:t()) -> ok.
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-
     %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
@@ -843,13 +873,11 @@ reply_error(ProcUri, CallId, Ctxt) ->
     {ok, bondy_context:t()}.
 
 dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
-    % #{session := S} = Ctxt,
-    % Caller = bondy_session:pid(S),
     Caller = bondy_context:peer_id(Ctxt),
     case bondy_rpc_promise:dequeue_call(CallId, Caller) of
         empty ->
             %% Promises for this call were either interrupted by us,
-            %% fulfilled or timed out and/or garbage collected, we do nothing
+            %% fulfilled or timed out and/or garbage collected.
             ok = no_matching_promise(M),
             {ok, Ctxt};
         {ok, P} ->
@@ -896,9 +924,11 @@ no_matching_promise(M) ->
     ok.
 
 
+
 %% =============================================================================
 %% PRIVATE - INVOCATION STRATEGIES (LOAD BALANCING, FAIL OVER, ETC)
 %% =============================================================================
+
 
 
 %% @private
@@ -1014,8 +1044,6 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE: META EVENTS
 %% =============================================================================
@@ -1024,20 +1052,20 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 %% @private
 on_register(true, Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_create">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok;
+    bondy_event_manager:notify({registration_created, Map, Ctxt});
 
 on_register(false, Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_register">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok.
+    bondy_event_manager:notify({registration_added, Map, Ctxt}).
+
 
 %% @private
 on_unregister(Map, Ctxt) ->
-    Uri = <<"wamp.registration.on_unregister">>,
-    {ok, _} = bondy_broker:publish(#{}, Uri, [], Map, Ctxt),
-    ok.
+    bondy_event_manager:notify({registration_removed, Map, Ctxt}).
+
+
+%% @private
+%% on_delete(Map, Ctxt) ->
+%%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
 
 no_such_procedure(ProcUri, CallId) ->
@@ -1083,3 +1111,42 @@ no_eligible_callee(Type, Id, Desc) ->
     ).
 
 
+
+%% @private
+yield_to_result(CallId, M) ->
+    wamp_message:result(
+        CallId,
+        %% TODO check if yield.options should be assigned to result.details
+        M#yield.options,
+        M#yield.arguments,
+        M#yield.arguments_kw
+    ).
+
+
+%% @private
+unregister_error(not_found, M) ->
+    Mssg = iolist_to_binary(
+        <<"There are no registered procedures matching the id ",
+        $', (M#unregister.registration_id)/integer, $'>>
+    ),
+    wamp_message:error(
+        ?UNREGISTER,
+        M#unregister.request_id,
+        #{},
+        ?WAMP_NO_SUCH_REGISTRATION,
+        [Mssg],
+        #{
+            message => Mssg,
+            description => <<"The unregister request failed.">>
+        }
+    );
+
+unregister_error({not_authorized, Mssg}, M) ->
+    wamp_message:error(
+        ?UNREGISTER,
+        M#unregister.request_id,
+        #{},
+        ?WAMP_NOT_AUTHORIZED,
+        [Mssg],
+        #{message => Mssg}
+    ).

@@ -1,0 +1,31 @@
+{
+    "id":"com.leapsight.test",
+    "meta":{},
+    "subscriptions" : [
+        {
+            "bridge": "bondy_kafka_bridge",
+            "match": {
+                "realm_uri": "com.leapsight.test",
+                "topic" : "com.example.on_counter",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "type": "produce_sync",
+                "topic": "{{kafka.topics |> get(com.magenta.wamp_events)}}",
+                "key": "\"{{event.topic}}/{{event.publication_id}}\"",
+                "value": "{{event}}",
+                "options" : {
+                    "client_id": "default",
+                    "acknowledge": true,
+                    "required_acks": "all",
+                    "partition": null,
+                    "partitioner": {
+                        "algorithm": "fnv32a",
+                        "value": "\"{{event.topic}}/{{event.publication_id}}\""
+                    },
+                    "encoding": "json"
+                }
+            }
+        }
+    ]
+}

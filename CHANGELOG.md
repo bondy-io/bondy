@@ -1,4 +1,36 @@
 # CHANGELOG
+## 0.8.2
+
+- Migration to OTP 21.3 or higher.
+- Upgraded all dependencies to support OTP 21
+
+## 0.8.1
+
+This version includes a complete redesign of event management and instrumentation.
+The new `bondy_event_manager` is now the way for the different subsystems to asynchronously publish events (notifications) and offload all instrumentation to event handlers:
+
+- `bondy_promethues` is an event handler that implements all promethues instrumentation
+- `bondy_wamp_meta_events` is an event handler that selectively re-published bondy events to WAMP Meta events.
+
+### New Modules
+
+- `bondy_event_manager` implements a form of supervised handlers similar to lager (logging library), by spawning a "watcher" processes per handler (module) under a supervision tree and restarting it when it crashes.
+
+- `bondy_alarm_handler` replaces sasl’s default alarm_handler.
+
+### Deprecated Modules
+
+`bondy_stats` containing legacy exometer instrumentation was removed.
+
+## 0.8.0
+
+This version introduces an incompatibility with previous versions data storage. If you want to upgrade an existing installation you will need to use the bondy_backup module's functions or the Admin Backup API.
+
+- Upgrade to plum_db 0.2.0 which introduces prefix types to determine which storage type to use with the following types supported: ram (ets-based storage), disk (leveledb) and ram_disk(ets and leveldb).
+    - Registry uses `ram` storage type
+    - All security resources use `ram_disk` storage type
+    - Api Gateway (specs) and OAuth2 tokens use `disk` storage type
+- Handling of migration in bondy_backup. To migrate from v0.7.1 perform a backup on Bondy v0.7.1 and then restore it on Bondy v0.7.2.
 
 ## 0.7.1
 - New Trie data structure for bondy_registry

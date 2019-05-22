@@ -2,7 +2,7 @@
 %% =============================================================================
 %%  bondy_context.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@
     roles => map(),
     challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
+    request_timestamp => integer(),
     request_timeout => non_neg_integer(),
     request_details => map(),
     %% Metadata
@@ -56,7 +57,8 @@
 }.
 -export_type([t/0]).
 
-
+-export([agent/1]).
+-export([authid/1]).
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
@@ -68,7 +70,10 @@
 -export([peer_id/1]).
 -export([realm_uri/1]).
 -export([request_id/1]).
+-export([call_timeout/1]).
+-export([set_call_timeout/2]).
 -export([request_timeout/1]).
+-export([request_timestamp/1]).
 -export([reset/1]).
 -export([roles/1]).
 -export([session/1]).
@@ -76,10 +81,19 @@
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
+-export([set_request_timestamp/2]).
 -export([set_subprotocol/2]).
+-export([set_realm_uri/2]).
 -export([subprotocol/1]).
 -export([set_session/2]).
 -export([encoding/1]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -93,8 +107,10 @@ new() ->
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         request_id => undefined,
-        request_timeout => bondy_config:request_timeout()
+        call_timeout => bondy_config:get(wamp_call_timeout),
+        request_timeout => bondy_config:get(request_timeout)
     }.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -117,12 +133,13 @@ new(Peer, Subprotocol) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Resets the context. Returns a copy of Ctxt where the following attributes
-%% have been reset: request_id, request_timeout.
+%% have been reset: request_id, request_timeout, request_timestamp
 %% @end
 %% -----------------------------------------------------------------------------
 -spec reset(t()) -> t().
 reset(Ctxt) ->
     Ctxt#{
+        request_timestamp => undefined,
         request_id => undefined,
         request_timeout => 0
     }.
@@ -226,6 +243,38 @@ realm_uri(#{realm_uri := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Sets the realm uri of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_realm_uri(t(), uri()) -> t().
+set_realm_uri(Ctxt, Uri) ->
+    Ctxt#{realm_uri => Uri}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the agent of the provided context or 'undefined'
+%% if there is none.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec agent(t()) -> binary() | undefined.
+agent(#{session := S}) ->
+    bondy_session:agent(S);
+agent(#{}) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authid(t()) -> binary() | undefined.
+authid(#{authid := Val}) -> Val;
+authid(#{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Returns the sessionId of the provided context or 'undefined'
 %% if there is none.
 %% @end
@@ -289,7 +338,6 @@ session(#{session := S}) ->
 request_id(#{request_id := Val}) ->
     Val.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Sets the current request id to the provided context.
@@ -318,6 +366,46 @@ request_timeout(#{request_timeout := Val}) ->
 -spec set_request_timeout(t(), non_neg_integer()) -> t().
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current WAMP call timeout.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec call_timeout(t()) -> non_neg_integer().
+call_timeout(#{call_timeout := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current WAMP call timeout to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_call_timeout(t(), non_neg_integer()) -> t().
+set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
+    Ctxt#{call_timeout => Timeout}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current request timestamp.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_timestamp(t()) -> integer().
+request_timestamp(#{request_timestamp := Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request timeout to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_timestamp(t(), integer()) -> t().
+set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
+    Ctxt#{request_timestamp => Timestamp}.
 
 
 %% -----------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -17,17 +17,13 @@
 %% =============================================================================
 
 
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 %% @doc
-%%
 %% @end
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 -module(bondy).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
-
--define(SEND_TIMEOUT, 20000).
--define(CALL_TIMEOUT, 20000).
 
 -type wamp_error_map() :: #{
     error_uri => uri(),
@@ -42,17 +38,21 @@
 -export([ack/2]).
 -export([call/5]).
 -export([publish/5]).
+-export([subscribe/3]).
 -export([subscribe/4]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
 -export([start/0]).
+-export([aae_exchanges/0]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -61,6 +61,14 @@
 %% -----------------------------------------------------------------------------
 start() ->
     application:ensure_all_started(bondy).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+aae_exchanges() ->
+    plumtree_broadcast:exchanges().
 
 
 %% -----------------------------------------------------------------------------
@@ -158,14 +166,28 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
 %% API - SUBSCRIBER ROLE
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Calls bondy_broker:subscribe/3.
+%% @end
+%% -----------------------------------------------------------------------------
+subscribe(RealmUri, Opts, TopicUri) ->
+    bondy_broker:subscribe(RealmUri, Opts, TopicUri).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Calls bondy_broker:subscribe/4.
+%% @end
+%% -----------------------------------------------------------------------------
 subscribe(RealmUri, Opts, TopicUri, Fun) ->
-    bondy_broker_events:subscribe(RealmUri, Opts, TopicUri, Fun).
+    bondy_broker:subscribe(RealmUri, Opts, TopicUri, Fun).
 
 
 
 %% =============================================================================
 %% API - PUBLISHER ROLE
 %% =============================================================================
+
 
 
 publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
@@ -197,9 +219,10 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% TODO we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    Timeout = case maps:get(timeout, Opts, ?CALL_TIMEOUT) of
-        0 -> ?CALL_TIMEOUT;
-        Val -> Val
+    Timeout = case maps:find(call_timeout, Opts) of
+        {ok, 0} -> bondy_config:get(wamp_call_timeout);
+        {ok, Val} -> Val;
+        error -> bondy_config:get(wamp_call_timeout)
     end,
     ReqId = bondy_utils:get_id(global),
 
@@ -218,46 +241,51 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                 Timeout ->
                     Mssg = iolist_to_binary(
                         io_lib:format(
-                            "The operation could not be completed in time "
+                            "The operation could not be completed in time"
                             " (~p milliseconds).",
                             [Timeout]
                         )
                     ),
-                    Error = #{
-                        error_uri => ?BONDY_ERROR_TIMEOUT,
-                        details => #{},
-                        arguments => [Mssg],
-                        arguments_kw => #{
-                            procedure_uri => ProcedureUri,
-                            timeout => Timeout
-                        }
+                    ErrorDetails = maps:new(),
+                    ErrorArgs = [Mssg],
+                    ErrorArgsKw = #{
+                        procedure_uri => ProcedureUri,
+                        timeout => Timeout
                     },
-                    {error, Error, Ctxt1}
+                    Error = wamp_message:error(
+                        ?CALL,
+                        ReqId,
+                        ErrorDetails,
+                        ?BONDY_ERROR_TIMEOUT,
+                        ErrorArgs,
+                        ErrorArgsKw
+                    ),
+                    ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+                    {error, message_to_map(Error), Ctxt1}
             end;
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, message_to_map(Error), Ctxt1};
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = #{
-                error_uri => ?BONDY_INCONSISTENCY_ERROR,
-                details => #{},
-                arguments => [<<"Inconsistency error">>],
-                arguments_kw => #{}
-            },
-            {error, Error, Ctxt1};
+            Error = wamp_message:error(
+                ?CALL, ReqId, #{}, ?BONDY_INCONSISTENCY_ERROR,
+                [<<"Inconsistency error">>]
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            {error, message_to_map(Error), Ctxt1};
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
             {error, message_to_map(Error), Ctxt1};
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
-            Error = #{
-                error_uri => ?BONDY_INCONSISTENCY_ERROR,
-                details => #{},
-                arguments => [<<"Inconsistency error">>],
-                arguments_kw => #{}
-            },
-            {error, Error, Ctxt1}
+            Error = wamp_message:error(
+                ?CALL, ReqId, #{}, ?BONDY_INCONSISTENCY_ERROR,
+                [<<"Inconsistency error">>]
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
+            {error, message_to_map(Error), Ctxt1}
     end.
 
 
@@ -313,7 +341,7 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
     MonitorRef = monitor(process, Pid),
 
     %% The following no longer applies, as the process should be local
-    %% However, we keep it as it is still the right thing to do
+    %% However, we keep it as it still is the right thing to do.
     %% ----------------------
     %% If the monitor/2 call failed to set up a connection to a
     %% remote node, we don't want the '!' operator to attempt

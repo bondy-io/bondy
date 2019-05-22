@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_security_utils.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,12 +16,17 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_security_utils).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
 -type auth_error_reason()           ::  bondy_oauth2:error()
-                                        | invalid_scheme.
+                                        | invalid_scheme
+                                        | no_such_realm.
 
 -type auth_scheme()                 ::  wampcra | basic | bearer | digest.
 -type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}

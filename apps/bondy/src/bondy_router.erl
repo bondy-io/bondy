@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_router.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -42,49 +42,49 @@
 %% delegating the rest to either {@link bondy_broker} or {@link bondy_dealer},
 %% which implement the actual PubSub and RPC logic respectively.
 %%
-%% <pre>
+%% ```
 %% ,------.                                    ,------.
 %% | Peer |                                    | Peer |
 %% `--+---'                                    `--+---'
 %%    |                                           |
 %%    |               TCP established             |
-%%    |&lt;-----------------------------------------&gt;|
+%%    |<----------------------------------------->|
 %%    |                                           |
 %%    |               TLS established             |
-%%    |+&lt;---------------------------------------&gt;+|
+%%    |+<--------------------------------------->+|
 %%    |+                                         +|
 %%    |+           WebSocket established         +|
-%%    |+|&lt;-------------------------------------&gt;|+|
+%%    |+|<------------------------------------->|+|
 %%    |+|                                       |+|
 %%    |+|            WAMP established           |+|
-%%    |+|+&lt;-----------------------------------&gt;+|+|
+%%    |+|+<----------------------------------->+|+|
 %%    |+|+                                     +|+|
 %%    |+|+                                     +|+|
 %%    |+|+            WAMP closed              +|+|
-%%    |+|+&lt;-----------------------------------&gt;+|+|
+%%    |+|+<----------------------------------->+|+|
 %%    |+|                                       |+|
 %%    |+|                                       |+|
 %%    |+|            WAMP established           |+|
-%%    |+|+&lt;-----------------------------------&gt;+|+|
+%%    |+|+<----------------------------------->+|+|
 %%    |+|+                                     +|+|
 %%    |+|+                                     +|+|
 %%    |+|+            WAMP closed              +|+|
-%%    |+|+&lt;-----------------------------------&gt;+|+|
+%%    |+|+<----------------------------------->+|+|
 %%    |+|                                       |+|
 %%    |+|           WebSocket closed            |+|
-%%    |+|&lt;-------------------------------------&gt;|+|
+%%    |+|<------------------------------------->|+|
 %%    |+                                         +|
 %%    |+              TLS closed                 +|
-%%    |+&lt;---------------------------------------&gt;+|
+%%    |+<--------------------------------------->+|
 %%    |                                           |
 %%    |               TCP closed                  |
-%%    |&lt;-----------------------------------------&gt;|
+%%    |<----------------------------------------->|
 %%    |                                           |
 %% ,--+---.                                    ,--+---.
 %% | Peer |                                    | Peer |
 %% `------'                                    `------'
 %%
-%% </pre>
+%% '''
 %% (Diagram copied from WAMP RFC Draft)
 %%
 %% @end
@@ -135,7 +135,7 @@ shutdown() ->
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
     catch
-        _:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             _ = lager:error(
                 "Error while shutting down router; reason=~p", [Reason])
     end,
@@ -187,15 +187,16 @@ agent() ->
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
 
-forward(M, #{session := _} = Ctxt) ->
+forward(M, #{session := _} = Ctxt0) ->
+    Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
     %% _ = lager:debug(
     %%     "Forwarding message; peer_id=~p, message=~p",
     %%     [bondy_context:peer_id(Ctxt), M]
     %% ),
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
-    ok = bondy_stats:update(M, Ctxt),
-    do_forward(M, Ctxt).
+    ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
+    do_forward(M, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
@@ -359,7 +360,7 @@ async_forward(M, Ctxt0) ->
             ok = sync_forward(Event),
             {ok, Ctxt0}
     catch
-        error:Reason when Acknowledge == true ->
+        ?EXCEPTION(error, Reason, _) when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             ErrorMap = bondy_error:map(Reason),
@@ -371,15 +372,15 @@ async_forward(M, Ctxt0) ->
                 [maps:get(<<"message">>, ErrorMap)],
                 #{error => ErrorMap}
             ),
-            ok = bondy_stats:update(Reply, Ctxt0),
+            ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
             {reply, Reply, Ctxt0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
             _ = lager:error(
                 "Error while routing message; class=~p, reason=~p, message=~p"
                 " realm_uri=~p, session_id=~p, stacktrace=~p",
-                [Class, Reason, M, Ctxt, SessionId, erlang:get_stacktrace()]
+                [Class, Reason, M, Ctxt, SessionId, ?STACKTRACE(Stacktrace)]
             ),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}

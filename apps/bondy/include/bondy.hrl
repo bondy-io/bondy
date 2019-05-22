@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.hrl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -22,6 +22,20 @@
 -define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
 
+-ifdef(OTP_RELEASE). %% => OTP is 21 or higher
+-include_lib("kernel/include/logger.hrl").
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(STACKTRACE(Stacktrace), Stacktrace).
+-else.
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(STACKTRACE(_), erlang:get_stacktrace()).
+-endif.
+
+
+%% In msecs
+-define(SEND_TIMEOUT, 20000).
+
+
 
 %% =============================================================================
 %% FEATURES
@@ -29,50 +43,49 @@
 
 
 
-
 -define(DEALER_FEATURES, #{
+    call_timeout => true,
+    shared_registration => true,
+    call_canceling => true,
+    pattern_based_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
-    call_canceling => false,
     caller_identification => false,
     call_trustlevels => false,
     registration_meta_api => false,
     registration_revocation => false,
     session_meta_api => false,
-    pattern_based_registration => true,
     reflection => false,
-    shared_registration => true,
     sharded_registration => false
 }).
 
 -define(CALLEE_FEATURES, #{
+    call_timeout => true,
+    call_canceling => true,
+    shared_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
-    call_canceling => false,
     caller_identification => false,
     call_trustlevels => false,
     registration_revocation => false,
     session_meta_api => false,
     pattern_based_registration => true,
-    shared_registration => true,
     sharded_registration => false
 }).
 
 -define(CALLER_FEATURES, #{
+    call_timeout => true,
     progressive_call_results => false,
     progressive_calls => false,
-    call_timeout => true,
     call_canceling => false,
     caller_identification => false
 }).
 
 -define(BROKER_FEATURES, #{
-    event_history => false,
     pattern_based_subscription => true,
+    publisher_exclusion => true,
+    event_history => false,
     publication_trustlevels => false,
-    publisher_exclusion => false,
     publisher_identification => false,
     session_meta_api => false,
     sharded_subscription => false,
@@ -82,15 +95,15 @@
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
-    event_history => false,
     pattern_based_subscription => true,
+    event_history => false,
     publication_trustlevels => false,
     publisher_identification => false,
     sharded_subscription => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
-    publisher_exclusion => false,
+    publisher_exclusion => true,
     publisher_identification => false,
     subscriber_blackwhite_listing => false
 }).

@@ -16,6 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -23,11 +27,12 @@
 -define(INVOCATION_QUEUE, bondy_rpc_promise).
 
 -record(bondy_rpc_promise, {
-    invocation_id       ::  id(),
-    procedure_uri       ::  uri() | undefined,
-    call_id             ::  id() | undefined,
-    caller              ::  peer_id(),
-    callee              ::  peer_id()
+    invocation_id                           ::  id(),
+    procedure_uri                           ::  uri() | undefined,
+    call_id                                 ::  id() | undefined,
+    caller                                  ::  peer_id(),
+    callee                                  ::  peer_id(),
+    timestamp                               :: integer()
 }).
 
 
@@ -58,12 +63,16 @@
 -export([peek_call/2]).
 -export([peek_invocation/2]).
 -export([procedure_uri/1]).
+-export([queue_size/0]).
+-export([timestamp/1]).
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new promise for a remote invocation
@@ -78,7 +87,8 @@ new(InvocationId, Callee, Caller) ->
     #bondy_rpc_promise{
         invocation_id = InvocationId,
         caller = Caller,
-        callee = Callee
+        callee = Callee,
+        timestamp = erlang:monotonic_time()
     }.
 
 
@@ -99,7 +109,8 @@ new(InvocationId, CallId, ProcUri, Callee, Ctxt) ->
         procedure_uri = ProcUri,
         call_id = CallId,
         caller = bondy_context:peer_id(Ctxt),
-        callee = Callee
+        callee = Callee,
+        timestamp = bondy_context:request_timestamp(Ctxt)
     }.
 
 
@@ -138,6 +149,13 @@ caller(#bondy_rpc_promise{caller = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 procedure_uri(#bondy_rpc_promise{procedure_uri = Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -241,6 +259,10 @@ flush(Caller) ->
     ok.
 
 
+queue_size() ->
+    tuplespace_queue:size(?INVOCATION_QUEUE).
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -279,10 +301,11 @@ dequeue_promise(Key) ->
     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, Opts) of
         empty ->
             %% The promise might have expired so we GC it.
-            case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
-                0 -> empty;
-                _ -> empty
-            end;
+            %% case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
+            %%     0 -> empty;
+            %%     _ -> empty
+            %% end;
+            empty;
         [#bondy_rpc_promise{} = Promise] ->
             {ok, Promise}
     end.

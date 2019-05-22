@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_cache.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,7 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_cache).
 
 
@@ -25,6 +28,7 @@
 -export([put/4]).
 -export([remove/2]).
 
+%% TODO Evict all caches for Session, User, Client and Realm once any of them are deleted
 
 -spec get(RealmUri :: binary(), any()) -> {ok, any()} | {error, not_found}.
 get(_, _) ->

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_ws_handler.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,10 +16,8 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-%% =============================================================================
-%% @doc
-%% A Cowboy WS handler.
+%% -----------------------------------------------------------------------------
+%% @doc A Cowboy WS handler.
 %%
 %% Each WAMP message is transmitted as a separate WebSocket message
 %% (not WebSocket frame)
@@ -45,15 +43,16 @@
 %% identifiers for additional serialization formats with the official
 %% WebSocket subprotocol registry.
 %% @end
-%% =============================================================================
+%% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_handler).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?CONN_TIMEOUT
 -define(CONN_TIMEOUT, 60000*10).
--define(WS_SUBPROTOCOL_HEADER, <<"sec-websocket-protocol">>).
+-define(SUBPROTO_HEADER, <<"sec-websocket-protocol">>).
 
 
 
@@ -85,46 +84,48 @@
     | {module(), cowboy_req:req(), state(), timeout()}
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
-init(Req0, _) ->
+init(Req0, State) ->
     %% From [Cowboy's Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
     %% If the sec-websocket-protocol header was sent with the request for
     %% establishing a Websocket connection, then the Websocket handler must
     %% select one of these subprotocol and send it back to the client,
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
-    All = cowboy_req:parse_header(?WS_SUBPROTOCOL_HEADER, Req0),
-    case select_subprotocol(All) of
-        {ok, {ws, FrameType, _Enc} = Subproto, BinProto} ->
-            Peer = cowboy_req:peer(Req0),
-            case bondy_wamp_protocol:init(Subproto, Peer, #{}) of
-                {ok, CBState} ->
-                    St = #state{
-                        frame_type = FrameType,
-                        protocol_state = CBState
-                    },
-                    Req1 = cowboy_req:set_resp_header(
-                        ?WS_SUBPROTOCOL_HEADER, BinProto, Req0),
-                    Opts = #{idle_timeout => ?CONN_TIMEOUT},
-                    {cowboy_websocket, Req1, St, Opts};
-                {error, _Reason} ->
-                    %% Returning ok will cause the handler to
-                    %% stop in websocket_handle
-                    {ok, Req0, undefined}
-            end;
+
+    ClientIP = bondy_http_utils:client_ip(Req0),
+    Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
+
+    case select_subprotocol(Subprotocols) of
+        {ok, Subproto, BinProto} ->
+            do_init(Subproto, BinProto, Req0, State);
+
+        {error, missing_subprotocol} ->
+            _ = lager:info(
+                "Closing WS connection. Missing value for header '~s'; " "client_ip=~s",
+                [?SUBPROTO_HEADER, ClientIP]
+            ),
+            %% Returning ok will cause the handler
+            %% to stop in websocket_handle
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
+            {ok, Req1, undefined};
+
         {error, invalid_subprotocol} ->
             %% At the moment we only support WAMP, not plain WS
             _ = lager:info(
-                <<"Closing WS connection. Initialised without a valid value for http header '~p'">>, [?WS_SUBPROTOCOL_HEADER]),
+                "Closing WS connection. Initialised without a valid value for http header '~s'; value=~p, client_ip=~s",
+                [?SUBPROTO_HEADER, Subprotocols, ClientIP]
+            ),
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            {ok, Req0, undefined};
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
+            {ok, Req1, undefined};
+
         {error, _Reason} ->
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
-            {ok, Req0, undefined}
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
+            {ok, Req1, undefined}
     end.
-
-
 
 
 
@@ -181,6 +182,9 @@ websocket_handle({T, Data}, #state{frame_type = T} = St) ->
             {stop, St#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             self() ! {stop, normal},
+            reply(T, L, St#state{protocol_state = PSt});
+        {stop, Reason, L, PSt} ->
+            self() ! {stop, Reason},
             reply(T, L, St#state{protocol_state = PSt})
     end;
 
@@ -257,22 +261,22 @@ terminate({error, _Other}, _Req, St) ->
 
 terminate({crash, error, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=error, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=error, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 
 terminate({crash, exit, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=exit, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=exit, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 
 terminate({crash, throw, Reason}, _Req, St) ->
     _ = lager:error(
-        "Process crashed, error=throw, reason=~p, stacktrace=~p",
-        [Reason, erlang:get_stacktrace()]
+        "Process crashed, error=throw, reason=~p",
+        [Reason]
     ),
     do_terminate(St);
 
@@ -298,9 +302,65 @@ handle_outbound(T, M, St) ->
 
 
 %% =============================================================================
-%% PRIVATE: WS FRAME / REPLY
+%% PRIVATE:
 %% =============================================================================
 
+
+
+%% @private
+do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, _) ->
+    Peer = cowboy_req:peer(Req0),
+    case bondy_wamp_protocol:init(Subproto, Peer, #{}) of
+        {ok, CBState} ->
+            St = #state{frame_type = FrameType, protocol_state = CBState},
+            Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
+            Opts = #{idle_timeout => ?CONN_TIMEOUT},
+            {cowboy_websocket, Req1, St, Opts};
+        {error, _Reason} ->
+            %% Returning ok will cause the handler to
+            %% stop in websocket_handle
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
+            {ok, Req1, undefined}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% The order is undefined
+%% @end
+%% -----------------------------------------------------------------------------
+-spec select_subprotocol(list(binary()) | undefined) ->
+    {ok, bondy_wamp_protocol:subprotocol(), binary()}
+    | {error, invalid_subprotocol | missing_subprotocol}.
+
+select_subprotocol(undefined) ->
+    {error, missing_subprotocol};
+
+select_subprotocol(L) when is_list(L) ->
+    try
+        Fun = fun(X) ->
+            case bondy_wamp_protocol:validate_subprotocol(X) of
+                {ok, SP} ->
+                    throw({ok, SP, X});
+                {error, invalid_subprotocol} ->
+                    ok
+            end
+        end,
+        ok = lists:foreach(Fun, L),
+        {error, invalid_subprotocol}
+    catch
+        ?EXCEPTION(throw, {ok, _SP, _X} = OK, _) ->
+            OK
+    end.
+
+
+%% @private
+do_terminate(undefined) ->
+    ok;
+
+do_terminate(St) ->
+    bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
 
@@ -319,52 +379,6 @@ frame(Type, L) when is_list(L) ->
 frame(Type, E) when Type == text orelse Type == binary ->
     {Type, E}.
 
-
-
-
-
-
-%% =============================================================================
-%% PRIVATE: UTILS
-%% =============================================================================
-
-
-
-
-%% @private
-do_terminate(St) ->
-    bondy_wamp_protocol:terminate(St#state.protocol_state).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% The order is undefined
-%% @end
-%% -----------------------------------------------------------------------------
--spec select_subprotocol(list(binary()) | undefined) ->
-    {ok, bondy_wamp_protocol:subprotocol(), binary()}
-    | {error, invalid_subprotocol}.
-
-select_subprotocol(undefined) ->
-    {error, invalid_subprotocol};
-
-select_subprotocol(L) when is_list(L) ->
-    try
-        Fun = fun(X) ->
-            case bondy_wamp_protocol:validate_subprotocol(X) of
-                {ok, SP} ->
-                    throw({ok, SP, X});
-                {error, invalid_subprotocol} ->
-                    ok
-            end
-        end,
-        ok = lists:foreach(Fun, L),
-        {error, invalid_subprotocol}
-    catch
-         throw:{ok, _SP, _X} = OK ->
-            OK
-    end.
 
 
 

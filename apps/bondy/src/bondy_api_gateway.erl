@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_api_gateway.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -25,10 +24,10 @@
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_security.hrl").
 
 
-
--define(PREFIX, {global, api_specs}).
+-define(PREFIX, {api_gateway, api_specs}).
 -define(HTTP, api_gateway_http).
 -define(HTTPS, api_gateway_https).
 -define(ADMIN_HTTP, admin_api_http).
@@ -36,7 +35,8 @@
 
 -record(state, {
     exchange_ref            ::  {pid(), reference()} | undefined,
-    updated_specs = []      ::  list()
+    updated_specs = []      ::  list(),
+    subscriptions = #{}     ::  #{id() => uri()}
 }).
 
 
@@ -50,6 +50,7 @@
 -export([delete/1]).
 -export([dispatch_table/1]).
 -export([list/0]).
+-export([apply_config/0]).
 -export([load/1]).
 -export([lookup/1]).
 -export([rebuild_dispatch_tables/0]).
@@ -78,7 +79,10 @@
 %% =============================================================================
 
 
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
@@ -167,6 +171,20 @@ resume_admin_listeners() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Parses the apis provided by the configuration file
+%% ('bondy.api_gateway.config_file'), stores the apis in the metadata store
+%% and calls rebuild_dispatch_tables/0.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec apply_config() ->
+    ok | {error, invalid_specification_format | any()}.
+
+apply_config() ->
+    gen_server:call(?MODULE, apply_config).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Parses the provided Spec, stores it in the metadata store and calls
 %% rebuild_dispatch_tables/0.
 %% @end
@@ -174,12 +192,13 @@ resume_admin_listeners() ->
 -spec load(file:filename() | map()) ->
     ok | {error, invalid_specification_format | any()}.
 
-load(Map) when is_map(Map) ->
-    gen_server:call(?MODULE, {load, Map}).
+load(Term) when is_map(Term) orelse is_list(Term) ->
+    gen_server:call(?MODULE, {load, Term}).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the current dispatch configured in the HTTP server.
+%% @doc Returns the current dispatch configured in Cowboy for the
+%% given Listener.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec dispatch_table(listener()) -> any().
@@ -251,15 +270,8 @@ delete(Id) when is_binary(Id) ->
 
 
 init([]) ->
-    %% We subscribe to change notifications in plum_db_events, we are
-    %% interested in updates to API Specs coming from another node so that we
-    %% recompile them and generate the Cowboy dispatch tables
-    ok = plum_db_events:subscribe(exchange_started),
-    ok = plum_db_events:subscribe(exchange_finished),
-    MS = [{{{?PREFIX, '_'}, '_'}, [], [true]}],
-    ok = plum_db_events:subscribe(object_update, MS),
-
-    {ok, #state{}}.
+    State = subscribe(#state{}),
+    {ok, State}.
 
 
 handle_call({start_listeners, Type}, _From, State) ->
@@ -278,19 +290,45 @@ handle_call({stop_listeners, Type}, _From, State) ->
     Res = do_stop_listeners(Type),
     {reply, Res, State};
 
-handle_call({load, Map}, _From, State) ->
-    Res = load_spec(Map),
+handle_call(apply_config, _From, State) ->
+    Res = do_apply_config(),
     {reply, Res, State};
+
+handle_call({load, Map}, _From, State) ->
+    try
+        Res = load_spec(Map),
+        ok = rebuild_dispatch_tables(),
+        {reply, Res, State}
+    catch
+        ?EXCEPTION(_, Reason, _) ->
+            {reply, {error, Reason}, State}
+    end;
 
 handle_call(Event, From, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
-    {noreply, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
+
+handle_cast(#event{} = Event, State) ->
+    %% We informally implement bondy_subscriber
+    %% TODO make bondy_subscriber into a behaviour we implement and change
+    %% bondy_registry_entry to contain Callback Mod, change bondy_broker to
+    %% call CallbackMod:handle_event/2 instead of
+    %% bondy_subscriber:handle_event/2
+    Id = Event#event.subscription_id,
+    Topic = maps:get(Id, State#state.subscriptions, undefined),
+    NewState = case {Topic, Event#event.arguments} of
+        {undefined, _} ->
+            State;
+        {?REALM_DELETED, [Uri]} ->
+            on_realm_deleted(Uri, State)
+    end,
+    {noreply, NewState};
 
 handle_cast(Event, State) ->
     _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
     {noreply, State}.
 
 handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
@@ -311,15 +349,7 @@ handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
     %% we do nothing
     {noreply, State};
 
-handle_info(
-    {'DOWN', Ref, process, Pid, _Reason},
-    #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-    ok = handle_spec_updates(State0),
-    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-    {noreply, State1};
-
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables
@@ -331,18 +361,34 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _}}, State) ->
     Acc = State#state.updated_specs,
     {noreply, State#state{updated_specs = [Key|Acc]}};
 
+
+handle_info(
+    {'DOWN', Ref, process, Pid, _Reason},
+    #state{exchange_ref = {Pid, Ref}} = State0) ->
+
+    ok = handle_spec_updates(State0),
+    State1 = State0#state{updated_specs = [], exchange_ref = undefined},
+    {noreply, State1};
+
 handle_info(Info, State) ->
     _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
     {noreply, State}.
 
 
-terminate(normal, _State) ->
-    unsubscribe();
-terminate(shutdown, _State) ->
-    unsubscribe();
-terminate({shutdown, _}, _State) ->
-    unsubscribe();
-terminate(_Reason, _State) ->
+terminate(normal, State) ->
+    _ = unsubscribe(State),
+    ok;
+
+terminate(shutdown, State) ->
+    _ = unsubscribe(State),
+    ok;
+
+terminate({shutdown, _}, State) ->
+    _ = unsubscribe(State),
+    ok;
+
+terminate(_Reason, State) ->
+    _ = unsubscribe(State),
     ok.
 
 
@@ -356,15 +402,44 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
-unsubscribe() ->
+
+subscribe(State) ->
+    %% We subscribe to change notifications in plum_db_events, we are
+    %% interested in updates to API Specs coming from another node so that we
+    %% recompile them and generate the Cowboy dispatch tables
+    ok = plum_db_events:subscribe(exchange_started),
+    ok = plum_db_events:subscribe(exchange_finished),
+    MS = [{
+        %% {{{_, _} = FullPrefix, Key}, NewObj, ExistingObj}
+        {{?PREFIX, '_'}, '_', '_'}, [], [true]
+    }],
+    ok = plum_db_events:subscribe(object_update, MS),
+
+    %% We subscribe WAMP events
+    Opts = #{
+        subscription_id => bondy_utils:get_id(global),
+        match => <<"exact">>
+    },
+    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?REALM_DELETED),
+    Subs = maps:put(Id, ?BONDY_PRIV_REALM_URI, State#state.subscriptions),
+
+    State#state{subscriptions = Subs}.
+
+
+%% @private
+unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(exchange_started),
     _ = plum_db_events:unsubscribe(exchange_finished),
     _ = plum_db_events:unsubscribe(object_update),
-    ok.
+
+    Ids = maps:keys(State#state.subscriptions),
+    _ = [bondy_broker:unsubscribe(Id, ?BONDY_PRIV_REALM_URI) ||  Id <- Ids],
+    State#state{subscriptions = #{}}.
 
 
 %% @private
 do_start_listeners(public) ->
+    _ = lager:info("Starting public HTTP/S listeners"),
     DTables = case load_dispatch_tables() of
         [] ->
             [
@@ -378,6 +453,7 @@ do_start_listeners(public) ->
     ok;
 
 do_start_listeners(admin) ->
+    _ = lager:info("Starting admin HTTP/S listeners"),
     DTables = parse_specs([admin_spec()], admin_base_routes()),
     _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok.
@@ -385,11 +461,13 @@ do_start_listeners(admin) ->
 
 %% @private
 do_suspend_listeners(public) ->
+    _ = lager:info("Suspending public HTTP/S listeners"),
     catch ranch:suspend_listener(?HTTP),
     catch ranch:suspend_listener(?HTTPS),
     ok;
 
 do_suspend_listeners(admin) ->
+    _ = lager:info("Suspending admin HTTP/S listeners"),
     catch ranch:suspend_listener(?ADMIN_HTTP),
     catch ranch:suspend_listener(?ADMIN_HTTPS),
     ok.
@@ -397,11 +475,13 @@ do_suspend_listeners(admin) ->
 
 %% @private
 do_resume_listeners(public) ->
+    _ = lager:info("Resuming public HTTP/S listeners"),
     catch ranch:resume_listener(?HTTP),
     catch ranch:resume_listener(?HTTPS),
     ok;
 
 do_resume_listeners(admin) ->
+    _ = lager:info("Resuming admin HTTP/S listeners"),
     catch ranch:resume_listener(?ADMIN_HTTP),
     catch ranch:resume_listener(?ADMIN_HTTPS),
     ok.
@@ -409,14 +489,46 @@ do_resume_listeners(admin) ->
 
 %% @private
 do_stop_listeners(public) ->
+    _ = lager:info("Stopping public HTTP/S listeners"),
     catch cowboy:stop_listener(?HTTP),
     catch cowboy:stop_listener(?HTTPS),
     ok;
 
 do_stop_listeners(admin) ->
+    _ = lager:info("Stopping admin HTTP/S listeners"),
     catch cowboy:stop_listener(?ADMIN_HTTP),
     catch cowboy:stop_listener(?ADMIN_HTTPS),
     ok.
+
+
+%% @private
+-spec do_apply_config() -> ok | no_return().
+
+do_apply_config() ->
+    case bondy_config:get([api_gateway, config_file]) of
+        undefined ->
+            ok;
+        FName ->
+            try jsx:consult(FName, [return_maps]) of
+                [Specs] ->
+                    _ = lager:info(
+                        "Loading configuration file; path=~p", [FName]),
+                    _ = [ok = load_spec(Spec) || Spec <- Specs],
+                    rebuild_dispatch_tables()
+            catch
+                ?EXCEPTION(error, badarg, _) ->
+                    case filelib:is_file(FName) of
+                        true ->
+                            error(invalid_specification_format);
+                        false ->
+                            _ = lager:info(
+                                "No configuration file found; path=~p",
+                                [FName]
+                            ),
+                            ok
+                    end
+            end
+    end.
 
 
 %% @private
@@ -425,12 +537,10 @@ load_spec(Map) when is_map(Map) ->
         {ok, #{<<"id">> := Id} = Spec} ->
             %% We store the source specification, see add/2 for an explanation
             ok = maybe_init_groups(maps:get(<<"realm_uri">>, Spec)),
-            ok = add(
+            add(
                 Id,
                 maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
-            ),
-            %% We rebuild the dispatch table
-            rebuild_dispatch_tables();
+            );
         {error, _} = Error ->
             Error
     end;
@@ -440,9 +550,10 @@ load_spec(FName) ->
         [Spec] ->
             load(Spec)
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             {error, invalid_specification_format}
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -454,7 +565,6 @@ load_spec(FName) ->
 %% -----------------------------------------------------------------------------
 add(Id, Spec) when is_binary(Id), is_map(Spec) ->
     plum_db:put(?PREFIX, Id, Spec).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -559,7 +669,7 @@ validate_spec(Map) ->
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
-        error:Reason ->
+        ?EXCEPTION(_, Reason, _) ->
             {error, Reason}
     end.
 
@@ -588,7 +698,7 @@ load_dispatch_tables() ->
                 ),
                 {K, Ts, Parsed}
             catch
-                _:_ ->
+                ?EXCEPTION(_, _, _) ->
                     _ = delete(K),
                     _ = lager:warning(
                         "Removed invalid API Gateway specification from store"),
@@ -674,13 +784,13 @@ admin_base_routes() ->
 
 
 admin_spec() ->
-    {ok, Base} = application:get_env(bondy, platform_etc_dir),
+    Base = bondy_config:get(platform_etc_dir),
     File = Base ++ "/bondy_admin_api.json",
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
             Spec
     catch
-        error:badarg ->
+        ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
                 "Error processing API Gateway Specification file. "
                 "File not found or invalid specification format, "
@@ -736,7 +846,7 @@ maybe_init_groups(RealmUri) ->
 
 
 transport_opts(Name) ->
-    {ok, Opts} = application:get_env(bondy, Name),
+    Opts = bondy_config:get(Name),
     {_, Port} = lists:keyfind(port, 1, Opts),
     {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
@@ -764,3 +874,13 @@ normalise(Opts) ->
         false ->
             Opts
     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Tear down all APIs for that realm when event occurs
+%% @end
+%% -----------------------------------------------------------------------------
+on_realm_deleted(_RealmUri, State) ->
+    State.

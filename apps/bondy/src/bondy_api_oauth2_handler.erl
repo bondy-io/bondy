@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_api_oauth2_handler.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,7 +16,12 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_api_oauth2_handler).
+-include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_api_gateway.hrl").
 
@@ -203,25 +208,30 @@
 
 
 
--export([init/2]).
+-export([accept/2]).
 -export([allowed_methods/2]).
--export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
+-export([init/2]).
 -export([is_authorized/2]).
--export([resource_exists/2]).
--export([resource_existed/2]).
--export([accept/2]).
+-export([options/2]).
 -export([provide/2]).
+-export([rate_limited/2]).
+-export([resource_existed/2]).
+-export([resource_exists/2]).
 
 
 
 %% =============================================================================
-%% API
+%% COWBOY CALLBACKS
 %% =============================================================================
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 init(Req, Opts0) ->
     Opts1 = maps_utils:validate(Opts0, ?OPTS_SPEC),
     St = #state{
@@ -262,24 +272,13 @@ is_authorized(Req0, St0) ->
         <<"OPTIONS">> ->
             {true, Req0, St0};
         _ ->
-            Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-            Peer = cowboy_req:peer(Req0),
-            case
-                bondy_security_utils:authenticate(
-                    basic, Val, St0#state.realm_uri, Peer)
-            of
-                {ok, AuthCtxt} ->
-                    ClientId = ?CHARS2BIN(
-                        bondy_security:get_username(AuthCtxt)),
-                    {true, Req0, St0#state{client_id = ClientId}};
-                {error, Reason} ->
-                    _ = lager:info(
-                        "API Client login failed due to invalid client, "
-                        "reason=~p, realm=~p", [Reason, St0#state.realm_uri]),
-                    Req1 = reply(oauth2_invalid_client, Req0),
-                    {stop, Req1, St0}
-            end
+            do_is_authorized(Req0, St0)
     end.
+
+
+rate_limited(Req, St) ->
+    %% Result :: false | {true, RetryAfter}
+    {false, Req, St}.
 
 
 resource_exists(Req, St) ->
@@ -310,10 +309,10 @@ accept(Req0, St) ->
                 revoke_token_flow(Data, Req1, St)
         end
     catch
-        error:Reason ->
+        ?EXCEPTION(error, Reason, Stacktrace) ->
             _ = lager:error(
                 "type=error, reason=~p, stacktrace:~p",
-                [Reason, erlang:get_stacktrace()]),
+                [Reason, ?STACKTRACE(Stacktrace)]),
             Req2 = reply(Reason, Req0),
             {false, Req2, St}
     end.
@@ -326,12 +325,47 @@ accept(Req0, St) ->
 
 
 
-%% @private
+do_is_authorized(Req0, St0) ->
+    Peer = cowboy_req:peer(Req0),
+    ClientIP = bondy_http_utils:client_ip(Req0),
 
+    try cowboy_req:parse_header(<<"authorization">>, Req0) of
+        Val ->
+            Result = bondy_security_utils:authenticate(
+                basic, Val, St0#state.realm_uri, Peer),
+
+            case Result of
+                {ok, AuthCtxt} ->
+                    ClientId = ?CHARS2BIN(
+                    bondy_security:get_username(AuthCtxt)),
+                    {true, Req0, St0#state{client_id = ClientId}};
+                {error, Reason} ->
+                    _ = lager:info(
+                        "API Client login failed due to invalid client ID; "
+                        "reason=~p, realm=~p, client_ip=~s",
+                        [Reason, St0#state.realm_uri, ClientIP]
+                    ),
+                    Req1 = reply(oauth2_invalid_client, Req0),
+                    {stop, Req1, St0}
+            end
+    catch
+        ?EXCEPTION(_, {request_error, {header, H}, Desc}, _) ->
+            _ = lager:info(
+                "API Client login failed due to bad request; "
+                "reason=badheader, header=~p, realm=~p, client_ip=~s ",
+                [H, St0#state.realm_uri, ClientIP]
+            ),
+            Req1 = reply({badheader, H, Desc}, Req0),
+            {stop, Req1, St0}
+    end.
+
+
+%% @private
 token_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Req, St) ->
     issue_token(client_credentials, St#state.client_id, Req, St);
 
 token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
+    %% Resource Owner Password Credentials Flow
     #{
         <<"username">> := U,
         <<"password">> := P,
@@ -349,9 +383,10 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
             Username = bondy_security:get_username(AuthCtxt),
             issue_token(password, Username, Req0, St1);
         {error, Error} ->
+            BinIP = inet_utils:ip_address_to_binary(IP),
             _ = lager:info(
                 "Resource Owner login failed, error=invalid_grant, reason=~p, username=~s, client_device_id=~s, realm_uri=~s, ip=~s",
-                [Error, U, DeviceId, RealmUri, inet_utils:ip_address_to_binary(IP)]
+                [Error, U, DeviceId, RealmUri, BinIP]
             ),
             {stop, reply(oauth2_invalid_grant, Req0), St1}
     end;
@@ -361,23 +396,22 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     %% The authorization server MAY issue a new refresh token, in which case
     %% the client MUST discard the old refresh token and replace it with the
     %% new refresh token.  The authorization server MAY revoke the old
-    %% refresh token after issuing a new refresh token to the client.  If a
-    %% new refresh token is issued, the refresh token scope MUST be
+    %% refresh token after issuing a new refresh token to the client.
+    %% If a new refresh token is issued, the refresh token scope MUST be
     %% identical to that of the refresh token included by the client in the
     %% request.
-    #{
-        <<"refresh_token">> := RT0
-    } = maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC),
-    Realm = St0#state.realm_uri,
-    Issuer = St0#state.client_id,
-    case bondy_oauth2:refresh_token(Realm, Issuer, RT0) of
-        {ok, JWT, RT1, Claims} ->
-            Req1 = token_response(JWT, RT1, Claims, Req0),
-            {true, Req1, St0};
-        {error, Error} ->
-            Req1 = reply(Error, Req0),
-            {stop, Req1, St0}
+    try maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC) of
+        #{<<"refresh_token">> := Val} -> refresh_token(Val, Req0, St0)
+    catch
+        ?EXCEPTION(error, Reason, Stacktrace) ->
+            _ = lager:info(
+                "Error while refreshing OAuth2 token; "
+                "reason=~[], stacktrace:~p",
+                [Reason, ?STACKTRACE(Stacktrace)]
+            ),
+            error({oauth2_invalid_request, Map0})
     end;
+
 
 token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
     %% TODO
@@ -385,6 +419,22 @@ token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
 
 token_flow(Map, _, _) ->
     error({oauth2_invalid_request, Map}).
+
+
+%% @private
+refresh_token(RefreshToken, Req0, St) ->
+    Realm = St#state.realm_uri,
+    Issuer = St#state.client_id,
+
+    case bondy_oauth2:refresh_token(Realm, Issuer, RefreshToken) of
+        {ok, JWT, RT1, Claims} ->
+            Req1 = token_response(JWT, RT1, Claims, Req0),
+            ok = on_login(Realm, Issuer, #{}),
+            {true, Req1, St};
+        {error, Error} ->
+            Req1 = reply(Error, Req0),
+            {stop, Req1, St}
+    end.
 
 
 %% @private
@@ -398,6 +448,7 @@ issue_token(Type, Username, Req0, St0) ->
     case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Username, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
             Req1 = token_response(JWT, RefreshToken, Claims, Req0),
+            ok = on_login(RealmUri, Username, Meta),
             {true, Req1, St0};
         {error, Reason} ->
             Req1 = reply(Reason, Req0),
@@ -422,7 +473,11 @@ revoke_token_flow(Data0, Req0, St) ->
         Req1 = prepare_request(<<"true">>, #{}, Req0),
         {true, Req1, St}
     catch
-        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
+        ?EXCEPTION(
+            error,
+            #{code := invalid_datatype, key := <<"token_type_hint">>},
+            _
+        ) ->
             {stop, reply(unsupported_token_type, Req0), St}
     end.
 
@@ -438,9 +493,9 @@ prepare_meta(_, Meta, _) ->
 
 
 %% @private
--spec reply(integer(), cowboy_req:req()) -> cowboy_req:req().
+-spec reply(atom() | integer(), cowboy_req:req()) -> cowboy_req:req().
 
-reply(unknown_realm, Req) ->
+reply(no_such_realm, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply({unknown_user, _}, Req) ->
@@ -464,7 +519,8 @@ reply(common_name_mismatch, Req) ->
 reply(oauth2_invalid_client = Error, Req) ->
     Headers = #{<<"www-authenticate">> => <<"Basic">>},
     ErrorMap = maps:without([<<"status_code">>], bondy_error:map(Error)),
-    cowboy_req:reply(401, prepare_request(ErrorMap, Headers, Req));
+    cowboy_req:reply(
+        ?HTTP_UNAUTHORIZED, prepare_request(ErrorMap, Headers, Req));
 
 reply(unsupported_token_type = Error, Req) ->
     {Code, Map} = maps:take(<<"status_code">>, bondy_error:map(Error)),
@@ -474,7 +530,7 @@ reply(Error, Req) ->
     Map0 = bondy_error:map(Error),
     {Code, Map1} = case maps:take(<<"status_code">>, Map0) of
         error ->
-            {400, Map0};
+            {?HTTP_BAD_REQUEST, Map0};
         Res ->
             Res
     end,
@@ -511,3 +567,9 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
             }
     end,
     prepare_request(Body1, #{}, Req0).
+
+
+%% @private
+on_login(RealmUri, Username, Meta) ->
+    bondy_event_manager:notify(
+        {security_user_logged_in, RealmUri, Username, Meta}).

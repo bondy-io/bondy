@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_utils.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,13 +16,17 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_utils).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -export([bin_to_pid/1]).
 -export([decode/2]).
--export([encode/2]).
+-export([elapsed_time/2]).
 -export([foreach/2]).
 -export([generate_fragment/1]).
 -export([get_flake_id/0]).
@@ -165,6 +169,15 @@ is_uuid(_) ->
 maybe_encode(_, <<>>) ->
     <<>>;
 
+maybe_encode(_, undefined) ->
+    <<>>;
+
+maybe_encode(bert, Term) ->
+    bert:encode(Term);
+
+maybe_encode(erl, Term) ->
+   binary_to_term(Term);
+
 maybe_encode(json, Term) ->
     case jsx:is_json(Term) of
         true ->
@@ -175,11 +188,21 @@ maybe_encode(json, Term) ->
 
  maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
-     msgpack:pack(Term).
+     Opts = [{map_format, map}, {pack_str, from_binary}],
+     msgpack:pack(Term, Opts);
+
+maybe_encode(Enc, Term) when is_binary(Enc) ->
+    maybe_encode(list_to_atom(binary_to_list(Enc)), Term).
 
 
 
 %% @private
+decode(bert, Bin) ->
+    bert:decode(Bin);
+
+decode(erl, Bin) ->
+   binary_to_term(Bin);
+
 decode(json, <<>>) ->
     <<>>;
 
@@ -187,28 +210,17 @@ decode(json, Term) ->
     jsx:decode(Term, [return_maps]);
 
 decode(msgpack, Term) ->
-    Opts = [
-        {map_format, map},
-        {unpack_str, as_binary}
-    ],
+    Opts = [{map_format, map}, {unpack_str, as_binary}],
     {ok, Bin} = msgpack:unpack(Term, Opts),
     Bin;
+
 decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
 
 
 
-%% @private
-encode(json, Term) ->
-    jsx:encode(Term);
 
-encode(msgpack, Term) ->
-    Opts = [
-        {map_format, map},
-        {pack_str, from_binary}
-    ],
-    msgpack:pack(Term, Opts).
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -252,7 +264,20 @@ timeout(#{timeout := T}) when is_integer(T), T > 0 ->
 timeout(#{timeout := 0}) ->
     infinity;
 timeout(_) ->
-    bondy_config:request_timeout().
+    bondy_config:get(wamp_call_timeout).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the elapsed time since Timestamp expressed in the
+%% desired TimeUnit.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec elapsed_time(Timestamp :: integer(), TimeUnit :: erlang:time_unit()) ->
+    integer().
+
+elapsed_time(Timestamp, TimeUnit) ->
+    Nsecs = erlang:monotonic_time() - Timestamp,
+    erlang:convert_time_unit(Nsecs, nanosecond, TimeUnit).
 
 
 %% -----------------------------------------------------------------------------

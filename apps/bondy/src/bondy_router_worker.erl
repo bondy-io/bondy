@@ -16,6 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_router_worker).
 -behaviour(gen_server).
 -include("bondy.hrl").
@@ -71,7 +75,7 @@ start_pool() ->
 %% @end
 %% -----------------------------------------------------------------------------
 cast(Fun) when is_function(Fun, 0) ->
-    {_, PoolType} = lists:keyfind(type, 1, bondy_config:router_pool()),
+    {_, PoolType} = lists:keyfind(type, 1, bondy_config:get(router_pool)),
     case do_cast(PoolType, router_pool, Fun) of
         ok ->
             ok;
@@ -112,7 +116,7 @@ init([Fun]) ->
 handle_call(Event, From, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
-    {noreply, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast(Fun, State) ->
@@ -120,11 +124,11 @@ handle_cast(Fun, State) ->
         _ = Fun(),
         {noreply, State}
     catch
-        Error:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% TODO publish metaevent
             _ = lager:error(
                 "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Error, Reason, erlang:get_stacktrace()]),
+                [Class, Reason, ?STACKTRACE(Stacktrace)]),
             {noreply, State}
     end.
 
@@ -173,7 +177,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_start_pool() ->
-    Opts = bondy_config:router_pool(),
+    Opts = bondy_config:get(router_pool),
     {_, Size} = lists:keyfind(size, 1, Opts),
     {_, Capacity} = lists:keyfind(capacity, 1, Opts),
     case lists:keyfind(type, 1, Opts) of

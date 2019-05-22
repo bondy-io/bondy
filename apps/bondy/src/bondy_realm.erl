@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_realm.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -33,25 +33,9 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
--define(SPEC, #{
-    description => #{
-        alias => <<"description">>,
-        key => description,
-        required => true,
-        datatype => binary,
-        default => <<>>
-    },
-    authmethods => #{
-        alias => <<"authmethods">>,
-        key => authmethods,
-        required => true,
-        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
-        default => ?WAMP_AUTH_METHODS
-    }
-}).
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
--define(PREFIX, {global, realms}).
+-define(PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
     {{10, 0, 0, 0}, 8},
     {{172, 16, 0, 0}, 12},
@@ -63,8 +47,8 @@
     uri                         ::  uri(),
     description                 ::  binary(),
     authmethods                 ::  [binary()], % a wamp property
-    private_keys                ::  map(),
-    public_keys                 ::  map()
+    private_keys = #{}          ::  map(),
+    public_keys = #{}           ::  map()
 }).
 -type realm()       ::  #realm{}.
 
@@ -72,6 +56,9 @@
 -export_type([realm/0]).
 -export_type([uri/0]).
 
+-export([add/1]).
+-export([add/2]).
+-export([apply_config/0]).
 -export([auth_methods/1]).
 -export([delete/1]).
 -export([disable_security/1]).
@@ -79,22 +66,61 @@
 -export([fetch/1]).
 -export([get/1]).
 -export([get/2]).
--export([is_security_enabled/1]).
--export([security_status/1]).
--export([public_keys/1]).
--export([get_random_kid/1]).
 -export([get_private_key/2]).
 -export([get_public_key/2]).
+-export([get_random_kid/1]).
+-export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
--export([add/1]).
--export([add/2]).
+-export([public_keys/1]).
+-export([security_status/1]).
 -export([select_auth_method/2]).
--export([uri/1]).
 -export([to_map/1]).
+-export([update/2]).
+-export([uri/1]).
 
 
-%% -compile({no_auto_import, [put/2]}).
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec apply_config() -> ok | no_return().
+
+apply_config() ->
+    case bondy_config:get([security, config_file]) of
+        undefined ->
+            ok;
+        FName ->
+            try jsx:consult(FName, [return_maps]) of
+                [Realms] ->
+                    _ = lager:info(
+                        "Loading configuration file; path=~p", [FName]),
+                    %% We add the realm and allow an update if it already
+                    %% exists in the database, by setting IsStrict
+                    %% argument to false
+                    _ = [apply_config(Realm) || Realm <- Realms],
+                    ok
+            catch
+                ?EXCEPTION(error, badarg, _) ->
+                    case filelib:is_file(FName) of
+                        true ->
+                            error(invalid_config);
+                        false ->
+                            _ = lager:info(
+                                "No configuration file found; path=~p",
+                                [FName]
+                            ),
+                            ok
+                    end
+            end
+    end.
 
 
 
@@ -111,7 +137,7 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_security_enabled(realm()) -> boolean().
+-spec is_security_enabled(realm() | uri()) -> boolean().
 is_security_enabled(R) ->
     security_status(R) =:= enabled.
 
@@ -120,8 +146,11 @@ is_security_enabled(R) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec security_status(realm()) -> enabled | disabled.
+-spec security_status(realm() | uri()) -> enabled | disabled.
 security_status(#realm{uri = Uri}) ->
+    security_status(Uri);
+
+security_status(Uri) when is_binary(Uri) ->
     bondy_security:status(Uri).
 
 
@@ -250,7 +279,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         {error, not_found} ->
-            add(Uri, Opts)
+            add(Opts#{<<"uri">> => Uri}, false)
     end.
 
 
@@ -258,70 +287,40 @@ get(Uri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri()) -> realm().
+-spec add(uri() | map()) -> realm() | no_return().
 
 add(Uri) when is_binary(Uri) ->
-    add(Uri, #{});
+    add(#{<<"uri">> => Uri});
 
-add(#{uri := Uri} = Map) ->
-    add(Uri, Map);
-
-add(#{<<"uri">> := Uri} = Map) ->
-    add(Uri, Map).
+add(Map) ->
+    add(Map, true, ?REALM_SPEC).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri(), map()) -> realm() | no_return().
+-spec add(map(), boolean()) -> realm() | no_return().
 
-add(Uri, Opts) ->
-    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
-    #{
-        description := Desc,
-        authmethods := Method
-    } = maps_utils:validate(Opts, ?SPEC),
-
-    Keys = maps:from_list([
-        begin
-            Priv = jose_jwk:generate_key({namedCurve, secp256r1}),
-            Kid = list_to_binary(integer_to_list(erlang:phash2(Priv))),
-            Fields = #{
-                <<"kid">> => Kid
-            },
-            {Kid, jose_jwk:merge(Priv, Fields)}
-        end || _ <- lists:seq(1, 3)
-    ]),
-
-    Realm = #realm{
-        uri = Uri,
-        description = Desc,
-        private_keys = Keys,
-        public_keys = maps:map(fun(_, V) -> jose_jwk:to_public(V) end, Keys),
-        authmethods = Method
-    },
-
-    case lookup(Uri) of
-        {error, not_found} ->
-            ok = plum_db:put(?PREFIX, Uri, Realm),
-            _ = bondy:publish(
-                #{}, ?REALM_ADDED, [Uri], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
-            init(Realm);
-        _ ->
-            error({already_exist, Uri})
-    end.
-
-
+add(Map, IsStrict) ->
+    add(Map, IsStrict, ?REALM_SPEC).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(uri()) -> ok | {error, not_permitted}.
+-spec update(uri(), map()) -> realm() | no_return().
+
+update(_Uri, Map) ->
+    add(Map, false, ?UPDATE_REALM_SPEC).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec delete(uri()) -> ok | {error, not_permitted | active_users}.
 
 delete(?BONDY_REALM_URI) ->
     {error, not_permitted};
@@ -330,14 +329,17 @@ delete(?BONDY_PRIV_REALM_URI) ->
     {error, not_permitted};
 
 delete(Uri) ->
-    %% TODO if there are users in the realm, the caller will need to first explicitely delete hthe users so return {error, users_exist} or similar
-    plum_db:delete(?PREFIX, Uri),
-    _ = bondy:publish(
-        #{}, ?REALM_DELETED, [Uri], #{},
-        ?BONDY_PRIV_REALM_URI
-    ),
-    % TODO we need to close all sessions for this realm
-    ok.
+    %% If there are users in the realm, the caller will need to first
+    %% explicitely delete the users first
+    case bondy_security_user:has_users(Uri) of
+        true ->
+            {error, active_users};
+        false ->
+            plum_db:delete(?PREFIX, Uri),
+            ok = bondy_event_manager:notify({realm_deleted, Uri}),
+            %% TODO we need to close all sessions for this realm
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -391,7 +393,6 @@ to_map(#realm{} = R) ->
 
 
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -399,10 +400,10 @@ to_map(#realm{} = R) ->
 
 
 %% @private
-init(#realm{uri = Uri} = Realm) ->
+init(#realm{uri = Uri} = Realm, SecurityEnabled) ->
     User0 = #{
-        username => <<"admin">>,
-        password => <<"bondy">>
+        <<"username">> => <<"admin">>,
+        <<"password">> => <<"bondy">>
     },
     {ok, _User} = bondy_security_user:add(Uri, User0),
     % Opts = [],
@@ -412,8 +413,154 @@ init(#realm{uri = Uri} = Realm) ->
     % ],
     %TODO remove this once we have the APIs to add sources
     _ = bondy_security:add_source(Uri, all, {{0, 0, 0, 0}, 0}, password, []),
-    ok = enable_security(Realm),
+    ok = maybe_enable_security(SecurityEnabled, Realm),
     Realm.
+
+
+%% @private
+maybe_enable_security(true, Realm) ->
+    enable_security(Realm);
+
+maybe_enable_security(false, _) ->
+    ok.
+
+apply_config(Map0) ->
+    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?UPDATE_REALM_SPEC),
+    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
+    _ = case lookup(Uri) of
+        #realm{} = Realm ->
+            do_update(Realm, Map1);
+        {error, not_found} ->
+            do_add(Map1)
+    end,
+    ok = apply_config(groups, Map1),
+    ok = apply_config(users, Map1),
+    ok = apply_config(sources, Map1),
+    ok = apply_config(grants, Map1),
+    ok.
+
+
+%% @private
+apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
+    _ = [
+        ok = maybe_error(bondy_security_group:add_or_update(Uri, Group))
+        || Group <- Groups
+    ],
+    ok;
+
+apply_config(users, #{<<"uri">> := Uri, <<"users">> := Users}) ->
+    _ = [
+        ok = maybe_error(bondy_security_user:add_or_update(Uri, User))
+        || User <- Users
+    ],
+    ok;
+
+apply_config(sources, #{<<"uri">> := Uri, <<"sources">> := Sources}) ->
+    _ = [
+        ok = maybe_error(bondy_security_source:add(Uri, Source))
+        || Source <- Sources
+    ],
+    ok;
+
+apply_config(grants, #{<<"uri">> := RealmUri, <<"grants">> := Grants}) ->
+    _ = [
+        begin
+            #{
+               <<"permissions">> := Permissions,
+               <<"uri">> := Uri,
+               <<"roles">> := Roles
+            } = Grant,
+            ok = maybe_error(
+                bondy_security:add_grant(RealmUri, Roles, Uri, Permissions))
+        end || Grant <- Grants
+    ],
+    ok;
+
+apply_config(_, _) ->
+    ok.
+
+
+%% @private
+maybe_error({error, Reason}) ->
+    error(Reason);
+maybe_error({ok, _}) ->
+    ok;
+maybe_error(ok) ->
+    ok.
+
+
+%% @private
+add(Map0, IsStrict, Spec) ->
+    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, Spec),
+    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
+     case lookup(Uri) of
+        #realm{} when IsStrict ->
+            error({already_exists, Uri});
+        #realm{} = Realm ->
+            do_update(Realm, Map1);
+        {error, not_found} ->
+            do_add(Map1)
+    end.
+
+
+%% @private
+do_add(Map) ->
+    #{
+        <<"uri">> := Uri,
+        <<"description">> := Desc,
+        <<"authmethods">> := Method,
+        <<"security_enabled">> := SecurityEnabled,
+        <<"private_keys">> := KeyList
+    } = Map,
+    Realm0 = #realm{
+        uri = Uri,
+        description = Desc,
+        authmethods = Method
+    },
+    Realm1 = set_keys(Realm0, KeyList),
+    ok = plum_db:put(?PREFIX, Uri, Realm1),
+    ok = bondy_event_manager:notify({realm_added, Uri}),
+    init(Realm1, SecurityEnabled).
+
+
+%% @private
+do_update(Realm0, Map) ->
+    #{
+        <<"uri">> := Uri,
+        <<"description">> := Desc,
+        <<"authmethods">> := Method,
+        <<"security_enabled">> := SecurityEnabled,
+        <<"private_keys">> := KeyList
+    } = Map,
+    Realm1 = Realm0#realm{
+        uri = Uri,
+        description = Desc,
+        authmethods = Method
+    },
+    Realm2 = set_keys(Realm1, KeyList),
+    ok = maybe_enable_security(SecurityEnabled, Realm2),
+    Realm2.
+
+
+%% @private
+set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
+    PrivateKeys = maps:from_list([
+        begin
+            Kid = list_to_binary(integer_to_list(erlang:phash2(Priv))),
+            case maps:get(Kid, Keys, undefined) of
+                undefined ->
+                    Fields = #{<<"kid">> => Kid},
+                    {Kid, jose_jwk:merge(Priv, Fields)};
+                Existing ->
+                    {Kid, Existing}
+            end
+        end || Priv <- KeyList
+    ]),
+    PublicKeys = maps:map(fun(_, V) -> jose_jwk:to_public(V) end, PrivateKeys),
+    Realm#realm{
+        private_keys = PrivateKeys,
+        public_keys = PublicKeys
+    }.
 
 
 %% @private

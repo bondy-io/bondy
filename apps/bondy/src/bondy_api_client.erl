@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_api_client.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@
 -define(ADD_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"username">>,
         required => true,
         allow_null => true,
@@ -35,6 +36,7 @@
     },
     <<"client_secret">> => #{
         alias => client_secret,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"password">>,
         required => true,
         allow_null => false,
@@ -57,6 +59,7 @@
 -define(UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
+        %% We rename the key to comply with bondy_security_user:t()
         key => <<"password">>,
         required => false,
         allow_null => false,

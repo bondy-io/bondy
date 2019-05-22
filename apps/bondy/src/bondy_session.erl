@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_session.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -149,6 +149,7 @@
 
 -export_type([peer/0]).
 
+-export([agent/1]).
 -export([close/1]).
 -export([created/1]).
 -export([fetch/1]).
@@ -244,13 +245,15 @@ open(Peer, Realm, Opts) when is_map(Opts) ->
 open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
     open(Id, Peer, bondy_realm:fetch(RealmUri), Opts);
 
-open(Id, {IP, _} = Peer, Realm, Opts) when is_map(Opts) ->
+open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     S1 = new(Id, Peer, Realm, Opts),
+    Agent = S1#session.agent,
 
     case ets:insert_new(table(Id), S1) of
         true ->
-            ok = bondy_stats:update({session_opened, RealmUri, Id, IP}),
+            ok = bondy_event_manager:notify(
+                {session_opened, RealmUri, Id, Agent, Peer}),
             S1;
         false ->
             error({integrity_constraint_violation, Id})
@@ -272,15 +275,23 @@ update(#session{id = Id} = S) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(session()) -> ok.
+
 close(#session{id = Id} = S) ->
-    {IP, _} = S#session.peer,
     Realm = S#session.realm_uri,
+    Agent = S#session.agent,
+    Peer = S#session.peer,
     Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
-    ok = bondy_stats:update(
-        {session_closed, Id, Realm, IP, Secs}),
+    ok = bondy_event_manager:notify(
+        {session_closed, Id, Realm, Agent, Peer, Secs}),
     true = ets:delete(table(Id), Id),
     _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
-    ok.
+    ok;
+
+close(Id) ->
+    case lookup(Id) of
+        #session{} = Session -> close(Session);
+        _ -> ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -298,9 +309,11 @@ id(#session{id = Id}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | session()) -> uri().
+
 realm_uri(#session{realm_uri = Val}) ->
     Val;
-realm_uri(Id) ->
+
+realm_uri(Id) when is_integer(Id) ->
     #session{realm_uri = Val} = fetch(Id),
     Val.
 
@@ -310,8 +323,10 @@ realm_uri(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles(id() | session()) -> map().
+
 roles(#session{roles = Val}) ->
     Val;
+
 roles(Id) ->
     #session{roles = Val} = fetch(Id),
     Val.
@@ -329,7 +344,10 @@ peer_id(#session{} = S) ->
         S#session.node,
         S#session.id,
         S#session.pid
-    }.
+    };
+
+peer_id(Id) when is_integer(Id) ->
+    peer_id(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------
@@ -340,11 +358,12 @@ peer_id(#session{} = S) ->
 %% -----------------------------------------------------------------------------
 -spec pid(session()) -> pid().
 
-pid(Id) when is_integer(Id) ->
-    pid(fetch(Id));
-
 pid(#session{pid = Pid}) ->
-    Pid.
+    Pid;
+
+pid(Id) when is_integer(Id) ->
+    #session{pid = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -353,7 +372,26 @@ pid(#session{pid = Pid}) ->
 %% -----------------------------------------------------------------------------
 -spec created(session()) -> calendar:date_time().
 
-created(#session{created = Val}) -> Val.
+created(#session{created = Val}) ->
+    Val;
+
+created(Id) when is_integer(Id) ->
+    #session{created = Val} = fetch(Id),
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec agent(session()) -> binary() | undefined.
+
+agent(#session{agent = Val}) ->
+    Val;
+
+agent(Id) when is_integer(Id) ->
+    #session{agent = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -362,7 +400,12 @@ created(#session{created = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec peer(session()) -> peer().
 
-peer(#session{peer = Val}) -> Val.
+peer(#session{peer = Val}) ->
+    Val;
+
+peer(Id) when is_integer(Id) ->
+    #session{peer = Val} = fetch(Id),
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -374,9 +417,9 @@ peer(#session{peer = Val}) -> Val.
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
-incr_seq(SessionId) when is_integer(SessionId), SessionId >= 0 ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, SessionId),
-    ets:update_counter(Tab, SessionId, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
+incr_seq(Id) when is_integer(Id), Id >= 0 ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    ets:update_counter(Tab, Id, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 
 
 %% -----------------------------------------------------------------------------

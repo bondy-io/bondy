@@ -23,7 +23,7 @@
 %% and EVENT messages between WAMP clients connected to different Bondy peers
 %% (nodes).
 %%
-%% <pre><code>
+%% ```
 %% +-------------------------+                    +-------------------------+
 %% |         node_1          |                    |         node_2          |
 %% |                         |                    |                         |
@@ -76,7 +76,7 @@
 %% |                         |                    |                         |
 %% |                         |                    |                         |
 %% +-------------------------+                    +-------------------------+
-%% </code></pre>
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_wamp_forwarder).
@@ -150,7 +150,7 @@ start_link() ->
 %% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
 %% message types. It will fail with an exception if another type is passed
 %% as the second argument.
-%% This is equivalent to call async_forward/3 and then yield/2.
+%% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
@@ -206,13 +206,12 @@ broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
     receive_broadcast_acks(IdNodes, Timeout, [], []).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 receive_ack(Id, Timeout) ->
-    %% Now we need to wait for the remote forwarder to send us an ACK
+    %% We wait for the remote forwarder to send us an ACK
     %% to be sure the wamp peer received the message
     receive
         #peer_ack{id = Id} ->
@@ -224,8 +223,6 @@ receive_ack(Id, Timeout) ->
             %% maybe_enqueue(Enqueue, SessionId, M, timeout)
             exit(timeout)
     end.
-
-
 
 
 
@@ -243,18 +240,18 @@ handle_call(Event, From, State) ->
     _ = lager:error(
         "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]
     ),
-    {noreply, State}.
+    {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast({forward, Mssg, BinPid} = Event, State) ->
     try
         cast_message(Mssg, BinPid)
     catch
-        Error:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% @TODO publish metaevent
             _ = lager:error(
-                "Error handling cast, event=~p, error=~p, reason=~p",
-                [Event, Error, Reason]
+                "Error handling cast, event=~p, error=~p, reason=~p, stacktrace=~p",
+                [Event, Class, Reason, ?STACKTRACE(Stacktrace)]
             )
     end,
     {noreply, State};
@@ -305,14 +302,14 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
         {noreply, State}
 
     catch
-        throw:badarg ->
+        ?EXCEPTION(throw, badarg, _) ->
             ok = cast_message(peer_error(badarg, Mssg), BinPid),
             {noreply, State};
-        Error:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             %% TODO publish metaevent
             _ = lager:error(
                 "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Error, Reason, erlang:get_stacktrace()]),
+                [Class, Reason, ?STACKTRACE(Stacktrace)]),
             ok = cast_message(peer_error(Reason, Mssg), BinPid),
             {noreply, State}
     end.
@@ -351,7 +348,7 @@ receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
         ok ->
             receive_broadcast_acks(T, Timeout, [Node|Good], Bad)
     catch
-        _:_ ->
+        ?EXCEPTION(_, _, _) ->
             receive_broadcast_acks(T, Timeout, Good, [Node|Bad])
     end;
 
@@ -383,7 +380,7 @@ cast_message(Mssg, BinPid) ->
 
 %% @private
 do_cast_message(Node, Mssg, BinPid) ->
-    Channel = wamp_peer_messages,
+    Channel = channel(),
     ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
     Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
@@ -404,4 +401,14 @@ peer_error(Reason, Mssg) ->
         id = bondy_peer_message:id(Mssg),
         reason = Reason
     }.
+
+
+channel() ->
+    Channels = partisan_config:get(channels),
+    case lists:member(wamp_peer_messages, Channels) of
+        true ->
+            wamp_peer_messages;
+        false ->
+            default
+    end.
 

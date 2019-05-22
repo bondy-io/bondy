@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_cli.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,10 +16,13 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_cli).
 -behaviour(clique_handler).
+-include("bondy.hrl").
 
 %% API
 -export([command/1]).
@@ -76,11 +79,11 @@ register() ->
 -spec load_schema() -> ok.
 
 load_schema() ->
-    case application:get_env(bondy, schema_dirs) of
-        {ok, Directories} ->
-            ok = clique_config:load_schema(Directories);
-        _ ->
-            ok = clique_config:load_schema([code:lib_dir()])
+    case bondy_config:get(schema_dirs, undefined) of
+        undefined ->
+            clique_config:load_schema([code:lib_dir()]);
+        Directories ->
+            clique_config:load_schema(Directories)
     end.
 
 
@@ -433,7 +436,7 @@ add_role(Realm, Name, Options, Fun) ->
             io:format("~n"),
             Error
     catch
-        throw:{error, {invalid_option, Option}} ->
+        ?EXCEPTION(throw, {error, {invalid_option, Option}}, _) ->
             io:format("Invalid option ~p, options are of the form key=value~n",
                       [Option]),
             error

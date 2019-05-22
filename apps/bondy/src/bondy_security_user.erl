@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_security_user.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,99 +16,28 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_security_user).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
-
--define(VALIDATE_USERNAME, fun
-        (<<"all">>) ->
-            false;
-        ("all") ->
-            false;
-        (all) ->
-            false;
-        (_) ->
-            true
-    end
-).
-
--define(SPEC, #{
-    <<"username">> => #{
-        alias => username,
-        key => <<"username">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary,
-        validator => ?VALIDATE_USERNAME
-    },
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => true,
-        allow_null => false,
-        datatype => binary
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        default => [],
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
-    }
-}).
-
--define(UPDATE_SPEC, #{
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => map
-    }
-}).
-
 
 -type t() :: map().
 
 -export_type([t/0]).
 
 -export([add/2]).
+-export([add_or_update/2]).
 -export([add_source/5]).
 -export([change_password/3]).
 -export([change_password/4]).
 -export([fetch/2]).
 -export([groups/1]).
 -export([list/1]).
+-export([has_users/1]).
 -export([lookup/2]).
 -export([password/2]).
 -export([remove/2]).
@@ -129,25 +58,42 @@
 %% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> ok | {error, map()}.
 
-add(RealmUri, User0) ->
+add(RealmUri, User) ->
     try
-        User1 = maps_utils:validate(User0, ?SPEC),
-        {L, R} = maps_utils:split([<<"username">>], User1),
-        #{<<"username">> := Username} = L,
-        PL = maps:to_list(R),
+        do_add(RealmUri, maps_utils:validate(User, ?USER_SPEC))
+    catch
+        ?EXCEPTION(error, Reason, _) when is_map(Reason) ->
+            {error, Reason}
+    end.
 
-        case bondy_security:add_user(RealmUri, Username, PL) of
-            ok ->
-                _ = bondy:publish(
-                    #{}, ?USER_ADDED, [RealmUri, Username], #{},
-                    ?BONDY_PRIV_REALM_URI
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_or_update(uri(), t()) -> ok.
+
+add_or_update(RealmUri, User) ->
+    try
+        NewUser = maps_utils:validate(User, ?USER_SPEC),
+        #{<<"username">> := Username} = NewUser,
+
+        case do_add(RealmUri, NewUser) of
+            {ok, _} = OK ->
+                OK;
+            {error, role_exists} ->
+                Res = update(
+                    RealmUri,
+                    Username,
+                    maps:without([<<"username">>], NewUser)
                 ),
-                {ok, fetch(RealmUri, Username)};
-            Error ->
+                ok_or_error(Res);
+            {error, _} = Error ->
                 Error
         end
     catch
-        error:Reason when is_map(Reason) ->
+        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 
@@ -160,21 +106,19 @@ add(RealmUri, User0) ->
 
 update(RealmUri, Username, User0) when is_binary(Username) ->
     try
-        User1 = maps_utils:validate(User0, ?UPDATE_SPEC),
-        Opts = maps:to_list(User1),
+        User1 = maps_utils:validate(User0, ?USER_UPDATE_SPEC),
+        Opts = maps:to_list(bondy_utils:to_binary_keys(User1)),
         case bondy_security:alter_user(RealmUri, Username, Opts) of
             {error, _} = Error ->
                 Error;
             ok ->
-                _ = bondy:publish(
-                    #{}, ?USER_UPDATED, [RealmUri, Username], #{},
-                    ?BONDY_PRIV_REALM_URI
-                ),
+                ok = bondy_event_manager:notify(
+                    {security_user_updated, RealmUri, Username}),
                 {ok, fetch(RealmUri, Username)}
         end
     catch
         %% Todo change to throw when upgrade to new utils
-        error:Reason when is_map(Reason) ->
+        ?EXCEPTION(error, Reason, _) when is_map(Reason) ->
             {error, Reason}
     end.
 
@@ -211,7 +155,7 @@ add_source(RealmUri, Username, CIDR, Source, Opts) ->
     CIDR :: bondy_security:cidr()) -> ok.
 
 remove_source(RealmUri, Username, CIDR) ->
-    bondy_security_source:remove_source(RealmUri, [Username], CIDR).
+    bondy_security_source:remove(RealmUri, [Username], CIDR).
 
 
 %% -----------------------------------------------------------------------------
@@ -226,10 +170,8 @@ remove(RealmUri, #{<<"username">> := Username}) ->
 remove(RealmUri, Username) ->
     case bondy_security:del_user(RealmUri, Username) of
         ok ->
-            _ = bondy:publish(
-                #{}, ?USER_DELETED, [RealmUri, Username], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
+            ok = bondy_event_manager:notify(
+                    {security_user_deleted, RealmUri, Username}),
             ok;
         {error, _} = Error ->
             Error
@@ -278,6 +220,18 @@ list(RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+has_users(RealmUri) ->
+    Result = plum_db:match(
+        {security_users, RealmUri},
+        '_',
+        [{limit, 1}, {resolver, lww}, {remove_tombstones, true}]
+    ),
+    Result =/= '$end_of_table'.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec password(uri(), t() | id()) -> map() | no_return().
 
 password(RealmUri, #{<<"username">> := Username}) ->
@@ -300,13 +254,10 @@ password(RealmUri, Username) ->
 %% @end
 %% -----------------------------------------------------------------------------
 change_password(RealmUri, Username, New) when is_binary(New) ->
-    case update(RealmUri, Username, #{password => New}) of
+    case update(RealmUri, Username, #{<<"password">> => New}) of
         {ok, _} ->
-            _ = bondy:publish(
-                #{}, ?PASSWORD_CHANGED, [RealmUri, Username], #{},
-                ?BONDY_PRIV_REALM_URI
-            ),
-            ok;
+            bondy_event_manager:notify(
+                {security_password_changed, RealmUri, Username});
         Error ->
             Error
     end.
@@ -340,18 +291,34 @@ change_password(RealmUri, Username, New, Old) ->
 
 
 %% @private
-to_map(RealmUri, {Username, PL}) ->
+do_add(RealmUri, User) ->
+    {L, R} = maps_utils:split([<<"username">>], User),
+    #{<<"username">> := Username} = L,
+    PL = maps:to_list(R),
+
+    case bondy_security:add_user(RealmUri, Username, PL) of
+        ok ->
+            ok = bondy_event_manager:notify(
+                {security_user_added, RealmUri, Username}),
+            {ok, fetch(RealmUri, Username)};
+        Error ->
+            Error
+    end.
+
+
+%% @private
+to_map(RealmUri, {Username, Opts}) ->
     Map1 = #{
         <<"username">> => Username,
-        <<"has_password">> => has_password(PL),
-        <<"groups">> => proplists:get_value(<<"groups">>, PL, []),
-        <<"meta">> => proplists:get_value(<<"meta">>, PL, #{})
+        <<"has_password">> => has_password(Opts),
+        <<"groups">> => proplists:get_value(<<"groups">>, Opts, []),
+        <<"meta">> => proplists:get_value(<<"meta">>, Opts, #{})
     },
     L = case bondy_security_source:list(RealmUri, Username) of
         {error, not_found} ->
             #{};
         Sources ->
-            [maps:without([username], S) || S <- Sources]
+            [maps:without([<<"username">>], S) || S <- Sources]
     end,
     Map1#{<<"sources">> => L}.
 
@@ -364,5 +331,7 @@ has_password(Opts) ->
     end.
 
 
-
+%% @private
+ok_or_error({ok, _}) -> ok;
+ok_or_error(Term) -> Term.
 

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_api_gateway_handler.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -36,9 +36,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_handler).
--include("bondy.hrl").
--include("bondy_api_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("http_api.hrl").
+-include("bondy_api_gateway.hrl").
+-include("bondy.hrl").
 
 -type state() :: #{
     api_spec => map(),
@@ -52,23 +53,25 @@
 }.
 
 
--export([init/2]).
+-export([accept/2]).
 -export([allowed_methods/2]).
--export([options/2]).
 -export([content_types_accepted/2]).
 -export([content_types_provided/2]).
--export([is_authorized/2]).
--export([resource_exists/2]).
--export([previously_existed/2]).
--export([to_json/2]).
--export([to_msgpack/2]).
--export([provide/2]).
+-export([delete_completed/2]).
+-export([delete_resource/2]).
+-export([from_form_urlencoded/2]).
 -export([from_json/2]).
 -export([from_msgpack/2]).
--export([from_form_urlencoded/2]).
--export([accept/2]).
--export([delete_resource/2]).
--export([delete_completed/2]).
+-export([init/2]).
+-export([is_authorized/2]).
+-export([languages_provided/2]).
+-export([options/2]).
+-export([previously_existed/2]).
+-export([provide/2]).
+-export([rate_limited/2]).
+-export([resource_exists/2]).
+-export([to_json/2]).
+-export([to_msgpack/2]).
 
 
 
@@ -99,8 +102,8 @@ allowed_methods(Req, #{api_spec := Spec} = St) ->
     {maps:get(<<"allowed_methods">>, Spec), Req, St}.
 
 
-%% languages_provided(Req, St) ->
-%%     {Result, Req, State}.
+languages_provided(Req, #{languages := L} = St) ->
+    {L, Req, St}.
 
 
 content_types_accepted(Req, #{api_spec := Spec} = St) ->
@@ -119,7 +122,7 @@ options(Req, #{api_spec := Spec} = St) ->
     Headers1 = case maps:find(<<"access-control-allow-methods">>, Headers0) of
         {ok, _V} ->
             maps:put(<<"access-control-allow-methods">>, Allowed, Headers0);
-        false ->
+        error ->
             Headers0
     end,
     Headers2 = maps:put(<<"allow">>, Allowed, Headers1),
@@ -127,27 +130,36 @@ options(Req, #{api_spec := Spec} = St) ->
 
 
 is_authorized(Req0, St) ->
-    case cowboy_req:method(Req0) of
-        <<"OPTIONS">> ->
-            {true, Req0, St};
-        _ ->
-            try
-                do_is_authorised(Req0, St)
-            catch
-                Class:Reason ->
-                    _ = log(
-                        error,
-                        "type=~p, reason=~p, stacktrace=~p",
-                        [Class, Reason, erlang:get_stacktrace()],
-                        St
-                    ),
-                    {StatusCode, Body} = take_status_code(
-                        bondy_error:map(Reason), 500),
-                    Response = #{<<"body">> => Body, <<"headers">> => #{}},
-                    Req1 = reply(StatusCode, json, Response, Req0),
-                    {stop, Req1, St}
-            end
+    try
+        Realm = bondy_realm:fetch(maps:get(realm_uri, St)),
+        RealmUri = bondy_realm:uri(Realm),
+        case cowboy_req:method(Req0) of
+            <<"OPTIONS">> -> {true, Req0, St};
+            _ -> do_is_authorised(Req0, RealmUri, St)
+        end
+    catch
+        ?EXCEPTION(error, no_such_realm = Reason, _) ->
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, json, Response, Req0),
+            {stop, Req1, St};
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
+            _ = log(
+                error,
+                "type=~p, reason=~p, stacktrace=~p",
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                St
+            ),
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
+            Response = #{<<"body">> => Body, <<"headers">> => #{}},
+            Req1 = reply(StatusCode, json, Response, Req0),
+            {stop, Req1, St}
     end.
+
+
+rate_limited(Req, St) ->
+    %% Result :: false | {true, RetryAfter}
+    {false, Req, St}.
 
 
 resource_exists(Req, #{api_spec := Spec} = St) ->
@@ -191,7 +203,7 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             {stop, Req1, St2};
 
         {error, Response0, St2} ->
-            {StatusCode, Response1} = take_status_code(Response0, 500),
+            {StatusCode, Response1} = take_status_code(Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St2};
 
@@ -240,11 +252,11 @@ accept(Req0, St0) ->
 %% =============================================================================
 
 %% @private
-do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
+do_is_authorised(
+    Req0, Realm, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-    Realm = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
     case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
         {ok, Claims} when is_map(Claims) ->
@@ -261,13 +273,13 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             },
             %% TODO update context
             {true, Req0, St1};
-        {error, unknown_realm} ->
-            {_, ErrorMap} = take_status_code(bondy_error:map(unknown_realm)),
+        {error, no_such_realm} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(no_such_realm)),
             Response = #{
                 <<"body">> => ErrorMap,
                 <<"headers">> => eval_headers(Req0, St0)
             },
-            Req2 = reply(401, json, Response, Req0),
+            Req2 = reply(?HTTP_UNAUTHORIZED, json, Response, Req0),
             {stop, Req2, St0};
         {error, Reason} ->
             Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
@@ -276,12 +288,12 @@ do_is_authorised(Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
             {stop, Req2, St0}
     end;
 
-do_is_authorised(Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+do_is_authorised(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     {true, Req, St};
 
-do_is_authorised(Req, #{security := _} = St)  ->
+do_is_authorised(Req, _, #{security := _} = St)  ->
     {true, Req, St}.
 
 
@@ -308,7 +320,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             {stop, Req1, St1};
 
         {error, Response0, St1} ->
-            {StatusCode, Response1} = take_status_code(Response0, 500),
+            {StatusCode, Response1} = take_status_code(Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             Req1 = reply(StatusCode, error_encoding(Enc), Response1, Req0),
             {stop, Req1, St1};
 
@@ -316,19 +328,20 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St1}
     catch
-        throw:Reason ->
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+        ?EXCEPTION(throw, Reason, _) ->
+            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St0
             ),
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), 500),
+            {StatusCode, Body} = take_status_code(
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0}
@@ -360,7 +373,8 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, Enc, Response, Req1), St2};
 
             {error, Response0, St2} ->
-                {HTTPCode, Response1} = take_status_code(Response0, 500),
+                {HTTPCode, Response1} = take_status_code(
+                    Response0, ?HTTP_INTERNAL_SERVER_ERROR),
                 Req2 = reply(HTTPCode, error_encoding(Enc), Response1, Req1),
                 {stop, Req2, St2};
 
@@ -368,21 +382,21 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
-        throw:Reason ->
+        ?EXCEPTION(throw, Reason, _) ->
             {StatusCode1, Body} = take_status_code(
-                bondy_error:map(Reason), 400),
+                bondy_error:map(Reason), ?HTTP_BAD_REQUEST),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
-                bondy_error:map(Reason), 500),
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0}
@@ -398,7 +412,7 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
 
 take_status_code(Term) ->
-    take_status_code(Term, 500).
+    take_status_code(Term, ?HTTP_INTERNAL_SERVER_ERROR).
 
 
 %% @private
@@ -440,8 +454,6 @@ update_context({result, Result}, #{<<"request">> := _} = Ctxt) ->
     maps_utils:put_path([<<"action">>, <<"result">>], Result, Ctxt);
 
 update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
-    Lang = maps_utils:get_path(
-        [<<"headers">>, <<"accept-language">>], Req, <<"en">>),
     Map = #{
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
@@ -449,7 +461,7 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
         <<"username">> => maps:get(<<"sub">>, Claims),
         <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
         <<"groups">> => maps:get(<<"groups">>, Claims),
-        <<"locale">> => Lang,
+        <<"locale">> => maps:get(<<"language">>, Req),
         <<"meta">> => maps:get(<<"meta">>, Claims)
     },
     maps:put(<<"security">>, Map, Ctxt);
@@ -463,7 +475,8 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
     Id = opencensus:generate_trace_id(),
-     M = #{
+
+    M = #{
         %% Msgpack does not support 128-bit integers,
         %% so for the time being we encod it as binary string
         <<"id">> => integer_to_binary(Id),
@@ -475,6 +488,7 @@ init_context(Req) ->
         <<"host">> => cowboy_req:host(Req),
         <<"port">> => cowboy_req:port(Req),
         <<"headers">> => cowboy_req:headers(Req),
+        <<"language">> => maps:get(language, Req, <<"en">>),
         <<"query_string">> => cowboy_req:qs(Req),
         <<"query_params">> => maps:from_list(cowboy_req:parse_qs(Req)),
         <<"bindings">> => bondy_utils:to_binary_keys(cowboy_req:bindings(Req)),
@@ -552,12 +566,12 @@ orelse Method =:= <<"put">> ->
         Body = bondy_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
-        Class:Error ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "Error while decoding HTTP body, "
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Error, erlang:get_stacktrace()],
+                [Class, Reason, ?STACKTRACE(Stacktrace)],
                 St
             ),
             throw({badarg, {decoding, Enc}})
@@ -649,7 +663,7 @@ perform_action(
     Method,
     #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec, St0) ->
     St1 = decode_body_in_context(Method, St0),
-    Ctxt0 = maps:get(api_context, St1),
+    ApiCtxt0 = maps:get(api_context, St1),
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
     %% so we need to evaluate them passing the context
@@ -658,52 +672,52 @@ perform_action(
         <<"arguments">> := A,
         <<"arguments_kw">> := Akw,
         <<"options">> := Opts,
+        %% TODO use retries
         <<"retries">> := _R,
-        <<"timeout">> := T
-    } = mops_eval(Act, Ctxt0),
+        <<"timeout">> := CallTimeout
+    } = mops_eval(Act, ApiCtxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
     %% @TODO We need to recreate ctxt and session from token
-    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], Ctxt0),
+    Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
-    WampCtxt0 = #{
-        peer => Peer,
-        node => bondy_peer_service:mynode(),
-        subprotocol => {http, text, maps:get(encoding, St0)},
-        realm_uri => RealmUri,
-        timeout => T,
-        session => bondy_session:new(Peer, RealmUri, #{
-            roles => #{
-                caller => #{
-                    features => #{
-                        call_timeout => true,
-                        call_canceling => false,
-                        caller_identification => true,
-                        call_trustlevels => true,
-                        progressive_call_results => false
-                    }
+    SessionOpts = #{
+        roles => #{
+            caller => #{
+                features => #{
+                    call_timeout => true,
+                    caller_identification => true,
+                    call_trustlevels => true,
+                    call_canceling => false,
+                    progressive_call_results => false
                 }
             }
-        })
+        }
     },
+    Session = bondy_session:new(Peer, RealmUri, SessionOpts),
+    Subprotocol = {http, text, maps:get(encoding, St0)},
+    Ctxt0 = bondy_context:new(Peer, Subprotocol),
+    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
+    Ctxt2 = bondy_context:set_session(Ctxt1, Session),
+    Ctxt3 = bondy_context:set_call_timeout(Ctxt2, CallTimeout),
 
-    case bondy:call(P, Opts, A, Akw, WampCtxt0) of
-        {ok, Result0, _WampCtxt1} ->
+    case bondy:call(P, Opts, A, Akw, Ctxt3) of
+        {ok, Result0, _} ->
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
-            Ctxt1 = update_context({result, Result1}, Ctxt0),
-            Response = mops_eval(
-                maps:get(<<"on_result">>, RSpec), Ctxt1),
-            St2 = maps:update(api_context, Ctxt1, St1),
+            ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),
+            Response = mops_eval(maps:get(<<"on_result">>, RSpec), ApiCtxt1),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
-        {error, WampError0, _WampCtxt1} ->
+        {error, WampError0, _} ->
             StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
-            Ctxt1 = update_context({error, Error}, Ctxt0),
-            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), Ctxt1),
-            St2 = maps:update(api_context, Ctxt1, St1),
-            {StatusCode1, Response1} = take_status_code(Response0, 500),
+            ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
+            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), ApiCtxt1),
+            St2 = maps:update(api_context, ApiCtxt1, St1),
+            {StatusCode1, Response1} = take_status_code(
+                Response0, ?HTTP_INTERNAL_SERVER_ERROR),
             {error, StatusCode1, Response1, St2}
     end.
 
@@ -711,7 +725,7 @@ perform_action(
 
 %% @private
 from_http_response(StatusCode, RespHeaders, RespBody, Spec, St0)
-when StatusCode >= 400 andalso StatusCode < 600->
+when StatusCode >= 400 andalso StatusCode < 600 ->
     Ctxt0 = maps:get(api_context, St0),
     Error = #{
         <<"status_code">> => StatusCode,
@@ -763,7 +777,7 @@ reply_auth_error(Error, Scheme, Realm, Enc, Req) ->
             <<"www-authenticate">> => Auth
         }
     },
-    reply(401, error_encoding(Enc), Resp, Req).
+    reply(?HTTP_UNAUTHORIZED, error_encoding(Enc), Resp, Req).
 
 
 %% @private
@@ -883,30 +897,77 @@ error_encoding(_Other) -> json.
 
 
 %% @private
-uri_to_status_code(timeout) ->                              504;
-uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->             503;
-uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->                 504;
-uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->           403;
-uri_to_status_code(?WAMP_CANCELLED) ->                      400;
-uri_to_status_code(?WAMP_CLOSE_REALM) ->                    500;
-uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->        400;
-uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->                500;
-uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->               400;
-uri_to_status_code(?WAMP_INVALID_URI) ->                    400;
-uri_to_status_code(?WAMP_NET_FAILURE) ->                    502;
-uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->                 401;
-uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->              502;
-uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->              501;
-uri_to_status_code(?WAMP_NO_SUCH_REALM) ->                  502;
-uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->           502;
-uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->                   400;
-uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->                500;
-uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->           502;
-uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->  400;
-uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->             400;
-uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->       400;
-uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->                500;
-uri_to_status_code(_) ->                                    500.
+uri_to_status_code(timeout) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+
+uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->
+    ?HTTP_SERVICE_UNAVAILABLE;
+
+uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->
+    ?HTTP_GATEWAY_TIMEOUT;
+
+uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->
+    ?HTTP_FORBIDDEN;
+
+uri_to_status_code(?WAMP_CANCELLED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_CLOSE_REALM) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_DISCLOSE_ME_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_GOODBYE_AND_OUT) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_INVALID_ARGUMENT) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_INVALID_URI) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_NET_FAILURE) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->
+    ?HTTP_UNAUTHORIZED;
+
+uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_PROCEDURE) ->
+    ?HTTP_NOT_IMPLEMENTED;
+
+uri_to_status_code(?WAMP_NO_SUCH_REALM) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_REGISTRATION) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_NO_SUCH_ROLE) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_NO_SUCH_SESSION) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(?WAMP_NO_SUCH_SUBSCRIPTION) ->
+    ?HTTP_BAD_GATEWAY;
+
+uri_to_status_code(?WAMP_OPTION_DISALLOWED_DISCLOSE_ME) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_OPTION_NOT_ALLOWED) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_PROCEDURE_ALREADY_EXISTS) ->
+    ?HTTP_BAD_REQUEST;
+
+uri_to_status_code(?WAMP_SYSTEM_SHUTDOWN) ->
+    ?HTTP_INTERNAL_SERVER_ERROR;
+
+uri_to_status_code(_) ->
+    ?HTTP_INTERNAL_SERVER_ERROR.
 
 
 %% @private
@@ -932,13 +993,13 @@ trim_trailing_slash(Bin) ->
 mops_eval(Expr, Ctxt) ->
     try mops:eval(Expr, Ctxt)
     catch
-        error:{badkey, Key} ->
+        ?EXCEPTION(error, {badkey, Key}, _) ->
             throw(#{
                 <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        error:{badkeypath, Path} ->
+        ?EXCEPTION(error, {badkeypath, Path}, _) ->
             throw(#{
                 <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,

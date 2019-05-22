@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_prometheus_collector.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,6 +16,10 @@
 %%  limitations under the License.
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_prometheus_collector).
 -behaviour(prometheus_collector).
 
@@ -69,7 +73,8 @@ do_collect(CB) ->
     ],
     lists:foreach(
         fun({Name, Help, Type, Fun}) ->
-            Data = try Fun()
+            Data = try
+                Fun()
             catch _:_ -> undefined
             end,
             MF = prometheus_model_helpers:create_mf(

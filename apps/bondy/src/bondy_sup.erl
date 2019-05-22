@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_sup.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -23,33 +23,72 @@
 -module(bondy_sup).
 -behaviour(supervisor).
 
--define(CHILD(Id, Type, Args, Restart, Timeout), #{
+-define(SUPERVISOR(Id, Args, Restart, Timeout), #{
     id => Id,
     start => {Id, start_link, Args},
     restart => Restart,
     shutdown => Timeout,
-    type => Type,
+    type => supervisor,
     modules => [Id]
 }).
 
+-define(WORKER(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [Id]
+}).
+
+-define(EVENT_MANAGER(Id, Restart, Timeout), #{
+    id => Id,
+    start => {gen_event, start_link, [{local, Id}]},
+    restart => Restart,
+    shutdown => Timeout,
+    type => worker,
+    modules => [dynamic]
+}).
+
+
+
+%% API
 -export([start_link/0]).
+
+%% SUPERVISOR CALLBACKS
 -export([init/1]).
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+
+
+
+%% =============================================================================
+%% SUPERVISOR CALLBACKS
+%% =============================================================================
+
+
+
 init([]) ->
     Children = [
-        ?CHILD(bondy_registry, worker, [], permanent, 5000),
-        ?CHILD(bondy_broker_events, worker, [], permanent, 5000),
-        ?CHILD(bondy_peer_wamp_forwarder, worker, [], permanent, 5000),
-        ?CHILD(bondy_api_gateway, worker, [], permanent, 5000),
-        ?CHILD(bondy_backup, worker, [], permanent, 5000)
+        %% bondy_config_manager should be first
+        ?WORKER(bondy_config_manager, [], permanent, 30000),
+        ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
+        ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
+        ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
+        ?WORKER(bondy_registry, [], permanent, 5000),
+        ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
+        ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
+        ?WORKER(bondy_backup, [], permanent, 5000),
+        ?WORKER(bondy_api_gateway, [], permanent, 5000)
     ],
-    %% REVIEW SUPERVISION TREE, MAYBE SPLIT IN SUPERVISORS TO ADOPT
-    %% MIXED STRATEGY
-    %% TODO, we should use rest_for_one strategy.
-    %% If the registry or the wamp forwarder dies it is useless to
-    %% accept HTTP requests. Also they need to wait for the registry
-    %% to restore data from disk and maybe perform an exchange
     {ok, {{one_for_one, 1, 5}, Children}}.

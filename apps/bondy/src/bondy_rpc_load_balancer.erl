@@ -41,7 +41,10 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => {in, [single, first, last, random, round_robin]}
+        datatype => {in, [
+            single, first, last, random, round_robin,
+            queue_least_loaded, queue_least_loaded_sample
+        ]}
     },
     force_locality => #{
         required => true,
@@ -80,6 +83,7 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -99,10 +103,16 @@ get(Entries, Opts) when is_list(Entries) ->
     {bondy_registry_entry:t(), continuation()} | '$end_of_table'.
 
 iterate(Entries0, Opts0) when is_list(Entries0) ->
-    #{
-        strategy := Strat,
-        force_locality := Loc
-    } = maps_utils:validate(Opts0, ?OPTS_SPEC),
+
+    {Strat, Loc} = case maps_utils:validate(Opts0, ?OPTS_SPEC) of
+        #{strategy := S}
+        when S == queue_least_loaded
+        orelse S == queue_least_loaded_sample ->
+            {S, true};
+        #{strategy := S, force_locality := L} ->
+            {S, L}
+    end,
+
 
     Entries = maybe_sort_entries(Loc, Entries0),
 
@@ -117,6 +127,10 @@ iterate(Entries0, Opts0) when is_list(Entries0) ->
             next(lists_utils:shuffle(Entries));
         round_robin ->
             get_round_robin(Entries);
+        queue_least_loaded_sample ->
+            get_queue_least_loaded(lists_utils:shuffle(Entries), 2);
+        queue_least_loaded ->
+            get_queue_least_loaded(Entries, length(Entries));
         _ ->
             error(badarg)
     end.
@@ -131,6 +145,12 @@ iterate(Entries0, Opts0) when is_list(Entries0) ->
 
 iterate({round_robin, Entries}) ->
     get_round_robin(Entries);
+
+iterate({queue_least_loaded, Entries}) ->
+    get_queue_least_loaded(Entries, length(Entries));
+
+iterate({queue_least_loaded_sample, Entries}) ->
+    get_queue_least_loaded(Entries, 2);
 
 iterate({_, Entries}) ->
     next(Entries).
@@ -219,6 +239,7 @@ get_round_robin(undefined, [H|T]) ->
     %% We never invoked this procedure before or we reordered the round
     case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
         true ->
+            %% The pid of the connection process
             Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
             case erlang:is_process_alive(Pid) of
                 true ->
@@ -256,6 +277,59 @@ get_round_robin(undefined, []) ->
     '$end_of_table'.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_queue_least_loaded(entries(), SampleSize :: integer()) ->
+    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
+
+get_queue_least_loaded([], _) ->
+    '$end_of_table';
+
+get_queue_least_loaded(L, SampleSize) ->
+    get_queue_least_loaded(L, SampleSize, 0, undefined).
+
+
+%% @private
+get_queue_least_loaded(L, SampleSize, Count, {_, Entry})
+when SampleSize == Count ->
+    {Entry, L};
+
+get_queue_least_loaded([H|T], SampleSize, Count, Chosen) ->
+    case bondy_registry_entry:is_local(H) of
+        true ->
+            %% The pid of the connection process
+            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
+            case erlang:process_info(Pid, [message_queue_len]) of
+                undefined ->
+                    %% Process died, we continue iterating
+                    get_queue_least_loaded(T, SampleSize, Count, Chosen);
+                [{message_queue_len, Len}] when Chosen == undefined ->
+                    get_queue_least_loaded(T, SampleSize, Count + 1, {Len, H});
+                [{message_queue_len, Len}] ->
+                    NewChosen = case Chosen of
+                        {Val, _} when Val =< Len -> Chosen;
+                        _ -> {Len, H}
+                    end,
+                    get_queue_least_loaded(T, SampleSize, Count + 1, NewChosen)
+            end;
+        false ->
+            %% We already covered all local callees,
+            %% pick the first remote callee (in effect randomnly as we already
+            %% shuffled the list of entries)
+            {H, T}
+    end;
+
+get_queue_least_loaded([], _, _, undefined) ->
+    '$end_of_table';
+
+get_queue_least_loaded([], _, _, Entry) ->
+    Entry.
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -265,6 +339,7 @@ get_round_robin(undefined, []) ->
 %% -----------------------------------------------------------------------------
 rpc_state_table(RealmUri, Uri) ->
     tuplespace:locate_table(?RPC_STATE_TABLE, {RealmUri, Uri}).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc

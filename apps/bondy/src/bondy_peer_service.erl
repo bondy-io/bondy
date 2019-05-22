@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_peer_service.erl -
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%  Copyright (c) 2015 Christopher Meiklejohn.  All Rights Reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
@@ -105,7 +105,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 peer_service() ->
-    application:get_env(bondy, peer_service, ?DEFAULT_PEER_SERVICE).
+    bondy_config:get(peer_service, ?DEFAULT_PEER_SERVICE).
 
 
 %% -----------------------------------------------------------------------------

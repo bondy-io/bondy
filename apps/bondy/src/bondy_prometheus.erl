@@ -2,7 +2,7 @@
 %%  bondy_prometheus - this module is used to configure the prometheus metrics
 %%  and export the prometheus report.
 %%
-%%  Copyright (c) 2016-2017 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,24 +16,33 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
+
 %% -----------------------------------------------------------------------------
 %% @doc
+%%
+%%
 %% We follow https://prometheus.io/docs/practices/naming/
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_prometheus).
+-behaviour(gen_event).
+-behaviour(prometheus_collector).
+-include_lib("prometheus/include/prometheus.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
+
+-record(state, {}).
+
+%% Used by promethues METRIC_NAME macro
+-define(METRIC_NAME_PREFIX, "bondy_").
 
 -define(WAMP_MESSAGE_LABELS, [
-    realm, node, protocol, transport, frame_type, encoding
+    realm, node, session_id, agent, peername, protocol, transport, frame_type, encoding
 ]).
 
--export([init/0]).
+
+%% API
 -export([report/0]).
--export([wamp_message/2]).
--export([socket_open/2]).
--export([socket_closed/3]).
--export([socket_error/2]).
 -export([days_duration_buckets/0]).
 -export([hours_duration_buckets/0]).
 -export([minutes_duration_buckets/0]).
@@ -42,24 +51,26 @@
 -export([microseconds_duration_buckets/0]).
 
 
+%% PROMETHEUS_COLLECTOR CALLBACKS
+-export([deregister_cleanup/1]).
+-export([collect_mf/2]).
+
+
+%% GEN_EVENT CALLBACKS
+-export([init/1]).
+-export([handle_event/2]).
+-export([handle_call/2]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
+
+-import(prometheus_model_helpers, [create_mf/4]).
+
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-init() ->
-    ok = node_metrics(),
-    ok = net_metrics(),
-    ok = wamp_metrics(),
-    ok = prometheus_registry:register_collector(prometheus_vm_memory_collector),
-    ok = prometheus_registry:register_collector(prometheus_vm_statistics_collector),
-    prometheus_registry:register_collector(prometheus_vm_system_info_collector).
 
 
 %% -----------------------------------------------------------------------------
@@ -121,122 +132,196 @@ microseconds_duration_buckets() ->
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec socket_open(Protocol :: atom(), Transport :: atom()) -> ok.
+%% =============================================================================
+%% PROMETHEUS_COLLECTOR CALLBACKS
+%% =============================================================================
 
-socket_open(Procotol, Transport) ->
-    Labels = get_socket_labels(Procotol, Transport),
+
+
+deregister_cleanup(_) ->
+    ok.
+
+
+-spec collect_mf(
+    prometheus_registry:registry(), prometheus_collector:callback()) -> ok.
+
+collect_mf(_Registry, Callback) ->
+  Metrics = collector_metrics(),
+  EnabledMetrics = enabled_metrics(),
+  [add_metric_family(Metric, Callback)
+   || {Name, _, _, _}=Metric <- Metrics, metric_enabled(Name, EnabledMetrics)],
+  ok.
+
+
+
+%% =============================================================================
+%% GEN_EVENT CALLBACKS
+%% =============================================================================
+
+
+
+init([]) ->
+    ok = setup(),
+    State = #state{},
+    {ok, State}.
+
+
+handle_event({socket_open, Procotol, Transport, Peername}, State) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
-    prometheus_gauge:inc(bondy_sockets_total, Labels).
+    ok = prometheus_gauge:inc(bondy_sockets_total, Labels),
+    {ok, State};
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec socket_closed(
-    Protocol :: atom(), Transport:: atom(), Seconds :: integer()) -> ok.
-
-socket_closed(Procotol, Transport, Seconds) ->
-    Labels = get_socket_labels(Procotol, Transport),
+handle_event({socket_closed, Procotol, Transport, Peername, Secs}, State) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
-    prometheus_histogram:observe(
-        bondy_socket_duration_seconds, Labels, Seconds).
+    ok = prometheus_histogram:observe(
+        bondy_socket_duration_seconds, Labels, Secs),
+    {ok, State};
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec socket_error(Protocol :: atom(), Transport:: atom()) -> ok.
-
-socket_error(Procotol, Transport) ->
-    Labels = get_socket_labels(Procotol, Transport),
+handle_event({socket_error, Procotol, Transport, Peername}, State) ->
+    Labels = get_socket_labels(Procotol, Transport, Peername),
     ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
-    prometheus_gauge:dec(bondy_sockets_total, Labels).
+    ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
+    {ok, State};
+
+handle_event({session_opened, RealmUri, Id, Agent, Peer}, State) ->
+    Labels = get_session_labels(RealmUri, Id, Agent, Peer),
+    ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
+    ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
+    {ok, State};
+
+handle_event({session_closed, RealmUri, Id, Agent, Peer, Secs}, State) ->
+    Labels = get_session_labels(RealmUri, Id, Agent, Peer),
+    ok = prometheus_counter:inc(bondy_sessions_closed_total, Labels),
+    ok = prometheus_gauge:dec(bondy_sessions_total, Labels),
+    ok = prometheus_histogram:observe(
+        bondy_session_duration_seconds, Labels, Secs),
+    {ok, State};
+
+handle_event({wamp, #abort{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_abort_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #authenticate{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_authenticate_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #call{procedure_uri = Val} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_call_messages_total, M, [Val], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #cancel{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_cancel_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #challenge{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_challenge_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #error{error_uri = Val} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_error_messages_total, M, [Val], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #event{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_event_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #goodbye{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_goodbye_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #hello{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_hello_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #interrupt{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_interrupt_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #invocation{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_invocation_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #publish{topic_uri = Val} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_publish_messages_total, M, [Val], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #published{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_published_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #register{procedure_uri = Val} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_register_messages_total, M, [Val], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #registered{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_registered_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #result{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_result_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #subscribe{topic_uri = Val} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_subscribe_messages_total, M, [Val], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #subscribed{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_subscribed_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #unregister{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_unregister_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #unregistered{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_unregistered_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #unsubscribe{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_unsubscribe_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #unsubscribed{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_unsubscribed_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #welcome{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_welcome_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({wamp, #yield{} = M, Ctxt}, State) ->
+    ok = observe_message(bondy_wamp_yield_messages_total, M, [], Ctxt),
+    {ok, State};
+
+handle_event({send_error, Reason, M, Ctxt}, State) ->
+    MessageType = element(1, M),
+    Labels = [Reason, MessageType, get_labels_values(Ctxt)],
+    ok = prometheus_counter:inc(bondy_send_errors_total, Labels),
+    {ok, State};
+
+handle_event(_Event, State) ->
+    {ok, State}.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec wamp_message(wamp_message:message(), bondy_context:t()) -> ok.
+handle_call(Event, State) ->
+    _ = lager:error(
+        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    {reply, {error, {unsupported_call, Event}}, State}.
 
-wamp_message(#abort{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_abort_messages_total, M, [], Ctxt);
 
-wamp_message(#authenticate{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_authenticate_messages_total, M, [], Ctxt);
+handle_info(_Info, State) ->
+    {ok, State}.
 
-wamp_message(#call{procedure_uri = Val} = M, Ctxt) ->
-    wamp_message(bondy_wamp_call_messages_total, M, [Val], Ctxt);
 
-wamp_message(#cancel{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_cancel_messages_total, M, [], Ctxt);
+terminate(_Reason, _State) ->
+    ok.
 
-wamp_message(#challenge{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_challenge_messages_total, M, [], Ctxt);
 
-wamp_message(#error{error_uri = Val} = M, Ctxt) ->
-    wamp_message(bondy_wamp_error_messages_total, M, [Val], Ctxt);
-
-wamp_message(#event{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_event_messages_total, M, [], Ctxt);
-
-wamp_message(#goodbye{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_goodbye_messages_total, M, [], Ctxt);
-
-wamp_message(#hello{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_hello_messages_total, M, [], Ctxt);
-
-wamp_message(#interrupt{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_interrupt_messages_total, M, [], Ctxt);
-
-wamp_message(#invocation{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_invocation_messages_total, M, [], Ctxt);
-
-wamp_message(#publish{topic_uri = Val} = M, Ctxt) ->
-    wamp_message(bondy_wamp_publish_messages_total, M, [Val], Ctxt);
-
-wamp_message(#published{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_published_messages_total, M, [], Ctxt);
-
-wamp_message(#register{procedure_uri = Val} = M, Ctxt) ->
-    wamp_message(bondy_wamp_register_messages_total, M, [Val], Ctxt);
-
-wamp_message(#registered{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_registered_messages_total, M, [], Ctxt);
-
-wamp_message(#result{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_result_messages_total, M, [], Ctxt);
-
-wamp_message(#subscribe{topic_uri = Val} = M, Ctxt) ->
-    wamp_message(bondy_wamp_subscribe_messages_total, M, [Val], Ctxt);
-
-wamp_message(#subscribed{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_subscribed_messages_total, M, [], Ctxt);
-
-wamp_message(#unregister{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unregister_messages_total, M, [], Ctxt);
-
-wamp_message(#unregistered{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unregistered_messages_total, M, [], Ctxt);
-
-wamp_message(#unsubscribe{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unsubscribe_messages_total, M, [], Ctxt);
-
-wamp_message(#unsubscribed{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_unsubscribed_messages_total, M, [], Ctxt);
-
-wamp_message(#welcome{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_welcome_messages_total, M, [], Ctxt);
-
-wamp_message(#yield{} = M, Ctxt) ->
-    wamp_message(bondy_wamp_yield_messages_total, M, [], Ctxt).
-
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
 
 
 
@@ -245,6 +330,21 @@ wamp_message(#yield{} = M, Ctxt) ->
 %% =============================================================================
 
 
+
+setup() ->
+    ok = declare_metrics(),
+    ok = declare_net_metrics(),
+    ok = declare_session_metrics(),
+    ok = declare_wamp_metrics(),
+    ok = bondy_cowboy_prometheus:setup(),
+    Collectors = [
+        prometheus_vm_memory_collector,
+        prometheus_vm_statistics_collector,
+        prometheus_vm_system_info_collector,
+        oc_stat_exporter_prometheus
+    ],
+    _ = [prometheus_registry:register_collector(C) || C <- Collectors],
+    ok.
 
 
 get_labels(call) ->
@@ -266,37 +366,51 @@ get_labels(_) ->
    ?WAMP_MESSAGE_LABELS.
 
 
-get_socket_labels(Protocol, Transport) ->
+%% @private
+get_session_labels(RealmUri, Id, Agent, {_, _} = Peer) ->
+    get_session_labels(
+        RealmUri, Id, Agent, inet_utils:peername_to_binary(Peer));
+
+get_session_labels(RealmUri, Id, Agent, Peername) ->
+    [RealmUri, node_name(), Id, Agent, Peername].
+
+
+%% @private
+get_socket_labels(Protocol, Transport, Peername) ->
     [
         node_name(),
         Protocol,
-        Transport
+        Transport,
+        Peername
     ].
 
-
+%% @private
 get_labels_values(Ctxt) ->
     {T, FT, E} = bondy_context:subprotocol(Ctxt),
     [
         get_realm(Ctxt),
         node_name(),
+        bondy_context:session_id(Ctxt),
+        bondy_context:agent(Ctxt),
+        inet_utils:peername_to_binary(bondy_context:peer(Ctxt)),
         wamp,
         T,
         FT,
         E
     ].
 
+
 %% @private
 get_realm(Ctxt) ->
     try
         bondy_context:realm_uri(Ctxt)
     catch
-        _:_ ->
+        ?EXCEPTION(_, _, _) ->
             undefined
     end.
 
 
-
-wamp_message(Metric, M, LabelsValues, Ctxt) ->
+observe_message(Metric, M, LabelsValues, Ctxt) ->
     Size = erts_debug:flat_size(M) * 8,
     Labels = get_labels_values(Ctxt),
     AllLabels = lists:append(LabelsValues, Labels),
@@ -305,38 +419,55 @@ wamp_message(Metric, M, LabelsValues, Ctxt) ->
     prometheus_histogram:observe(bondy_wamp_message_bytes, Labels, Size).
 
 
-net_metrics() ->
+declare_metrics() ->
+    _ = prometheus_counter:declare([
+        {name, bondy_errors_total},
+        {help,
+            <<"The total number of errors in a bondy node since reset.">>},
+        {labels, [reason | ?WAMP_MESSAGE_LABELS]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_send_errors_total},
+        {help,
+            <<"The total number of router send errors in a bondy node since reset.">>},
+        {labels, [reason, message_type | ?WAMP_MESSAGE_LABELS]}
+    ]),
+    ok.
+
+
+declare_net_metrics() ->
     %% Sockets
 
     _ = prometheus_gauge:declare([
         {name, bondy_sockets_total},
         {help,
             <<"The number of active sockets on a bondy node.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_opened_total},
         {help,
             <<"The number of sockets opened on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_closed_total},
         {help,
             <<"The number of sockets closed on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_socket_errors_total},
         {help,
             <<"The number of socket errors on a bondy node since reset.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
     _ = prometheus_histogram:declare([
         {name, bondy_socket_duration_seconds},
+        {buckets, seconds_duration_buckets()},
         {help,
             <<"A histogram of the duration of a socket.">>},
-        {labels, [node, protocol, transport]}
+        {labels, [node, protocol, transport, peername]}
     ]),
 
     %% Bytes
@@ -375,18 +506,35 @@ net_metrics() ->
     ok.
 
 
-node_metrics() ->
-    %% Counters
+declare_session_metrics() ->
+    _ = prometheus_gauge:declare([
+        {name, bondy_sessions_total},
+        {help,
+            <<"The number of active sessions on a bondy node since reset.">>},
+        {labels, [realm, node, session_id, agent, peername]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_sessions_opened_total},
+        {help,
+            <<"The number of sessions opened on a bondy node since reset.">>},
+        {labels, [realm, node, session_id, agent, peername]}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_sessions_closed_total},
+        {help,
+            <<"The number of sessions closed on a bondy node since reset.">>},
+        {labels, [realm, node, session_id, agent, peername]}
+    ]),
     _ = prometheus_histogram:declare([
-            {name, bondy_session_duration},
-            {buckets, microseconds_duration_buckets()},
-            {labels, [db, type]},
-            {help, ""},
-            {duration_unit, seconds}]),
+        {name, bondy_session_duration_seconds},
+        {buckets, seconds_duration_buckets()},
+        {help,
+            <<"A histogram of the duration of sessions.">>},
+        {labels, [realm, node, session_id, agent, peername]}
+    ]),
     ok.
 
-
-wamp_metrics() ->
+declare_wamp_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_wamp_messages_total},
         {help,
@@ -406,6 +554,18 @@ wamp_metrics() ->
     _ = prometheus_counter:declare([
         {name, bondy_wamp_call_messages_total},
         {help, <<"The total number of call messages routed by a bondy node since reset.">>},
+        {labels, get_labels(call)}
+    ]),
+    _ = prometheus_histogram:declare([
+        {name, bondy_wamp_call_latency_milliseconds},
+        {buckets, milliseconds_duration_buckets()},
+        {help,
+            <<"A histogram of routed RPC response latencies. This measurement reflects the time between the dealer processing a WAMP call message and the first response (WAMP result or error).">>},
+        {labels, get_labels(call)}
+    ]),
+    _ = prometheus_counter:declare([
+        {name, bondy_wamp_call_retries_total},
+        {help, <<"The total number of retries for WAMP call.">>},
         {labels, get_labels(call)}
     ]),
     _ = prometheus_counter:declare([
@@ -535,3 +695,57 @@ bytes_bucket() ->
     [0, 1024, 1024*4, 1024*16, 1024*32, 1024*64, 1024*128, 1024*256, 1024*512, 1024*1024, 1024*1024*2, 1024*1024*4, 1024*1024*8].
 
 
+
+
+
+%% =============================================================================
+%% PRIVATE BONDY COLLECTOR
+%% =============================================================================
+
+
+
+%% @private
+collector_metrics() ->
+    lists:append([
+        registry_metrics()
+    ]).
+
+%% @private
+registry_metric(size, Labels, Value) ->
+    Help = "The total number of elements in a trie.",
+    {registry_trie_elements, gauge, Help, Labels, Value};
+
+registry_metric(nodes, Labels, Value) ->
+    Help = "The total number of modes in a trie.",
+    {registry_trie_nodes, gauge, Help, Labels, Value};
+
+registry_metric(memory, Labels, Value) ->
+    Help = "The total number of modes in a trie.",
+    {registry_trie_nodes, gauge, Help, Labels, Value}.
+
+
+%% @private
+registry_metrics() ->
+    Info = bondy_registry:info(),
+    L = [
+        registry_metric(K, [{name, Name}], V)
+        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner
+    ],
+    [
+        {registry_tries, gauge, "Registry tries count.", length(Info)}
+        | L
+    ].
+
+
+%% @private
+add_metric_family({Name, Type, Help, Metrics}, Callback) ->
+    Callback(create_mf(?METRIC_NAME(Name), Help, Type, Metrics)).
+
+%% @private
+enabled_metrics() ->
+    application:get_env(prometheus, bondy_prometheus_metrics, all).
+
+
+%% @private
+metric_enabled(Name, Metrics) ->
+    Metrics =:= all orelse lists:member(Name, Metrics).
