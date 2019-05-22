@@ -26,10 +26,7 @@ db
 deps
 ebin
 erl_crash.dump
-log
 log/*
-log/3
-log/4
 log/index
 logs
 rebar3.crashdump
