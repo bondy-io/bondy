@@ -1,0 +1,26 @@
+## Name of the node
+-name bondy@127.0.0.1
+
+## Cookie for distributed erlang
+-setcookie bondy
+
+## Explicit connections only.
+-connect_all false
+
+## Hidden nodes
+-hidden
+
+## Max processes
++P 2000000
+
+## Kernel polling
++K true
+
+## Async I/O threads
++A 64
+
+## Increase distribution port buffer size.
++zdbbl 32768
+
+## Enable multi_time_warp
++C multi_time_warp
