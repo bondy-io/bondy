@@ -44,7 +44,7 @@
 %%         <<"agent">> => binary()
 %%     },
 %%     <<"event">> => #{
-%%         <<"realm_uri">> => uri(),
+%%         <<"realm">> => uri(),
 %%         <<"topic">> => uri(),
 %%         <<"subscription_id">> => integer(),
 %%         <<"publication_id">> => integer(),
@@ -130,8 +130,8 @@
 }).
 
 -define(MATCH_SPEC, #{
-    <<"realm_uri">> => #{
-        alias => realm_uri,
+    <<"realm">> => #{
+        alias => realm,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -548,7 +548,7 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
             <<"agent">> => State#state.broker_agent
         },
         <<"event">> => #{
-            <<"realm_uri">> => RealmUri,
+            <<"realm">> => RealmUri,
             <<"topic">> => Topic,
             <<"subscription_id">> => Event#event.subscription_id,
             <<"publication_id">> => Event#event.publication_id,
@@ -569,7 +569,7 @@ do_subscribe(Subscription, State) ->
     #{
         <<"bridge">> := Bridge,
         <<"match">> := #{
-            <<"realm_uri">> := RealmUri,
+            <<"realm">> := RealmUri,
             <<"topic">> := Topic,
             <<"options">> := Opts
         },

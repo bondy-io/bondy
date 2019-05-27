@@ -156,7 +156,7 @@
 %%
 %%    There is no guarantee regarding the order of return for multiple
 %%    subsequent register requests.  A register request might require the
-%%    _Broker_ to do a time-consuming lookup in some database, whereas
+%%    _Dealer_ to do a time-consuming lookup in some database, whereas
 %%    another register request second might be permissible immediately.
 %% @end
 %% =============================================================================
