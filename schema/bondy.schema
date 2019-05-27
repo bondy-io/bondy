@@ -690,6 +690,57 @@
 
 
 %% =============================================================================
+%% CLUSTER PEER TCP
+%% =============================================================================
+
+
+
+%% @doc Defines the IP to use for the cluster TCP connection
+%% {mapping, "cluster.peer_ip", "partisan.peer_ip", [
+%%   {default, "{{bondy_ip}}"},
+%%   {datatype, integer}
+%% ]}.
+
+%% @doc Defines the port to use for the cluster TCP connection
+{mapping, "cluster.peer_port", "partisan.peer_port", [
+  {default, "{{peer_port}}"},
+  {datatype, integer}
+]}.
+
+%% @doc Defines the number of TCP connections for the cluster TCP stack
+{mapping, "cluster.parallelism", "partisan.parallelism", [
+  {default, 1},
+  {datatype, integer}
+]}.
+
+
+{mapping, "cluster.tls.enabled", "partisan.tls", [
+  {default, "off"},
+  {datatype, flag}
+]}.
+
+
+%% @doc Default cert location for cluster TLS connection
+{mapping, "cluster.tls.certfile", "partisan.tls_options.certfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cert.pem"}
+]}.
+
+%% @doc Default key location for cluster TLS connection
+{mapping, "cluster.tls.keyfile", "partisan.tls_options.keyfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/key.pem"}
+]}.
+
+%% @doc Default signing authority location for cluster TLS connection
+{mapping, "cluster.tls.cacertfile", "partisan.tls_options.cacertfile", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/cacert.pem"}
+]}.
+
+
+
+%% =============================================================================
 %% DIRS
 %% =============================================================================
 
