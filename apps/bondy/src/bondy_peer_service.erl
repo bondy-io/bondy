@@ -27,6 +27,7 @@
 -include_lib("partisan/include/partisan.hrl").
 -define(DEFAULT_PEER_SERVICE, bondy_partisan_peer_service).
 
+-type partisan_peer() :: plum_db_peer_service:partisan_peer().
 
 -export([forward_message/3]).
 -export([forward_message/4]).
@@ -59,21 +60,25 @@
 
 
 %% Attempt to join node.
--callback join(node()) -> ok | {error, atom()}.
+-callback join(node() | list() | partisan_peer()) -> ok | {error, atom()}.
 
 %% Attempt to join node with or without automatically claiming ring
 %% ownership.
--callback join(node(), boolean()) -> ok | {error, atom()}.
+-callback join(node() | list() | partisan_peer(), boolean()) ->
+    ok | {error, atom()}.
 
 %% Attempt to join node with or without automatically claiming ring
 %% ownership.
--callback join(node(), node(), boolean()) -> ok | {error, atom()}.
+-callback join(
+    node() | list() | partisan_peer(),
+    node() | list() | partisan_peer(),
+    boolean()) -> ok | {error, atom()}.
 
 %% Remove myself from the cluster.
 -callback leave() -> ok.
 
 %% Remove a node from the cluster.
--callback leave(node()) -> ok.
+-callback leave(node() | list() | partisan_peer()) -> ok.
 
 %% Return manager.
 -callback manager() -> module().
