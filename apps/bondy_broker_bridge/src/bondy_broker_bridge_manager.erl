@@ -542,21 +542,14 @@ load_config(_, State) ->
 mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     %% mops requiere binary keys
     Base = maps:get(ctxt, bridge(Bridge)),
+    CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
+
     Base#{
         <<"broker">> => #{
             <<"node">> => State#state.nodename,
             <<"agent">> => State#state.broker_agent
         },
-        <<"event">> => #{
-            <<"realm">> => RealmUri,
-            <<"topic">> => Topic,
-            <<"subscription_id">> => Event#event.subscription_id,
-            <<"publication_id">> => Event#event.publication_id,
-            <<"details">> => Event#event.details,
-            <<"arguments">> => Event#event.arguments,
-            <<"arguments_kw">> => Event#event.arguments_kw,
-            <<"ingestion_timestamp">> => erlang:system_time(millisecond)
-        }
+        <<"event">> => CtxtEvent
     }.
 
 
