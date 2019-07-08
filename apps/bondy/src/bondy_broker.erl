@@ -282,13 +282,13 @@ when is_map(Ctxt) ->
     catch
         ?EXCEPTION(_, Reason, Stacktrace) ->
             _ = lager:error(
-            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, ?STACKTRACE(Stacktrace)]),
+                "Error while publishing; reason=~p, "
                 "topic=~p, session_id=~p, stacktrace=~p",
                 [
                     Reason,
                     TopicUri,
                     bondy_context:session_id(Ctxt),
-                    erlang:get_stacktrace()
+                    ?STACKTRACE(Stacktrace)
                 ]
             ),
             {error, Reason}
