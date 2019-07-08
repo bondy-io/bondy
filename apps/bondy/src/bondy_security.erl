@@ -376,7 +376,13 @@ get_grants(#context{grants=Val}) ->
     Password::binary() | {hash, binary()},
     ConnInfo :: [{atom(), any()}]) ->
         {ok, context()} |
-        {error, {unknown_user, binary()} | {no_such_realm, uri()} | missing_password | no_matching_sources }.
+        {error,
+            {unknown_user, binary()}
+            | {no_such_realm, uri()}
+            | bad_password
+            | missing_password
+            | no_matching_sources
+        }.
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
     try
@@ -444,31 +450,30 @@ auth_with_source(?WAMPCRA_AUTH, UserData, M) ->
 
 auth_with_source(password, UserData, M) ->
     % pull the password out of the userdata
-    case lookup(?PASSWORD, UserData) of
+    try lookup(?PASSWORD, UserData) of
         undefined ->
             _ = lager:warning(
-                "User '~s' is configured for "
-                "password authentication, but has "
-                "no password", [maps:get(username, M)]),
+                "User '~s' is configured for password authentication, "
+                "but has no password.",
+                [maps:get(username, M)]
+            ),
             {error, missing_password};
-        PasswordData ->
-            HashedPass = lookup(hash_pass, PasswordData),
-            HashFunction = lookup(hash_func, PasswordData),
-            Salt = lookup(salt, PasswordData),
-            Iterations = lookup(iterations, PasswordData),
-            case
-                bondy_security_pw:check_password(
-                    maps:get(password, M),
-                    HashedPass,
-                    HashFunction,
-                    Salt,
-                    Iterations)
-            of
+
+        PW0 ->
+            %% We trigger a conditional upgrade to the password struct version
+            %% if required.
+            PW1 = maybe_upgrade_password(PW0, M),
+            String = maps:get(password, M),
+            Result = bondy_security_pw:check_password(String, PW1),
+            case Result of
                 true ->
                     {ok, get_context(M)};
                 false ->
                     {error, bad_password}
             end
+    catch
+        throw:Reason ->
+            {error, Reason}
     end;
 
 auth_with_source(?CERTIFICATE_AUTH, Data, M) ->
@@ -513,8 +518,6 @@ auth_with_source(Source, UserData, M) ->
                     {error, bad_password}
             end
     end.
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1104,6 +1107,28 @@ status(RealmUri) ->
 %% ADDED BY US
 %% =============================================================================
 
+
+maybe_upgrade_password(PW0, M) ->
+    String = maps:get(password, M),
+    case bondy_security_pw:upgrade(String, PW0) of
+        PW0 ->
+            %% No upgrade performed
+            PW0;
+        PW1 ->
+            %% The password was upgraded, we store it
+            RealmUri = maps:get(realm_uri, M),
+            Username = maps:get(username, M),
+            Result = alter_user(RealmUri, Username, [{?PASSWORD, PW1}]),
+
+            case Result of
+                ok ->
+                    _ = lager:debug("Password upgraded"),
+                    PW1;
+                {error, Reason} ->
+                    _ = lager:debug("Error while trying to upgrade password"),
+                    throw(Reason)
+            end
+    end.
 
 
 -spec lookup_user(binary(), binary()) ->
@@ -1806,16 +1831,13 @@ validate_groups_option(RealmUri, Options) ->
 validate_password_option(Pass, Options) when is_list(Pass) ->
     validate_password_option(list_to_binary(Pass), Options);
 
-validate_password_option(Pass, Options) ->
-    {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
-        bondy_security_pw:hash_password(Pass),
-    NewOptions = stash(?PASSWORD, {?PASSWORD,
-                                    [{hash_pass, HashedPass},
-                                     {auth_name, AuthName},
-                                     {hash_func, HashFunction},
-                                     {salt, Salt},
-                                     {iterations, Iterations}]},
-                       Options),
+validate_password_option(Pass, Options) when is_binary(Pass) ->
+    PW = bondy_security_pw:new(Pass),
+    NewOptions = stash(?PASSWORD, {?PASSWORD, PW}, Options),
+    {ok, NewOptions};
+
+validate_password_option(#{} = PW0, Options) ->
+    NewOptions = stash(?PASSWORD, {?PASSWORD, PW0}, Options),
     {ok, NewOptions}.
 
 
