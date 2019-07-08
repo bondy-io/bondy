@@ -72,6 +72,7 @@
 -export([request_id/1]).
 -export([call_timeout/1]).
 -export([set_call_timeout/2]).
+-export([request_details/1]).
 -export([request_timeout/1]).
 -export([request_timestamp/1]).
 -export([reset/1]).
@@ -141,6 +142,7 @@ reset(Ctxt) ->
     Ctxt#{
         request_timestamp => undefined,
         request_id => undefined,
+        request_details => undefined,
         request_timeout => 0
     }.
 
@@ -366,6 +368,16 @@ request_timeout(#{request_timeout := Val}) ->
 -spec set_request_timeout(t(), non_neg_integer()) -> t().
 set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{request_timeout => Timeout}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the current request details
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request_details(t()) -> map().
+request_details(#{request_details := Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------

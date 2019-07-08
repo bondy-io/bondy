@@ -89,6 +89,7 @@
 -export([add/2]).
 -export([apply_config/0]).
 -export([auth_methods/1]).
+-export([is_auth_method/2]).
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
@@ -160,6 +161,15 @@ apply_config() ->
 -spec auth_methods(realm()) -> [binary()].
 auth_methods(#realm{authmethods = Val}) ->
     Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_auth_method(realm(), binary()) -> boolean().
+is_auth_method(#realm{authmethods = L}, Method) ->
+    lists:member(Method, L).
 
 
 %% -----------------------------------------------------------------------------

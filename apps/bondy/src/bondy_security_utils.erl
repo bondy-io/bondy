@@ -28,8 +28,8 @@
                                         | invalid_scheme
                                         | no_such_realm.
 
--type auth_scheme()                 ::  wampcra | basic | bearer | digest.
--type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}
+-type auth_scheme()                 ::  basic | bearer | digest | hmac.
+-type auth_scheme_val()             ::  {hmac, binary(), binary(), binary()}
                                         | {basic, binary(), binary()}
                                         | {bearer, binary()}
                                         | {digest, [{binary(), binary()}]}.
@@ -50,14 +50,18 @@
 %% -----------------------------------------------------------------------------
 -spec authenticate(
     auth_scheme(), auth_scheme_val(), uri(), bondy_session:peer()) ->
-    {ok, bondy_security:context() | map()} | {error, auth_error_reason()}.
+    {ok, bondy_security:context() | map()}
+    | {error, auth_error_reason()}.
 
-authenticate(?TICKET_AUTH, {?TICKET_AUTH, AuthId, Signature}, Realm, Peer) ->
-    authenticate(basic, {basic, AuthId, Signature}, Realm, Peer);
+authenticate(hmac, {hmac, AuthId, Sign, Sign}, Realm, Peer) ->
+    PW = bondy_security_user:password(Realm, AuthId),
+    HashedPass = maps:get(hash_pass, PW),
+    ConnInfo = conn_info(Peer),
+    bondy_security:authenticate(Realm, AuthId, {hash, HashedPass}, ConnInfo);
 
-authenticate(?WAMPCRA_AUTH, {?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
-    bondy_security:authenticate(
-        Realm, AuthId, {hash, Signature}, conn_info(Peer));
+authenticate(hmac, {hmac, _, _, _}, _, _) ->
+    %% Signatures do not match
+    {error, bad_password};
 
 authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
     bondy_oauth2:verify_jwt(Realm, Token);
