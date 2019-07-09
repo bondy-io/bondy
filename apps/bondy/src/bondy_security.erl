@@ -54,6 +54,7 @@
 -export([del_user/2]).
 -export([disable/1]).
 -export([enable/1]).
+-export([get_anonymous_context/2]).
 -export([get_context/2]).
 -export([find_user/2]).
 -export([find_one_user_by_metadata/3]).
@@ -144,10 +145,11 @@
 -endif.
 
 -record(context, {
-    realm_uri   ::  binary(),
-    username    ::  binary(),
-    grants      ::  [{any(), any()}],
-    epoch       ::  erlang:timestamp()
+    realm_uri               ::  binary(),
+    username                ::  binary(),
+    grants                  ::  [{any(), any()}],
+    epoch                   ::  erlang:timestamp(),
+    is_anonymous = false    ::  boolean()
 }).
 
 -type context() :: #context{}.
@@ -832,8 +834,19 @@ when (Reserved == all orelse Reserved == anonymous) ->
             Error
     end;
 
-do_add_grant(RealmUri, RoleList, Resource, Grants)
-when is_binary(RealmUri), is_binary(Resource) ->
+do_add_grant(RealmUri, RoleList0, Resource, Grants)
+when is_binary(RealmUri), is_binary(Resource) orelse Resource == any ->
+    Split = lists:splitwith(
+        fun(anonymous) -> true; (_) -> false end, RoleList0),
+
+    RoleList = case Split of
+        {[], L} ->
+            L;
+        {_, L} ->
+            ok = do_add_grant(RealmUri, anonymous, Resource, Grants),
+            L
+    end,
+
     Uri = to_lowercase_bin(RealmUri),
     RoleTypes = lists:map(
         fun(Name) ->
@@ -1486,6 +1499,7 @@ do_print_groups(RealmUri, Groups) ->
 %% -----------------------------------------------------------------------------
 -spec print_grants(RealmUri :: uri(), Rolename :: string()) ->
     ok | {error, term()}.
+
 print_grants(RealmUri, RoleName) ->
     Uri = to_lowercase_bin(RealmUri),
     Name = to_lowercase_bin(RoleName),
@@ -1755,6 +1769,9 @@ maybe_refresh_context(RealmUri, Context) ->
     %% TODO replace this with a cluster metadata hash check, or something
     Epoch = os:timestamp(),
     case timer:now_diff(Epoch, Context#context.epoch) < ?REFRESH_TIME of
+        false when Context#context.is_anonymous ->
+            %% context has expired
+            get_anonymous_context(RealmUri, Context#context.username);
         false ->
             %% context has expired
             get_context(RealmUri, Context#context.username);
@@ -1764,6 +1781,8 @@ maybe_refresh_context(RealmUri, Context) ->
 
 concat_role(user, Name) ->
     <<"user/", Name/binary>>;
+concat_role(group, anonymous) ->
+    <<"group/anonymous">>;
 concat_role(group, Name) ->
     <<"group/", Name/binary>>.
 
@@ -1772,17 +1791,30 @@ concat_role(group, Name) ->
 %% whenever a GRANT or a REVOKE is performed. This is a little coarse grained
 %% right now, but it'll do for the moment.
 get_context(RealmUri, Username)
-when is_binary(Username) orelse Username == anonymous ->
+when is_binary(Username) ->
     Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
     #context{
         realm_uri = to_lowercase_bin(RealmUri),
         username=Username,
         grants=Grants,
-        epoch=os:timestamp()}.
+        epoch=os:timestamp(),
+        is_anonymous = false
+    }.
 
 
 get_context(#{username := U, realm_uri := R}) ->
     get_context(R, U).
+
+
+get_anonymous_context(RealmUri, Username) ->
+    Grants = group_grants(accumulate_grants(RealmUri, anonymous, group)),
+    #context{
+        realm_uri = to_lowercase_bin(RealmUri),
+        username=Username,
+        grants=Grants,
+        epoch=os:timestamp(),
+        is_anonymous = true
+    }.
 
 
 
@@ -1824,6 +1856,9 @@ accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
 
 %% lookup a key in a list of key/value tuples. Like proplists:get_value but
 %% faster.
+%% lookup(_, undefined, Default) ->
+%%     Default;
+
 lookup(Key, List, Default) ->
     case lists:keyfind(Key, 1, List) of
         false ->
@@ -2159,7 +2194,7 @@ do_role_type(_UserDetails, _GroupDetails) ->
 
 
 role_details(_, anonymous) ->
-    [];
+    [{<<"groups">>, []}, {<<"meta">>, #{}}];
 
 role_details(FullPrefix, Rolename) ->
     plum_db:get(FullPrefix, to_lowercase_bin(Rolename)).

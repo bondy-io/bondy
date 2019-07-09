@@ -390,8 +390,17 @@
         true;
     (List) when is_list(List) ->
         A = sets:from_list(List),
-        B = sets:from_list([<<"anonymous">>, <<"all">>]),
-        sets:is_disjoint(A, B)
+        B = sets:from_list([<<"all">>]),
+        case sets:is_disjoint(A, B) of
+            true ->
+                L = lists:map(
+                    fun(<<"anonymous">>) -> anonymous; (X) -> X end,
+                    List
+                ),
+                {ok, L};
+            false ->
+                false
+        end
 end).
 
 -define(SOURCE_SPEC, #{
@@ -402,7 +411,7 @@ end).
         allow_null => false,
         allow_undefined => false,
         datatype => ?ROLES_DATATYPE,
-        %% all or anonymous cannot be mixed with custom usernames
+        %% all cannot be mixed anonymous or with custom usernames
         %% in the same rule
         validator => ?ROLES_VALIDATOR
     },

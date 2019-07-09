@@ -72,7 +72,7 @@
                     "wamp.publish"
                 ],
                 "uri" : "*",
-                "roles" : "anonymous"
+                "roles" : ["anonymous"]
             },
             {
                 "permissions" : [
