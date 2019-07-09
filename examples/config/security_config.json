@@ -79,7 +79,7 @@
                     "wamp.register",
                     "wamp.unregister"
                 ],
-                "uri" : "com.example.add2",
+                "uri" : "com.leapsight.add",
                 "roles" : ["microservices"]
             },
             {
@@ -87,14 +87,14 @@
                     "wamp.subscribe",
                     "wamp.unsubscribe"
                 ],
-                "uri" : "com.example.on_counter",
+                "uri" : "com.leapsight.example_event",
                 "roles" : ["peer1", "peer2"]
             },
             {
                 "permissions" : [
                     "wamp.call"
                 ],
-                "uri" : "com.example.add2",
+                "uri" : "com.leapsight.add",
                 "roles" : ["peer1", "peer2"]
             }
         ],
