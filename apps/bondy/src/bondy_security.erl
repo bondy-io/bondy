@@ -714,14 +714,17 @@ del_user(RealmUri, Username) when is_binary(Username) ->
                 %% delete any associated grants, so if a user with the same name
                 %% is added again, they don't pick up these grants
                 Prefix = ?USER_GRANTS_PREFIX(Uri),
-                plum_db:fold(fun({Key, _Value}, Acc) ->
-                                                %% apparently destructive
-                                                %% iteration is allowed
-                                                plum_db:delete(Prefix, Key),
-                                                Acc
-                                        end, undefined,
-                                        Prefix,
-                                        [{match, {Name, '_'}}]),
+                plum_db:fold(
+                    fun({Key, _Value}, Acc) ->
+                        %% apparently destructive
+                        %% iteration is allowed
+                        plum_db:delete(Prefix, Key),
+                        Acc
+                    end,
+                    undefined,
+                    Prefix,
+                    [{match, {Name, '_'}}, {resolver, lww}]
+                ),
                 delete_user_from_sources(Uri, Name),
                 ok
         end
@@ -759,13 +762,15 @@ del_group(RealmUri, Groupname) when is_binary(Groupname) ->
                 %% is added again, they don't pick up these grants
                 Prefix = ?GROUP_GRANTS_PREFIX(Uri),
                 plum_db:fold(fun({Key, _Value}, Acc) ->
-                                                %% apparently destructive
-                                                %% iteration is allowed
-                                                plum_db:delete(Prefix, Key),
-                                                Acc
-                                        end, undefined,
-                                        Prefix,
-                                        [{match, {Name, '_'}}]),
+                        %% apparently destructive
+                        %% iteration is allowed
+                        plum_db:delete(Prefix, Key),
+                        Acc
+                    end,
+                    undefined,
+                    Prefix,
+                    [{match, {Name, '_'}}, {resolver, lww}]
+                ),
                 delete_group_from_roles(Uri, Name),
                 ok
         end
@@ -1265,7 +1270,8 @@ do_lookup_user_sources(RealmUri, Username) ->
     try
         _ = bondy_realm:fetch(RealmUri),
         R = to_lowercase_bin(RealmUri),
-        L = plum_db:to_list(?SOURCES_PREFIX(R), [{match, {Username, '_'}}]),
+        L = plum_db:to_list(
+            ?SOURCES_PREFIX(R), [{match, {Username, '_'}}, {resolver, lww}]),
         Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
 
         case lists:filter(Pred, L) of
@@ -1650,9 +1656,11 @@ prettyprint_permissions([Permission|Rest], Width, Acc) ->
 
 
 match_grants(Realm, Match, Type) ->
-    Grants = plum_db:to_list(metadata_grant_prefix(Realm, Type),
-                                        [{match, Match}]),
-    [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
+    Grants = plum_db:to_list(
+        metadata_grant_prefix(Realm, Type), [{match, Match}, {resolver, lww}]),
+    %% [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
+    [{Key, Val} || {Key, Val} <- Grants, Val /= [?TOMBSTONE]].
+
 
 metadata_grant_prefix(RealmUri, user) ->
     ?USER_GRANTS_PREFIX(RealmUri);
