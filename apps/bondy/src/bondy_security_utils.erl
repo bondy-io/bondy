@@ -122,7 +122,7 @@ get_security_context(Ctxt) ->
         false ->
             AuthId = bondy_context:authid(Ctxt),
             RealmUri = bondy_context:realm_uri(Ctxt),
-            bondy_context:get_context(RealmUri, AuthId)
+            bondy_security:get_context(RealmUri, AuthId)
     end.
 
 
