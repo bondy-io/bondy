@@ -443,7 +443,7 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 -spec is_anonymous(t()) -> boolean().
 
 is_anonymous(Ctxt) ->
-    maps:get(is_anonymous, Ctxt).
+    maps:get(is_anonymous, Ctxt, false).
 
 
 %% -----------------------------------------------------------------------------
