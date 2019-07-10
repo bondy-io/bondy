@@ -111,7 +111,30 @@
 
 -define(BONDY_REALM, #{
     description => <<"The Bondy administrative realm.">>,
-    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH]
+    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
+    grants => [
+        #{
+            permissions => [
+                <<"wamp.register">>,
+                <<"wamp.unregister">>,
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.call">>,
+                <<"wamp.cancel">>,
+                <<"wamp.publish">>
+            ],
+            uri => <<"*">>,
+            roles => [<<"anonymous">>]
+        }
+    ],
+    sources => [
+        #{
+            usernames => <<"anonymous">>,
+            authmethod => <<"trust">>,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{}
+        }
+    ]
 }).
 
 -define(REALM_SPEC, #{

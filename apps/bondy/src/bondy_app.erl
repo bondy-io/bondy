@@ -173,7 +173,8 @@ setup_env(Args) ->
 
 %% @private
 setup_bondy_realm() ->
-    %% We do a get to force the creation of the bondy realm
+    %% We use get/2 to force the creation of the bondy realm
+    %% if it does not exist.
     _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
     ok.
 

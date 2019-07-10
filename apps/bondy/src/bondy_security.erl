@@ -300,17 +300,7 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
             {true, Context};
         false ->
             %% no applicable grant
-            Username = to_bin(Context#context.username),
-            Mssg = unicode:characters_to_binary(
-                [
-                    "Permission denied: User '",
-                    Username,
-                    "' does not have permission '",
-                    Permission, "' on any"
-                ],
-                utf8,
-                utf8
-            ),
+            Mssg = permission_denied_message(Permission, any, Context),
             {false, Mssg, Context}
     end;
 
@@ -323,18 +313,7 @@ check_permission(
             {true, Context};
         false ->
             %% no applicable grant
-            Username = to_bin(Context#context.username),
-            Mssg = unicode:characters_to_binary(
-                [
-                    "Permission denied: User '",
-                    Username,
-                    "' does not have permission '",
-                    Permission, "' on ",
-                    bucket2iolist(Resource)
-                ],
-                utf8,
-                utf8
-            ),
+            Mssg = permission_denied_message(Permission, Resource, Context),
             {false, Mssg, Context}
     end.
 
@@ -2240,12 +2219,41 @@ to_lowercase_bin(Name) when is_list(Name) ->
 
 
 
-bucket2iolist({Type, Bucket}) ->
+resource_to_iolist({Type, Bucket}) ->
     [Type, "/", Bucket];
-bucket2iolist(Bucket) ->
+resource_to_iolist(any) ->
+    "any";
+resource_to_iolist(Bucket) ->
     Bucket.
 
 
+permission_denied_message(
+    Permission, Resource, #context{is_anonymous = false} = Ctxt) ->
+    Username = to_bin(Ctxt#context.username),
+    unicode:characters_to_binary(
+        [
+            "Permission denied. ",
+            "User '", Username,
+            "' does not have permission '",
+            Permission, "' on '", resource_to_iolist(Resource), "'"
+        ],
+        utf8,
+        utf8
+    );
+
+permission_denied_message(
+    Permission, Resource, #context{is_anonymous = true} = Ctxt) ->
+    Username = to_bin(Ctxt#context.username),
+    unicode:characters_to_binary(
+        [
+            "Permission denied. ",
+            "Anonymous user '", Username,
+            "' does not have permission '",
+            Permission, "' on '", resource_to_iolist(Resource), "'"
+        ],
+        utf8,
+        utf8
+    ).
 
 
 

@@ -118,7 +118,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Loads a security config file if defined and applies its definitions.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_config() -> ok | no_return().
@@ -159,6 +159,7 @@ apply_config() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec auth_methods(realm()) -> [binary()].
+
 auth_methods(#realm{authmethods = Val}) ->
     Val.
 
@@ -168,6 +169,7 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_auth_method(realm(), binary()) -> boolean().
+
 is_auth_method(#realm{authmethods = L}, Method) ->
     lists:member(Method, L).
 
@@ -210,6 +212,7 @@ enable_security(#realm{uri = Uri}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec disable_security(realm()) -> ok.
+
 disable_security(#realm{uri = Uri}) ->
     ?DISABLE_SECURITY(Uri).
 
@@ -219,6 +222,7 @@ disable_security(#realm{uri = Uri}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec public_keys(realm()) -> [map()].
+
 public_keys(#realm{public_keys = Keys}) ->
     [jose_jwk:to_map(K) || K <- Keys].
 
@@ -228,6 +232,7 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
+
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
@@ -240,6 +245,7 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
+
 get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
@@ -305,6 +311,7 @@ fetch(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri()) -> realm().
+
 get(Uri) ->
     get(Uri, #{}).
 
@@ -316,6 +323,7 @@ get(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) -> realm().
+
 get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
@@ -469,6 +477,7 @@ maybe_enable_security(true, Realm) ->
 maybe_enable_security(false, _) ->
     ok.
 
+
 apply_config(Map0) ->
     #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?UPDATE_REALM_SPEC),
     wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
@@ -564,6 +573,13 @@ do_add(Map) ->
     },
     Realm1 = set_keys(Realm0, KeyList),
     ok = plum_db:put(?PREFIX, Uri, Realm1),
+
+    %% We create all RBAC entities defined in the Realm Spec map
+    ok = apply_config(groups, Map),
+    ok = apply_config(users, Map),
+    ok = apply_config(sources, Map),
+    ok = apply_config(grants, Map),
+
     ok = bondy_event_manager:notify({realm_added, Uri}),
     init(Realm1, SecurityEnabled).
 
@@ -583,7 +599,16 @@ do_update(Realm0, Map) ->
         authmethods = Method
     },
     Realm2 = set_keys(Realm1, KeyList),
+
+    ok = plum_db:put(?PREFIX, Uri, Realm2),
     ok = maybe_enable_security(SecurityEnabled, Realm2),
+
+    %% We create all RBAC entities defined in the Realm Spec map
+    ok = apply_config(groups, Map),
+    ok = apply_config(users, Map),
+    ok = apply_config(sources, Map),
+    ok = apply_config(grants, Map),
+    ok = bondy_event_manager:notify({realm_updated, Uri}),
     Realm2.
 
 
@@ -619,7 +644,7 @@ select_first_available([H|T], I) ->
 %% @private
 -spec do_lookup(uri()) -> realm() | {error, not_found}.
 do_lookup(Uri) ->
-    case plum_db:get(?PREFIX, Uri)  of
+    case plum_db:get(?PREFIX, Uri) of
         #realm{} = Realm ->
             Realm;
         undefined ->

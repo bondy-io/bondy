@@ -46,6 +46,7 @@
     peer => bondy_session:peer(),
     authmethod => binary(),
     authid => binary(),
+    is_anonymous => boolean(),
     roles => map(),
     challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
@@ -62,6 +63,7 @@
 -export([close/1]).
 -export([has_session/1]).
 -export([is_feature_enabled/3]).
+-export([is_anonymous/1]).
 -export([new/0]).
 -export([local_context/1]).
 -export([new/2]).
@@ -72,6 +74,7 @@
 -export([request_id/1]).
 -export([call_timeout/1]).
 -export([set_call_timeout/2]).
+-export([set_is_anonymous/2]).
 -export([request_details/1]).
 -export([request_timeout/1]).
 -export([request_timestamp/1]).
@@ -429,3 +432,26 @@ set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
 
 is_feature_enabled(Ctxt, Role, Feature) ->
     maps_utils:get_path([Role, Feature], roles(Ctxt), false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the user is anonymous. In that case authid would be a random
+%% identifier assigned by Bondy.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_anonymous(t()) -> boolean().
+
+is_anonymous(Ctxt) ->
+    maps:get(is_anonymous, Ctxt).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_is_anonymous(t(), boolean()) -> t().
+
+set_is_anonymous(Ctxt, Value) when is_boolean(Value) ->
+    Ctxt#{is_anonymous => Value}.
+

@@ -635,19 +635,36 @@ maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
             do_auth_challenge(User, Realm, St1)
     end;
 
-maybe_auth_challenge(true, _, _, St) ->
-    {error, {missing_param, authid}, St};
+maybe_auth_challenge(true, Details, Realm, St0) ->
+    %% There is no authid param, we check if anonymous is allowed
+    RealmUri = bondy_realm:uri(Realm),
+    case bondy_realm:is_security_enabled(RealmUri) of
+        true ->
+            Ctxt0 = St0#wamp_state.context,
+            TempId = bondy_utils:uuid(),
+            Ctxt1 = Ctxt0#{
+                authid => TempId,
+                request_details => Details,
+                is_anonymous => true
+            },
+            St1 = update_context(Ctxt1, St0),
+            {ok, St1};
+        false ->
+            {error, {missing_param, authid}, St0}
+    end;
 
 maybe_auth_challenge(false, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
-    {ok, update_context(Ctxt1, St0)};
+    St1 = update_context(Ctxt1, St0),
+    {ok, St1};
 
 maybe_auth_challenge(false, Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
     TempId = bondy_utils:uuid(),
     Ctxt1 = Ctxt0#{authid => TempId, request_details => Details},
-    {ok, update_context(Ctxt1, St0)}.
+    St1 = update_context(Ctxt1, St0),
+    {ok, St1}.
 
 
 %% @private
