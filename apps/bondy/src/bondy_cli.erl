@@ -67,6 +67,8 @@
 %% API
 %% =============================================================================
 
+command([]) ->
+    command(["usage"]);
 
 command(Cmd) ->
     clique:run(Cmd).
@@ -109,7 +111,7 @@ register_node_finder() ->
 -spec register_cli() -> ok.
 register_cli() ->
     %% clique:register(?MODULE).
-    register_all_usage(),
+    ok = register_all_usage(),
     register_all_commands().
 
 
@@ -123,7 +125,7 @@ register_all_usage() ->
     %% clique:register_usage(["cluster", "partition"], partition_usage()),
     %% clique:register_usage(["cluster", "partitions"], partitions_usage()),
     %% clique:register_usage(["cluster", "partition_count"], partition_count_usage()).
-    [].
+    ok.
 
 
 register_all_commands() ->
@@ -136,6 +138,7 @@ register_all_commands() ->
                 apply(clique, register_usage, [Cmd, UsageCB])
         end,
         lists:append([
+            [{["usage"], [], [], undefined, fun usage/0}],
             cluster_commands(),
             %% router_register(),
             security_commands(),
@@ -200,6 +203,13 @@ cluster_commands() ->
 security_commands() ->
     %% [ {Cmd, KeySpecs, FlagSpecs, CmdCallback, UsageCallback} ]
     [
+        {
+            ["security"],
+            [],
+            [],
+            undefined,
+            fun security_usage/0
+        },
         {
             ["security", "add-user"],
             [],
@@ -300,20 +310,42 @@ load_api(["gateway", "load-api"], [{filename, FName}], []) ->
 load_api(["gateway", "load-api"], [{Op, Value}], []) ->
     [make_alert(["ERROR: The given value ", integer_to_list(Value),
                 " for ", atom_to_list(Op), " is invalid."])];
+
 load_api(_, [], []) ->
     clique_status:usage().
 
 
+usage() ->
+    [
+        "bondy-admin <command>\n\n",
+        "  Manage a bondy node by issuing any of the following commands:\n\n",
+        "  Commands:\n",
+        "    cluster       join or leave a cluster, kick-out a node from \n",
+        "                  the cluster or list the cluster members.\n",
+        "\n  Use --help after a command for more details.\n"
+    ].
+
+security() ->
+    [
+     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
+     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
+    ].
+add_user_usage() ->
+    [
+     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
+     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
+    ].
+
 cluster_usage() ->
     [
-     "bondy-admin cluster <sub-command>\n\n",
-     "  Interact with a the peer service.\n\n",
-     "  Sub-commands:\n",
-     "    join    join cluster by providing another node.\n",
-     "    leave   leave the cluster.\n",
-     "    kick-out   make another node leave the cluster.\n",
-     "    members list the cluster members.\n",
-     "  Use --help after a sub-command for more details.\n"
+        "bondy-admin cluster <sub-command>\n\n",
+        "  Interact with a the peer service.\n\n",
+        "  Sub-commands:\n",
+        "    join          join cluster by providing another node.\n",
+        "    leave         leave the cluster.\n",
+        "    kick-out      make another node leave the cluster.\n",
+        "    members       list the cluster members.\n",
+        "\n  Use --help after a sub-command for more details.\n"
     ].
 
 members_usage() ->
@@ -331,17 +363,19 @@ kick_out_usage() ->
 
 gateway_usage() ->
     [
-     "bondy-admin gateway <sub-command>\n\n",
-     "  Interact with a the API Gateway application.\n\n",
-     "  Sub-commands:\n",
-     "    load-api    Load and deploy the API endpoints found in the provided Bondy API Gateway Specification format.\n",
-     "  Use --help after a sub-command for more details.\n"
+        "bondy-admin gateway <sub-command>\n\n",
+        "  Interact with a the API Gateway application.\n\n",
+        "  Sub-commands:\n",
+        "    load-api    Load and deploy the API endpoints found in the provided Bondy API Gateway Specification format.\n",
+        "\n  Use --help after a sub-command for more details.\n"
     ].
 
 load_api_usage() ->
     [
-     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
-     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
+        "bondy-admin gateway load-api filename='my_spec.json'\n\n",
+        "  Load and deploy the API endpoints found in the provided filename.\n",
+        "  The file needs to be a valid Bondy API Gateway Specification format.\n"
+        "\n"
     ].
 
 %% status_usage() ->
@@ -416,12 +450,6 @@ security_error_xlate(Error) ->
 
 add_user([Realm, Username|Options]) ->
     add_role(Realm, Username, Options, fun bondy_security:add_user/3).
-
-add_user_usage() ->
-    [
-     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
-     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
-    ].
 
 
 add_group([Realm, Groupname|Options]) ->
