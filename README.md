@@ -1,15 +1,13 @@
-
-
 # Bondy: A Distributed WAMP Router and API Gateway
 
-Bondy is an open source scaleable and robust networking platform for distributed microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns. It also provides a built-in HTTP/REST API Gateway.
+Bondy is an open source, distributed, scaleable and robust networking platform for microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns. It also provides a built-in HTTP/REST API Gateway.
 
 Bondy is Apache2 licensed.
 
-**DOCS COMING SOON**
+For work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
 
 ## Quick Start
-Bondy requires Erlang/OTP 20.3.8 (support for 21 on the way) and `rebar3`.
+Bondy requires Erlang/OTP 20.3.8 or higher and `rebar3`.
 
 The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
 
