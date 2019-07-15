@@ -20,6 +20,9 @@
 -include_lib("common_test/include/ct.hrl").
 
 -define(BONDY,[
+    {plum_db, [
+        {partitions, 8}
+    ]},
     {oauth2,
           [{refresh_token_length,40},
            {refresh_token_duration,2592000},
