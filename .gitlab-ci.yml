@@ -1,4 +1,4 @@
-image: erlang:21-slim
+image: erlang:21.3.8.6
 
 before_script:
   - apt-get update -y
