@@ -325,11 +325,12 @@ usage() ->
         "\n  Use --help after a command for more details.\n"
     ].
 
-security() ->
+security_usage() ->
     [
-     "bondy-admin gateway load-api filename='my_spec.json'\n\n",
-     "  Load and deploy the API endpoints found in the provided filename. The file needs to be a valid Bondy API Gateway Specification format.\n"
+     "to be documented\n"
     ].
+
+
 add_user_usage() ->
     [
      "bondy-admin gateway load-api filename='my_spec.json'\n\n",
