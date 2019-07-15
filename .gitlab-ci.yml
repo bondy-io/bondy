@@ -1,15 +1,22 @@
+image: erlang:21-slim
+
 before_script:
-   - export LS_CI_TEMP=`pwd`/`mktemp -d ls-ci.XXXXXXXX`
-   - ssh-agent bash -c "ssh-add ~/build_keys/id_rsa; git clone git@gitlab.com:leapsight-lojack/magenta-env.git $LS_CI_TEMP"
-   - export LS_SCRIPTS=$LS_CI_TEMP/build
-   - source $LS_SCRIPTS/before.sh
+  - apt-get update -y
+  - apt-get -y install build-essential libssl-dev openssl
+  - export CXX=g++-4.9
 
-build1:
- stage: build
- tags:
-   - packet
- script:
-   - $LS_SCRIPTS/build.sh
+test:
+  artifacts:
+    when: always
+    paths:
+    - _build/test/logs
+    - _build/test/cover
 
-stages:
-  - build
+  script:
+    - rm -rf _build/test
+    - rebar3 as test ct
+
+  cache:
+    paths:
+    - _build/default/lib/eleveldb
+    - _build/test/lib/eleveldb
