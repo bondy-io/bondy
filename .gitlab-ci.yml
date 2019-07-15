@@ -3,7 +3,6 @@ image: erlang:21-slim
 before_script:
   - apt-get update -y
   - apt-get -y install build-essential libssl-dev openssl
-  - export CXX=g++-4.9
 
 test:
   artifacts:
