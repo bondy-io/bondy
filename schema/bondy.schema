@@ -47,7 +47,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "security.config_file", "bondy.security.config_file", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/security_config.json"}
+  {default, "{{platform_etc_dir}}/security_config.json"}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -305,21 +305,21 @@
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.certfile", "bondy.admin_api_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.keyfile", "bondy.admin_api_https.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.cacertfile", "bondy.admin_api_https.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 
@@ -366,7 +366,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/api_gateway_config.json"}
+  {default, "{{platform_etc_dir}}/api_gateway_config.json"}
 ]}.
 
 
@@ -493,21 +493,21 @@
 %% with the api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.certfile", "bondy.api_gateway_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.keyfile", "bondy.api_gateway_https.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.cacertfile", "bondy.api_gateway_https.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 
@@ -670,21 +670,21 @@
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.certfile", "bondy.wamp_tls.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%wamp.tls config variable, for example:
 {mapping, "wamp.tls.keyfile", "bondy.wamp_tls.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.cacertfile", "bondy.wamp_tls.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 
@@ -723,19 +723,19 @@
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.certfile", "partisan.tls_options.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
 {mapping, "cluster.tls.keyfile", "partisan.tls_options.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
 {mapping, "cluster.tls.cacertfile", "partisan.tls_options.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 
@@ -751,6 +751,14 @@
   {datatype, directory},
   {default, "{{platform_bin_dir}}"}
 ]}.
+
+
+%% @see platform_bin_dir
+{mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
+  {datatype, directory},
+  {default, "{{platform_lib_dir}}"}
+]}.
+
 
 %% @see platform_bin_dir
 {mapping, "platform_data_dir", "bondy.platform_data_dir", [
@@ -768,12 +776,6 @@
 {mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
   {datatype, directory},
   {default, "{{platform_etc_dir}}"}
-]}.
-
-%% @see platform_bin_dir
-{mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
-  {datatype, directory},
-  {default, "{{platform_lib_dir}}"}
 ]}.
 
 %% @see platform_bin_dir
@@ -808,10 +810,6 @@
   {datatype, integer}
 ]}.
 
-{mapping, "db.aae_enabled", "plum_db.aae_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
-]}.
 
 {mapping, "db.store_open_retry_Limit", "plum_db.store_open_retry_Limit", [
   {default, 30},
@@ -828,11 +826,46 @@
   {datatype, {duration, ms}}
 ]}.
 
+
 {mapping, "db.hashtree_timer", "plum_db.hashtree_timer", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
+
+{mapping, "db.aae_enabled", "plum_db.aae_enabled", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+
+%% Controls when will the AAE system will trigger the next
+%% data exchange.
+{mapping, "db.aae_exchange_timer", "plumtree.broadcast_exchange_timer", [
+  {default, "1m"},
+  {datatype, {duration, ms}}
+]}.
+
+
+
+
+
+%% =============================================================================
+%% HIDDEN - this will be generated in the app.congif but not in the
+%% bondy.conf file
+%% =============================================================================
+
+{mapping, "flake.timestamp_path", "flake.timestamp_path", [
+  {default, "{{platform_etc_dir}}/flake_timestamp.dets"},
+  {hidden, true},
+  {datatype, file}
+]}.
+
+{mapping, "flake.allowable_downtime", "flake.allowable_downtime", [
+  {default, "30d"},
+  {hidden, true},
+  {datatype, {duration, ms}}
+]}.
 
 
 
