@@ -445,23 +445,34 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     Caller = bondy_context:peer_id(Ctxt0),
     Opts = M#cancel.options,
 
+    %% We first use peek to find the Promise based on CallId so we can retreive
+    %% the Procedure URI required for authrization
+    Authorize = fun(Promise, Ctxt) ->
+        Uri = bondy_rpc_promise:procedure_uri(Promise),
+        ok = bondy_security_utils:authorize(<<"wamp.cancel">>, Uri, Ctxt),
+        {ok, Ctxt}
+    end,
+    _ = peek_invocations(CallId, Authorize, Ctxt0),
+
     %% A response will be send asynchronously by another router process instance
 
     %% If the callee does not support call canceling, then behavior is skip.
-    %% We should check calle but that means we need to broadcast sessions
-    %% another option is to pay the price and ask bondy to fail on the
+    %% We should check calle but that means we need to broadcast sessions.
+    %% Another option is to pay the price and ask bondy to fail on the
     %% remote node after checking the callee does not support it.
     %% The caller is not affected, only in the kill case will receive an
     %% error later in the case of a remote callee.
     case maps:get(mode, Opts, skip) of
         kill ->
             %% INTERRUPT is sent to the callee, but ERROR is not returned
-            %% to the caller until after the callee has responded to the
-            %% canceled call. In this case the caller may receive RESULT or
-            %% ERROR depending whether the callee finishes processing the
-            %% invocation or the interrupt first.
+            %% to the caller until the callee has responded to INTERRUPT with
+            %% ERROR. In this case, the caller may receive RESULT or
+            %% anotehr ERROR if the callee finishes processing the
+            %% INVOCATION first.
             %% We thus peek (read) instead of dequeueing.
-            Fun = fun(InvocationId, Callee, Ctxt1) ->
+            Fun = fun(Promise, Ctxt1) ->
+                InvocationId = bondy_rpc_promise:invocation_id(Promise),
+                Callee = bondy_rpc_promise:callee(Promise),
                 R = wamp_message:interrupt(InvocationId, Opts),
                 ok = bondy:send(Caller, Callee, R, #{}),
                 {ok, Ctxt1}
@@ -475,7 +486,9 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% discarded when received.
             %% We dequeue the invocation, that way the response will be
             %% discarded.
-            Fun = fun(InvocationId, Callee, Ctxt1) ->
+            Fun = fun(Promise, Ctxt1) ->
+                InvocationId = bondy_rpc_promise:invocation_id(Promise),
+                Callee = bondy_rpc_promise:callee(Promise),
                 Caller = bondy_context:peer_id(Ctxt1),
                 Mssg = <<"call_cancelled">>,
                 Args = [Mssg],
@@ -501,7 +514,8 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% discarded.
             %% TODO instead of dequeing, update the entry to reflect it was
             %% cancelled
-            Fun = fun(_InvocationId, Callee, Ctxt1) ->
+            Fun = fun(Promise, Ctxt1) ->
+                Callee = bondy_rpc_promise:callee(Promise),
                 Caller = bondy_context:peer_id(Ctxt1),
                 Mssg = <<"call_cancelled">>,
                 Args = [Mssg],
@@ -511,7 +525,9 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                 },
                 Error = wamp_message:error(
                     ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
+
                 ok = bondy:send(Callee, Caller, Error, #{}),
+
                 {ok, Ctxt1}
             end,
             _ = dequeue_invocations(CallId, M, Fun, Ctxt0),
@@ -716,7 +732,11 @@ handle_unregister(#unregister{} = M, Ctxt) ->
         {error, not_found} ->
             throw(not_found);
         Entry ->
-            unregister(bondy_registry_entry:uri(Entry), M, Ctxt)
+            Uri = bondy_registry_entry:uri(Entry),
+            %% We authorize first
+            ok = bondy_security_utils:authorize(
+                <<"wamp.unregister">>, Uri, Ctxt),
+            unregister(Uri, M, Ctxt)
     end.
 
 
@@ -733,9 +753,9 @@ unregister(<<"wamp", _/binary>>, _, _) ->
     NS = <<"wamp">>,
     throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
 
-unregister(TopicUri, M, Ctxt) ->
+unregister(Uri, M, Ctxt) ->
     RegId = M#unregister.request_id,
-    ok = bondy_security_utils:authorize(<<"wamp.unregister">>, TopicUri, Ctxt),
+    ok = bondy_security_utils:authorize(<<"wamp.unregister">>, Uri, Ctxt),
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:peer_id(Ctxt), Reply).
@@ -950,18 +970,18 @@ dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec peek_invocations(id(), function(), bondy_context:t()) ->
-    {ok, bondy_context:t()}.
+-spec peek_invocations(
+    id(),
+    fun((bondy_rpc_promise:t(), bondy_context:t()) -> {ok, bondy_context:t()}),
+    bondy_context:t()) -> {ok, bondy_context:t()}.
 
-peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 3) ->
+peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 2) ->
     Caller = bondy_context:peer_id(Ctxt),
     case bondy_rpc_promise:peek_call(CallId, Caller) of
         empty ->
             {ok, Ctxt};
-        {ok, P} ->
-            ReqId = bondy_rpc_promise:invocation_id(P),
-            Callee = bondy_rpc_promise:callee(P),
-            {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
+        {ok, Promise} ->
+            {ok, Ctxt1} = Fun(Promise, Ctxt),
             %% We iterate until there are no more pending invocation for the
             %% call_request_id == CallId
             peek_invocations(CallId, Fun, Ctxt1)
