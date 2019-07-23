@@ -148,6 +148,7 @@ shutdown() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close_context(bondy_context:t()) -> bondy_context:t().
+
 close_context(Ctxt) ->
     bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
 
@@ -157,6 +158,7 @@ close_context(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
+
 roles() ->
     ?ROUTER_ROLES.
 
@@ -254,6 +256,7 @@ handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
+
 acknowledge_message(#publish{options = Opts}) ->
     maps:get(acknowledge, Opts, false);
 
