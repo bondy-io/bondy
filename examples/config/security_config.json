@@ -85,7 +85,8 @@
             {
                 "permissions" : [
                     "wamp.subscribe",
-                    "wamp.unsubscribe"
+                    "wamp.unsubscribe",
+                    "wamp.publish"
                 ],
                 "uri" : "com.leapsight.example_event",
                 "roles" : ["peer1", "peer2"]
