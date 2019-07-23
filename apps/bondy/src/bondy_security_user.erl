@@ -25,7 +25,7 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
--type t() :: map().
+-type t()           ::  map().
 
 -export_type([t/0]).
 
@@ -36,8 +36,9 @@
 -export([change_password/4]).
 -export([fetch/2]).
 -export([groups/1]).
--export([list/1]).
+-export([has_password/1]).
 -export([has_users/1]).
+-export([list/1]).
 -export([lookup/2]).
 -export([password/2]).
 -export([remove/2]).
@@ -117,7 +118,6 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
                 {ok, fetch(RealmUri, Username)}
         end
     catch
-        %% Todo change to throw when upgrade to new utils
         ?EXCEPTION(error, Reason, _) when is_map(Reason) ->
             {error, Reason}
     end.
@@ -128,6 +128,13 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
 %% @end
 %% -----------------------------------------------------------------------------
 groups(#{<<"groups">> := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+has_password(#{<<"has_password">> := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -228,11 +235,12 @@ has_users(RealmUri) ->
     ),
     Result =/= '$end_of_table'.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec password(uri(), t() | id()) -> map() | no_return().
+-spec password(uri(), t() | id()) -> bondy_security_pw:t() | no_return().
 
 password(RealmUri, #{<<"username">> := Username}) ->
     password(RealmUri, Username);
@@ -243,8 +251,15 @@ password(RealmUri, Username) ->
             error(Reason);
         {Username, Opts} ->
             case proplists:get_value(<<"password">>, Opts) of
-                undefined -> undefined;
-                L -> maps:from_list(L)
+                undefined ->
+                    undefined;
+                PW ->
+                    %% In previous versions we stored a proplists,
+                    %% we ensure we return a map but we do not trigger
+                    %% a password version upgrade. Upgrades will be forced
+                    %% during authentication or can be done by batch migration
+                    %% process.
+                    bondy_security_pw:to_map(PW)
             end
     end.
 
@@ -273,8 +288,8 @@ change_password(RealmUri, Username, New, Old) ->
     case catch password(RealmUri, Username) of
         {'EXIT', {Reason, _}} ->
             {error, Reason};
-        Password ->
-            case bondy_security_pw:check_password(Old, Password) of
+        PW ->
+            case bondy_security_pw:check_password(Old, PW) of
                 true ->
                     change_password(RealmUri, Username, New);
                 false ->
@@ -308,9 +323,12 @@ do_add(RealmUri, User) ->
 
 %% @private
 to_map(RealmUri, {Username, Opts}) ->
+    Password = proplists:get_value(<<"password">>, Opts, undefined),
+    HasPassword = Password =/= undefined,
+
     Map1 = #{
         <<"username">> => Username,
-        <<"has_password">> => has_password(Opts),
+        <<"has_password">> => HasPassword,
         <<"groups">> => proplists:get_value(<<"groups">>, Opts, []),
         <<"meta">> => proplists:get_value(<<"meta">>, Opts, #{})
     },
@@ -324,14 +342,7 @@ to_map(RealmUri, {Username, Opts}) ->
 
 
 %% @private
-has_password(Opts) ->
-    case proplists:get_value(<<"password">>, Opts) of
-        undefined -> false;
-        _ -> true
-    end.
-
-
-%% @private
 ok_or_error({ok, _}) -> ok;
 ok_or_error(Term) -> Term.
+
 

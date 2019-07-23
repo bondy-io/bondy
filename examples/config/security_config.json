@@ -48,6 +48,12 @@
                 "meta" : {}
             },
             {
+                "usernames" : "anonymous",
+                "authmethod" : "trust",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
                 "usernames" : ["peer1", "peer2"],
                 "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
@@ -58,16 +64,38 @@
             {
                 "permissions" : [
                     "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "*",
+                "roles" : ["anonymous"]
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
                     "wamp.unregister"
                 ],
-                "uri" : "com.example.on_counter",
-                "roles" : ["peer1"]
+                "uri" : "com.leapsight.add",
+                "roles" : ["microservices"]
+            },
+            {
+                "permissions" : [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.publish"
+                ],
+                "uri" : "com.leapsight.example_event",
+                "roles" : ["peer1", "peer2"]
             },
             {
                 "permissions" : [
                     "wamp.call"
                 ],
-                "uri" : "com.example.on_counter",
+                "uri" : "com.leapsight.add",
                 "roles" : ["peer1", "peer2"]
             }
         ],

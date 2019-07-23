@@ -54,6 +54,7 @@
 -export([del_user/2]).
 -export([disable/1]).
 -export([enable/1]).
+-export([get_anonymous_context/2]).
 -export([get_context/2]).
 -export([find_user/2]).
 -export([find_one_user_by_metadata/3]).
@@ -144,16 +145,17 @@
 -endif.
 
 -record(context, {
-    realm_uri   ::  binary(),
-    username    ::  binary(),
-    grants      ::  [{any(), any()}],
-    epoch       ::  erlang:timestamp()
+    realm_uri               ::  binary(),
+    username                ::  binary(),
+    grants                  ::  [{any(), any()}],
+    epoch                   ::  erlang:timestamp(),
+    is_anonymous = false    ::  boolean()
 }).
 
 -type context() :: #context{}.
 -type bucket() :: {binary(), binary()} | binary().
 -type permission() :: {binary()} | {binary(), bucket()}.
--type userlist() :: all | [binary()].
+-type userlist() :: all | anonymous | [binary()].
 -type metadata_key() :: binary().
 -type metadata_value() :: term().
 -type options() :: [{metadata_key(), metadata_value()}].
@@ -290,7 +292,7 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
     Context = maybe_refresh_context(Uri, Context0),
     %% The user needs to have this permission applied *globally*
     %% This is for things like mapreduce with undetermined inputs or
-    %% permissions that don't tie to a particular bucket, like 'ping' and
+    %% permissions that don't tie to a particular resource, like 'ping' and
     %% 'stats'.
     MatchG = match_grant(any, Context#context.grants),
     case lists:member(Permission, MatchG) of
@@ -298,10 +300,8 @@ check_permission({Permission}, #context{realm_uri = Uri} = Context0) ->
             {true, Context};
         false ->
             %% no applicable grant
-            {false, unicode:characters_to_binary(
-                      ["Permission denied: User '",
-                       Context#context.username, "' does not have '",
-                       Permission, "' on any"], utf8, utf8), Context}
+            Mssg = permission_denied_message(Permission, any, Context),
+            {false, Mssg, Context}
     end;
 
 check_permission(
@@ -313,11 +313,8 @@ check_permission(
             {true, Context};
         false ->
             %% no applicable grant
-            {false, unicode:characters_to_binary(
-                      ["Permission denied: User '",
-                       Context#context.username, "' does not have '",
-                       Permission, "' on ",
-                       bucket2iolist(Resource)], utf8, utf8), Context}
+            Mssg = permission_denied_message(Permission, Resource, Context),
+            {false, Mssg, Context}
     end.
 
 
@@ -376,7 +373,13 @@ get_grants(#context{grants=Val}) ->
     Password::binary() | {hash, binary()},
     ConnInfo :: [{atom(), any()}]) ->
         {ok, context()} |
-        {error, {unknown_user, binary()} | {no_such_realm, uri()} | missing_password | no_matching_sources }.
+        {error,
+            {unknown_user, binary()}
+            | {no_such_realm, uri()}
+            | bad_password
+            | missing_password
+            | no_matching_sources
+        }.
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
     try
@@ -444,31 +447,30 @@ auth_with_source(?WAMPCRA_AUTH, UserData, M) ->
 
 auth_with_source(password, UserData, M) ->
     % pull the password out of the userdata
-    case lookup(?PASSWORD, UserData) of
+    try lookup(?PASSWORD, UserData) of
         undefined ->
             _ = lager:warning(
-                "User '~s' is configured for "
-                "password authentication, but has "
-                "no password", [maps:get(username, M)]),
+                "User '~s' is configured for password authentication, "
+                "but has no password.",
+                [maps:get(username, M)]
+            ),
             {error, missing_password};
-        PasswordData ->
-            HashedPass = lookup(hash_pass, PasswordData),
-            HashFunction = lookup(hash_func, PasswordData),
-            Salt = lookup(salt, PasswordData),
-            Iterations = lookup(iterations, PasswordData),
-            case
-                bondy_security_pw:check_password(
-                    maps:get(password, M),
-                    HashedPass,
-                    HashFunction,
-                    Salt,
-                    Iterations)
-            of
+
+        PW0 ->
+            %% We trigger a conditional upgrade to the password struct version
+            %% if required.
+            PW1 = maybe_upgrade_password(PW0, M),
+            String = maps:get(password, M),
+            Result = bondy_security_pw:check_password(String, PW1),
+            case Result of
                 true ->
                     {ok, get_context(M)};
                 false ->
                     {error, bad_password}
             end
+    catch
+        throw:Reason ->
+            {error, Reason}
     end;
 
 auth_with_source(?CERTIFICATE_AUTH, Data, M) ->
@@ -515,8 +517,6 @@ auth_with_source(Source, UserData, M) ->
     end.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -554,6 +554,9 @@ add_group(RealmUri, Groupname, Options) ->
 %% @private
 -spec add_role(uri(), binary(), list(), function(), binary()) ->
     ok | {error, {no_such_realm, uri()} | reserved_name | role_exists | illegal_name_char}.
+
+add_role(_, <<"anonymous">>, _Options, _Fun, _Prefix) ->
+    {error, reserved_name};
 
 add_role(_, <<"all">>, _Options, _Fun, _Prefix) ->
     {error, reserved_name};
@@ -609,6 +612,9 @@ add_role(RealmUri, Name, Options, ExistenceFun, Prefix) ->
     Options :: [{binary(), term()}]) ->
     ok | {error, term()}.
 
+alter_user(_, <<"anonymous">>, _Options) ->
+    {error, reserved_name};
+
 alter_user(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
@@ -650,6 +656,9 @@ alter_user(RealmUri, Username, Options) when is_binary(Username) ->
     Options :: [{binary(), term()}]) ->
     ok | {error, term()}.
 
+alter_group(_, <<"anonymous">>, _Options) ->
+    {error, reserved_name};
+
 alter_group(_, <<"all">>, _Options) ->
     {error, reserved_name};
 
@@ -686,6 +695,9 @@ alter_group(RealmUri, Groupname, Options) when is_binary(Groupname) ->
 -spec del_user(RealmUri :: binary(), Username :: binary()) ->
     ok | {error, term()}.
 
+del_user(_, <<"anonymous">>) ->
+    {error, reserved_name};
+
 del_user(_, <<"all">>) ->
     {error, reserved_name};
 
@@ -702,14 +714,17 @@ del_user(RealmUri, Username) when is_binary(Username) ->
                 %% delete any associated grants, so if a user with the same name
                 %% is added again, they don't pick up these grants
                 Prefix = ?USER_GRANTS_PREFIX(Uri),
-                plum_db:fold(fun({Key, _Value}, Acc) ->
-                                                %% apparently destructive
-                                                %% iteration is allowed
-                                                plum_db:delete(Prefix, Key),
-                                                Acc
-                                        end, undefined,
-                                        Prefix,
-                                        [{match, {Name, '_'}}]),
+                plum_db:fold(
+                    fun({Key, _Value}, Acc) ->
+                        %% apparently destructive
+                        %% iteration is allowed
+                        plum_db:delete(Prefix, Key),
+                        Acc
+                    end,
+                    undefined,
+                    Prefix,
+                    [{match, {Name, '_'}}, {resolver, lww}]
+                ),
                 delete_user_from_sources(Uri, Name),
                 ok
         end
@@ -725,6 +740,9 @@ del_user(RealmUri, Username) when is_binary(Username) ->
 %% -----------------------------------------------------------------------------
 -spec del_group(RealmUri :: binary(), Groupname :: binary()) ->
     ok | {error, term()}.
+
+del_group(_, <<"anonymous">>) ->
+    {error, reserved_name};
 
 del_group(_, <<"all">>) ->
     {error, reserved_name};
@@ -744,13 +762,15 @@ del_group(RealmUri, Groupname) when is_binary(Groupname) ->
                 %% is added again, they don't pick up these grants
                 Prefix = ?GROUP_GRANTS_PREFIX(Uri),
                 plum_db:fold(fun({Key, _Value}, Acc) ->
-                                                %% apparently destructive
-                                                %% iteration is allowed
-                                                plum_db:delete(Prefix, Key),
-                                                Acc
-                                        end, undefined,
-                                        Prefix,
-                                        [{match, {Name, '_'}}]),
+                        %% apparently destructive
+                        %% iteration is allowed
+                        plum_db:delete(Prefix, Key),
+                        Acc
+                    end,
+                    undefined,
+                    Prefix,
+                    [{match, {Name, '_'}}, {resolver, lww}]
+                ),
                 delete_group_from_roles(Uri, Name),
                 ok
         end
@@ -783,23 +803,34 @@ add_grant(RealmUri, Usernames, Bucket, Grants) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_add_grant(RealmUri, all, Bucket, Grants) when is_binary(Bucket) ->
-    %% all is always valid
+do_add_grant(RealmUri, Reserved, Resource, Grants)
+when (Reserved == all orelse Reserved == anonymous) ->
+    %% all and anonymous are always valid
     case validate_permissions(Grants) of
         ok ->
             add_grant_int(
-                [{all, group}],
+                [{Reserved, group}],
                 to_lowercase_bin(RealmUri),
-                Bucket,
+                maybe_prefix_resource(Resource),
                 Grants
             );
         Error ->
             Error
     end;
 
+do_add_grant(RealmUri, RoleList0, Resource, Grants)
+when is_binary(RealmUri), is_binary(Resource) orelse Resource == any ->
+    Split = lists:splitwith(
+        fun(anonymous) -> true; (_) -> false end, RoleList0),
 
-do_add_grant(RealmUri, RoleList, Bucket, Grants)
-when is_binary(RealmUri), is_binary(Bucket) ->
+    RoleList = case Split of
+        {[], L} ->
+            L;
+        {_, L} ->
+            ok = do_add_grant(RealmUri, anonymous, Resource, Grants),
+            L
+    end,
+
     Uri = to_lowercase_bin(RealmUri),
     RoleTypes = lists:map(
         fun(Name) ->
@@ -837,10 +868,22 @@ when is_binary(RealmUri), is_binary(Bucket) ->
         UnknownRoles, NameOverlaps, validate_permissions(Grants))
     of
         none ->
-            add_grant_int(RoleTypes, Uri, Bucket, Grants);
+            add_grant_int(
+                RoleTypes, Uri, maybe_prefix_resource(Resource), Grants);
         Error ->
             Error
     end.
+
+
+
+maybe_prefix_resource(Resource) when is_binary(Resource) ->
+    case binary:split(Resource, <<$*>>) of
+        [Resource] -> Resource;
+        [Prefix, <<>>] -> {match_prefix, Prefix}
+    end;
+
+maybe_prefix_resource(Resource) ->
+    Resource.
 
 
 %% -----------------------------------------------------------------------------
@@ -861,12 +904,13 @@ add_revoke(RealmUri, Usernames, Bucket, Revokes) ->
 
 
 %% @private
-do_add_revoke(RealmUri, all, Bucket, Revokes) ->
-    %% all is always valid
+do_add_revoke(RealmUri, Reserved, Bucket, Revokes)
+when (Reserved == all orelse Reserved == anonymous) andalso is_binary(Bucket) ->
+    %% all and anonymous are always valid
     case validate_permissions(Revokes) of
         ok ->
             add_revoke_int(
-                [{all, group}],
+                [{Reserved, group}],
                 to_lowercase_bin(RealmUri),
                 Bucket,
                 Revokes
@@ -939,14 +983,16 @@ add_source(RealmUri, Users, CIDR, Source, Options) ->
 
 
 %% @private
-do_add_source(RealmUri, all, CIDR, Source, Options) ->
+do_add_source(RealmUri, Reserved, CIDR, Source, Options)
+when (Reserved == all orelse Reserved == anonymous) ->
+
     Uri = to_lowercase_bin(RealmUri),
-    %% all is always valid
+    %% all and anonymous are always valid
 
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
     plum_db:put(
-        ?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}, {Source, Options}),
+        ?SOURCES_PREFIX(Uri), {Reserved, anchor_mask(CIDR)}, {Source, Options}),
     ok;
 
 do_add_source(RealmUri, Users, CIDR, Source, Options) ->
@@ -991,10 +1037,11 @@ del_source(RealmUri, Users, CIDR) ->
 
 
 %% @private
-do_del_source(RealmUri, all, CIDR) ->
+do_del_source(RealmUri, Reserved, CIDR)
+when (Reserved == all orelse Reserved == anonymous) ->
     Uri = to_lowercase_bin(RealmUri),
-    %% all is always valid
-    plum_db:delete(?SOURCES_PREFIX(Uri), {all, anchor_mask(CIDR)}),
+    %% all and anonymous are always valid
+    plum_db:delete(?SOURCES_PREFIX(Uri), {Reserved, anchor_mask(CIDR)}),
     ok;
 
 do_del_source(RealmUri, Users, CIDR) ->
@@ -1105,6 +1152,28 @@ status(RealmUri) ->
 %% =============================================================================
 
 
+maybe_upgrade_password(PW0, M) ->
+    String = maps:get(password, M),
+    case bondy_security_pw:upgrade(String, PW0) of
+        PW0 ->
+            %% No upgrade performed
+            PW0;
+        PW1 ->
+            %% The password was upgraded, we store it
+            RealmUri = maps:get(realm_uri, M),
+            Username = maps:get(username, M),
+            Result = alter_user(RealmUri, Username, [{?PASSWORD, PW1}]),
+
+            case Result of
+                ok ->
+                    _ = lager:debug("Password upgraded"),
+                    PW1;
+                {error, Reason} ->
+                    _ = lager:debug("Error while trying to upgrade password"),
+                    throw(Reason)
+            end
+    end.
+
 
 -spec lookup_user(binary(), binary()) ->
     tuple() | {error, {no_such_realm, uri()} | not_found}.
@@ -1187,8 +1256,10 @@ list(RealmUri, source) when is_binary(RealmUri) ->
     ).
 
 
-lookup_user_sources(RealmUri, all) when is_binary(RealmUri) ->
-    do_lookup_user_sources(RealmUri, all);
+lookup_user_sources(RealmUri, Reserved)
+when (Reserved == all orelse Reserved == anonymous)
+andalso is_binary(RealmUri) ->
+    do_lookup_user_sources(RealmUri, Reserved);
 
 lookup_user_sources(RealmUri, Username) when is_binary(Username) ->
     do_lookup_user_sources(RealmUri, to_lowercase_bin(Username)).
@@ -1199,7 +1270,8 @@ do_lookup_user_sources(RealmUri, Username) ->
     try
         _ = bondy_realm:fetch(RealmUri),
         R = to_lowercase_bin(RealmUri),
-        L = plum_db:to_list(?SOURCES_PREFIX(R), [{match, {Username, '_'}}]),
+        L = plum_db:to_list(
+            ?SOURCES_PREFIX(R), [{match, {Username, '_'}}, {resolver, lww}]),
         Pred = fun({_, [?TOMBSTONE]}) -> false; (_) -> true end,
 
         case lists:filter(Pred, L) of
@@ -1269,6 +1341,10 @@ context_to_map(#context{} = Ctxt) ->
 
 prettyprint_users([all], _) ->
     "all";
+
+prettyprint_users([anonymous], _) ->
+    "anonymous";
+
 prettyprint_users(Users0, Width) ->
     %% my kingdom for an iolist join...
     Users = [unicode:characters_to_list(U, utf8) || U <- Users0],
@@ -1408,6 +1484,7 @@ do_print_groups(RealmUri, Groups) ->
 %% -----------------------------------------------------------------------------
 -spec print_grants(RealmUri :: uri(), Rolename :: string()) ->
     ok | {error, term()}.
+
 print_grants(RealmUri, RoleName) ->
     Uri = to_lowercase_bin(RealmUri),
     Name = to_lowercase_bin(RoleName),
@@ -1579,9 +1656,11 @@ prettyprint_permissions([Permission|Rest], Width, Acc) ->
 
 
 match_grants(Realm, Match, Type) ->
-    Grants = plum_db:to_list(metadata_grant_prefix(Realm, Type),
-                                        [{match, Match}]),
-    [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
+    Grants = plum_db:to_list(
+        metadata_grant_prefix(Realm, Type), [{match, Match}, {resolver, lww}]),
+    %% [{Key, Val} || {Key, [Val]} <- Grants, Val /= ?TOMBSTONE].
+    [{Key, Val} || {Key, Val} <- Grants, Val /= [?TOMBSTONE]].
+
 
 metadata_grant_prefix(RealmUri, user) ->
     ?USER_GRANTS_PREFIX(RealmUri);
@@ -1629,38 +1708,57 @@ add_source_int([User|Users], Uri, CIDR, Source, Options) ->
         ?SOURCES_PREFIX(Uri), {User, CIDR}, {Source, Options}),
     add_source_int(Users, Uri, CIDR, Source, Options).
 
+
 add_grant_int([], _, _, _) ->
     ok;
-add_grant_int([{Name, RoleType}|Roles], RealmUri, Bucket, Permissions) ->
-    Prefix = metadata_grant_prefix(RealmUri, RoleType),
-    BucketPermissions = case plum_db:get(Prefix, {Name, Bucket}) of
-                            undefined ->
-                                [];
-                            Perms ->
-                                Perms
-                        end,
-    NewPerms = lists:umerge(lists:sort(BucketPermissions),
-                            lists:sort(Permissions)),
-    plum_db:put(Prefix, {Name, Bucket}, NewPerms),
-    add_grant_int(Roles, RealmUri, Bucket, Permissions).
+add_grant_int([{RoleName, RoleType}|T], RealmUri, Resource, Permissions0) ->
+    DBPrefix = metadata_grant_prefix(RealmUri, RoleType),
+    Existing = case plum_db:get(DBPrefix, {RoleName, Resource}) of
+        undefined -> [];
+        List -> List
+    end,
 
-match_grant(Bucket, Grants) ->
+    Permissions1 = lists:umerge(lists:sort(Existing), lists:sort(Permissions0)),
+
+    plum_db:put(DBPrefix, {RoleName, Resource}, Permissions1),
+
+    add_grant_int(T, RealmUri, Resource, Permissions0).
+
+
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+match_grant(Resource, Grants) ->
     AnyGrants = proplists:get_value(any, Grants, []),
-    %% find the first grant that matches the bucket name and then merge in the
-    %% 'any' grants, if any
-    lists:umerge(lists:sort(lists:foldl(fun({B, P}, Acc) when Bucket == B ->
-                        P ++ Acc;
-                   ({B, P}, Acc) when element(1, Bucket) == B ->
-                        %% wildcard match against bucket type
-                        P ++ Acc;
-                   (_, Acc) ->
-                        Acc
-                end, [], Grants)), lists:sort(AnyGrants)).
+    %% find the first grant that matches the resource name
+    %% and then merge in the 'any' grants, if any
+    Fun = fun
+        ({B, P}, Acc) when Resource == B ->
+            P ++ Acc;
+        ({B, P}, Acc) when element(1, Resource) == B ->
+            %% wildcard match against bucket type
+            P ++ Acc;
+        (_, Acc) ->
+            Acc
+    end,
+    lists:umerge(
+        lists:sort(lists:foldl(Fun, [], Grants)),
+        lists:sort(AnyGrants)
+    ).
+
 
 maybe_refresh_context(RealmUri, Context) ->
     %% TODO replace this with a cluster metadata hash check, or something
     Epoch = os:timestamp(),
     case timer:now_diff(Epoch, Context#context.epoch) < ?REFRESH_TIME of
+        false when Context#context.is_anonymous ->
+            %% context has expired
+            get_anonymous_context(RealmUri, Context#context.username);
         false ->
             %% context has expired
             get_context(RealmUri, Context#context.username);
@@ -1670,6 +1768,8 @@ maybe_refresh_context(RealmUri, Context) ->
 
 concat_role(user, Name) ->
     <<"user/", Name/binary>>;
+concat_role(group, anonymous) ->
+    <<"group/anonymous">>;
 concat_role(group, Name) ->
     <<"group/", Name/binary>>.
 
@@ -1677,17 +1777,31 @@ concat_role(group, Name) ->
 %% Contexts are only valid until the GRANT epoch changes, and it will change
 %% whenever a GRANT or a REVOKE is performed. This is a little coarse grained
 %% right now, but it'll do for the moment.
-get_context(RealmUri, Username) when is_binary(Username) ->
+get_context(RealmUri, Username)
+when is_binary(Username) ->
     Grants = group_grants(accumulate_grants(RealmUri, Username, user)),
     #context{
         realm_uri = to_lowercase_bin(RealmUri),
         username=Username,
         grants=Grants,
-        epoch=os:timestamp()}.
+        epoch=os:timestamp(),
+        is_anonymous = false
+    }.
 
 
 get_context(#{username := U, realm_uri := R}) ->
     get_context(R, U).
+
+
+get_anonymous_context(RealmUri, Username) ->
+    Grants = group_grants(accumulate_grants(RealmUri, anonymous, group)),
+    #context{
+        realm_uri = to_lowercase_bin(RealmUri),
+        username=Username,
+        grants=Grants,
+        epoch=os:timestamp(),
+        is_anonymous = true
+    }.
 
 
 
@@ -1709,10 +1823,12 @@ accumulate_grants([], Seen, Acc, _Type, _) ->
 
 accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
     FullPrefix = full_prefix(Type, RealmUri),
-    Options = role_details(FullPrefix, Role),
-    Groups = [G || G <- lookup(?GROUPS, Options, []),
-                        not lists:member(G, Seen),
-                        group_exists(RealmUri, G)],
+    Details = role_details(FullPrefix, Role),
+    Groups = [G ||
+        G <- lookup(?GROUPS, Details, []),
+        not lists:member(G, Seen),
+        group_exists(RealmUri, G)
+    ],
     {NewAcc, NewSeen} = accumulate_grants(
         Groups, [Role|Seen], Acc, group, RealmUri),
 
@@ -1727,6 +1843,9 @@ accumulate_grants([Role|Roles], Seen, Acc, Type, RealmUri) ->
 
 %% lookup a key in a list of key/value tuples. Like proplists:get_value but
 %% faster.
+%% lookup(_, undefined, Default) ->
+%%     Default;
+
 lookup(Key, List, Default) ->
     case lists:keyfind(Key, 1, List) of
         false ->
@@ -1790,8 +1909,11 @@ validate_groups_option(RealmUri, Options) ->
         undefined ->
             {ok, Options};
         L ->
-            %% Don't let the admin assign "all" as a container
-            Groups = [to_lowercase_bin(G) || G <- L, G /= <<"all">>],
+            %% Don't let the admin assign "all" or "anonymous" as a container
+            Groups = [
+                to_lowercase_bin(G)
+                || G <- L, G /= <<"all">>, G /= <<"anonymous">>
+            ],
 
             case unknown_roles(Groups, ?GROUPS_PREFIX(RealmUri)) of
                 [] ->
@@ -1806,16 +1928,13 @@ validate_groups_option(RealmUri, Options) ->
 validate_password_option(Pass, Options) when is_list(Pass) ->
     validate_password_option(list_to_binary(Pass), Options);
 
-validate_password_option(Pass, Options) ->
-    {ok, HashedPass, AuthName, HashFunction, Salt, Iterations} =
-        bondy_security_pw:hash_password(Pass),
-    NewOptions = stash(?PASSWORD, {?PASSWORD,
-                                    [{hash_pass, HashedPass},
-                                     {auth_name, AuthName},
-                                     {hash_func, HashFunction},
-                                     {salt, Salt},
-                                     {iterations, Iterations}]},
-                       Options),
+validate_password_option(Pass, Options) when is_binary(Pass) ->
+    PW = bondy_security_pw:new(Pass),
+    NewOptions = stash(?PASSWORD, {?PASSWORD, PW}, Options),
+    {ok, NewOptions};
+
+validate_password_option(#{} = PW0, Options) ->
+    NewOptions = stash(?PASSWORD, {?PASSWORD, PW0}, Options),
     {ok, NewOptions}.
 
 
@@ -1851,9 +1970,12 @@ match_source([], _User, _PeerIP) ->
     {error, no_matching_sources};
 
 match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
-    case (UserName == all orelse
-          UserName == User) andalso
-        mask_address(IP, Mask) == mask_address(PeerIP, Mask) of
+    Result =
+        (UserName == all orelse UserName == anonymous orelse UserName == User)
+        andalso
+        mask_address(IP, Mask) == mask_address(PeerIP, Mask),
+
+    case Result of
         true ->
             {ok, Source, Options};
         false ->
@@ -1862,7 +1984,7 @@ match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
 
 sort_sources(Sources) ->
     %% sort sources first by userlist, so that 'all' matches come last
-    %% and then by CIDR, so that most sprcific masks come first
+    %% and then by CIDR, so that most specific masks come first
     Sources1 = lists:sort(fun({UserA, _, _, _}, {UserB, _, _, _}) ->
                     case {UserA, UserB} of
                         {all, all} ->
@@ -2058,6 +2180,9 @@ do_role_type(_UserDetails, _GroupDetails) ->
     both.
 
 
+role_details(_, anonymous) ->
+    [{<<"groups">>, []}, {<<"meta">>, #{}}];
+
 role_details(FullPrefix, Rolename) ->
     plum_db:get(FullPrefix, to_lowercase_bin(Rolename)).
 
@@ -2085,22 +2210,58 @@ illegal_name_chars(Name) ->
     [Name] =/= string:tokens(Name, ?ILLEGAL).
 
 
+to_bin(anonymous) -> <<"anonymous">>;
+to_bin(Bin) when is_binary(Bin) -> Bin.
+
+
+%% @private
+to_lowercase_bin(anonymous) ->
+    anonymous;
 
 to_lowercase_bin(Name) when is_binary(Name) ->
     string:casefold(Name);
 
-to_lowercase_bin(Name) ->
+to_lowercase_bin(Name) when is_list(Name) ->
     unicode:characters_to_binary(
         string:casefold(Name), utf8, utf8).
 
 
 
-bucket2iolist({Type, Bucket}) ->
+resource_to_iolist({Type, Bucket}) ->
     [Type, "/", Bucket];
-bucket2iolist(Bucket) ->
+resource_to_iolist(any) ->
+    "any";
+resource_to_iolist(Bucket) ->
     Bucket.
 
 
+permission_denied_message(
+    Permission, Resource, #context{is_anonymous = false} = Ctxt) ->
+    Username = to_bin(Ctxt#context.username),
+    unicode:characters_to_binary(
+        [
+            "Permission denied. ",
+            "User '", Username,
+            "' does not have permission '",
+            Permission, "' on '", resource_to_iolist(Resource), "'"
+        ],
+        utf8,
+        utf8
+    );
+
+permission_denied_message(
+    Permission, Resource, #context{is_anonymous = true} = Ctxt) ->
+    Username = to_bin(Ctxt#context.username),
+    unicode:characters_to_binary(
+        [
+            "Permission denied. ",
+            "Anonymous user '", Username,
+            "' does not have permission '",
+            Permission, "' on '", resource_to_iolist(Resource), "'"
+        ],
+        utf8,
+        utf8
+    ).
 
 
 

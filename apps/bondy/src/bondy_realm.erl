@@ -33,6 +33,35 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
+-ifdef(OTP_RELEASE). %% => OTP is 21 or higher
+    -define(GET_SECURITY_STATUS(Uri),
+        try persistent_term:get({Uri, security_status}) of
+            Status -> Status
+        catch
+            error:badarg ->
+                Status = bondy_security:status(Uri),
+                ok = persistent_term:put({Uri, security_status}, Status),
+                Status
+        end
+    ).
+    -define(ENABLE_SECURITY(Uri),
+        bondy_security:enable(Uri),
+        persistent_term:put({Uri, security_status}, enabled)
+    ).
+    -define(DISABLE_SECURITY(Uri),
+        bondy_security:disable(Uri),
+        persistent_term:put({Uri, security_status}, disabled)
+    ).
+    -define(ERASE_SECURITY_STATUS(Uri),
+        _ = persistent_term:erase({Uri, security_status}),
+        ok
+    ).
+-else.
+    -define(GET_SECURITY_STATUS(Uri), bondy_security:status(Uri)).
+    -define(ENABLE_SECURITY(Uri), bondy_security:enable(Uri)).
+    -define(DISABLE_SECURITY(Uri), bondy_security:disable(Uri)).
+    -define(ERASE_SECURITY_STATUS(_), ok).
+-endif.
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {security, realms}).
@@ -60,6 +89,7 @@
 -export([add/2]).
 -export([apply_config/0]).
 -export([auth_methods/1]).
+-export([is_auth_method/2]).
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
@@ -88,7 +118,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Loads a security config file if defined and applies its definitions.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_config() -> ok | no_return().
@@ -129,6 +159,7 @@ apply_config() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec auth_methods(realm()) -> [binary()].
+
 auth_methods(#realm{authmethods = Val}) ->
     Val.
 
@@ -137,7 +168,18 @@ auth_methods(#realm{authmethods = Val}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec is_auth_method(realm(), binary()) -> boolean().
+
+is_auth_method(#realm{authmethods = L}, Method) ->
+    lists:member(Method, L).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec is_security_enabled(realm() | uri()) -> boolean().
+
 is_security_enabled(R) ->
     security_status(R) =:= enabled.
 
@@ -147,11 +189,12 @@ is_security_enabled(R) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec security_status(realm() | uri()) -> enabled | disabled.
+
 security_status(#realm{uri = Uri}) ->
     security_status(Uri);
 
 security_status(Uri) when is_binary(Uri) ->
-    bondy_security:status(Uri).
+    ?GET_SECURITY_STATUS(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -159,8 +202,9 @@ security_status(Uri) when is_binary(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec enable_security(realm()) -> ok.
+
 enable_security(#realm{uri = Uri}) ->
-    bondy_security:enable(Uri).
+    ?ENABLE_SECURITY(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -168,8 +212,9 @@ enable_security(#realm{uri = Uri}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec disable_security(realm()) -> ok.
+
 disable_security(#realm{uri = Uri}) ->
-    bondy_security:disable(Uri).
+    ?DISABLE_SECURITY(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -177,6 +222,7 @@ disable_security(#realm{uri = Uri}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec public_keys(realm()) -> [map()].
+
 public_keys(#realm{public_keys = Keys}) ->
     [jose_jwk:to_map(K) || K <- Keys].
 
@@ -186,6 +232,7 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
+
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
@@ -198,6 +245,7 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
+
 get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
@@ -263,6 +311,7 @@ fetch(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri()) -> realm().
+
 get(Uri) ->
     get(Uri, #{}).
 
@@ -274,6 +323,7 @@ get(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) -> realm().
+
 get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
@@ -335,6 +385,7 @@ delete(Uri) ->
         true ->
             {error, active_users};
         false ->
+            ok = ?ERASE_SECURITY_STATUS(Uri),
             plum_db:delete(?PREFIX, Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
@@ -347,6 +398,7 @@ delete(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec list() -> [realm()].
+
 list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
 
@@ -356,6 +408,7 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec select_auth_method(realm(), [binary()]) -> any().
+
 select_auth_method(Realm, []) ->
     select_auth_method(Realm, [?DEFAULT_AUTH_METHOD]);
 
@@ -423,6 +476,7 @@ maybe_enable_security(true, Realm) ->
 
 maybe_enable_security(false, _) ->
     ok.
+
 
 apply_config(Map0) ->
     #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?UPDATE_REALM_SPEC),
@@ -519,6 +573,13 @@ do_add(Map) ->
     },
     Realm1 = set_keys(Realm0, KeyList),
     ok = plum_db:put(?PREFIX, Uri, Realm1),
+
+    %% We create all RBAC entities defined in the Realm Spec map
+    ok = apply_config(groups, Map),
+    ok = apply_config(users, Map),
+    ok = apply_config(sources, Map),
+    ok = apply_config(grants, Map),
+
     ok = bondy_event_manager:notify({realm_added, Uri}),
     init(Realm1, SecurityEnabled).
 
@@ -538,7 +599,16 @@ do_update(Realm0, Map) ->
         authmethods = Method
     },
     Realm2 = set_keys(Realm1, KeyList),
+
+    ok = plum_db:put(?PREFIX, Uri, Realm2),
     ok = maybe_enable_security(SecurityEnabled, Realm2),
+
+    %% We create all RBAC entities defined in the Realm Spec map
+    ok = apply_config(groups, Map),
+    ok = apply_config(users, Map),
+    ok = apply_config(sources, Map),
+    ok = apply_config(grants, Map),
+    ok = bondy_event_manager:notify({realm_updated, Uri}),
     Realm2.
 
 
@@ -574,7 +644,7 @@ select_first_available([H|T], I) ->
 %% @private
 -spec do_lookup(uri()) -> realm() | {error, not_found}.
 do_lookup(Uri) ->
-    case plum_db:get(?PREFIX, Uri)  of
+    case plum_db:get(?PREFIX, Uri) of
         #realm{} = Realm ->
             Realm;
         undefined ->

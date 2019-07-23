@@ -329,9 +329,12 @@ merge_fun(K, V, Acc) ->
         _ -> maps:put(K, false, Acc)
     end.
 
-
+%% -----------------------------------------------------------------------------
+%% @doc Returns a base64 encoded random string
+%% @end
+%% -----------------------------------------------------------------------------
 get_nonce() ->
-    list_to_binary(
+    base64:encode(
         get_random_string(
             32,
             "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
