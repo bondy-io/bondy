@@ -22,7 +22,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "kafka_bridge.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
+{mapping, "bondy_broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
   {datatype, flag},
   {default, off}
 ]}.
