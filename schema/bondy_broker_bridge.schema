@@ -30,9 +30,9 @@
 %% @doc The configuration filename for the Broker Bridge.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.config_file", "bondy_broker_bridge.config_file", [
-  {datatype, file},
-  {default, "{{platform_etc_dir}}/broker_bridge_config.json"}
+{mapping, "broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
 ]}.
 
 
@@ -48,9 +48,9 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
-  {datatype, flag},
-  {default, off}
+{mapping, "broker_bridge.config_file", "bondy_broker_bridge.config_file", [
+  {datatype, file},
+  {default, "$(platform_etc_dir)/broker_bridge_config.json"}
 ]}.
 
 
