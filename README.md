@@ -1,15 +1,26 @@
+# Bondy
+## A Distributed WAMP Router and API Gateway
 
+Bondy is an open source, distributed, scaleable and robust networking platform for microservices and IoT applications written in Erlang.
 
-# Bondy: A Distributed WAMP Router and API Gateway
-
-Bondy is an open source scaleable and robust networking platform for distributed microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns. It also provides a built-in HTTP/REST API Gateway.
+It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns. It also provides a built-in HTTP/REST API Gateway.
 
 Bondy is Apache2 licensed.
 
-**DOCS COMING SOON**
+**NOTICE for Contributors**
+
+> Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
+>
+> If you are reading this file at Bondy's Github repository, notice that this is a mirror that is unidirectionally synced to Gitlab's i.e. no commits or PRs done in Github will be synced to the main repository.
+>
+> So if you would like to fork and/or contribute please do it at Gitlab.
+
+## Documentation
+
+For work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
 
 ## Quick Start
-Bondy requires Erlang/OTP 20.3.8 (support for 21 on the way) and `rebar3`.
+Bondy requires Erlang/OTP 20.3.8 or higher and `rebar3`.
 
 The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
 
@@ -77,15 +88,14 @@ In `bondy1@127.0.0.1` erlang's shell type:
 (bondy2@127.0.0.1)1> bondy_peer_service:join('bondy2@127.0.0.1').
 ```
 
-One minute after joining the cluster the nodes the Active Anti-entropy service will trigger an exchange after which the Realm we have created in `bondy1@127.0.0.1` will have been replicated to `bondy2@127.0.0.1`.
+All new state changes will be propagated in real-time through gossip.
+One minute after joining the cluster, the Active Anti-entropy service will trigger an exchange after which the Realm we have created in `bondy1@127.0.0.1` will have been replicated to `bondy2@127.0.0.1`.
 
-
-## References
-
-* Read more about [WAMP](wamp-proto.org)
 
 ## Important links
 
+
+* [http://docs.getbondy.io](http://docs.getbondy.io).
+* Read more about [WAMP](wamp-proto.org)
 * #bondy on slack (coming soon!)
-* Bondy Documentation and Guides (coming soon!)
 * [Follow us on twitter @leapsight](https://twitter.com/leapsight)
