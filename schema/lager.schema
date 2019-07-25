@@ -1,4 +1,3 @@
-%% -*- erlang -*-
 
 {mapping, "log.colored", "lager.colored", [
   {default, on},

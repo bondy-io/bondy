@@ -1,4 +1,4 @@
-%%-*- mode: erlang -*-
+
 
 %% @doc Starts the Erlang runtime system with SMP support
 %% enabled. This may fail if no runtime system with SMP support is
