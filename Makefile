@@ -17,5 +17,6 @@ dialyzer: compile
 
 devrun:
 	${REBAR} as dev release
-	/bin/cp config/dev/bondy.conf _build/dev/rel/bondy/etc/bondy.conf
+	tools/replace-env-vars -i config/dev/bondy.conf -o _build/dev/rel/bondy/etc/bondy.conf
+
 	_build/dev/rel/bondy/bin/bondy console

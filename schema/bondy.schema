@@ -792,14 +792,16 @@ end}.
 %% @doc Platform-specific installation paths (substituted by rebar)
 {mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
   {datatype, directory},
-  {default, "{{platform_bin_dir}}"}
+  {default, "{{platform_bin_dir}}"},
+  hidden
 ]}.
 
 
 %% @see platform_bin_dir
 {mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
   {datatype, directory},
-  {default, "{{platform_lib_dir}}"}
+  {default, "{{platform_lib_dir}}"},
+  hidden
 ]}.
 
 
@@ -832,14 +834,9 @@ end}.
 
 
 %% =============================================================================
-%% DB
+%% DATA STORE
 %% =============================================================================
 
-
-{mapping, "db.data_dir", "plum_db.data_dir", [
-  {datatype, directory},
-  {default, "$(platform_data_dir)"}
-]}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the level of concurrency in plum_db (the local embedded
@@ -847,67 +844,90 @@ end}.
 %% Each partition has its own leveldb and ets instance.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.partitions", "plum_db.partitions", [
+{mapping, "store.partitions", "plum_db.partitions", [
   {default, 16},
   {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
+{mapping, "store.shard_by", "plum_db.shard_by", [
+  {default, prefix},
+  {datatype, {enum, [prefix, key]}}
+]}.
 
-{mapping, "db.store_open_retry_Limit", "plum_db.store_open_retry_Limit", [
+{mapping, "store.open_retry_Limit", "plum_db.store_open_retry_Limit", [
   {default, 30},
   {datatype, integer}
 ]}.
 
-{mapping, "db.store_open_retries_delay", "plum_db.store_open_retries_delay", [
+
+{mapping, "store.open_retries_delay", "plum_db.store_open_retries_delay", [
   {default, "2s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "db.data_exchange_timeout", "plum_db.data_exchange_timeout", [
+
+
+{mapping, "store.data_dir", "plum_db.data_dir", [
+  {datatype, directory},
+  {default, "$(platform_data_dir)"},
+  hidden
+]}.
+
+
+%% =============================================================================
+%% ACTIVE ANTI-ENTROPY
+%% =============================================================================
+
+
+
+
+{mapping, "aae.data_exchange_timeout", "plum_db.data_exchange_timeout", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
 
+%% Controls wether the active anti-entropy subsystem is enabled.
+{mapping, "aae.enabled", "plum_db.aae_enabled", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
 
-{mapping, "db.hashtree_timer", "plum_db.hashtree_timer", [
+{mapping, "aae.hashtree_timer", "plum_db.hashtree_timer", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
 
-{mapping, "db.aae_enabled", "plum_db.aae_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
+{mapping, "aae.hashtree_ttl", "plum_db.hashtree_ttl", [
+  {default, "1w"},
+  {datatype, {duration, s}}
 ]}.
 
 
 %% Controls when will the AAE system will trigger the next
 %% data exchange.
-{mapping, "db.aae_exchange_timer", "plumtree.broadcast_exchange_timer", [
+{mapping, "aae.exchange_timer", "plumtree.broadcast_exchange_timer", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
 
 
 
-
-
 %% =============================================================================
-%% HIDDEN - this will be generated in the app.congif but not in the
-%% bondy.conf file
+%% FLAKE
 %% =============================================================================
 
 {mapping, "flake.timestamp_path", "flake.timestamp_path", [
   {default, "$(platform_tmp_dir)/flake_timestamp.dets"},
-  {hidden, true},
-  {datatype, file}
+  {datatype, file},
+  hidden
 ]}.
 
 {mapping, "flake.allowable_downtime", "flake.allowable_downtime", [
   {default, "30d"},
-  {hidden, true},
-  {datatype, {duration, ms}}
+  {datatype, {duration, ms}},
+  hidden
 ]}.
 
 
