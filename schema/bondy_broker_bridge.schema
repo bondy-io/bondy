@@ -32,7 +32,7 @@
 %% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.config_file", "bondy_broker_bridge.config_file", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/broker_bridge_config.json"}
+  {default, "$(platform_etc_dir)/broker_bridge_config.json"}
 ]}.
 
 
