@@ -126,7 +126,13 @@ start_phase(init_registry, normal, []) ->
 
 start_phase(join_cluster, normal, []) ->
     %% If automatic_join is enabled
-    ok;
+    %% bondy_config:get([automatic_join, enabled]),
+    case true of
+        true ->
+            join_cluster(os:getenv("BONDY_SERVICE_NAME", undefined));
+        false ->
+            ok
+    end;
 
 start_phase(restore_aae_config, normal, []) ->
     ok = restore_aae(),
@@ -293,3 +299,23 @@ stop_router_services() ->
 
     _ = lager:info("Shutdown finished"),
     ok.
+
+
+%% @private
+join_cluster(undefined) ->
+    _ = lager:error(
+        "Automatic clustering disabled as no value found for environment variable BONDY_SERVICE_NAME. Please set the variable and restart Bondy."
+    );
+
+join_cluster(SrvName) ->
+    %% TEST
+    case inet_res:resolve(SrvName, in, srv, 5000) of
+        {ok, Response} ->
+            _ = lager:info("DNS lookup found ~p", [Response]),
+            ok;
+
+        {error, Reason} ->
+            _ = lager:info("DNS lookup error ~p", [Reason]),
+            ok
+    end.
+
