@@ -309,7 +309,7 @@ join_cluster(undefined) ->
 
 join_cluster(SrvName) ->
     %% TEST
-    case inet_res:resolve(SrvName, in, srv, 5000) of
+    case inet_res:resolve(SrvName, in, srv, [], 5000) of
         {ok, Response} ->
             _ = lager:info("DNS lookup found ~p", [Response]),
             ok;
