@@ -26,6 +26,7 @@
         {init_admin_listeners, []},
         {configure_features, []},
         {init_registry, []},
+        {join_cluster, []},
         {restore_aae_config, []},
         {init_listeners, []}
     ]},
