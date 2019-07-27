@@ -726,8 +726,13 @@
   {datatype, {duration, ms}}
 ]}.
 
+{mapping, "cluster.automatic_join.timeout", "bondy.automatic_join.timeout", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
+]}.
+
 %% The name of a module implementing the bondy_peer_discovery_strategy
-{mapping, "cluster.peer_discovery.agent", "bondy.peer_discovery.agent", [
+{mapping, "cluster.peer_discovery_agent.type", "bondy.peer_discovery_agent.type", [
   {default, bondy_peer_discovery_dns_agent},
   {datatype, atom}
 ]}.
@@ -738,15 +743,15 @@
 %% cluster.peer_discovery.config.keyB = valueB
 %%
 %% Refer to each strategy documentsion
-{mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery_strategy.config", [
+{mapping, "cluster.peer_discovery_agent.config.$name", "bondy.peer_discovery_agent.config", [
   {datatype, string}
 ]}.
 
 {translation,
-"plum_db.peer_discovery_strategy.config",
+"bondy.peer_discovery_agent.config",
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
-      "plum_db.peer_discovery_strategy.config", Conf0),
+      "bondy.peer_discovery_agent.config", Conf0),
     lists:foldl(
         fun({[_, _, _, Key], Value}, Acc) ->
           [{list_to_binary(Key), list_to_binary(Value)} | Acc]
