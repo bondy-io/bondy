@@ -751,7 +751,7 @@
 "bondy.peer_discovery_agent.config",
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
-      "bondy.peer_discovery_agent.config", Conf0),
+      "cluster.peer_discovery_agent.config", Conf0),
     lists:foldl(
         fun({[_, _, _, Key], Value}, Acc) ->
           [{list_to_binary(Key), list_to_binary(Value)} | Acc]
