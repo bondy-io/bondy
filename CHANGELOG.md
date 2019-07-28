@@ -3,7 +3,7 @@
 ## 0.8.6
 
 - Added authorization controls for all WAMP verbs (register, unregister, call, cancel, publish, subscribe and unsubscribe). Authorization is managed  y the existing Security subsystem which now can be configured using JSON files defined in the bondy.conf file
-- Fixed WAMPRA (with salted password) authentication method
+- Fixed WAMPRA (with salted password) authentication method. This requires a rehash of the existing passwords (if you are migrating from an existing Bondy installation. The migration occurs lazily on the new user login (as we need the user to provide the password for Bondy to be able to rehash, as Bondy never stores the passwords).
 - Refactoring of configuration via bondy.conf, removed legacy config options, renamed a few and introduced new ones to support static configuration via JSON files and new features like Peer Discovery and Automatic Cluster join.
 - Finished Bondy Broker schema specification
 - First implementation of Peer Discovery and Automatic Cluster join.
