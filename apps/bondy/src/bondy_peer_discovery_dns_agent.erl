@@ -77,14 +77,17 @@ init(Opts) ->
     | {error, Reason :: any(), NewState :: any()}.
 
 lookup(State, Timeout) ->
-    SrvName = maps:get(service_name, State),
+    SrvName = binary_to_list(maps:get(service_name, State)),
 
     case inet_res:resolve(SrvName, in, srv, Timeout) of
         {ok, DNSMessage} ->
             _ = lager:debug("DNS lookup found ~p", [DNSMessage]),
             {ok, to_peer_list(DNSMessage), State};
         {error, Reason} ->
-            _ = lager:error("DNS lookup error ~p", [Reason]),
+            _ = lager:error(
+                "DNS lookup error; reason=~p, service_name=~p",
+                [Reason, SrvName]
+            ),
             {error, Reason, State}
     end.
 
