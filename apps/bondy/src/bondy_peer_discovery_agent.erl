@@ -235,6 +235,7 @@ discovering(internal, lookup, State) ->
         true ->
             %% Not in cluster
             Res = CBMod:lookup(CBState, Timeout),
+            _ = lager:debug("~p lookup returned: ~p", [CBMod, Res]),
             maybe_join(Res, State);
         false ->
             %% We have already joined the cluster

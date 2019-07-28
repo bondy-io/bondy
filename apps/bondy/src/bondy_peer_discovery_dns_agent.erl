@@ -112,7 +112,7 @@ lookup(State, Timeout) ->
 %% -----------------------------------------------------------------------------
 to_peer_list(DNSMessage) ->
     %% We are assuming all nodes export the same peer_port
-    Port = application:get_env(partisan, peer_port),
+    {ok, Port} = application:get_env(partisan, peer_port),
     %% We are assuming all nodes have the same nodename prefix
     Prefix = "bondy",
     MyNode = bondy_peer_service:mynode(),
