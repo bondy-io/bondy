@@ -18,19 +18,11 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
-  {datatype, flag},
-  {default, off}
-]}.
 
 
 
 %% =============================================================================
-%% BONDY BROKER BRIDGE CONFIGURATION
+%% BONDY BROKER BRIDGE
 %% =============================================================================
 
 
@@ -44,22 +36,46 @@
 ]}.
 
 
+
+
+
+%% =============================================================================
+%% KAFKA BRIDGE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+
 %% -----------------------------------------------------------------------------
 %% @doc A mapping of names to kafka topics. This mapping is used by the JSON
 %% broker_bridge.config_file which defines the subscribers for each bridge.
+%%
+%% Usage:
+%%
+%% broker_bridge.kafka.topics.<KEY>
+%%
+%% In the config_file you can use the mops expression
+%% `"{{kafka.topics.<KEY>}}"` to get the value assigned.
 %%
 %% Example:
 %%
 %% broker_bridge.kafka.topics.important_events = "com.myapp.events.important"
 %%
 %% In the config_file you can use the mops expression
-%% `"{{kafka.topics |> get(important_events)}}"` to get the value
-%% "com.myapp.events.important" for the name "important_events".
+%% `"{{kafka.topics.important_events}}"` to get the value
+%% "com.myapp.events.important".
+
 %% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.topics.$name", "bondy_broker_bridge.bridges.bondy_kafka_bridge.topics", [
-  {datatype, string},
-  {default, "com.bondy.example"},
-  {include_default, "example"}
+  {datatype, string}
 ]}.
 
 {translation,

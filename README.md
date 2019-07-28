@@ -7,24 +7,26 @@ It implements the open Web Application Messaging Protocol (WAMP) offering both P
 
 Bondy is Apache2 licensed.
 
-**NOTICE for Contributors**
+## Notice for Contributors
 
-> Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
->
-> If you are reading this file at Bondy's Github repository, notice that this is a mirror that is unidirectionally synced to Gitlab's i.e. no commits or PRs done in Github will be synced to the main repository.
->
-> So if you would like to fork and/or contribute please do it at Gitlab.
+Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
+
+If you are reading this file at Bondy's Github repository, notice that this is a mirror that is unidirectionally synced to Gitlab's i.e. no commits or PRs done in Github will be synced to the main repository.
+
+So if you would like to fork and/or contribute please do it at Gitlab.
 
 ## Documentation
 
-For work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
+For our work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
 
 ## Quick Start
+
 Bondy requires Erlang/OTP 20.3.8 or higher and `rebar3`.
 
 The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
 
 ### Run a first node
+
 We will start a node named `bondy1@127.0.0.1` which uses the following variables from the config file (`config/test1/vars.config`).
 
 |Transport|Description|Port|
@@ -42,7 +44,8 @@ We will start a node named `bondy1@127.0.0.1` which uses the following variables
 rebar3 as test1 run
 ```
 
-### Create a Realm
+#### Create a Realm
+
 WAMP is a session-based protocol. Each session belongs to a Realm.
 
 ```curl
@@ -55,7 +58,8 @@ curl -X "POST" "http://localhost:18081/realms/" \
 }'
 ```
 
-### Disable Security
+#### Disable Security
+
 We will disable security to avoid setting up credentials at this moment.
 
 ```curl
@@ -64,7 +68,8 @@ curl -X "DELETE" "http://localhost:18081/realms/com.myrealm/security_enabled" \
      -H 'Accept: application/json; charset=utf-8'
 ```
 
-### Run a second node
+#### Run a second node
+
 We start a second node named `bondy2@127.0.0.1` which uses the following variables from the config file (`config/test2/vars.config`).
 
 |Transport|Description|Port|
@@ -81,7 +86,8 @@ We start a second node named `bondy2@127.0.0.1` which uses the following variabl
 rebar3 as test2 run
 ```
 
-### Connect the two
+#### Connect the nodes
+
 In `bondy1@127.0.0.1` erlang's shell type:
 
 ```erlang
@@ -91,9 +97,7 @@ In `bondy1@127.0.0.1` erlang's shell type:
 All new state changes will be propagated in real-time through gossip.
 One minute after joining the cluster, the Active Anti-entropy service will trigger an exchange after which the Realm we have created in `bondy1@127.0.0.1` will have been replicated to `bondy2@127.0.0.1`.
 
-
 ## Important links
-
 
 * [http://docs.getbondy.io](http://docs.getbondy.io).
 * Read more about [WAMP](wamp-proto.org)

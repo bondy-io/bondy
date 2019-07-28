@@ -119,8 +119,8 @@ start_phase(init_registry, normal, []) ->
     %% connected. This was a clean way of avoiding new registrations
     %% interfiering with the registry restore and cleanup.
     %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
-    %% longer store the registry on disk, we restore everything from the
-    %% network. However, we kept this step as it is clean and allows us to do
+    %% longer store the registry on disk, just on ram.
+    %% However, we kept this step as it is clean and allows us to do
     %% some validations and preparations.
     bondy_registry:init();
 
@@ -289,3 +289,5 @@ stop_router_services() ->
 
     _ = lager:info("Shutdown finished"),
     ok.
+
+
