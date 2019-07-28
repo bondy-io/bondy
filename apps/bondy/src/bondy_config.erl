@@ -68,6 +68,7 @@ get([H|T]) ->
         Term when is_list(Term) ->
             get_path(T, Term, ?ERROR);
         _ ->
+            %% We cannot get(T) from a term which is neither a map nor a list
             undefined
     end;
 
