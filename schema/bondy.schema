@@ -715,24 +715,24 @@
 
 %% If enabled and cluster.peer_discovery_strategy is configured it will
 %% automatically join a random peer from the discover ones if any
-{mapping, "cluster.automatic_join.enabled", "bondy.automatic_join.enabled", [
+{mapping, "cluster.peer_discovery.automatic_join", "bondy.peer_discovery.automatic_join", [
   {default, off},
   {datatype, flag}
 ]}.
 
 
-{mapping, "cluster.automatic_join.polling_interval", "bondy.automatic_join.polling_interval", [
+{mapping, "cluster.peer_discovery.polling_interval", "bondy.peer_discovery.polling_interval", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "cluster.automatic_join.timeout", "bondy.automatic_join.timeout", [
+{mapping, "cluster.peer_discovery.timeout", "bondy.peer_discovery.timeout", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% The name of a module implementing the bondy_peer_discovery_strategy
-{mapping, "cluster.peer_discovery_agent.type", "bondy.peer_discovery_agent.type", [
+{mapping, "cluster.peer_discovery.type", "bondy.peer_discovery.type", [
   {default, bondy_peer_discovery_dns_agent},
   {datatype, atom}
 ]}.
@@ -743,15 +743,15 @@
 %% cluster.peer_discovery.config.keyB = valueB
 %%
 %% Refer to each strategy documentsion
-{mapping, "cluster.peer_discovery_agent.config.$name", "bondy.peer_discovery_agent.config", [
+{mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [
   {datatype, string}
 ]}.
 
 {translation,
-"bondy.peer_discovery_agent.config",
+"bondy.peer_discovery.config",
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
-      "cluster.peer_discovery_agent.config", Conf0),
+      "cluster.peer_discovery.config", Conf0),
     lists:foldl(
         fun({[_, _, _, Key], Value}, Acc) ->
           [{list_to_binary(Key), list_to_binary(Value)} | Acc]
