@@ -744,7 +744,10 @@
   {datatype, {duration, ms}}
 ]}.
 
-%% The name of a module implementing the bondy_peer_discovery_strategy
+%% The name of a module implementing the bondy_peer_discovery_agent behaviour.
+%% At the moment Bondy provides only the `bondy_peer_discovery_dns_agent', which
+%% ssumes that all Bondy nodes are deployed using a common base name e.g. bondy,
+%% are using unique longnames e.g. {BASENAME}@{UNIQUE}.{SERVICE_NAME}
 {mapping, "cluster.peer_discovery.type", "bondy.peer_discovery.type", [
   {default, bondy_peer_discovery_dns_agent},
   {datatype, atom}

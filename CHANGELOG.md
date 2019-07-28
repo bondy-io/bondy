@@ -1,4 +1,14 @@
 # CHANGELOG
+
+## 0.8.6
+
+- Added authorization controls for all WAMP verbs (register, unregister, call, cancel, publish, subscribe and unsubscribe). Authorization is managed  y the existing Security subsystem which now can be configured using JSON files defined in the bondy.conf file
+- Fixed WAMPRA (with salted password) authentication method
+- Refactoring of configuration via bondy.conf, removed legacy config options, renamed a few and introduced new ones to support static configuration via JSON files and new features like Peer Discovery and Automatic Cluster join.
+- Finished Bondy Broker schema specification
+- First implementation of Peer Discovery and Automatic Cluster join.
+  - Implementation of DNS srv based discovery tested to work with Kubernetes DNS
+
 ## 0.8.2
 
 - Migration to OTP 21.3 or higher.
