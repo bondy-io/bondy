@@ -713,11 +713,24 @@
   {datatype, integer}
 ]}.
 
-%% If enabled and cluster.peer_discovery_strategy is configured it will
-%% automatically join a random peer from the discover ones if any
+%% If enabled Bondy will discover peers using the defined
+%% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
+%% This can only be configured before tunning Bondy.
+{mapping, "cluster.peer_discovery.enabled", "bondy.peer_discovery.enabled", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+%% If enabled Bondy will try to automatically join a random peer from the
+%% defined cluster.peer_discovery.type
 {mapping, "cluster.peer_discovery.automatic_join", "bondy.peer_discovery.automatic_join", [
   {default, off},
   {datatype, flag}
+]}.
+
+{mapping, "cluster.peer_discovery.join_retry_interval", "bondy.peer_discovery.join_retry_interval", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
 ]}.
 
 
