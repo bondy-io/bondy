@@ -17,7 +17,17 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This state machine is reponsible for discovering Bondy cluster peers
+%% using the defined implementation backend (callback module).
+%%
+%% Its behaviour can be configured using the `cluster.peer_discovery' family of
+%% bondy.conf options.
+%%
+%% If the agent is enabled (`cluster.peer_discovery.enabled') and the Bondy node
+%%  has not yet joined a cluster, it will lookup for peers using the
+%% defined implementation backend callback module
+%%  (`cluster.peer_discovery.type').
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_discovery_agent).
@@ -171,7 +181,7 @@ init([]) ->
         true ->
             do_init(State);
         false ->
-            {next_state, disabled, State}
+            {ok, disabled, State}
     end.
 
 
