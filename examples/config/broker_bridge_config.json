@@ -6,7 +6,9 @@
     "subscriptions" : [
         {
             "bridge": "bondy_kafka_bridge",
-            "meta": {},
+            "meta": {
+                "description": "Subscribe to com.leapsight.example_event and produce in kafka.topics.wamp_events."
+            },
             "match": {
                 "realm": "com.leapsight.test",
                 "topic" : "com.leapsight.example_event",

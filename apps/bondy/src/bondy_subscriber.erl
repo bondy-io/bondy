@@ -32,6 +32,7 @@
 -record(state, {
     realm_uri           ::  uri(),
     opts                ::  map(),
+    meta                ::  map(),
     topic               ::  binary(),
     callback_fun        ::  function(),
     subscription_id     ::  id() | undefined,
@@ -126,10 +127,13 @@ handle_event_sync(Subscriber, Event) ->
 
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
+    Meta = maps:get(meta, Opts0, #{}),
     {ok, Id} = bondy_broker:subscribe(RealmUri, Opts, Topic, self()),
+
     State = #state{
         realm_uri = RealmUri,
-        opts = Opts,
+        opts = maps:without([meta], Opts),
+        meta = Meta,
         topic = Topic,
         callback_fun = Fun,
         subscription_id = Id
@@ -139,11 +143,12 @@ init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
 
 handle_call(info, _From, State) ->
     Info = #{
+        meta => State#state.meta,
+        options => maps:without([subscription_id], State#state.opts),
         realm_uri => State#state.realm_uri,
-        topic => State#state.topic,
-        opts => State#state.topic,
         stats => State#state.stats,
-        subscription_id => State#state.subscription_id
+        subscription_id => State#state.subscription_id,
+        topic => State#state.topic
     },
     {reply, Info, State};
 

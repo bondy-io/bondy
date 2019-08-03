@@ -148,13 +148,6 @@
 }).
 
 -define(SUBS_SPEC, #{
-    <<"id">> => #{
-        alias => id,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary
-    },
     <<"meta">> => #{
         alias => meta,
         required => true,
@@ -591,10 +584,11 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
 do_subscribe(Subscription, State) ->
     #{
         <<"bridge">> := Bridge,
+        <<"meta">> := Meta,
         <<"match">> := #{
             <<"realm">> := RealmUri,
             <<"topic">> := Topic,
-            <<"options">> := Opts
+            <<"options">> := Opts0
         },
         <<"action">> := Action
     } = Subscription,
@@ -603,7 +597,8 @@ do_subscribe(Subscription, State) ->
         undefined ->
             error({unknown_bridge, Bridge});
         #{id := Bridge} ->
-            do_subscribe(RealmUri, Opts, Topic, Bridge, Action, State)
+            Opts1 = maps:put(meta, Meta, Opts0),
+            do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
     end.
 
 
@@ -680,8 +675,6 @@ subscribers(Bridge) ->
 
 %% @private
 get_subscriptions(Bridge) ->
-    [{gproc:get_value({r, l, subscription_id}, Pid), Pid}
-        || Pid <- subscribers(Bridge)].
-
+    [bondy_subscriber:info(Pid) || Pid <- subscribers(Bridge)].
 
 
