@@ -112,9 +112,30 @@
         allow_undefined => false,
         datatype => binary
     },
+    <<"kind">> => #{
+        alias => id,
+        required => true,
+        default => <<"broker_bridge">>,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {in, [<<"broker_bridge">>]}
+    },
+    <<"version">> => #{
+        alias => version,
+        default => <<"v1.0">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {in, [
+            <<"v1.0">>
+        ]}
+    },
     <<"meta">> => #{
         alias => meta,
-        required => false,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => maps:new(),
         datatype => map
     },
     <<"subscriptions">> => #{
@@ -127,6 +148,21 @@
 }).
 
 -define(SUBS_SPEC, #{
+    <<"id">> => #{
+        alias => id,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
+    },
+    <<"meta">> => #{
+        alias => meta,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => maps:new(),
+        datatype => map
+    },
     <<"bridge">> => #{
         alias => bridge,
         required => true,
@@ -479,7 +515,9 @@ do_terminate(Reason, State) ->
 load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, Spec} ->
-            #{<<"subscriptions">> := Subscriptions} = Spec,
+            #{<<"subscriptions">> := L} = Spec,
+            %% We make sure all subscriptions are unique
+            Subscriptions = sets:to_list(sets:from_list(L)),
             %% We instantiate the subscribers
             Folder = fun(Subs, Acc) ->
                 {ok, _, _} = do_subscribe(Subs, Acc),

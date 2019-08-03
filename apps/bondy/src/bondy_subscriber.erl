@@ -17,8 +17,10 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc This module implements a local WAMP subscriber that applies the user
-%% provided function when handling each event.
+%% @doc This module implements a supervised process (gen_server) that acts as a
+%% local WAMP subscriber that when received an EVENT applies the user provided
+%% function.
+%%
 %% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -170,7 +172,6 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(#event{} = Event, State) ->
-    %% TODO spawn using sidejob
     case do_handle_event(Event, State) of
         {ok, NewState} ->
             {noreply, NewState};
@@ -256,7 +257,10 @@ do_unsubscribe(#state{subscription_id = undefined} = State) ->
 
 do_unsubscribe(#state{subscription_id = Id} = State) ->
     RealmUri = State#state.realm_uri,
-    {bondy_broker:unsubscribe(Id, RealmUri), State#state{subscription_id = undefined}}.
+    {
+        bondy_broker:unsubscribe(Id, RealmUri),
+        State#state{subscription_id = undefined}
+    }.
 
 
 %% @private
@@ -280,7 +284,6 @@ do_handle_event(Event, State) ->
 
 
 %% @private
-
 retry_handle_event(Event, State, Time, Cnt) ->
     timer:sleep(Time),
     case handle_event(Event, State) of

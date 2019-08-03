@@ -1,9 +1,12 @@
 {
-    "id":"com.leapsight.test",
-    "meta":{},
+    "id": "main",
+    "version": "v1.0",
+    "kind": "broker_bridge",
+    "meta": {},
     "subscriptions" : [
         {
             "bridge": "bondy_kafka_bridge",
+            "meta": {},
             "match": {
                 "realm": "com.leapsight.test",
                 "topic" : "com.leapsight.example_event",
