@@ -461,7 +461,7 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 -spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
 
 unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
-    case bondy_registry:lookup(subscription, RealmUri, SubsId) of
+    case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
         Entry ->
@@ -524,7 +524,7 @@ maybe_subscribe(M, Ctxt) ->
 maybe_unsubscribe(M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
     SubsId = M#unsubscribe.subscription_id,
-    case bondy_registry:lookup(subscription, RealmUri, SubsId) of
+    case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
         Entry ->
