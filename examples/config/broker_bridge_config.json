@@ -6,12 +6,12 @@
             "bridge": "bondy_kafka_bridge",
             "match": {
                 "realm": "com.leapsight.test",
-                "topic" : "com.example.on_counter",
+                "topic" : "com.leapsight.example_event",
                 "options": {"match": "exact"}
             },
             "action": {
                 "type": "produce_sync",
-                "topic": "{{kafka.topics |> get(wamp_events)}}",
+                "topic": "{{kafka.topics.wamp_events}}",
                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
                 "value": "{{event}}",
                 "options" : {

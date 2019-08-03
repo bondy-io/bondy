@@ -55,7 +55,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc A mapping of names to kafka topics. This mapping is used by the JSON
+%% @doc A mapping of Clients to kafka topics. This mapping is used by the JSON
 %% broker_bridge.config_file which defines the subscribers for each bridge.
 %%
 %% Usage:
@@ -97,11 +97,13 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.kafka.clients.$name.endpoints", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+{mapping, "broker_bridge.kafka.clients.$name.endpoint", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, ip},
   {default, {"127.0.0.1", 9092}},
   {include_default, "default"}
 ]}.
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -207,7 +209,7 @@ end}.
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
         "broker_bridge.kafka.clients", Conf0),
-    Names = sets:to_list(
+    Clients = sets:to_list(
         sets:from_list(
             lists:foldl(
                 fun(X, Acc) -> [element(4, X) | Acc] end,
@@ -220,6 +222,7 @@ fun(Conf0) ->
         %% Socket Opts
         AllConf = cuttlefish_variable:filter_by_prefix(
             "broker_bridge.kafka.clients." ++ Name, Conf),
+
         SocketConf = cuttlefish_variable:filter_by_prefix(
             "broker_bridge.kafka.clients." ++ Name ++ ".socket", AllConf),
 
@@ -282,5 +285,5 @@ fun(Conf0) ->
 
         [Client | Acc]
     end,
-    lists:foldl(Fun, [], Names)
+    lists:foldl(Fun, [], Clients)
 end}.

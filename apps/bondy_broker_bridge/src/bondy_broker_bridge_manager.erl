@@ -155,8 +155,7 @@
 -record(state, {
     nodename                        ::  binary(),
     broker_agent                    ::  binary(),
-    bridges = #{}                   ::  #{module() => bridge()},
-    enabled = false                 ::  boolean()
+    bridges = #{}                   ::  #{module() => bridge()}
     %% Cluster sync state
     %% exchange_ref            ::  {pid(), reference()} | undefined,
     %% updated_specs = []      ::  list()
@@ -272,6 +271,7 @@ subscriptions(BridgeId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec validate_spec(map()) -> {ok, map()} | {error, any()}.
+
 validate_spec(Map) ->
     try
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
@@ -292,13 +292,11 @@ validate_spec(Map) ->
 
 init([]) ->
     %% We store the bridges configurations provided
-    Enabled = application:get_env(bondy_broker_bridge, enabled, false),
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     BridgesMap = maps:from_list(
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
-        enabled = Enabled,
         nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
@@ -359,44 +357,6 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-%% handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
-%%     Ref = erlang:monitor(process, Pid),
-%%     {noreply, State#state{exchange_ref = {Pid, Ref}}};
-
-%% handle_info(
-%%     {plum_db_event, exchange_finished, {Pid, _Reason}},
-%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-%%     true = erlang:demonitor(Ref),
-%%     %% ok = handle_spec_updates(State0),
-%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-%%     {noreply, State1};
-
-%% handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
-%%     %% We are receiving the notification after we recevied a DOWN message
-%%     %% we do nothing
-%%     {noreply, State};
-
-%% handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
-%%     %% We've got a notification that an API Spec object has been updated
-%%     %% in the database via cluster replication, so we need to rebuild the
-%%     %% Cowboy dispatch tables
-%%     %% But since Specs depend on other objects being present and we also want
-%%     %% to avoid rebuilding the dispatch table multiple times, we just set a
-%%     %% flag on the state to rebuild the dispatch tables once we received an
-%%     %% exchange_finished event,
-%%     _ = lager:info("API Spec object_update received; key=~p", [Key]),
-%%     Acc = State#state.updated_specs,
-%%     {noreply, State#state{updated_specs = [Key|Acc]}};
-
-%% handle_info(
-%%     {'DOWN', Ref, process, Pid, _Reason},
-%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-%%     %% ok = handle_spec_updates(State0),
-%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-%%     {noreply, State1};
-
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     _ = lager:debug("Subscriber down, pid=~p", [Pid]),
     %% TODO
@@ -426,8 +386,6 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -435,16 +393,14 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_bridges(#state{enabled = false} = State) ->
-    {ok, State};
-
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
-        Fun = fun(Mod, #{config := Config} = Bridge, Acc) ->
+        Fun = fun(Mod, #{config := Config}, Acc) ->
             case Mod:init(Config) of
                 {ok, Ctxt} when is_map(Ctxt) ->
-                    maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                    maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
+                    %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
                 {error, Reason} ->
                     error(Reason)
             end

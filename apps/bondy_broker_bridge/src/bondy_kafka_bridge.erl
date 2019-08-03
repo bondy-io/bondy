@@ -244,11 +244,11 @@ init(Config) ->
             {ok, Clients} = application:get_env(brod, clients),
             [
                 begin
-                    case lists:keyfind(endpoints, 1, Opts) of
+                    case lists:keyfind(endpoint, 1, Opts) of
                         false ->
                             error(badarg);
-                        {endpoints, Endpoints} ->
-                            ok = brod:start_client(Endpoints, Name, Opts)
+                        {endpoint, Endpoint} ->
+                            ok = brod:start_client([Endpoint], Name, Opts)
                     end
                 end || {Name, Opts} <- Clients
             ],
