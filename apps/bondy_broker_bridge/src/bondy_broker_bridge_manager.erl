@@ -20,7 +20,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc This module provides event bridging functionality, allowing
 %% a supervised process (implemented via bondy_subscriber) to subscribe to WAMP
-%% events and to process and or forward those events to an external system,
+%% events and process and/or forward those events to an external system,
 %% e.g. publish to another message broker.
 %%
 %% A subscription can be created at runtime using the `subscribe/5',
@@ -28,8 +28,7 @@
 %% environment variable which should have the filename of a valid
 %% Broker Bridge Specification File.
 %%
-%%
-%% Each broker bridge is implemented as a callback module implementing the
+%% Each broker bridge is implemented as a module implementing the
 %% bondy_broker_bridge behaviour.
 %%
 %% ## Action Specification Map.
@@ -37,6 +36,7 @@
 %% ## `mops' Evaluation Context
 %%
 %% The mops context is map containing the following:
+%%
 %% ```erlang
 %% #{
 %%     <<"broker">> => #{
@@ -57,6 +57,42 @@
 %% '''
 %%
 %% ## Broker Bridge Specification File.
+%%
+%% Example:
+%%
+%% ```json
+%% {
+%%     "id":"com.leapsight.test",
+%%     "meta":{},
+%%     "subscriptions" : [
+%%         {
+%%             "bridge": "bondy_kafka_bridge",
+%%             "match": {
+%%                 "realm": "com.leapsight.test",
+%%                 "topic" : "com.leapsight.example_event",
+%%                 "options": {"match": "exact"}
+%%             },
+%%             "action": {
+%%                 "type": "produce_sync",
+%%                 "topic": "{{kafka.topics.wamp_events}}",
+%%                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
+%%                 "value": "{{event}}",
+%%                 "options" : {
+%%                     "client_id": "default",
+%%                     "acknowledge": true,
+%%                     "required_acks": "all",
+%%                     "partition": null,
+%%                     "partitioner": {
+%%                         "algorithm": "fnv32a",
+%%                         "value": "\"{{event.topic}}/{{event.publication_id}}\""
+%%                     },
+%%                     "encoding": "json"
+%%                 }
+%%             }
+%%         }
+%%     ]
+%% }
+%% '''
 %%
 %% @end
 %% -----------------------------------------------------------------------------
@@ -542,7 +578,7 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
     try
         %% We build the fun that we will use for the subscriber
         Fun = fun
-            (Topic1, Event) when Topic1 == Topic ->
+            (Topic1, #event{} = Event) when Topic1 == Topic ->
                 Ctxt = mops_ctxt(Event, RealmUri, Opts, Topic, Bridge, State),
                 Action1 = mops:eval(Action0, Ctxt),
                 case Bridge:validate_action(Action1) of
@@ -552,10 +588,7 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
                         Bridge:apply_action(Action2);
                     {error, Reason} ->
                         throw({invalid_action, Reason})
-                end;
-            (_Topic1, {brod_produce_reply, _ ,brod_produce_req_acked}) ->
-                %% Required to handle in case of Action.type == produce (async)
-                ok
+                end
         end,
         %% We use bondy_broker subscribers, this is an intance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup

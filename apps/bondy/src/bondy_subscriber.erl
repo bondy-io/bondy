@@ -195,8 +195,8 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info(Event, State) ->
-    case do_handle_event(Event, State) of
+handle_info(#event{} = WAMPEvent, State) ->
+    case do_handle_event(WAMPEvent, State) of
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason, NewState} ->
@@ -209,11 +209,15 @@ handle_info(Event, State) ->
                     State#state.topic,
                     State#state.subscription_id,
                     self(),
-                    Event
+                    WAMPEvent
                 ]
             ),
             {noreply, NewState}
-    end.
+    end;
+
+handle_info(Event, State) ->
+    _ = lager:debug("Received unknown event; event=~p", [Event]),
+    {noreply, State}.
 
 
 terminate(normal, State) ->
@@ -256,7 +260,7 @@ do_unsubscribe(#state{subscription_id = Id} = State) ->
 
 
 %% @private
-do_handle_event(#event{} = Event, State) ->
+do_handle_event(Event, State) ->
     try (State#state.callback_fun)(State#state.topic, Event) of
         ok ->
             {ok, State};
