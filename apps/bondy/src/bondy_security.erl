@@ -1725,10 +1725,6 @@ add_grant_int([{RoleName, RoleType}|T], RealmUri, Resource, Permissions0) ->
     add_grant_int(T, RealmUri, Resource, Permissions0).
 
 
-
-
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
