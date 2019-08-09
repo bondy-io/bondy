@@ -60,6 +60,15 @@
   {datatype, {flag, on, off}}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy allows the "anonymous" user
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.allow_anonymous_user", "bondy.allow_anonymous_user", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Not currently working, leave the value as 'session'
@@ -704,6 +713,70 @@
   {datatype, integer}
 ]}.
 
+%% If enabled Bondy will discover peers using the defined
+%% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
+%% This can only be configured before tunning Bondy.
+{mapping, "cluster.peer_discovery.enabled", "bondy.peer_discovery.enabled", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+%% If enabled Bondy will try to automatically join a random peer from the
+%% defined cluster.peer_discovery.type
+{mapping, "cluster.peer_discovery.automatic_join", "bondy.peer_discovery.automatic_join", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+{mapping, "cluster.peer_discovery.join_retry_interval", "bondy.peer_discovery.join_retry_interval", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
+]}.
+
+
+{mapping, "cluster.peer_discovery.polling_interval", "bondy.peer_discovery.polling_interval", [
+  {default, "10s"},
+  {datatype, {duration, ms}}
+]}.
+
+{mapping, "cluster.peer_discovery.timeout", "bondy.peer_discovery.timeout", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% The name of a module implementing the bondy_peer_discovery_agent behaviour.
+%% At the moment Bondy provides only the `bondy_peer_discovery_dns_agent', which
+%% ssumes that all Bondy nodes are deployed using a common base name e.g. bondy,
+%% are using unique longnames e.g. {BASENAME}@{UNIQUE}.{SERVICE_NAME}
+{mapping, "cluster.peer_discovery.type", "bondy.peer_discovery.type", [
+  {default, bondy_peer_discovery_dns_agent},
+  {datatype, atom}
+]}.
+
+%% The configuration for the selected strategy.
+%% Example:
+%% cluster.peer_discovery.config.keyA = valueA
+%% cluster.peer_discovery.config.keyB = valueB
+%%
+%% Refer to each strategy documentsion
+{mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [
+  {datatype, string}
+]}.
+
+{translation,
+"bondy.peer_discovery.config",
+fun(Conf0) ->
+    Conf = cuttlefish_variable:filter_by_prefix(
+      "cluster.peer_discovery.config", Conf0),
+    lists:foldl(
+        fun({[_, _, _, Key], Value}, Acc) ->
+          [{list_to_binary(Key), list_to_binary(Value)} | Acc]
+        end,
+        [],
+        Conf
+    )
+end}.
+
 
 {mapping, "cluster.tls.enabled", "partisan.tls", [
   {default, "off"},
@@ -740,8 +813,18 @@
 %% @doc Platform-specific installation paths (substituted by rebar)
 {mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
   {datatype, directory},
-  {default, "{{platform_bin_dir}}"}
+  {default, "{{platform_bin_dir}}"},
+  hidden
 ]}.
+
+
+%% @see platform_bin_dir
+{mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
+  {datatype, directory},
+  {default, "{{platform_lib_dir}}"},
+  hidden
+]}.
+
 
 %% @see platform_bin_dir
 {mapping, "platform_data_dir", "bondy.platform_data_dir", [
@@ -762,12 +845,6 @@
 ]}.
 
 %% @see platform_bin_dir
-{mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
-  {datatype, directory},
-  {default, "{{platform_lib_dir}}"}
-]}.
-
-%% @see platform_bin_dir
 {mapping, "platform_log_dir", "bondy.platform_log_dir", [
   {datatype, directory},
   {default, "{{platform_log_dir}}"}
@@ -778,14 +855,9 @@
 
 
 %% =============================================================================
-%% DB
+%% DATA STORE
 %% =============================================================================
 
-
-{mapping, "db.data_dir", "plum_db.data_dir", [
-  {datatype, directory},
-  {default, "{{platform_data_dir}}"}
-]}.
 
 %% -----------------------------------------------------------------------------
 %% @doc Defines the level of concurrency in plum_db (the local embedded
@@ -793,37 +865,91 @@
 %% Each partition has its own leveldb and ets instance.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "db.partitions", "plum_db.partitions", [
+{mapping, "store.partitions", "plum_db.partitions", [
   {default, 16},
   {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
-{mapping, "db.aae_enabled", "plum_db.aae_enabled", [
-  {datatype, {flag, on, off}},
-  {default, on}
+{mapping, "store.shard_by", "plum_db.shard_by", [
+  {default, prefix},
+  {datatype, {enum, [prefix, key]}}
 ]}.
 
-{mapping, "db.store_open_retry_Limit", "plum_db.store_open_retry_Limit", [
+{mapping, "store.open_retry_Limit", "plum_db.store_open_retry_Limit", [
   {default, 30},
   {datatype, integer}
 ]}.
 
-{mapping, "db.store_open_retries_delay", "plum_db.store_open_retries_delay", [
+
+{mapping, "store.open_retries_delay", "plum_db.store_open_retries_delay", [
   {default, "2s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "db.data_exchange_timeout", "plum_db.data_exchange_timeout", [
+
+
+{mapping, "store.data_dir", "plum_db.data_dir", [
+  {datatype, directory},
+  {default, "$(platform_data_dir)"},
+  hidden
+]}.
+
+
+%% =============================================================================
+%% ACTIVE ANTI-ENTROPY
+%% =============================================================================
+
+
+
+
+{mapping, "aae.data_exchange_timeout", "plum_db.data_exchange_timeout", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "db.hashtree_timer", "plum_db.hashtree_timer", [
+%% Controls wether the active anti-entropy subsystem is enabled.
+{mapping, "aae.enabled", "plum_db.aae_enabled", [
+  {datatype, {flag, on, off}},
+  {default, on}
+]}.
+
+{mapping, "aae.hashtree_timer", "plum_db.hashtree_timer", [
   {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
+
+{mapping, "aae.hashtree_ttl", "plum_db.hashtree_ttl", [
+  {default, "1w"},
+  {datatype, {duration, s}}
+]}.
+
+
+%% Controls when will the AAE system will trigger the next
+%% data exchange.
+{mapping, "aae.exchange_timer", "plumtree.broadcast_exchange_timer", [
+  {default, "1m"},
+  {datatype, {duration, ms}}
+]}.
+
+
+
+%% =============================================================================
+%% FLAKE
+%% =============================================================================
+
+{mapping, "flake.timestamp_path", "flake.timestamp_path", [
+  {default, "$(platform_tmp_dir)/flake_timestamp.dets"},
+  {datatype, file},
+  hidden
+]}.
+
+{mapping, "flake.allowable_downtime", "flake.allowable_downtime", [
+  {default, "30d"},
+  {datatype, {duration, ms}},
+  hidden
+]}.
 
 
 

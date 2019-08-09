@@ -17,8 +17,10 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc This module implements a local WAMP subscriber that applies the user
-%% provided function when handling each event.
+%% @doc This module implements a supervised process (gen_server) that acts as a
+%% local WAMP subscriber that when received an EVENT applies the user provided
+%% function.
+%%
 %% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -30,6 +32,7 @@
 -record(state, {
     realm_uri           ::  uri(),
     opts                ::  map(),
+    meta                ::  map(),
     topic               ::  binary(),
     callback_fun        ::  function(),
     subscription_id     ::  id() | undefined,
@@ -124,10 +127,13 @@ handle_event_sync(Subscriber, Event) ->
 
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
+    Meta = maps:get(meta, Opts0, #{}),
     {ok, Id} = bondy_broker:subscribe(RealmUri, Opts, Topic, self()),
+
     State = #state{
         realm_uri = RealmUri,
-        opts = Opts,
+        opts = maps:without([meta], Opts),
+        meta = Meta,
         topic = Topic,
         callback_fun = Fun,
         subscription_id = Id
@@ -137,11 +143,12 @@ init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
 
 handle_call(info, _From, State) ->
     Info = #{
+        meta => State#state.meta,
+        options => maps:without([subscription_id], State#state.opts),
         realm_uri => State#state.realm_uri,
-        topic => State#state.topic,
-        opts => State#state.topic,
         stats => State#state.stats,
-        subscription_id => State#state.subscription_id
+        subscription_id => State#state.subscription_id,
+        topic => State#state.topic
     },
     {reply, Info, State};
 
@@ -170,7 +177,6 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(#event{} = Event, State) ->
-    %% TODO spawn using sidejob
     case do_handle_event(Event, State) of
         {ok, NewState} ->
             {noreply, NewState};
@@ -195,8 +201,8 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info(Event, State) ->
-    case do_handle_event(Event, State) of
+handle_info(#event{} = WAMPEvent, State) ->
+    case do_handle_event(WAMPEvent, State) of
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason, NewState} ->
@@ -209,11 +215,15 @@ handle_info(Event, State) ->
                     State#state.topic,
                     State#state.subscription_id,
                     self(),
-                    Event
+                    WAMPEvent
                 ]
             ),
             {noreply, NewState}
-    end.
+    end;
+
+handle_info(Event, State) ->
+    _ = lager:debug("Received unknown event; event=~p", [Event]),
+    {noreply, State}.
 
 
 terminate(normal, State) ->
@@ -252,11 +262,14 @@ do_unsubscribe(#state{subscription_id = undefined} = State) ->
 
 do_unsubscribe(#state{subscription_id = Id} = State) ->
     RealmUri = State#state.realm_uri,
-    {bondy_broker:unsubscribe(Id, RealmUri), State#state{subscription_id = undefined}}.
+    {
+        bondy_broker:unsubscribe(Id, RealmUri),
+        State#state{subscription_id = undefined}
+    }.
 
 
 %% @private
-do_handle_event(#event{} = Event, State) ->
+do_handle_event(Event, State) ->
     try (State#state.callback_fun)(State#state.topic, Event) of
         ok ->
             {ok, State};
@@ -276,7 +289,6 @@ do_handle_event(#event{} = Event, State) ->
 
 
 %% @private
-
 retry_handle_event(Event, State, Time, Cnt) ->
     timer:sleep(Time),
     case handle_event(Event, State) of

@@ -18,19 +18,11 @@
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "kafka_bridge.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
-  {datatype, flag},
-  {default, off}
-]}.
 
 
 
 %% =============================================================================
-%% BONDY BROKER BRIDGE CONFIGURATION
+%% BONDY BROKER BRIDGE
 %% =============================================================================
 
 
@@ -44,22 +36,46 @@
 ]}.
 
 
+
+
+
+%% =============================================================================
+%% KAFKA BRIDGE
+%% =============================================================================
+
+
 %% -----------------------------------------------------------------------------
-%% @doc A mapping of names to kafka topics. This mapping is used by the JSON
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.kafka.enabled", "bondy_broker_bridge.bridges.bondy_kafka_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc A mapping of Clients to kafka topics. This mapping is used by the JSON
 %% broker_bridge.config_file which defines the subscribers for each bridge.
+%%
+%% Usage:
+%%
+%% broker_bridge.kafka.topics.<KEY>
+%%
+%% In the config_file you can use the mops expression
+%% `"{{kafka.topics.<KEY>}}"` to get the value assigned.
 %%
 %% Example:
 %%
 %% broker_bridge.kafka.topics.important_events = "com.myapp.events.important"
 %%
 %% In the config_file you can use the mops expression
-%% `"{{kafka.topics |> get(important_events)}}"` to get the value
-%% "com.myapp.events.important" for the name "important_events".
+%% `"{{kafka.topics.important_events}}"` to get the value
+%% "com.myapp.events.important".
+
 %% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.topics.$name", "bondy_broker_bridge.bridges.bondy_kafka_bridge.topics", [
-  {datatype, string},
-  {default, "com.bondy.example"},
-  {include_default, "example"}
+  {datatype, string}
 ]}.
 
 {translation,
@@ -81,11 +97,13 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.kafka.clients.$name.endpoints", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
+{mapping, "broker_bridge.kafka.clients.$name.endpoint", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, ip},
   {default, {"127.0.0.1", 9092}},
   {include_default, "default"}
 ]}.
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -191,7 +209,7 @@ end}.
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
         "broker_bridge.kafka.clients", Conf0),
-    Names = sets:to_list(
+    Clients = sets:to_list(
         sets:from_list(
             lists:foldl(
                 fun(X, Acc) -> [element(4, X) | Acc] end,
@@ -204,6 +222,7 @@ fun(Conf0) ->
         %% Socket Opts
         AllConf = cuttlefish_variable:filter_by_prefix(
             "broker_bridge.kafka.clients." ++ Name, Conf),
+
         SocketConf = cuttlefish_variable:filter_by_prefix(
             "broker_bridge.kafka.clients." ++ Name ++ ".socket", AllConf),
 
@@ -266,5 +285,5 @@ fun(Conf0) ->
 
         [Client | Acc]
     end,
-    lists:foldl(Fun, [], Names)
+    lists:foldl(Fun, [], Clients)
 end}.

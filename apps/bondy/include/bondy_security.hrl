@@ -81,7 +81,6 @@
 %% =============================================================================
 
 
-
 -define(TRUST_AUTH, <<"trust">>).
 -define(PASSWORD_AUTH, <<"password">>).
 -define(CERTIFICATE_AUTH, <<"certificate">>).
@@ -112,7 +111,30 @@
 
 -define(BONDY_REALM, #{
     description => <<"The Bondy administrative realm.">>,
-    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH]
+    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
+    grants => [
+        #{
+            permissions => [
+                <<"wamp.register">>,
+                <<"wamp.unregister">>,
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.call">>,
+                <<"wamp.cancel">>,
+                <<"wamp.publish">>
+            ],
+            uri => <<"*">>,
+            roles => [<<"anonymous">>]
+        }
+    ],
+    sources => [
+        #{
+            usernames => <<"anonymous">>,
+            authmethod => <<"trust">>,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{}
+        }
+    ]
 }).
 
 -define(REALM_SPEC, #{
@@ -375,6 +397,34 @@
     }
 }).
 
+-define(ROLES_DATATYPE, [
+    {in, [<<"all">>, all,  <<"anonymous">>, anonymous]},
+    {list, binary}
+]).
+
+-define(ROLES_VALIDATOR, fun
+    (<<"anonymous">>) ->
+        {ok, anonymous};
+    (<<"all">>) ->
+        {ok, all};
+    (all) ->
+        true;
+    (anonymous) ->
+        true;
+    (List) when is_list(List) ->
+        A = sets:from_list(List),
+        B = sets:from_list([<<"all">>]),
+        case sets:is_disjoint(A, B) of
+            true ->
+                L = lists:map(
+                    fun(<<"anonymous">>) -> anonymous; (X) -> X end,
+                    List
+                ),
+                {ok, L};
+            false ->
+                false
+        end
+end).
 
 -define(SOURCE_SPEC, #{
     <<"usernames">> => #{
@@ -383,22 +433,10 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => [
-            {in, [<<"all">>, all]},
-            {list, binary}
-        ],
-        validator => fun
-            (<<"all">>) ->
-                {ok, all};
-            ("all") ->
-                {ok, all};
-            (all) ->
-                true;
-            (List) ->
-                A = sets:from_list(List),
-                B = sets:from_list([<<"all">>, "all", all]),
-                sets:is_disjoint(A, B)
-        end
+        datatype => ?ROLES_DATATYPE,
+        %% all cannot be mixed anonymous or with custom usernames
+        %% in the same rule
+        validator => ?ROLES_VALIDATOR
     },
     <<"authmethod">> => #{
         alias => authmethod,
@@ -486,13 +524,20 @@
         datatype => binary,
         validator => fun
             (<<"*">>) ->
-                {ok, all};
+                {ok, any};
             (<<"all">>) ->
                 {ok, all};
+            (any) ->
+                true;
             (all) ->
                 true;
             (Uri) when is_binary(Uri) ->
-                true
+                Len = byte_size(Uri) - 1,
+                case binary:matches(Uri, [<<$*>>]) of
+                    [] -> true;
+                    [{Len, 1}] -> true; % a prefix match
+                    [_|_] -> false % illegal
+                end
         end
     },
     <<"roles">> => #{
@@ -501,20 +546,8 @@
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => [
-            {in, [<<"all">>, all]},
-            {list, binary}
-        ],
-        validator => fun
-            (<<"all">>) ->
-                {ok, all};
-            (all) ->
-                true;
-            (List) ->
-                A = sets:from_list(List),
-                B = sets:from_list([<<"all">>, all]),
-                sets:is_disjoint(A, B)
-        end
+        datatype => ?ROLES_DATATYPE,
+        validator => ?ROLES_VALIDATOR
     }
 }).
 

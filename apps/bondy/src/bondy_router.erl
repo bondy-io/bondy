@@ -148,6 +148,7 @@ shutdown() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close_context(bondy_context:t()) -> bondy_context:t().
+
 close_context(Ctxt) ->
     bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
 
@@ -157,6 +158,7 @@ close_context(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec roles() -> #{binary() => #{binary() => boolean()}}.
+
 roles() ->
     ?ROUTER_ROLES.
 
@@ -254,6 +256,7 @@ handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec acknowledge_message(map()) -> boolean().
+
 acknowledge_message(#publish{options = Opts}) ->
     maps:get(acknowledge, Opts, false);
 
@@ -282,31 +285,14 @@ do_forward(#register{} = M, Ctxt) ->
     %% before we reply here.
     %% At the moment this relies on Erlang's guaranteed causal delivery of
     %% messages between two processes even when in different nodes.
-
-    #register{procedure_uri = Uri, options = Opts, request_id = ReqId} = M,
-
-    Reply = case bondy_dealer:register(Uri, Opts, Ctxt) of
-        {ok, Map} ->
-            wamp_message:registered(ReqId, maps:get(id, Map));
-        {error, {not_authorized, Mssg}} ->
-            wamp_message:error(
-                ?REGISTER, ReqId,
-                #{},
-                ?WAMP_NOT_AUTHORIZED,
-                [Mssg]
-            );
-        {error, {procedure_already_exists, Mssg}} ->
-            wamp_message:error(
-                ?REGISTER,
-                ReqId,
-                #{},
-                ?WAMP_PROCEDURE_ALREADY_EXISTS,
-                [Mssg]
-            )
-    end,
-    {reply, Reply, Ctxt};
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
 
 do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    async_forward(M, Ctxt);
+
+do_forward(
+    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
     async_forward(M, Ctxt);
 
 do_forward(

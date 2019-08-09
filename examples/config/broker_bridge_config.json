@@ -1,17 +1,22 @@
 {
-    "id":"com.leapsight.test",
-    "meta":{},
+    "id": "main",
+    "version": "v1.0",
+    "kind": "broker_bridge",
+    "meta": {},
     "subscriptions" : [
         {
             "bridge": "bondy_kafka_bridge",
+            "meta": {
+                "description": "Subscribe to com.leapsight.example_event and produce in kafka.topics.wamp_events."
+            },
             "match": {
                 "realm": "com.leapsight.test",
-                "topic" : "com.example.on_counter",
+                "topic" : "com.leapsight.example_event",
                 "options": {"match": "exact"}
             },
             "action": {
                 "type": "produce_sync",
-                "topic": "{{kafka.topics |> get(wamp_events)}}",
+                "topic": "{{kafka.topics.wamp_events}}",
                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
                 "value": "{{event}}",
                 "options" : {

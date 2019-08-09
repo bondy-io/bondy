@@ -76,7 +76,7 @@ start(_Type, Args) ->
     ok = setup_env(Args),
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
-    ok = disable_aae(),
+    ok = suspend_aae(),
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
@@ -119,15 +119,16 @@ start_phase(init_registry, normal, []) ->
     %% connected. This was a clean way of avoiding new registrations
     %% interfiering with the registry restore and cleanup.
     %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
-    %% longer store the registry on disk, we restore everything from the
-    %% network. However, we kept this step as it is clean and allows us to do
+    %% longer store the registry on disk, just on ram.
+    %% However, we kept this step as it is clean and allows us to do
     %% some validations and preparations.
     bondy_registry:init();
 
 start_phase(restore_aae_config, normal, []) ->
-    ok = maybe_enable_aae(),
+    ok = restore_aae(),
     %% TODO conditionally force an AAE exchange here to get a the
     %% registry in sync with the cluster before init_listeners
+    %% This might take a while.
     ok;
 
 start_phase(init_listeners, normal, []) ->
@@ -173,7 +174,8 @@ setup_env(Args) ->
 
 %% @private
 setup_bondy_realm() ->
-    %% We do a get to force the creation of the bondy realm
+    %% We use get/2 to force the creation of the bondy realm
+    %% if it does not exist.
     _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
     ok.
 
@@ -231,7 +233,7 @@ setup_wamp_subscriptions() ->
 
 
 %% @private
-disable_aae() ->
+suspend_aae() ->
     case plum_db_config:get(aae_enabled, true) of
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
@@ -243,11 +245,11 @@ disable_aae() ->
             ok
     end.
 
-maybe_enable_aae() ->
+restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             ok = plum_db_config:set(aae_enabled, true),
-            _ = lager:info("Active anti-entropy (AAE) enabled");
+            _ = lager:info("Active anti-entropy (AAE) re-enabled");
         false ->
             ok
     end.
@@ -287,3 +289,5 @@ stop_router_services() ->
 
     _ = lager:info("Shutdown finished"),
     ok.
+
+

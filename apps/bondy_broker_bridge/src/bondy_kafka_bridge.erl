@@ -90,6 +90,49 @@
         allow_null => false,
         allow_undefined => false
     },
+    %% partition_buffer_limit(optional, default = 256):
+    %% How many requests (per-partition) can be buffered without blocking the
+    %% caller. The callers are released (by receiving the
+    %% 'brod_produce_req_buffered' reply) once the request is taken into buffer
+    %% and after the request has been put on wire, then the caller may expect
+    %% a reply 'brod_produce_req_acked' when the request is accepted by kafka.
+    <<"partition_buffer_limit">> => #{
+        alias => partition_buffer_limit,
+        required => false,
+        datatype => integer,
+        default => 256,
+        allow_null => false,
+        allow_undefined => false
+    },
+    %% partition_onwire_limit(optional, default = 1):
+    %% How many message sets (per-partition) can be sent to kafka broker
+    %% asynchronously before receiving ACKs from broker.
+    %% NOTE: setting a number greater than 1 may cause messages being persisted
+    %%       in an order different from the order they were produced.
+    <<"partition_onwire_limit">> => #{
+        alias => partition_onwire_limit,
+        required => false,
+        datatype => integer,
+        default => 1,
+        allow_null => false,
+        allow_undefined => false
+    },
+    %% max_batch_size (in bytes, optional, default = 1M):
+    %% In case callers are producing faster than brokers can handle (or
+    %% congestion on wire), try to accumulate small requests into batches
+    %% as much as possible but not exceeding max_batch_size.
+    %% OBS: If compression is enabled, care should be taken when picking
+    %%  the max batch size, because a compressed batch will be produced
+    %%  as one message and this message might be larger than
+    %%  'max.message.bytes' in kafka config (or topic config)
+    <<"max_batch_size">> => #{
+        alias => max_batch_size,
+        required => false,
+        datatype => integer,
+        default => 1024,
+        allow_null => false,
+        allow_undefined => false
+    },
     %% max_retries (optional, default = 3):
     %% If {max_retries, N} is given, the producer retry produce request for
     %% N times before crashing in case of failures like connection being
@@ -115,6 +158,24 @@
         default => 500,
         allow_null => false,
         allow_undefined => false
+    },
+    %% compression (optional, default = no_compression):
+    %%'gzip' or 'snappy' to enable compression
+    <<"compression">> => #{
+        alias => compression,
+        required => true,
+        default => no_compression,
+        allow_null => false,
+        allow_undefined => false,
+        validator => fun
+            (<<"gzip">>) -> {ok, gzip};
+            (<<"snappy">>) -> {ok, snappy};
+            (<<"no_compression">>) -> {ok, no_compression};
+            (gzip) -> true;
+            (snappy) -> true;
+            (no_compression) -> true;
+            (_) -> false
+        end
     },
     %% max_linger_ms (optional, default = 0):
     %% Messages are allowed to 'linger' in buffer for this amount of
@@ -177,9 +238,11 @@
     <<"type">> => #{
         alias => type,
         required => true,
+        default => <<"produce_sync">>,
         allow_null => false,
         allow_undefined => false,
-        datatype => {in, [<<"produce">>, <<"produce_sync">>]}
+        %% datatype => {in, [<<"produce">>, <<"produce_sync">>]}
+        datatype => {in, [<<"produce_sync">>]}
     },
     <<"topic">> => #{
         alias => topic,
@@ -244,11 +307,11 @@ init(Config) ->
             {ok, Clients} = application:get_env(brod, clients),
             [
                 begin
-                    case lists:keyfind(endpoints, 1, Opts) of
+                    case lists:keyfind(endpoint, 1, Opts) of
                         false ->
                             error(badarg);
-                        {endpoints, Endpoints} ->
-                            ok = brod:start_client(Endpoints, Name, Opts)
+                        {endpoint, Endpoint} ->
+                            ok = brod:start_client([Endpoint], Name, Opts)
                     end
                 end || {Name, Opts} <- Clients
             ],
@@ -267,7 +330,7 @@ init(Config) ->
 %% @doc Validates the action specification.
 %% An action spec is a map containing the following keys:
 %%
-%% * `type :: binary()' - either `<<"produce">>' or `<<"produce_sync">>'. Optional, the default value is `<<"produce">>'.
+%% * `type :: binary()' - `<<"produce_sync">>'. Optional, the default value is `<<"produce_sync">>'.
 %% * `topic :: binary()' - the Kafka topic we should produce to.
 %% * `key :: binary()' - the kafka message's key
 %% * `value :: any()' - the kafka message's value
@@ -328,16 +391,16 @@ apply_action(Action) ->
         Data = bondy_utils:maybe_encode(Enc, Value),
 
         Result = case ActionType of
+            %% <<"produce">> ->
+            %%     brod:produce(Client, Topic, Part, Key, Data);
             <<"produce_sync">> ->
-                brod:produce_sync(Client, Topic, Part, Key, Data);
-            <<"produce">> ->
-                brod:produce(Client, Topic, Part, Key, Data)
+                brod:produce_sync(Client, Topic, Part, Key, Data)
         end,
 
         case Result of
             ok ->
                 ok;
-            {ok, _} ->
+            {ok, _Offset} ->
                 ok;
             {error, client_down} ->
                 {retry, client_down};

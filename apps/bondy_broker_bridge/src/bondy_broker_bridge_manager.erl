@@ -20,7 +20,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc This module provides event bridging functionality, allowing
 %% a supervised process (implemented via bondy_subscriber) to subscribe to WAMP
-%% events and to process and or forward those events to an external system,
+%% events and process and/or forward those events to an external system,
 %% e.g. publish to another message broker.
 %%
 %% A subscription can be created at runtime using the `subscribe/5',
@@ -28,8 +28,7 @@
 %% environment variable which should have the filename of a valid
 %% Broker Bridge Specification File.
 %%
-%%
-%% Each broker bridge is implemented as a callback module implementing the
+%% Each broker bridge is implemented as a module implementing the
 %% bondy_broker_bridge behaviour.
 %%
 %% ## Action Specification Map.
@@ -37,6 +36,7 @@
 %% ## `mops' Evaluation Context
 %%
 %% The mops context is map containing the following:
+%%
 %% ```erlang
 %% #{
 %%     <<"broker">> => #{
@@ -58,6 +58,42 @@
 %%
 %% ## Broker Bridge Specification File.
 %%
+%% Example:
+%%
+%% ```json
+%% {
+%%     "id":"com.leapsight.test",
+%%     "meta":{},
+%%     "subscriptions" : [
+%%         {
+%%             "bridge": "bondy_kafka_bridge",
+%%             "match": {
+%%                 "realm": "com.leapsight.test",
+%%                 "topic" : "com.leapsight.example_event",
+%%                 "options": {"match": "exact"}
+%%             },
+%%             "action": {
+%%                 "type": "produce_sync",
+%%                 "topic": "{{kafka.topics.wamp_events}}",
+%%                 "key": "\"{{event.topic}}/{{event.publication_id}}\"",
+%%                 "value": "{{event}}",
+%%                 "options" : {
+%%                     "client_id": "default",
+%%                     "acknowledge": true,
+%%                     "required_acks": "all",
+%%                     "partition": null,
+%%                     "partitioner": {
+%%                         "algorithm": "fnv32a",
+%%                         "value": "\"{{event.topic}}/{{event.publication_id}}\""
+%%                     },
+%%                     "encoding": "json"
+%%                 }
+%%             }
+%%         }
+%%     ]
+%% }
+%% '''
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_broker_bridge_manager).
@@ -76,9 +112,30 @@
         allow_undefined => false,
         datatype => binary
     },
+    <<"kind">> => #{
+        alias => id,
+        required => true,
+        default => <<"broker_bridge">>,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {in, [<<"broker_bridge">>]}
+    },
+    <<"version">> => #{
+        alias => version,
+        default => <<"v1.0">>,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {in, [
+            <<"v1.0">>
+        ]}
+    },
     <<"meta">> => #{
         alias => meta,
-        required => false,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => maps:new(),
         datatype => map
     },
     <<"subscriptions">> => #{
@@ -91,6 +148,14 @@
 }).
 
 -define(SUBS_SPEC, #{
+    <<"meta">> => #{
+        alias => meta,
+        required => true,
+        allow_null => false,
+        allow_undefined => false,
+        default => maps:new(),
+        datatype => map
+    },
     <<"bridge">> => #{
         alias => bridge,
         required => true,
@@ -155,8 +220,7 @@
 -record(state, {
     nodename                        ::  binary(),
     broker_agent                    ::  binary(),
-    bridges = #{}                   ::  #{module() => bridge()},
-    enabled = false                 ::  boolean()
+    bridges = #{}                   ::  #{module() => bridge()}
     %% Cluster sync state
     %% exchange_ref            ::  {pid(), reference()} | undefined,
     %% updated_specs = []      ::  list()
@@ -272,6 +336,7 @@ subscriptions(BridgeId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec validate_spec(map()) -> {ok, map()} | {error, any()}.
+
 validate_spec(Map) ->
     try
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
@@ -292,13 +357,11 @@ validate_spec(Map) ->
 
 init([]) ->
     %% We store the bridges configurations provided
-    Enabled = application:get_env(bondy_broker_bridge, enabled, false),
     Bridges = application:get_env(bondy_broker_bridge, bridges, []),
     BridgesMap = maps:from_list(
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
-        enabled = Enabled,
         nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
@@ -359,44 +422,6 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-%% handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
-%%     Ref = erlang:monitor(process, Pid),
-%%     {noreply, State#state{exchange_ref = {Pid, Ref}}};
-
-%% handle_info(
-%%     {plum_db_event, exchange_finished, {Pid, _Reason}},
-%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-%%     true = erlang:demonitor(Ref),
-%%     %% ok = handle_spec_updates(State0),
-%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-%%     {noreply, State1};
-
-%% handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
-%%     %% We are receiving the notification after we recevied a DOWN message
-%%     %% we do nothing
-%%     {noreply, State};
-
-%% handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
-%%     %% We've got a notification that an API Spec object has been updated
-%%     %% in the database via cluster replication, so we need to rebuild the
-%%     %% Cowboy dispatch tables
-%%     %% But since Specs depend on other objects being present and we also want
-%%     %% to avoid rebuilding the dispatch table multiple times, we just set a
-%%     %% flag on the state to rebuild the dispatch tables once we received an
-%%     %% exchange_finished event,
-%%     _ = lager:info("API Spec object_update received; key=~p", [Key]),
-%%     Acc = State#state.updated_specs,
-%%     {noreply, State#state{updated_specs = [Key|Acc]}};
-
-%% handle_info(
-%%     {'DOWN', Ref, process, Pid, _Reason},
-%%     #state{exchange_ref = {Pid, Ref}} = State0) ->
-
-%%     %% ok = handle_spec_updates(State0),
-%%     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
-%%     {noreply, State1};
-
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     _ = lager:debug("Subscriber down, pid=~p", [Pid]),
     %% TODO
@@ -426,8 +451,6 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
@@ -435,16 +458,14 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_bridges(#state{enabled = false} = State) ->
-    {ok, State};
-
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
-        Fun = fun(Mod, #{config := Config} = Bridge, Acc) ->
+        Fun = fun(Mod, #{config := Config}, Acc) ->
             case Mod:init(Config) of
                 {ok, Ctxt} when is_map(Ctxt) ->
-                    maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                    maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
+                    %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
                 {error, Reason} ->
                     error(Reason)
             end
@@ -487,7 +508,9 @@ do_terminate(Reason, State) ->
 load_config(Map, State) when is_map(Map) ->
     case validate_spec(Map) of
         {ok, Spec} ->
-            #{<<"subscriptions">> := Subscriptions} = Spec,
+            #{<<"subscriptions">> := L} = Spec,
+            %% We make sure all subscriptions are unique
+            Subscriptions = sets:to_list(sets:from_list(L)),
             %% We instantiate the subscribers
             Folder = fun(Subs, Acc) ->
                 {ok, _, _} = do_subscribe(Subs, Acc),
@@ -542,21 +565,14 @@ load_config(_, State) ->
 mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
     %% mops requiere binary keys
     Base = maps:get(ctxt, bridge(Bridge)),
+    CtxtEvent = bondy_broker_bridge_event:new(RealmUri, Topic, Event),
+
     Base#{
         <<"broker">> => #{
             <<"node">> => State#state.nodename,
             <<"agent">> => State#state.broker_agent
         },
-        <<"event">> => #{
-            <<"realm">> => RealmUri,
-            <<"topic">> => Topic,
-            <<"subscription_id">> => Event#event.subscription_id,
-            <<"publication_id">> => Event#event.publication_id,
-            <<"details">> => Event#event.details,
-            <<"arguments">> => Event#event.arguments,
-            <<"arguments_kw">> => Event#event.arguments_kw,
-            <<"ingestion_timestamp">> => erlang:system_time(millisecond)
-        }
+        <<"event">> => CtxtEvent
     }.
 
 
@@ -568,10 +584,11 @@ mops_ctxt(Event, RealmUri, _Opts, Topic, Bridge, State) ->
 do_subscribe(Subscription, State) ->
     #{
         <<"bridge">> := Bridge,
+        <<"meta">> := Meta,
         <<"match">> := #{
             <<"realm">> := RealmUri,
             <<"topic">> := Topic,
-            <<"options">> := Opts
+            <<"options">> := Opts0
         },
         <<"action">> := Action
     } = Subscription,
@@ -580,7 +597,8 @@ do_subscribe(Subscription, State) ->
         undefined ->
             error({unknown_bridge, Bridge});
         #{id := Bridge} ->
-            do_subscribe(RealmUri, Opts, Topic, Bridge, Action, State)
+            Opts1 = maps:put(meta, Meta, Opts0),
+            do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
     end.
 
 
@@ -593,7 +611,7 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
     try
         %% We build the fun that we will use for the subscriber
         Fun = fun
-            (Topic1, Event) when Topic1 == Topic ->
+            (Topic1, #event{} = Event) when Topic1 == Topic ->
                 Ctxt = mops_ctxt(Event, RealmUri, Opts, Topic, Bridge, State),
                 Action1 = mops:eval(Action0, Ctxt),
                 case Bridge:validate_action(Action1) of
@@ -603,10 +621,7 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
                         Bridge:apply_action(Action2);
                     {error, Reason} ->
                         throw({invalid_action, Reason})
-                end;
-            (_Topic1, {brod_produce_reply, _ ,brod_produce_req_acked}) ->
-                %% Required to handle in case of Action.type == produce (async)
-                ok
+                end
         end,
         %% We use bondy_broker subscribers, this is an intance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup
@@ -660,8 +675,6 @@ subscribers(Bridge) ->
 
 %% @private
 get_subscriptions(Bridge) ->
-    [{gproc:get_value({r, l, subscription_id}, Pid), Pid}
-        || Pid <- subscribers(Bridge)].
-
+    [bondy_subscriber:info(Pid) || Pid <- subscribers(Bridge)].
 
 

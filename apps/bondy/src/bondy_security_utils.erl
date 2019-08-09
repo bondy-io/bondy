@@ -28,14 +28,15 @@
                                         | invalid_scheme
                                         | no_such_realm.
 
--type auth_scheme()                 ::  wampcra | basic | bearer | digest.
--type auth_scheme_val()             ::  {wampcra, binary(), binary(), map()}
+-type auth_scheme()                 ::  basic | bearer | digest | hmac.
+-type auth_scheme_val()             ::  {hmac, binary(), binary(), binary()}
                                         | {basic, binary(), binary()}
                                         | {bearer, binary()}
                                         | {digest, [{binary(), binary()}]}.
 
 
 -export([authenticate/4]).
+-export([authorize/3]).
 
 
 %% =============================================================================
@@ -49,14 +50,18 @@
 %% -----------------------------------------------------------------------------
 -spec authenticate(
     auth_scheme(), auth_scheme_val(), uri(), bondy_session:peer()) ->
-    {ok, bondy_security:context() | map()} | {error, auth_error_reason()}.
+    {ok, bondy_security:context() | map()}
+    | {error, auth_error_reason()}.
 
-authenticate(?TICKET_AUTH, {?TICKET_AUTH, AuthId, Signature}, Realm, Peer) ->
-    authenticate(basic, {basic, AuthId, Signature}, Realm, Peer);
+authenticate(hmac, {hmac, AuthId, Sign, Sign}, Realm, Peer) ->
+    PW = bondy_security_user:password(Realm, AuthId),
+    HashedPass = maps:get(hash_pass, PW),
+    ConnInfo = conn_info(Peer),
+    bondy_security:authenticate(Realm, AuthId, {hash, HashedPass}, ConnInfo);
 
-authenticate(?WAMPCRA_AUTH, {?WAMPCRA_AUTH, AuthId, Signature}, Realm, Peer) ->
-    bondy_security:authenticate(
-        Realm, AuthId, {hash, Signature}, conn_info(Peer));
+authenticate(hmac, {hmac, _, _, _}, _, _) ->
+    %% Signatures do not match
+    {error, bad_password};
 
 authenticate(bearer, {bearer, Token}, Realm, _Peer) ->
     bondy_oauth2:verify_jwt(Realm, Token);
@@ -77,11 +82,73 @@ authenticate(_, _Scheme, _Realm, _Peer) ->
 
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns 'ok' or an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authorize(binary(), binary(), bondy_context:t()) ->
+    ok | no_return().
+
+authorize(Permission, Resource, Ctxt) ->
+    %% We could be cashing the security ctxt,
+    %% the data is in ets so it should be pretty fast.
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    IsEnabled = bondy_realm:is_security_enabled(RealmUri),
+    maybe_authorize(IsEnabled, Permission, Resource, Ctxt).
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
 
+
+%% @private
+maybe_authorize(true, Permission, Resource, Ctxt) ->
+    SecCtxt = get_security_context(Ctxt),
+    do_authorize(Permission, Resource, SecCtxt);
+
+maybe_authorize(false, _, _, _) ->
+    ok.
+
+
+%% @private
+get_security_context(Ctxt) ->
+    case bondy_context:is_anonymous(Ctxt) of
+        true ->
+            get_anonymous_context(Ctxt);
+        false ->
+            AuthId = bondy_context:authid(Ctxt),
+            RealmUri = bondy_context:realm_uri(Ctxt),
+            bondy_security:get_context(RealmUri, AuthId)
+    end.
+
+
+%% @private
+get_anonymous_context(Ctxt) ->
+    case bondy_config:get(allow_anonymous_user, true) of
+        true ->
+            AuthId = bondy_context:authid(Ctxt),
+            RealmUri = bondy_context:realm_uri(Ctxt),
+            bondy_security:get_anonymous_context(RealmUri, AuthId);
+        false ->
+            error({not_authorized, <<"Anonymous user not allowed.">>})
+    end.
+
+
+%% @private
+do_authorize(Permission, Resource, SecCtxt) ->
+    case bondy_security:check_permission({Permission, Resource}, SecCtxt) of
+        {true, _SecCtxt1} ->
+            ok;
+        {false, Mssg, _SecCtxt1} ->
+            error({not_authorized, Mssg})
+    end.
+
+
 %% @private
 conn_info({IP, _Port}) ->
     [{ip, IP}].
+

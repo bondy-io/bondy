@@ -105,20 +105,16 @@ handle_call(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(
-    #call{procedure_uri = ?LIST} = M,
-    Ctxt) ->
+handle_call(#call{procedure_uri = ?LIST} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0) of
-        {ok, [_]} ->
+        {ok, []} ->
             bondy_wamp_utils:maybe_error(catch bondy_api_gateway:list(), M);
         {error, WampError} ->
             WampError
     end,
     bondy:send(bondy_context:peer_id(Ctxt), R);
 
-handle_call(
-    #call{procedure_uri = ?LOOKUP} = M,
-    Ctxt) ->
+handle_call(#call{procedure_uri = ?LOOKUP} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
         {ok, [Id]} ->
             bondy_wamp_utils:maybe_error(catch bondy_api_gateway:lookup(Id), M);

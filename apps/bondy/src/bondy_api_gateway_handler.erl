@@ -49,6 +49,7 @@
     realm_uri => binary(),
     deprecated => boolean(),
     security => map(),
+    is_anonymous => boolean(),
     encoding => binary() | json | msgpack
 }.
 
@@ -129,35 +130,40 @@ options(Req, #{api_spec := Spec} = St) ->
     {ok, cowboy_req:set_resp_headers(Headers2, Req), St}.
 
 
-is_authorized(Req0, St) ->
+is_authorized(Req0, St0) ->
     try
-        Realm = bondy_realm:fetch(maps:get(realm_uri, St)),
+        Realm = bondy_realm:fetch(maps:get(realm_uri, St0)),
         RealmUri = bondy_realm:uri(Realm),
         case cowboy_req:method(Req0) of
-            <<"OPTIONS">> -> {true, Req0, St};
-            _ -> do_is_authorised(Req0, RealmUri, St)
+            <<"OPTIONS">> ->
+                St1 = St0#{is_anonymous => true},
+                {true, Req0, St1};
+            _ ->
+                do_is_authorized(Req0, RealmUri, St0)
         end
     catch
         ?EXCEPTION(error, no_such_realm = Reason, _) ->
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
-            {stop, Req1, St};
+            {stop, Req1, St0};
         ?EXCEPTION(Class, Reason, Stacktrace) ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
                 [Class, Reason, ?STACKTRACE(Stacktrace)],
-                St
+                St0
             ),
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
+            {StatusCode, Body} = take_status_code(
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
-            {stop, Req1, St}
+            {stop, Req1, St0}
     end.
 
 
 rate_limited(Req, St) ->
+    %% TODO implement this callback
     %% Result :: false | {true, RetryAfter}
     {false, Req, St}.
 
@@ -188,6 +194,7 @@ previously_existed(Req, St) ->
     %% TODO
     {false, Req, St}.
 
+
 delete_resource(Req0, #{api_spec := Spec} = St0) ->
     Method = method(Req0),
     Enc = json,
@@ -211,8 +218,6 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St2}
     end.
-
-
 
 
 delete_completed(Req, St) ->
@@ -247,12 +252,15 @@ accept(Req0, St0) ->
     do_accept(Req0, St0#{encoding => ContentType}).
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+
 %% @private
-do_is_authorised(
+do_is_authorized(
     Req0, Realm, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
@@ -288,13 +296,18 @@ do_is_authorised(
             {stop, Req2, St0}
     end;
 
-do_is_authorised(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+do_is_authorized(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    {true, Req, St};
+    _ = lager:info(
+        "Request is using unsupported api_key authentication scheme; "
+        "request=~p", [Req]
+    ),
+    {false, Req, St};
 
-do_is_authorised(Req, _, #{security := _} = St)  ->
-    {true, Req, St}.
+do_is_authorized(Req, _, #{security := _} = St0)  ->
+    St1 = St0#{is_anonymous => true},
+    {true, Req, St1}.
 
 
 %% -----------------------------------------------------------------------------
@@ -439,6 +452,7 @@ take_status_code(ErrorBody, Default) ->
             Res
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Creates a context object based on the passed Request
@@ -472,6 +486,7 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
         [<<"request">>, <<"body_length">>], byte_size(Body), Ctxt1).
 
 
+%% @private
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
     Id = opencensus:generate_trace_id(),
@@ -582,7 +597,6 @@ decode_body_in_context(_, #{api_context := Ctxt} = St) ->
     maps:update(api_context, maps_utils:put_path(Path, <<>>, Ctxt), St).
 
 
-
 %% @private
 -spec perform_action(binary(), map(), state()) ->
     {ok, Response :: any(), state()}
@@ -678,7 +692,7 @@ perform_action(
     } = mops_eval(Act, ApiCtxt0),
     RSpec = maps:get(<<"response">>, Spec),
 
-    %% @TODO We need to recreate ctxt and session from token
+    %% TODO We need to recreate ctxt and session from JWT
     Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
     SessionOpts = #{
@@ -701,7 +715,9 @@ perform_action(
     Ctxt2 = bondy_context:set_session(Ctxt1, Session),
     Ctxt3 = bondy_context:set_call_timeout(Ctxt2, CallTimeout),
 
-    case bondy:call(P, Opts, A, Akw, Ctxt3) of
+    Ctxt4 = maybe_anonymous(Ctxt3, St0),
+
+    case bondy:call(P, Opts, A, Akw, Ctxt4) of
         {ok, Result0, _} ->
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
@@ -721,6 +737,15 @@ perform_action(
             {error, StatusCode1, Response1, St2}
     end.
 
+
+%% @private
+maybe_anonymous(Ctxt0, #{is_anonymous := true}) ->
+    AuthId = bondy_utils:uuid(),
+    Ctxt1 = bondy_context:set_is_anonymous(Ctxt0, true),
+    Ctxt1#{authid => AuthId};
+
+maybe_anonymous(Ctxt, _) ->
+    bondy_context:set_is_anonymous(Ctxt, false).
 
 
 %% @private

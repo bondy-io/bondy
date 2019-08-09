@@ -95,6 +95,7 @@
 
 
 -spec close_context(bondy_context:t()) -> bondy_context:t().
+
 close_context(Ctxt) ->
     try
         %% Cleanup subscriptions for context's session
@@ -136,15 +137,15 @@ is_feature_enabled(F) when is_binary(F) ->
 %% message to the broker worker pool).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(M :: wamp_message(), Ctxt :: bondy_context:t()) -> ok.
+-spec handle_message(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
+    ok | no_return().
 
 handle_message(#subscribe{} = M, Ctxt) ->
-    subscribe(M, Ctxt);
+    maybe_subscribe(M, Ctxt);
 
 handle_message(#unsubscribe{} = M, Ctxt) ->
     ReqId = M#unsubscribe.request_id,
-    SubsId = M#unsubscribe.subscription_id,
-    Reply = case unsubscribe(SubsId, Ctxt) of
+    Reply = case maybe_unsubscribe(M, Ctxt) of
         ok ->
             wamp_message:unsubscribed(ReqId);
         {error, not_found} ->
@@ -155,48 +156,7 @@ handle_message(#unsubscribe{} = M, Ctxt) ->
     bondy:send(bondy_context:peer_id(Ctxt), Reply);
 
 handle_message(#publish{} = M, Ctxt) ->
-    %% (RFC) Asynchronously notifies all subscribers of the published event.
-    %% Note that the _Publisher_ of an event will never receive the
-    %% published event even if the _Publisher_ is also a _Subscriber_ of the
-    %% topic published to.
-    ReqId = M#publish.request_id,
-    Opts = M#publish.options,
-    TopicUri = M#publish.topic_uri,
-    Args = M#publish.arguments,
-    Payload = M#publish.arguments_kw,
-    Acknowledge = maps:get(acknowledge, Opts, false),
-    %% (RFC) By default, publications are unacknowledged, and the _Broker_ will
-    %% not respond, whether the publication was successful indeed or not.
-    %% This behavior can be changed with the option
-    %% "PUBLISH.Options.acknowledge|bool"
-    %% We publish first to the local subscribers and if succeed we forward to
-    %% cluster peers
-    case publish(ReqId, Opts, TopicUri, Args, Payload, Ctxt) of
-        {ok, PubId} when Acknowledge == true ->
-            Reply = wamp_message:published(ReqId, PubId),
-            ok = bondy:send(bondy_context:peer_id(Ctxt), Reply),
-            ok;
-        {ok, _} ->
-            ok;
-        {error, not_authorized} when Acknowledge == true ->
-            Reply = wamp_message:error(
-                ?PUBLISH, ReqId, #{}, ?WAMP_NOT_AUTHORIZED),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply);
-        {error, Reason} when Acknowledge == true ->
-            ErrorMap = bondy_error:map(?WAMP_CANCELLED, Reason),
-            Reply = wamp_message:error(
-                ?PUBLISH,
-                ReqId,
-                #{},
-                ?WAMP_CANCELLED,
-                [maps:get(<<"message">>, ErrorMap)],
-                ErrorMap
-            ),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply);
-        {error, _} ->
-            ok
-    end.
-
+    maybe_publish(M, Ctxt).
 
 
 
@@ -255,6 +215,7 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     Args :: [],
     ArgsKw :: map(),
     bondy_context:t()) -> {ok, id()} | {error, any()}.
+
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
     publish(bondy_utils:get_id(global), Opts, TopicUri, Args, ArgsKw, Ctxt).
 
@@ -282,7 +243,16 @@ when is_map(Ctxt) ->
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         ?EXCEPTION(_, Reason, Stacktrace) ->
-            _ = lager:error("Error while publishing; reason=~p, stacktrace=~p", [Reason, ?STACKTRACE(Stacktrace)]),
+            _ = lager:error(
+                "Error while publishing; reason=~p, "
+                "topic=~p, session_id=~p, stacktrace=~p",
+                [
+                    Reason,
+                    TopicUri,
+                    bondy_context:session_id(Ctxt),
+                    ?STACKTRACE(Stacktrace)
+                ]
+            ),
             {error, Reason}
     end.
 
@@ -491,7 +461,7 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 -spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
 
 unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
-    case bondy_registry:lookup(subscription, RealmUri, SubsId) of
+    case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
         Entry ->
@@ -518,10 +488,155 @@ unsubscribe(SubsId, Ctxt) ->
     end.
 
 
+
+
+
+
+%% =============================================================================
+%% PRIVATE: AUTHORIZATION
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_subscribe(M, Ctxt) ->
+    TopicUri = M#subscribe.topic_uri,
+    try bondy_security_utils:authorize(<<"wamp.subscribe">>, TopicUri, Ctxt) of
+        ok ->
+            subscribe(M, Ctxt)
+    catch
+        error:{not_authorized, Reason} ->
+            Reply = not_authorized_error(Reason, M, Ctxt),
+            bondy:send(bondy_context:peer_id(Ctxt), Reply),
+            ok
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_unsubscribe(M, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    SubsId = M#unsubscribe.subscription_id,
+    case bondy_registry:lookup(subscription, SubsId, RealmUri) of
+        {error, not_found} = Error ->
+            Error;
+        Entry ->
+            TopicUri = bondy_registry_entry:uri(Entry),
+            maybe_unsubscribe(TopicUri, M, Ctxt)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc used by maybe_unsubscribe/2
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_unsubscribe(Topic, M, Ctxt) ->
+    try
+        _ = bondy_security_utils:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
+        SubsId = M#unsubscribe.subscription_id,
+        unsubscribe(SubsId, Ctxt)
+    catch
+        error:{not_authorized, Reason} ->
+            Reply = not_authorized_error(Reason, M, Ctxt),
+            bondy:send(bondy_context:peer_id(Ctxt), Reply),
+            ok
+    end.
+
+
+
+maybe_publish(M, Ctxt) ->
+
+    Opts = M#publish.options,
+    Acknowledge = maps:get(acknowledge, Opts, false),
+
+    try
+        Topic = M#publish.topic_uri,
+        ok = bondy_security_utils:authorize(<<"wamp.publish">>, Topic, Ctxt),
+        %% (RFC) Asynchronously notifies all subscribers of the published event.
+        %% Note that the _Publisher_ of an event will never receive the
+        %% published event even if the _Publisher_ is also a _Subscriber_ of the
+        %% topic published to.
+        ReqId = M#publish.request_id,
+        Args = M#publish.arguments,
+        Payload = M#publish.arguments_kw,
+        %% (RFC) By default, publications are unacknowledged, and the _Broker_
+        %% will not respond, whether the publication was successful indeed or
+        %% not.
+        %% This behavior can be changed with the option
+        %% "PUBLISH.Options.acknowledge|bool"
+        %% We publish first to the local subscribers and if succeed we forward
+        %% to cluster peers
+        case publish(ReqId, Opts, Topic, Args, Payload, Ctxt) of
+            {ok, PubId} when Acknowledge == true ->
+                Reply = wamp_message:published(ReqId, PubId),
+                ok = bondy:send(bondy_context:peer_id(Ctxt), Reply),
+                ok;
+            {ok, _} ->
+                ok;
+            {error, not_authorized} when Acknowledge == true ->
+                Reply = wamp_message:error(
+                    ?PUBLISH, ReqId, #{}, ?WAMP_NOT_AUTHORIZED),
+                bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            {error, Reason} when Acknowledge == true ->
+                ErrorMap = bondy_error:map(?WAMP_CANCELLED, Reason),
+                Reply = wamp_message:error(
+                    ?PUBLISH,
+                    ReqId,
+                    #{},
+                    ?WAMP_CANCELLED,
+                    [maps:get(<<"message">>, ErrorMap)],
+                    ErrorMap
+                ),
+                bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            {error, _} ->
+                ok
+        end
+    catch
+        error:{not_authorized, AReason} when Acknowledge == true ->
+            bondy:send(
+                bondy_context:peer_id(Ctxt),
+                not_authorized_error(AReason, M, Ctxt)
+            ),
+            ok;
+        error:{not_authorized, _} ->
+            ok
+    end.
+
+%% @private
+not_authorized_error(Reason, #subscribe{} = M, Ctxt) ->
+    not_authorized_error(?SUBSCRIBE, M#subscribe.request_id, Reason, Ctxt);
+
+not_authorized_error(Reason, #unsubscribe{} = M, Ctxt) ->
+    not_authorized_error(?UNSUBSCRIBE, M#unsubscribe.request_id, Reason, Ctxt);
+
+not_authorized_error(Reason, #publish{} = M, Ctxt) ->
+    not_authorized_error(?PUBLISH, M#publish.request_id, Reason, Ctxt).
+
+
+%% @private
+not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
+    wamp_message:error(
+        Type,
+        ReqId,
+        #{},
+        ?WAMP_NOT_AUTHORIZED,
+        [Mssg],
+        #{message => Mssg}
+    ).
+
+
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 
 
@@ -536,6 +651,7 @@ subscribe(M, Ctxt) ->
     ReqId = M#subscribe.request_id,
     Opts = M#subscribe.options,
     Topic = M#subscribe.topic_uri,
+
     PeerId = bondy_context:peer_id(Ctxt),
     %% TODO check authorization and reply with wamp.error.not_authorized if not
 
