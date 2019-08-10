@@ -461,14 +461,20 @@ code_change(_OldVsn, State, _Extra) ->
 init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
-        Fun = fun(Mod, #{config := Config}, Acc) ->
-            case Mod:init(Config) of
-                {ok, Ctxt} when is_map(Ctxt) ->
-                    maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
-                    %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
-                {error, Reason} ->
-                    error(Reason)
-            end
+        Fun = fun
+            (Mod, #{config := Config}, Acc) ->
+                case lists:keyfind(enabled, 1, Config) of
+                    {enabled, false} ->
+                        Acc;
+                    {enabled, true} ->
+                        case Mod:init(Config) of
+                            {ok, Ctxt} when is_map(Ctxt) ->
+                                maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
+                                %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                            {error, Reason} ->
+                                error(Reason)
+                        end
+                end
         end,
         Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
         {ok, State#state{bridges = Bridges1}}
