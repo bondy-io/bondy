@@ -37,10 +37,11 @@ while getopts 'hi:o:' option; do
     esac
 done
 
-if ((OPTIND == 1)); then
+if (($OPTIND == 1)); then
     echo "No options specified"
 fi
 
+# shift so that $@, $1, etc. refer to the non-option arguments
 shift $((OPTIND -1))
 
 if ! $iflag; then
