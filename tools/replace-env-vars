@@ -1,8 +1,8 @@
 
 #!/bin/bash
 ## =============================================================================
-##  replaceosvars.sh - Takes a file and generates another file by substituting all
-##  instances of variables i.e. the string ${VARNAME}, with the environment
+##  replaceosvars.sh - Takes a file and generates another file by substituting
+##  all instances of variables i.e. the string ${VARNAME}, with the environment
 ##  variable value of the same variable name i.e. VARNAME.
 ##
 ##  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
