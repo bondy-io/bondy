@@ -226,13 +226,17 @@ fun(Conf0) ->
         EndpointsConf = cuttlefish_variable:filter_by_prefix(
             "broker_bridge.kafka.clients." ++ Name ++ ".endpoints", AllConf),
 
-        [{[_, _, _, Name, "endpoints"], EndpointsString}] = EndpointsConf,
-        Endpoints = case erl_scan:string(EndpointsString ++ ".") of
-          {ok, Tokens, _} ->
-            {ok, Term} = erl_parse:parse_term(Tokens),
-            Term;
-          {error, Reason} ->
-            error({invalid_endpoints, Reason})
+        Endpoints = case EndpointsConf of
+          [{[_, _, _, Name, "endpoints"], EndpointsString}] ->
+            case erl_scan:string(EndpointsString ++ ".") of
+              {ok, Tokens, _} ->
+                {ok, Term} = erl_parse:parse_term(Tokens),
+                Term;
+              {error, Reason} ->
+                error({invalid_endpoints, Reason})
+            end;
+          _ ->
+            []
         end,
 
 

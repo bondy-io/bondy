@@ -310,6 +310,8 @@ init(Config) ->
                     case lists:keyfind(endpoints, 1, Opts) of
                         false ->
                             error(badarg);
+                        {endpoint, []} ->
+                            error(badarg);
                         {endpoints, Endpoints} when is_list(Endpoints) ->
                             ok = brod:start_client(Endpoints, Name, Opts)
                     end
