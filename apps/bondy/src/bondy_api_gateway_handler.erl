@@ -50,6 +50,7 @@
     deprecated => boolean(),
     security => map(),
     is_anonymous => boolean(),
+    auth_id => binary() | undefined,
     encoding => binary() | json | msgpack
 }.
 
@@ -91,6 +92,7 @@ init(Req, St0) ->
     %     bondy_context:new(), cowboy_req:peer(Req)),
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
+        auth_id => undefined,
         body_evaluated => false,
         api_context => init_context(Req),
         session => Session,
@@ -132,18 +134,14 @@ options(Req, #{api_spec := Spec} = St) ->
 
 is_authorized(Req0, St0) ->
     try
-        Realm = bondy_realm:fetch(maps:get(realm_uri, St0)),
-        RealmUri = bondy_realm:uri(Realm),
-        case cowboy_req:method(Req0) of
-            <<"OPTIONS">> ->
-                St1 = St0#{is_anonymous => true},
-                {true, Req0, St1};
-            _ ->
-                do_is_authorized(Req0, RealmUri, St0)
-        end
+        %% We validate realm exists
+        _Realm = bondy_realm:fetch(maps:get(realm_uri, St0)),
+        is_authorized(cowboy_req:method(Req0), Req0, St0)
+
     catch
         ?EXCEPTION(error, no_such_realm = Reason, _) ->
-            {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
+            {StatusCode, Body} = take_status_code(
+                bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St0};
@@ -260,24 +258,31 @@ accept(Req0, St0) ->
 
 
 %% @private
-do_is_authorized(
-    Req0, Realm, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
+is_authorized(<<"OPTIONS">>, Req, St0) ->
+    St1 = St0#{is_anonymous => true},
+    {true, Req, St1};
+
+is_authorized(
+    _, Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     Val = cowboy_req:parse_header(<<"authorization">>, Req0),
     Peer = cowboy_req:peer(Req0),
+    Realm = maps:get(realm_uri, St0),
+
     case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
         {ok, Claims} when is_map(Claims) ->
             %% The token claims
             Ctxt = update_context(
                 {security, Claims}, maps:get(api_context, St0)),
             St1 = maps:update(api_context, Ctxt, St0),
-            {true, Req0, St1};
+            St2 = maps:put(authid, maps:get(<<"sub">>, Claims), St1),
+            {true, Req0, St2};
         {ok, AuthCtxt} ->
             %% TODO Here we need the token or the session with the
             %% token grants and not the AuthCtxt
             St1 = St0#{
-                user_id => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
+                authid => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
             },
             %% TODO update context
             {true, Req0, St1};
@@ -296,7 +301,7 @@ do_is_authorized(
             {stop, Req2, St0}
     end;
 
-do_is_authorized(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
+is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
     _ = lager:info(
@@ -305,7 +310,7 @@ do_is_authorized(Req, _, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     ),
     {false, Req, St};
 
-do_is_authorized(Req, _, #{security := _} = St0)  ->
+is_authorized(_, Req, #{security := _} = St0)  ->
     St1 = St0#{is_anonymous => true},
     {true, Req, St1}.
 
@@ -361,9 +366,6 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
     end.
 
 
-
-
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -417,12 +419,13 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
 
 
 
-
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+-spec take_status_code(map()) -> {pos_integer(), map()}.
 
 take_status_code(Term) ->
     take_status_code(Term, ?HTTP_INTERNAL_SERVER_ERROR).
@@ -472,7 +475,10 @@ update_context({security, Claims}, #{<<"request">> := Req} = Ctxt) ->
         <<"realm_uri">> => maps:get(<<"aud">>, Claims),
         <<"session">> => maps:get(<<"id">>, Claims),
         <<"client_id">> => maps:get(<<"iss">>, Claims),
+        %% We keep it for legacy reasons, we shoult be using authid
         <<"username">> => maps:get(<<"sub">>, Claims),
+        %% Wamp synonym for username
+        <<"authid">> => maps:get(<<"sub">>, Claims),
         <<"authmethod">> => <<"oauth2">>, %% Todo get this dynamically
         <<"groups">> => maps:get(<<"groups">>, Claims),
         <<"locale">> => maps:get(<<"language">>, Req),
@@ -695,29 +701,10 @@ perform_action(
     %% TODO We need to recreate ctxt and session from JWT
     Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
-    SessionOpts = #{
-        roles => #{
-            caller => #{
-                features => #{
-                    call_timeout => true,
-                    caller_identification => true,
-                    call_trustlevels => true,
-                    call_canceling => false,
-                    progressive_call_results => false
-                }
-            }
-        }
-    },
-    Session = bondy_session:new(Peer, RealmUri, SessionOpts),
-    Subprotocol = {http, text, maps:get(encoding, St0)},
-    Ctxt0 = bondy_context:new(Peer, Subprotocol),
-    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
-    Ctxt2 = bondy_context:set_session(Ctxt1, Session),
-    Ctxt3 = bondy_context:set_call_timeout(Ctxt2, CallTimeout),
+    WampCtxt0 = wamp_context(RealmUri, Peer, St1),
+    WampCtxt = bondy_context:set_call_timeout(WampCtxt0, CallTimeout),
 
-    Ctxt4 = maybe_anonymous(Ctxt3, St0),
-
-    case bondy:call(P, Opts, A, Akw, Ctxt4) of
+    case bondy:call(P, Opts, A, Akw, WampCtxt) of
         {ok, Result0, _} ->
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
@@ -739,13 +726,38 @@ perform_action(
 
 
 %% @private
+wamp_context(RealmUri, Peer, St1) ->
+    SessionOpts = #{
+        roles => #{
+            caller => #{
+                features => #{
+                    call_timeout => true,
+                    caller_identification => true,
+                    call_trustlevels => true,
+                    call_canceling => true,
+                    progressive_call_results => false
+                }
+            }
+        }
+    },
+    Session = bondy_session:new(Peer, RealmUri, SessionOpts),
+    Subprotocol = {http, text, maps:get(encoding, St1)},
+    Ctxt0 = bondy_context:new(Peer, Subprotocol),
+    Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
+    Ctxt2 = bondy_context:set_session(Ctxt1, Session),
+    maybe_anonymous(Ctxt2, St1).
+
+
+%% @private
 maybe_anonymous(Ctxt0, #{is_anonymous := true}) ->
     AuthId = bondy_utils:uuid(),
     Ctxt1 = bondy_context:set_is_anonymous(Ctxt0, true),
-    Ctxt1#{authid => AuthId};
+    bondy_context:set_authid(Ctxt1, AuthId);
 
-maybe_anonymous(Ctxt, _) ->
-    bondy_context:set_is_anonymous(Ctxt, false).
+maybe_anonymous(Ctxt0, St) ->
+    AuthId = maps:get(authid, St),
+    Ctxt1 = bondy_context:set_authid(Ctxt0, AuthId),
+    bondy_context:set_is_anonymous(Ctxt1, false).
 
 
 %% @private

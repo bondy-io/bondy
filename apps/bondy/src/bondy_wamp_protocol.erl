@@ -393,7 +393,7 @@ handle_inbound_messages(
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
 
     AuthMethod = St#wamp_state.authmethod,
-    AuthId = maps:get(authid, St#wamp_state.context),
+    AuthId = bondy_context:authid(St#wamp_state.context),
     Signature = M#authenticate.signature,
 
     maybe_auth(AuthMethod, AuthId, Signature, St);
@@ -443,7 +443,7 @@ maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
     Ctxt0 = St#wamp_state.context,
     Realm = maps:get(realm_uri, Ctxt0),
     Peer = maps:get(peer, Ctxt0),
-    AuthId = maps:get(authid, Ctxt0),
+    AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
         hmac, {hmac, AuthId, Signature, ExpectedSignature}, Realm, Peer),
@@ -459,7 +459,7 @@ maybe_auth(?TICKET_AUTH, AuthId, Password, St) ->
     Ctxt0 = St#wamp_state.context,
     Realm = maps:get(realm_uri, Ctxt0),
     Peer = maps:get(peer, Ctxt0),
-    AuthId = maps:get(authid, Ctxt0),
+    AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
         basic, {basic, AuthId, Password}, Realm, Peer),
@@ -624,7 +624,8 @@ maybe_auth_challenge(Details, Realm, St) ->
 %% @private
 maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+    Ctxt1 = bondy_context:set_authid(
+        Ctxt0#{request_details => Details}, UserId),
     St1 = update_context(Ctxt1, St0),
     RealmUri = bondy_realm:uri(Realm),
 
@@ -643,11 +644,11 @@ maybe_auth_challenge(true, Details, Realm, St0) ->
             Ctxt0 = St0#wamp_state.context,
             TempId = bondy_utils:uuid(),
             Ctxt1 = Ctxt0#{
-                authid => TempId,
                 request_details => Details,
                 is_anonymous => true
             },
-            St1 = update_context(Ctxt1, St0),
+            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
+            St1 = update_context(Ctxt2, St0),
             {ok, St1};
         false ->
             {error, {missing_param, authid}, St0}
@@ -655,14 +656,16 @@ maybe_auth_challenge(true, Details, Realm, St0) ->
 
 maybe_auth_challenge(false, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = Ctxt0#{authid => UserId, request_details => Details},
+    Ctxt1 = bondy_context:set_authid(
+        Ctxt0#{request_details => Details}, UserId),
     St1 = update_context(Ctxt1, St0),
     {ok, St1};
 
 maybe_auth_challenge(false, Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
     TempId = bondy_utils:uuid(),
-    Ctxt1 = Ctxt0#{authid => TempId, request_details => Details},
+    Ctxt1 = bondy_context:set_authid(
+        Ctxt0#{request_details => Details}, TempId),
     St1 = update_context(Ctxt1, St0),
     {ok, St1}.
 
@@ -679,8 +682,8 @@ do_auth_challenge(User, Realm, St) ->
 
 %% @private
 do_auth_challenge([?ANON_AUTH|_], _, _, St0) ->
-    Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = Ctxt0#{authid => bondy_utils:uuid()},
+    Ctxt1 = bondy_context:set_authid(
+        St0#wamp_state.context, bondy_utils:uuid()),
     {ok, update_context(Ctxt1, St0)};
 
 do_auth_challenge([?COOKIE_AUTH|T], User, Realm, St) ->
