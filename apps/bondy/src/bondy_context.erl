@@ -82,6 +82,7 @@
 -export([roles/1]).
 -export([session/1]).
 -export([session_id/1]).
+-export([set_authid/2]).
 -export([set_peer/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
@@ -276,6 +277,17 @@ agent(#{}) ->
 -spec authid(t()) -> binary() | undefined.
 authid(#{authid := Val}) -> Val;
 authid(#{}) -> undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_authid(t(), binary()) -> t().
+
+set_authid(Ctxt, Val)
+when is_map(Ctxt) andalso (is_binary(Val) orelse Val == undefined) ->
+    maps:put(authid, Val, Ctxt).
 
 
 %% -----------------------------------------------------------------------------

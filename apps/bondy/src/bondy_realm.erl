@@ -66,8 +66,11 @@
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
+    %% single class A network 10.0.0.0 – 10.255.255.255
     {{10, 0, 0, 0}, 8},
+    %% 16 contiguous class B networks 172.16.0.0 – 172.31.255.255
     {{172, 16, 0, 0}, 12},
+    %% 256 contiguous class C networks 192.168.0.0 – 192.168.255.255
     {{192, 168, 0, 0}, 16}
 ]).
 
@@ -496,6 +499,8 @@ apply_config(Map0) ->
 
 %% @private
 apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
+    GroupNames = [maps:get(<<"name">>, G) || G <- Groups],
+    _ = lager:debug("Adding; realm=~p, groups=~p", [Uri, GroupNames]),
     _ = [
         ok = maybe_error(bondy_security_group:add_or_update(Uri, Group))
         || Group <- Groups
@@ -503,6 +508,8 @@ apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
     ok;
 
 apply_config(users, #{<<"uri">> := Uri, <<"users">> := Users}) ->
+    Usernames = [maps:get(<<"username">>, U) || U <- Users],
+    _ = lager:debug("Adding users; realm=~p, users=~p", [Uri, Usernames]),
     _ = [
         ok = maybe_error(bondy_security_user:add_or_update(Uri, User))
         || User <- Users
@@ -524,6 +531,7 @@ apply_config(grants, #{<<"uri">> := RealmUri, <<"grants">> := Grants}) ->
                <<"uri">> := Uri,
                <<"roles">> := Roles
             } = Grant,
+            %% TODO add_or_update
             ok = maybe_error(
                 bondy_security:add_grant(RealmUri, Roles, Uri, Permissions))
         end || Grant <- Grants
