@@ -19,7 +19,7 @@
 
 
 <pre><code>
-state() = #wamp_state{subprotocol = <a href="#type-subprotocol">subprotocol()</a> | undefined, authmethod = any(), state_name = <a href="#type-state_name">state_name()</a>, context = <a href="bondy_context.md#type-t">bondy_context:t()</a> | undefined} | undefined
+state() = #wamp_state{subprotocol = <a href="#type-subprotocol">subprotocol()</a> | undefined, authmethod = any(), auth_signature = binary() | undefined, auth_timestamp = integer() | undefined, state_name = <a href="#type-state_name">state_name()</a>, context = <a href="bondy_context.md#type-t">bondy_context:t()</a> | undefined} | undefined
 </code></pre>
 
 
@@ -37,7 +37,7 @@ state_name() = closed | establishing | challenging | failed | established | shut
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#agent-1">agent/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_inbound-2">handle_inbound/2</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#agent-1">agent/1</a></td><td></td></tr><tr><td valign="top"><a href="#context-1">context/1</a></td><td></td></tr><tr><td valign="top"><a href="#handle_inbound-2">handle_inbound/2</a></td><td>
 Handles wamp frames, decoding 1 or more messages, routing them and replying
 when required.</td></tr><tr><td valign="top"><a href="#handle_outbound-2">handle_outbound/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-3">init/3</a></td><td></td></tr><tr><td valign="top"><a href="#peer-1">peer/1</a></td><td></td></tr><tr><td valign="top"><a href="#peer_id-1">peer_id/1</a></td><td></td></tr><tr><td valign="top"><a href="#session_id-1">session_id/1</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-1">terminate/1</a></td><td></td></tr><tr><td valign="top"><a href="#validate_subprotocol-1">validate_subprotocol/1</a></td><td></td></tr></table>
 
@@ -52,6 +52,15 @@ when required.</td></tr><tr><td valign="top"><a href="#handle_outbound-2">handle
 
 <pre><code>
 agent(Wamp_state::<a href="#type-state">state()</a>) -&gt; <a href="#type-id">id()</a>
+</code></pre>
+<br />
+
+<a name="context-1"></a>
+
+### context/1 ###
+
+<pre><code>
+context(Wamp_state::<a href="#type-state">state()</a>) -&gt; <a href="bondy_context.md#type-t">bondy_context:t()</a>
 </code></pre>
 <br />
 

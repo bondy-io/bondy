@@ -5,8 +5,9 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-This module implements a local WAMP subscriber that applies the user
-provided function when handling each event.
+This module implements a supervised process (gen_server) that acts as a
+local WAMP subscriber that when received an EVENT applies the user provided
+function.
 
 __Behaviours:__ [`gen_server`](gen_server.md).
 

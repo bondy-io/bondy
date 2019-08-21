@@ -9,7 +9,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-2">accept/2</a></td><td></td></tr><tr><td valign="top"><a href="#allowed_methods-2">allowed_methods/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_accepted-2">content_types_accepted/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_provided-2">content_types_provided/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-2">init/2</a></td><td></td></tr><tr><td valign="top"><a href="#is_authorized-2">is_authorized/2</a></td><td></td></tr><tr><td valign="top"><a href="#options-2">options/2</a></td><td></td></tr><tr><td valign="top"><a href="#provide-2">provide/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_existed-2">resource_existed/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_exists-2">resource_exists/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-2">accept/2</a></td><td></td></tr><tr><td valign="top"><a href="#allowed_methods-2">allowed_methods/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_accepted-2">content_types_accepted/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_provided-2">content_types_provided/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-2">init/2</a></td><td></td></tr><tr><td valign="top"><a href="#is_authorized-2">is_authorized/2</a></td><td></td></tr><tr><td valign="top"><a href="#options-2">options/2</a></td><td></td></tr><tr><td valign="top"><a href="#provide-2">provide/2</a></td><td></td></tr><tr><td valign="top"><a href="#rate_limited-2">rate_limited/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_existed-2">resource_existed/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_exists-2">resource_exists/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -63,6 +63,12 @@
 ### provide/2 ###
 
 `provide(Req, St) -> any()`
+
+<a name="rate_limited-2"></a>
+
+### rate_limited/2 ###
+
+`rate_limited(Req, St) -> any()`
 
 <a name="resource_existed-2"></a>
 

@@ -21,7 +21,7 @@
 %% using the defined implementation backend (callback module).
 %%
 %% Its behaviour can be configured using the `cluster.peer_discovery' family of
-%% bondy.conf options.
+%% `bondy.conf' options.
 %%
 %% If the agent is enabled (`cluster.peer_discovery.enabled') and the Bondy node
 %%  has not yet joined a cluster, it will lookup for peers using the
@@ -75,8 +75,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% @end
+%% Initializes the peer discovery agent implementation
 %% -----------------------------------------------------------------------------
 -callback init(Opts :: map()) ->
     {ok, State :: any()}
@@ -84,8 +83,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% @end
+%%
 %% -----------------------------------------------------------------------------
 -callback lookup(State :: any(), Timeout :: timeout()) ->
     {ok, [bondy_peer_service:peer()], NewState :: any()}

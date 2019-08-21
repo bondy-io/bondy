@@ -1,12 +1,9 @@
 
 
 # Module bondy #
-* [Description](#description)
 * [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
-
-.
 
 <a name="types"></a>
 

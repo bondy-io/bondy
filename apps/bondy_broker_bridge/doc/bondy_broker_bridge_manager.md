@@ -8,7 +8,7 @@
 
 This module provides event bridging functionality, allowing
 a supervised process (implemented via bondy_subscriber) to subscribe to WAMP
-events and to process and or forward those events to an external system,
+events and process and/or forward those events to an external system,
 e.g.
 
 __Behaviours:__ [`gen_server`](gen_server.md).
@@ -24,7 +24,7 @@ or at system boot time by setting the application's `config_file`
 environment variable which should have the filename of a valid
 Broker Bridge Specification File.
 
-Each broker bridge is implemented as a callback module implementing the
+Each broker bridge is implemented as a module implementing the
 bondy_broker_bridge behaviour.
 
 ## Action Specification Map.
@@ -41,7 +41,7 @@ The mops context is map containing the following:
           <<"agent">> => binary()
       },
       <<"event">> => #{
-          <<"realm_uri">> => uri(),
+          <<"realm">> => uri(),
           <<"topic">> => uri(),
           <<"subscription_id">> => integer(),
           <<"publication_id">> => integer(),
@@ -54,6 +54,44 @@ The mops context is map containing the following:
 ```
 
 ## Broker Bridge Specification File.
+
+Example:
+
+```
+     json
+  {
+      "id":"com.leapsight.test",
+      "meta":{},
+      "subscriptions" : [
+          {
+              "bridge": "bondy_kafka_bridge",
+              "match": {
+                  "realm": "com.leapsight.test",
+                  "topic" : "com.leapsight.example_event",
+                  "options": {"match": "exact"}
+              },
+              "action": {
+                  "type": "produce_sync",
+                  "topic": "{{kafka.topics.wamp_events}}",
+                  "key": "\"{{event.topic}}/{{event.publication_id}}\"",
+                  "value": "{{event}}",
+                  "options" : {
+                      "client_id": "default",
+                      "acknowledge": true,
+                      "required_acks": "all",
+                      "partition": null,
+                      "partitioner": {
+                          "algorithm": "fnv32a",
+                          "value": "\"{{event.topic}}/{{event.publication_id}}\""
+                      },
+                      "encoding": "json"
+                  }
+              }
+          }
+      ]
+  }
+```
+
 
 <a name="types"></a>
 

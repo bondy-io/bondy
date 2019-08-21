@@ -12,7 +12,7 @@
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#bin_to_pid-1">bin_to_pid/1</a></td><td></td></tr><tr><td valign="top"><a href="#elapsed_time-2">elapsed_time/2</a></td><td>Returns the elapsed time since Timestamp expressed in the
 desired TimeUnit.</td></tr><tr><td valign="top"><a href="#foreach-2">foreach/2</a></td><td></td></tr><tr><td valign="top"><a href="#generate_fragment-1">generate_fragment/1</a></td><td></td></tr><tr><td valign="top"><a href="#get_flake_id-0">get_flake_id/0</a></td><td>Calls flake_server:id/0 and returns the generated ID.</td></tr><tr><td valign="top"><a href="#get_id-1">get_id/1</a></td><td>
 IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
-distribution_ over the complete range [0, 2^53].</td></tr><tr><td valign="top"><a href="#get_nonce-0">get_nonce/0</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_string-2">get_random_string/2</a></td><td>
+distribution_ over the complete range [0, 2^53].</td></tr><tr><td valign="top"><a href="#get_nonce-0">get_nonce/0</a></td><td>Returns a base64 encoded random string.</td></tr><tr><td valign="top"><a href="#get_random_string-2">get_random_string/2</a></td><td>
 borrowed from
 http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/.</td></tr><tr><td valign="top"><a href="#is_uuid-1">is_uuid/1</a></td><td></td></tr><tr><td valign="top"><a href="#log-5">log/5</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_encode-2">maybe_encode/2</a></td><td></td></tr><tr><td valign="top"><a href="#merge_map_flags-2">merge_map_flags/2</a></td><td>
 The call will fail with a {badkey, any()} exception is any key found in M1
@@ -87,6 +87,8 @@ distribution_ over the complete range [0, 2^53]
 ### get_nonce/0 ###
 
 `get_nonce() -> any()`
+
+Returns a base64 encoded random string
 
 <a name="get_random_string-2"></a>
 

@@ -47,7 +47,7 @@ features() -&gt; map()
 ### handle_message/2 ###
 
 <pre><code>
-handle_message(M::<a href="#type-wamp_message">wamp_message()</a>, Ctxt::<a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; ok
+handle_message(M::<a href="#type-wamp_message">wamp_message()</a>, Ctxt::<a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; ok | no_return()
 </code></pre>
 <br />
 

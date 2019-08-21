@@ -25,7 +25,7 @@
 %% ```shell
 %% cluster.peer_discovery_agent.type = bondy_peer_discovery_dns_agent
 %% cluster.peer_discovery_agent.config.service_name = my-service-name
-%% ```
+%% '''
 %% Where service_name is the service to be used by the DNS lookup.
 %%
 %% @end

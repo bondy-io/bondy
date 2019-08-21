@@ -499,7 +499,7 @@ init_context(Req) ->
 
     M = #{
         %% Msgpack does not support 128-bit integers,
-        %% so for the time being we encod it as binary string
+        %% so for the time being we encode it as binary string
         <<"id">> => integer_to_binary(Id),
         <<"method">> => method(Req),
         <<"scheme">> => cowboy_req:scheme(Req),

@@ -36,7 +36,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns a binary representation of the IP or <<"unknown">>.
+%% @doc Returns a binary representation of the IP or `<<"unknown">>'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec client_ip(Req :: cowboy_req:req()) -> binary() | undefined.

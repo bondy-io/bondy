@@ -48,7 +48,7 @@ token_type() = access_token | refresh_token
 Generates an access token and a refresh token.</td></tr><tr><td valign="top"><a href="#issued_at-1">issued_at/1</a></td><td></td></tr><tr><td valign="top"><a href="#issuer-1">issuer/1</a></td><td></td></tr><tr><td valign="top"><a href="#lookup_token-3">lookup_token/3</a></td><td></td></tr><tr><td valign="top"><a href="#rebuild_token_indices-2">rebuild_token_indices/2</a></td><td>Rebuilds refresh_token indices.</td></tr><tr><td valign="top"><a href="#refresh_token-3">refresh_token/3</a></td><td>
 After refreshing a token, the previous refresh token will be revoked.</td></tr><tr><td valign="top"><a href="#revoke_dangling_tokens-2">revoke_dangling_tokens/2</a></td><td>Removes all refresh tokens whose user has been removed.</td></tr><tr><td valign="top"><a href="#revoke_refresh_token-3">revoke_refresh_token/3</a></td><td>Removes a refresh token from store using an index to match the function
 arguments.</td></tr><tr><td valign="top"><a href="#revoke_refresh_token-4">revoke_refresh_token/4</a></td><td>Removes a refresh token from store using an index to match the function
-arguments.</td></tr><tr><td valign="top"><a href="#revoke_refresh_tokens-2">revoke_refresh_tokens/2</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_refresh_tokens-3">revoke_refresh_tokens/3</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_token-4">revoke_token/4</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_token-5">revoke_token/5</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_tokens-4">revoke_tokens/4</a></td><td></td></tr><tr><td valign="top"><a href="#verify_jwt-2">verify_jwt/2</a></td><td></td></tr><tr><td valign="top"><a href="#verify_jwt-3">verify_jwt/3</a></td><td></td></tr></table>
+arguments.</td></tr><tr><td valign="top"><a href="#revoke_refresh_tokens-2">revoke_refresh_tokens/2</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_refresh_tokens-3">revoke_refresh_tokens/3</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_token-4">revoke_token/4</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_token-5">revoke_token/5</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_tokens-3">revoke_tokens/3</a></td><td></td></tr><tr><td valign="top"><a href="#revoke_tokens-4">revoke_tokens/4</a></td><td></td></tr><tr><td valign="top"><a href="#verify_jwt-2">verify_jwt/2</a></td><td></td></tr><tr><td valign="top"><a href="#verify_jwt-3">verify_jwt/3</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -180,6 +180,15 @@ revoke_token(Hint::<a href="#type-token_type">token_type()</a> | undefined, Real
 
 <pre><code>
 revoke_token(Hint::<a href="#type-token_type">token_type()</a> | undefined, RealmUri::<a href="bondy_realm.md#type-uri">bondy_realm:uri()</a>, Issuer::binary(), Username::binary(), DeviceId::non_neg_integer()) -&gt; ok | {error, unsupported_operation}
+</code></pre>
+<br />
+
+<a name="revoke_tokens-3"></a>
+
+### revoke_tokens/3 ###
+
+<pre><code>
+revoke_tokens(Hint::<a href="#type-token_type">token_type()</a> | undefined, RealmUri::<a href="bondy_realm.md#type-uri">bondy_realm:uri()</a>, Username::binary()) -&gt; ok | {error, unsupported_operation}
 </code></pre>
 <br />
 
