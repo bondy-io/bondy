@@ -24,7 +24,7 @@ t() = map()
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_or_update-2">add_or_update/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_source-5">add_source/5</a></td><td></td></tr><tr><td valign="top"><a href="#change_password-3">change_password/3</a></td><td></td></tr><tr><td valign="top"><a href="#change_password-4">change_password/4</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-2">fetch/2</a></td><td></td></tr><tr><td valign="top"><a href="#groups-1">groups/1</a></td><td></td></tr><tr><td valign="top"><a href="#has_users-1">has_users/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-2">lookup/2</a></td><td></td></tr><tr><td valign="top"><a href="#password-2">password/2</a></td><td></td></tr><tr><td valign="top"><a href="#remove-2">remove/2</a></td><td></td></tr><tr><td valign="top"><a href="#remove_source-3">remove_source/3</a></td><td></td></tr><tr><td valign="top"><a href="#update-3">update/3</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_or_update-2">add_or_update/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_source-5">add_source/5</a></td><td></td></tr><tr><td valign="top"><a href="#change_password-3">change_password/3</a></td><td></td></tr><tr><td valign="top"><a href="#change_password-4">change_password/4</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-2">fetch/2</a></td><td></td></tr><tr><td valign="top"><a href="#groups-1">groups/1</a></td><td></td></tr><tr><td valign="top"><a href="#has_password-1">has_password/1</a></td><td></td></tr><tr><td valign="top"><a href="#has_users-1">has_users/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-2">lookup/2</a></td><td></td></tr><tr><td valign="top"><a href="#password-2">password/2</a></td><td></td></tr><tr><td valign="top"><a href="#remove-2">remove/2</a></td><td></td></tr><tr><td valign="top"><a href="#remove_source-3">remove_source/3</a></td><td></td></tr><tr><td valign="top"><a href="#update-3">update/3</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -85,6 +85,12 @@ fetch(RealmUri::<a href="#type-uri">uri()</a>, Id::binary()) -&gt; <a href="#typ
 
 `groups(X1) -> any()`
 
+<a name="has_password-1"></a>
+
+### has_password/1 ###
+
+`has_password(X1) -> any()`
+
 <a name="has_users-1"></a>
 
 ### has_users/1 ###
@@ -114,7 +120,7 @@ lookup(RealmUri::<a href="#type-uri">uri()</a>, Id::binary()) -&gt; <a href="#ty
 ### password/2 ###
 
 <pre><code>
-password(RealmUri::<a href="#type-uri">uri()</a>, Username::<a href="#type-t">t()</a> | <a href="#type-id">id()</a>) -&gt; map() | no_return()
+password(RealmUri::<a href="#type-uri">uri()</a>, Username::<a href="#type-t">t()</a> | <a href="#type-id">id()</a>) -&gt; <a href="bondy_security_pw.md#type-t">bondy_security_pw:t()</a> | no_return()
 </code></pre>
 <br />
 

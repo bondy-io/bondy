@@ -26,7 +26,7 @@ Bondy API Gateway Specification Format.<a name="index"></a>
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-2">accept/2</a></td><td></td></tr><tr><td valign="top"><a href="#allowed_methods-2">allowed_methods/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_accepted-2">content_types_accepted/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_provided-2">content_types_provided/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete_completed-2">delete_completed/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete_resource-2">delete_resource/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_form_urlencoded-2">from_form_urlencoded/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_json-2">from_json/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_msgpack-2">from_msgpack/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-2">init/2</a></td><td></td></tr><tr><td valign="top"><a href="#is_authorized-2">is_authorized/2</a></td><td></td></tr><tr><td valign="top"><a href="#options-2">options/2</a></td><td></td></tr><tr><td valign="top"><a href="#previously_existed-2">previously_existed/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_exists-2">resource_exists/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_json-2">to_json/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_msgpack-2">to_msgpack/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#accept-2">accept/2</a></td><td></td></tr><tr><td valign="top"><a href="#allowed_methods-2">allowed_methods/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_accepted-2">content_types_accepted/2</a></td><td></td></tr><tr><td valign="top"><a href="#content_types_provided-2">content_types_provided/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete_completed-2">delete_completed/2</a></td><td></td></tr><tr><td valign="top"><a href="#delete_resource-2">delete_resource/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_form_urlencoded-2">from_form_urlencoded/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_json-2">from_json/2</a></td><td></td></tr><tr><td valign="top"><a href="#from_msgpack-2">from_msgpack/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-2">init/2</a></td><td></td></tr><tr><td valign="top"><a href="#is_authorized-2">is_authorized/2</a></td><td></td></tr><tr><td valign="top"><a href="#languages_provided-2">languages_provided/2</a></td><td></td></tr><tr><td valign="top"><a href="#options-2">options/2</a></td><td></td></tr><tr><td valign="top"><a href="#previously_existed-2">previously_existed/2</a></td><td></td></tr><tr><td valign="top"><a href="#rate_limited-2">rate_limited/2</a></td><td></td></tr><tr><td valign="top"><a href="#resource_exists-2">resource_exists/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_json-2">to_json/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_msgpack-2">to_msgpack/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -97,7 +97,13 @@ Bondy API Gateway Specification Format.<a name="index"></a>
 
 ### is_authorized/2 ###
 
-`is_authorized(Req0, St) -> any()`
+`is_authorized(Req0, St0) -> any()`
+
+<a name="languages_provided-2"></a>
+
+### languages_provided/2 ###
+
+`languages_provided(Req, St) -> any()`
 
 <a name="options-2"></a>
 
@@ -110,6 +116,12 @@ Bondy API Gateway Specification Format.<a name="index"></a>
 ### previously_existed/2 ###
 
 `previously_existed(Req, St) -> any()`
+
+<a name="rate_limited-2"></a>
+
+### rate_limited/2 ###
+
+`rate_limited(Req, St) -> any()`
 
 <a name="resource_exists-2"></a>
 

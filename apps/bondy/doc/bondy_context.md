@@ -39,7 +39,7 @@ subprotocol_2() = <a href="#type-subprotocol">subprotocol()</a> | {http, text, j
 
 
 <pre><code>
-t() = #{id =&gt; <a href="#type-id">id()</a>, realm_uri =&gt; <a href="#type-uri">uri()</a>, node =&gt; atom(), session =&gt; <a href="bondy_session.md#type-session">bondy_session:session()</a> | undefined, peer =&gt; <a href="bondy_session.md#type-peer">bondy_session:peer()</a>, authmethod =&gt; binary(), authid =&gt; binary(), roles =&gt; map(), challenge_sent =&gt; {true, AuthMethod::any()} | false, request_id =&gt; <a href="#type-id">id()</a>, request_timestamp =&gt; integer(), request_timeout =&gt; non_neg_integer(), request_details =&gt; map(), user_info =&gt; map()}
+t() = #{id =&gt; <a href="#type-id">id()</a>, realm_uri =&gt; <a href="#type-uri">uri()</a>, node =&gt; atom(), session =&gt; <a href="bondy_session.md#type-session">bondy_session:session()</a> | undefined, peer =&gt; <a href="bondy_session.md#type-peer">bondy_session:peer()</a>, authmethod =&gt; binary(), authid =&gt; binary(), is_anonymous =&gt; boolean(), roles =&gt; map(), challenge_sent =&gt; {true, AuthMethod::any()} | false, request_id =&gt; <a href="#type-id">id()</a>, request_timestamp =&gt; integer(), request_timeout =&gt; non_neg_integer(), request_details =&gt; map(), user_info =&gt; map()}
 </code></pre>
 
 <a name="index"></a>
@@ -49,16 +49,19 @@ t() = #{id =&gt; <a href="#type-id">id()</a>, realm_uri =&gt; <a href="#type-uri
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#agent-1">agent/1</a></td><td>
 Returns the agent of the provided context or 'undefined'
-if there is none.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>
+if there is none.</td></tr><tr><td valign="top"><a href="#authid-1">authid/1</a></td><td></td></tr><tr><td valign="top"><a href="#call_timeout-1">call_timeout/1</a></td><td>
+Returns the current WAMP call timeout.</td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td>
 Closes the context.</td></tr><tr><td valign="top"><a href="#encoding-1">encoding/1</a></td><td>
 Returns the encoding used by the peer of the provided context.</td></tr><tr><td valign="top"><a href="#has_session-1">has_session/1</a></td><td>
 Returns true if the context is associated with a session,
-false otherwise.</td></tr><tr><td valign="top"><a href="#is_feature_enabled-3">is_feature_enabled/3</a></td><td>
+false otherwise.</td></tr><tr><td valign="top"><a href="#is_anonymous-1">is_anonymous/1</a></td><td>
+Returns true if the user is anonymous.</td></tr><tr><td valign="top"><a href="#is_feature_enabled-3">is_feature_enabled/3</a></td><td>
 Returns true if the feature Feature is enabled for role Role.</td></tr><tr><td valign="top"><a href="#local_context-1">local_context/1</a></td><td></td></tr><tr><td valign="top"><a href="#new-0">new/0</a></td><td>
 Initialises a new context.</td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td></td></tr><tr><td valign="top"><a href="#node-1">node/1</a></td><td>
 Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#peer-1">peer/1</a></td><td>
 Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#peer_id-1">peer_id/1</a></td><td></td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td>
-Returns the realm uri of the provided context.</td></tr><tr><td valign="top"><a href="#request_id-1">request_id/1</a></td><td>
+Returns the realm uri of the provided context.</td></tr><tr><td valign="top"><a href="#request_details-1">request_details/1</a></td><td>
+Returns the current request details.</td></tr><tr><td valign="top"><a href="#request_id-1">request_id/1</a></td><td>
 Returns the current request id.</td></tr><tr><td valign="top"><a href="#request_timeout-1">request_timeout/1</a></td><td>
 Returns the current request timeout.</td></tr><tr><td valign="top"><a href="#request_timestamp-1">request_timestamp/1</a></td><td>
 Returns the current request timestamp.</td></tr><tr><td valign="top"><a href="#reset-1">reset/1</a></td><td>
@@ -66,8 +69,10 @@ Resets the context.</td></tr><tr><td valign="top"><a href="#roles-1">roles/1</a>
 Returns the roles of the provided context.</td></tr><tr><td valign="top"><a href="#session-1">session/1</a></td><td>
 Fetches and returns the bondy_session for the associated sessionId.</td></tr><tr><td valign="top"><a href="#session_id-1">session_id/1</a></td><td>
 Returns the sessionId of the provided context or 'undefined'
-if there is none.</td></tr><tr><td valign="top"><a href="#set_peer-2">set_peer/2</a></td><td>
-Set the peer to the provided context.</td></tr><tr><td valign="top"><a href="#set_request_id-2">set_request_id/2</a></td><td>
+if there is none.</td></tr><tr><td valign="top"><a href="#set_authid-2">set_authid/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_call_timeout-2">set_call_timeout/2</a></td><td>
+Sets the current WAMP call timeout to the provided context.</td></tr><tr><td valign="top"><a href="#set_is_anonymous-2">set_is_anonymous/2</a></td><td></td></tr><tr><td valign="top"><a href="#set_peer-2">set_peer/2</a></td><td>
+Set the peer to the provided context.</td></tr><tr><td valign="top"><a href="#set_realm_uri-2">set_realm_uri/2</a></td><td>
+Sets the realm uri of the provided context.</td></tr><tr><td valign="top"><a href="#set_request_id-2">set_request_id/2</a></td><td>
 Sets the current request id to the provided context.</td></tr><tr><td valign="top"><a href="#set_request_timeout-2">set_request_timeout/2</a></td><td>
 Sets the current request timeout to the provided context.</td></tr><tr><td valign="top"><a href="#set_request_timestamp-2">set_request_timestamp/2</a></td><td>
 Sets the current request timeout to the provided context.</td></tr><tr><td valign="top"><a href="#set_session-2">set_session/2</a></td><td>
@@ -91,6 +96,26 @@ agent(X1::<a href="#type-t">t()</a>) -&gt; binary() | undefined
 
 Returns the agent of the provided context or 'undefined'
 if there is none.
+
+<a name="authid-1"></a>
+
+### authid/1 ###
+
+<pre><code>
+authid(X1::<a href="#type-t">t()</a>) -&gt; binary() | undefined
+</code></pre>
+<br />
+
+<a name="call_timeout-1"></a>
+
+### call_timeout/1 ###
+
+<pre><code>
+call_timeout(X1::<a href="#type-t">t()</a>) -&gt; non_neg_integer()
+</code></pre>
+<br />
+
+Returns the current WAMP call timeout.
 
 <a name="close-1"></a>
 
@@ -126,6 +151,18 @@ has_session(X1::<a href="#type-t">t()</a>) -&gt; boolean()
 
 Returns true if the context is associated with a session,
 false otherwise.
+
+<a name="is_anonymous-1"></a>
+
+### is_anonymous/1 ###
+
+<pre><code>
+is_anonymous(Ctxt::<a href="#type-t">t()</a>) -&gt; boolean()
+</code></pre>
+<br />
+
+Returns true if the user is anonymous. In that case authid would be a random
+identifier assigned by Bondy.
 
 <a name="is_feature_enabled-3"></a>
 
@@ -206,6 +243,17 @@ realm_uri(X1::<a href="#type-t">t()</a>) -&gt; <a href="#type-uri">uri()</a>
 
 Returns the realm uri of the provided context.
 
+<a name="request_details-1"></a>
+
+### request_details/1 ###
+
+<pre><code>
+request_details(X1::<a href="#type-t">t()</a>) -&gt; map()
+</code></pre>
+<br />
+
+Returns the current request details
+
 <a name="request_id-1"></a>
 
 ### request_id/1 ###
@@ -285,6 +333,35 @@ session_id(X1::<a href="#type-t">t()</a>) -&gt; <a href="#type-id">id()</a> | un
 Returns the sessionId of the provided context or 'undefined'
 if there is none.
 
+<a name="set_authid-2"></a>
+
+### set_authid/2 ###
+
+<pre><code>
+set_authid(Ctxt::<a href="#type-t">t()</a>, Val::binary()) -&gt; <a href="#type-t">t()</a>
+</code></pre>
+<br />
+
+<a name="set_call_timeout-2"></a>
+
+### set_call_timeout/2 ###
+
+<pre><code>
+set_call_timeout(Ctxt::<a href="#type-t">t()</a>, Timeout::non_neg_integer()) -&gt; <a href="#type-t">t()</a>
+</code></pre>
+<br />
+
+Sets the current WAMP call timeout to the provided context.
+
+<a name="set_is_anonymous-2"></a>
+
+### set_is_anonymous/2 ###
+
+<pre><code>
+set_is_anonymous(Ctxt::<a href="#type-t">t()</a>, Value::boolean()) -&gt; <a href="#type-t">t()</a>
+</code></pre>
+<br />
+
 <a name="set_peer-2"></a>
 
 ### set_peer/2 ###
@@ -295,6 +372,17 @@ set_peer(Ctxt::<a href="#type-t">t()</a>, Peer::<a href="bondy_session.md#type-p
 <br />
 
 Set the peer to the provided context.
+
+<a name="set_realm_uri-2"></a>
+
+### set_realm_uri/2 ###
+
+<pre><code>
+set_realm_uri(Ctxt::<a href="#type-t">t()</a>, Uri::<a href="#type-uri">uri()</a>) -&gt; <a href="#type-t">t()</a>
+</code></pre>
+<br />
+
+Sets the realm uri of the provided context.
 
 <a name="set_request_id-2"></a>
 

@@ -25,6 +25,7 @@
 <tr><td><a href="bondy_cache.md" class="module">bondy_cache</a></td></tr>
 <tr><td><a href="bondy_cli.md" class="module">bondy_cli</a></td></tr>
 <tr><td><a href="bondy_config.md" class="module">bondy_config</a></td></tr>
+<tr><td><a href="bondy_config_manager.md" class="module">bondy_config_manager</a></td></tr>
 <tr><td><a href="bondy_console_table.md" class="module">bondy_console_table</a></td></tr>
 <tr><td><a href="bondy_context.md" class="module">bondy_context</a></td></tr>
 <tr><td><a href="bondy_cowboy_prometheus.md" class="module">bondy_cowboy_prometheus</a></td></tr>
@@ -35,10 +36,14 @@
 <tr><td><a href="bondy_event_handler_watcher_sup.md" class="module">bondy_event_handler_watcher_sup</a></td></tr>
 <tr><td><a href="bondy_event_manager.md" class="module">bondy_event_manager</a></td></tr>
 <tr><td><a href="bondy_http_ping_handler.md" class="module">bondy_http_ping_handler</a></td></tr>
+<tr><td><a href="bondy_http_utils.md" class="module">bondy_http_utils</a></td></tr>
+<tr><td><a href="bondy_logger_formatter.md" class="module">bondy_logger_formatter</a></td></tr>
 <tr><td><a href="bondy_mochiglobal.md" class="module">bondy_mochiglobal</a></td></tr>
 <tr><td><a href="bondy_oauth2.md" class="module">bondy_oauth2</a></td></tr>
 <tr><td><a href="bondy_oauth2_wamp_handler.md" class="module">bondy_oauth2_wamp_handler</a></td></tr>
 <tr><td><a href="bondy_partisan_peer_service.md" class="module">bondy_partisan_peer_service</a></td></tr>
+<tr><td><a href="bondy_peer_discovery_agent.md" class="module">bondy_peer_discovery_agent</a></td></tr>
+<tr><td><a href="bondy_peer_discovery_dns_agent.md" class="module">bondy_peer_discovery_dns_agent</a></td></tr>
 <tr><td><a href="bondy_peer_message.md" class="module">bondy_peer_message</a></td></tr>
 <tr><td><a href="bondy_peer_service.md" class="module">bondy_peer_service</a></td></tr>
 <tr><td><a href="bondy_peer_wamp_forwarder.md" class="module">bondy_peer_wamp_forwarder</a></td></tr>

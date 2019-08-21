@@ -146,14 +146,13 @@ message will be sent by _Dealer_ to _Callee A_ before any
 
 There is no guarantee regarding the order of return for multiple
 subsequent register requests.  A register request might require the
-_Broker_ to do a time-consuming lookup in some database, whereas
+_Dealer_ to do a time-consuming lookup in some database, whereas
 another register request second might be permissible immediately.<a name="index"></a>
 
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#callees-1">callees/1</a></td><td></td></tr><tr><td valign="top"><a href="#callees-2">callees/2</a></td><td></td></tr><tr><td valign="top"><a href="#callees-3">callees/3</a></td><td></td></tr><tr><td valign="top"><a href="#close_context-1">close_context/1</a></td><td></td></tr><tr><td valign="top"><a href="#features-0">features/0</a></td><td></td></tr><tr><td valign="top"><a href="#handle_message-2">handle_message/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_peer_message-4">handle_peer_message/4</a></td><td>Handles inbound messages received from a peer (node).</td></tr><tr><td valign="top"><a href="#is_feature_enabled-1">is_feature_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#register-3">register/3</a></td><td>
-Registers an RPC endpoint.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#callees-1">callees/1</a></td><td></td></tr><tr><td valign="top"><a href="#callees-2">callees/2</a></td><td></td></tr><tr><td valign="top"><a href="#callees-3">callees/3</a></td><td></td></tr><tr><td valign="top"><a href="#close_context-1">close_context/1</a></td><td></td></tr><tr><td valign="top"><a href="#features-0">features/0</a></td><td></td></tr><tr><td valign="top"><a href="#handle_message-2">handle_message/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_peer_message-4">handle_peer_message/4</a></td><td>Handles inbound messages received from a peer (node).</td></tr><tr><td valign="top"><a href="#is_feature_enabled-1">is_feature_enabled/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -233,17 +232,4 @@ Handles inbound messages received from a peer (node).
 is_feature_enabled(F::binary()) -&gt; boolean()
 </code></pre>
 <br />
-
-<a name="register-3"></a>
-
-### register/3 ###
-
-<pre><code>
-register(ProcUri::<a href="#type-uri">uri()</a>, Options::map(), Ctxt::<a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; {ok, map()} | {error, {not_authorized | procedure_already_exists, binary()}}
-</code></pre>
-<br />
-
-Registers an RPC endpoint.
-If the registration already exists, it fails with a
-`{not_authorized | procedure_already_exists, binary()}` error.
 

@@ -2,12 +2,27 @@
 
 # Module bondy_peer_service #
 * [Description](#description)
+* [Data Types](#types)
 * [Function Index](#index)
 * [Function Details](#functions)
 
 Based on: github.com/lasp-lang/lasp/...lasp_peer_service.erl.
 
 __This module defines the `bondy_peer_service` behaviour.__<br /> Required callback functions: `forward_message/3`, `forward_message/4`, `forward_message/5`, `join/1`, `join/2`, `join/3`, `leave/0`, `leave/1`, `manager/0`, `members/0`, `myself/0`, `mynode/0`, `stop/0`, `stop/1`.
+
+<a name="types"></a>
+
+## Data Types ##
+
+
+
+
+### <a name="type-peer">peer()</a> ###
+
+
+<pre><code>
+peer() = <a href="plum_db_peer_service.md#type-partisan_peer">plum_db_peer_service:partisan_peer()</a>
+</code></pre>
 
 <a name="index"></a>
 

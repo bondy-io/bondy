@@ -71,7 +71,7 @@ Initialises the WS connection.</td></tr></table>
 ### init/2 ###
 
 <pre><code>
-init(Req0::<a href="cowboy_req.md#type-req">cowboy_req:req()</a>, X2::<a href="#type-state">state()</a>) -&gt; {ok | module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, hibernate} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, timeout()} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, timeout(), hibernate}
+init(Req0::<a href="cowboy_req.md#type-req">cowboy_req:req()</a>, State::<a href="#type-state">state()</a>) -&gt; {ok | module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, hibernate} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, timeout()} | {module(), <a href="cowboy_req.md#type-req">cowboy_req:req()</a>, <a href="#type-state">state()</a>, timeout(), hibernate}
 </code></pre>
 <br />
 

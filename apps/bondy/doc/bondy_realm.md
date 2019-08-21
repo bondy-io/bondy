@@ -37,10 +37,10 @@ realm() = #realm{uri = <a href="#type-uri">uri()</a>, description = binary(), au
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-1">add/1</a></td><td></td></tr><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#apply_config-0">apply_config/0</a></td><td></td></tr><tr><td valign="top"><a href="#auth_methods-1">auth_methods/1</a></td><td></td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#disable_security-1">disable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#enable_security-1">enable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-1">add/1</a></td><td></td></tr><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#apply_config-0">apply_config/0</a></td><td>Loads a security config file if defined and applies its definitions.</td></tr><tr><td valign="top"><a href="#auth_methods-1">auth_methods/1</a></td><td></td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#disable_security-1">disable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#enable_security-1">enable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
 Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get-1">get/1</a></td><td>
 Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get-2">get/2</a></td><td>
-Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get_private_key-2">get_private_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_public_key-2">get_public_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_kid-1">get_random_kid/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
+Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get_private_key-2">get_private_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_public_key-2">get_public_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_kid-1">get_random_kid/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_auth_method-2">is_auth_method/2</a></td><td></td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
 Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}'
 if it doesn't exist.</td></tr><tr><td valign="top"><a href="#public_keys-1">public_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#security_status-1">security_status/1</a></td><td></td></tr><tr><td valign="top"><a href="#select_auth_method-2">select_auth_method/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_map-1">to_map/1</a></td><td></td></tr><tr><td valign="top"><a href="#update-2">update/2</a></td><td></td></tr><tr><td valign="top"><a href="#uri-1">uri/1</a></td><td></td></tr></table>
 
@@ -75,6 +75,8 @@ add(Map::map(), IsStrict::boolean()) -&gt; <a href="#type-realm">realm()</a> | n
 apply_config() -&gt; ok | no_return()
 </code></pre>
 <br />
+
+Loads a security config file if defined and applies its definitions.
 
 <a name="auth_methods-1"></a>
 
@@ -172,12 +174,21 @@ get_public_key(Realm::<a href="#type-realm">realm()</a>, Kid::integer()) -&gt; m
 
 `get_random_kid(Realm) -> any()`
 
+<a name="is_auth_method-2"></a>
+
+### is_auth_method/2 ###
+
+<pre><code>
+is_auth_method(Realm::<a href="#type-realm">realm()</a>, Method::binary()) -&gt; boolean()
+</code></pre>
+<br />
+
 <a name="is_security_enabled-1"></a>
 
 ### is_security_enabled/1 ###
 
 <pre><code>
-is_security_enabled(R::<a href="#type-realm">realm()</a>) -&gt; boolean()
+is_security_enabled(R::<a href="#type-realm">realm()</a> | <a href="#type-uri">uri()</a>) -&gt; boolean()
 </code></pre>
 <br />
 
@@ -216,7 +227,7 @@ public_keys(Realm::<a href="#type-realm">realm()</a>) -&gt; [map()]
 ### security_status/1 ###
 
 <pre><code>
-security_status(Realm::<a href="#type-realm">realm()</a>) -&gt; enabled | disabled
+security_status(Realm::<a href="#type-realm">realm()</a> | <a href="#type-uri">uri()</a>) -&gt; enabled | disabled
 </code></pre>
 <br />
 

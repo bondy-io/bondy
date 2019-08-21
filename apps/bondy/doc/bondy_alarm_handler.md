@@ -1,8 +1,11 @@
 
 
 # Module bondy_alarm_handler #
+* [Description](#description)
 * [Function Index](#index)
 * [Function Details](#functions)
+
+This module implements a replacement for OTP's default alarm_handler.
 
 __Behaviours:__ [`gen_event`](gen_event.md).
 
