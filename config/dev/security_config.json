@@ -1,0 +1,169 @@
+[
+      {
+          "uri" : "com.leapsight.test",
+          "description" : "Magenta Public realm",
+          "authmethods" : ["wampcra", "ticket", "anonymous"],
+          "security_enabled" : true,
+          "private_keys": [
+              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
+              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIL1pG+GIs/rAV7Gaev65hPpXeNeMFWUhOv8TnPD7dPY4oAoGCCqGSM49\nAwEHoUQDQgAEAEjB2EC5kchCFuylw7Qcna4ERPGzkogcoInYLEQI1Crkag2wiHKU\naziyiCgs/sM4qt1Tg47an53BYPPfBUJhIA==\n-----END EC PRIVATE KEY-----\n\n",
+              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIAJRhRKd0kWLeSv+ZqxaNZjePVLKb37neKF6+Yvbb2hFoAoGCCqGSM49\nAwEHoUQDQgAEjHJMWbqcWPemB7X+a1eZ1ctcoTAxdJqffp1Yil/Pbqe7mZAZ7bie\nmurWvNW9c4x6qTuHv7jcBiwyBYho3FBlMw==\n-----END EC PRIVATE KEY-----\n\n"
+          ],
+          "users" : [
+              {
+                "username" : "peer1",
+                "password" : "changethispassword",
+                "groups":["admin", "administrators", "api_clients"]
+              },
+              {
+                "username" : "peer2",
+                "password" : "changethispassword",
+                "groups": ["api_clients"]
+              }
+          ],
+          "groups" : [
+              {
+                  "name" : "account_admin",
+                  "groups" : [],
+                  "meta" : {
+                    "description": "The administrator of a Magenta Account."
+                  }
+              },
+              {
+                  "name" : "account_user",
+                  "groups" : [],
+                  "meta" : {
+                    "description": "A user of a Magenta Account."
+                  }
+              },
+              {
+                "name" : "administrators",
+                "groups" : [],
+                "meta" : {
+                  "description": "The administrators of Magenta."
+                }
+            },
+              {
+                  "name" : "admin",
+                  "groups" : ["administrators"],
+                  "meta" : {
+                    "description": "A group used by magenta microservices."
+                  }
+              },
+              {
+                  "name" : "resource_owners",
+                  "groups" : [],
+                  "meta" : {
+                    "description": "OAuth2 Resource Owners. An entity capable of authorizing access to a protected resource."
+                  }
+              },
+              {
+                  "name" : "api_clients",
+                  "groups" : [],
+                  "meta" : {
+                    "description": "OAuth2 confidential client. A third-party application that wants access to the private resources of the Resource Owner. The OAuth client can make protected resource requests on behalf of the Resource Owner after the latter grants it authorization."
+                  }
+              }
+          ],
+          "named_sources" : [
+              {
+                  "name" : "all",
+                  "cidr" : "0.0.0.0/0"
+              },
+              {
+                  "name" : "internal",
+                  "cidr" : "10.0.0.0/24"
+              }
+          ],
+          "sources" : [
+              {
+                  "usernames" : "all",
+                  "authmethod" : "password",
+                  "cidr" : "0.0.0.0/0",
+                  "meta" : {
+                    "description" : "Allows all users from any network authenticate using password credentials."
+                  }
+              },
+              {
+                  "usernames" : "anonymous",
+                  "authmethod" : "trust",
+                  "cidr" : "0.0.0.0/0",
+                  "meta" : {
+                    "description" : "Allows all users from any network authenticate as anonymous."
+                  }
+              }
+          ],
+          "grants" : [
+              {
+                  "permissions" : [
+                      "wamp.register",
+                      "wamp.unregister",
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["administrators"]
+              },
+              {
+                  "permissions" : [
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["api_clients"]
+              },
+              {
+                  "permissions" : [
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["resource_owners"]
+              },
+              {
+                  "permissions" : [
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["account_admin"]
+              },
+              {
+                  "permissions" : [
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["account_user"]
+              },
+              {
+                  "permissions" : [
+                      "wamp.register",
+                      "wamp.unregister",
+                      "wamp.subscribe",
+                      "wamp.unsubscribe",
+                      "wamp.call",
+                      "wamp.cancel",
+                      "wamp.publish"
+                  ],
+                  "uri" : "*",
+                  "roles" : ["anonymous"]
+              }
+          ]
+      }
+  ]
