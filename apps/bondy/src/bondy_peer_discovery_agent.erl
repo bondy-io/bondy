@@ -52,7 +52,6 @@
 -export([lookup/0]).
 -export([enable/0]).
 -export([disable/0]).
--export([status/0]).
 
 %% gen_statem callbacks
 -export([init/1]).
@@ -144,17 +143,8 @@ enable() ->
 -spec disable() -> boolean().
 
 disable() ->
-    gen_statem:call(?MODULE, enable).
+    gen_statem:call(?MODULE, disable).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec status() -> enabled | disabled.
-
-status() ->
-    sys:get_status(?MODULE).
 
 
 
@@ -225,6 +215,7 @@ discovering(cast, joined, State) ->
     %% remembered us, or other peer wants to join us.
     {next_state, joined, State};
 
+
 discovering({call, From}, disable, State) ->
     ok = gen_statem:reply(From, ok),
     {next_state, disabled, State};
@@ -252,6 +243,7 @@ discovering(internal, lookup, State) ->
 
 discovering(EventType, EventContent, State) ->
     handle_event(EventType, EventContent, State).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc

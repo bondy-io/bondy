@@ -36,6 +36,38 @@
 ]}.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy will wait for the db partitions to be initialised
+%% before continuing with initialisation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "startup.wait_for_store_partitions", "plum_db.wait_for_partitions", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy will wait for the db hashtrees to be built
+%% before continuing with initialisation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "startup.wait_for_store_hashtrees", "plum_db.wait_for_hashtrees", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy will wait for the first aae exchange to be
+%% finished before continuing with initialisation.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "startup.wait_for_store_aae_exchange", "plum_db.wait_for_aae_exchange", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+
+
 %% =============================================================================
 %% SECURITY REALMS
 %% =============================================================================
@@ -758,7 +790,7 @@
 %% cluster.peer_discovery.config.keyA = valueA
 %% cluster.peer_discovery.config.keyB = valueB
 %%
-%% Refer to each strategy documentsion
+%% Refer to each strategy documentation
 {mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [
   {datatype, string}
 ]}.
@@ -863,6 +895,7 @@ end}.
 %% @doc Defines the level of concurrency in plum_db (the local embedded
 %% database used by Bondy).
 %% Each partition has its own leveldb and ets instance.
+
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "store.partitions", "plum_db.partitions", [
@@ -871,6 +904,15 @@ end}.
   {datatype, integer}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Defines how data is hashed and distributed amongst Bondy's database
+%% partitions.
+%% If this is a new deployment we recommend using "key" as it will provide
+%% better distribution.
+%% **Notice that once data is stored, this cannot be changed as you will not be
+%% able to find previous data**.
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "store.shard_by", "plum_db.shard_by", [
   {default, prefix},
   {datatype, {enum, [prefix, key]}}
@@ -899,7 +941,6 @@ end}.
 %% =============================================================================
 %% ACTIVE ANTI-ENTROPY
 %% =============================================================================
-
 
 
 
@@ -933,6 +974,14 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "aae.exchange_on_cluster_join", "plum_db.aae_exchange_on_cluster_join", [
+  {default, on},
+  {datatype, flag}
+]}.
 
 
 %% =============================================================================

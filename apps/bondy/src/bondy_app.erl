@@ -97,9 +97,16 @@ start(_Type, Args) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback
+%% @doc Application behaviour callback.
+%% The order in which this function is called with the different phases is
+%% defined in the bondy_app.src file.
 %% @end
 %% -----------------------------------------------------------------------------
+start_phase(init_db_partitions, normal, []) ->
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
+    ok;
+
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable certain operations during startup i.e. heartbeats
@@ -124,8 +131,13 @@ start_phase(init_registry, normal, []) ->
     %% some validations and preparations.
     bondy_registry:init();
 
-start_phase(restore_aae_config, normal, []) ->
+start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
+    ok;
+
+start_phase(aae_exchange, normal, []) ->
     %% TODO conditionally force an AAE exchange here to get a the
     %% registry in sync with the cluster before init_listeners
     %% This might take a while.
@@ -189,6 +201,10 @@ setup_partisan() ->
 
 %% @private
 setup_event_handlers() ->
+    Mod = bondy_peer_service:manager(),
+    Name = bondy_peer_service:mynode(),
+    Fun  = fun() -> _ = lager:debug(">>>>> Node is connected") end,
+    ok = Mod:on_up(Name, Fun),
     %% We replace the default OTP alarm handler with ours
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
@@ -249,7 +265,8 @@ restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             ok = plum_db_config:set(aae_enabled, true),
-            _ = lager:info("Active anti-entropy (AAE) re-enabled");
+            _ = lager:info("Active anti-entropy (AAE) re-enabled"),
+            ok;
         false ->
             ok
     end.
