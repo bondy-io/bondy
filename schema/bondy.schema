@@ -41,7 +41,7 @@
 %% before continuing with initialisation.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "wait_for_partitions", "plum_db.wait_for_partitions", [
+{mapping, "startup.wait_for_store_partitions", "plum_db.wait_for_partitions", [
   {datatype, flag},
   {default, on}
 ]}.
@@ -51,7 +51,7 @@
 %% before continuing with initialisation.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "wait_for_hashtrees", "plum_db.wait_for_hashtrees", [
+{mapping, "startup.wait_for_store_hashtrees", "plum_db.wait_for_hashtrees", [
   {datatype, flag},
   {default, on}
 ]}.
@@ -61,7 +61,7 @@
 %% finished before continuing with initialisation.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "wait_for_aae_exchange", "plum_db.wait_for_aae_exchange", [
+{mapping, "startup.wait_for_store_aae_exchange", "plum_db.wait_for_aae_exchange", [
   {datatype, flag},
   {default, on}
 ]}.
