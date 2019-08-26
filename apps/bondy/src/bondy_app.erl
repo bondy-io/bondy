@@ -120,15 +120,6 @@ start_phase(configure_features, normal, []) ->
     ok;
 
 start_phase(init_registry, normal, []) ->
-    %% In previous versions of Bondy we piggy backed on a disk-only version of
-    %% plum_db to get registry synchronisation across the cluster.
-    %% During the previous registry initialisation no client should be
-    %% connected. This was a clean way of avoiding new registrations
-    %% interfiering with the registry restore and cleanup.
-    %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
-    %% longer store the registry on disk, just on ram.
-    %% However, we kept this step as it is clean and allows us to do
-    %% some validations and preparations.
     bondy_registry:init();
 
 start_phase(init_db_hashtrees, normal, []) ->
@@ -138,9 +129,8 @@ start_phase(init_db_hashtrees, normal, []) ->
     ok;
 
 start_phase(aae_exchange, normal, []) ->
-    %% TODO conditionally force an AAE exchange here to get a the
-    %% registry in sync with the cluster before init_listeners
-    %% This might take a while.
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
     ok;
 
 start_phase(init_listeners, normal, []) ->
