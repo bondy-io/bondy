@@ -191,10 +191,6 @@ setup_partisan() ->
 
 %% @private
 setup_event_handlers() ->
-    Mod = bondy_peer_service:manager(),
-    Name = bondy_peer_service:mynode(),
-    Fun  = fun() -> _ = lager:debug(">>>>> Node is connected") end,
-    ok = Mod:on_up(Name, Fun),
     %% We replace the default OTP alarm handler with ours
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
