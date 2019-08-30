@@ -21,7 +21,7 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 
 ## Quick Start
 
-Bondy requires Erlang/OTP 20.3.8 or higher and `rebar3`.
+Bondy requires Erlang/OTP 21.2 or higher and `rebar3`.
 
 The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
 

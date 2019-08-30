@@ -19,10 +19,9 @@
 {application, bondy,
  [
     {description, "Leapsight Bondy is an open source networking platform for distributed MicroServices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
-    {vsn, "0.8.6"},
+    {vsn, "0.8.7"},
     {registered, []},
-    %% {mod, {bondy_app, [{vsn, "0.8.6"}]}},
-    {mod, {application_starter, [bondy_app, [{vsn, "0.8.6"}]]}},
+    {mod, {application_starter, [bondy_app, [{vsn, "0.8.7"}]]}},
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
         {init_db_partitions, []},
