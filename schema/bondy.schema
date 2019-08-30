@@ -984,23 +984,6 @@ end}.
 ]}.
 
 
-%% =============================================================================
-%% FLAKE
-%% =============================================================================
-
-{mapping, "flake.timestamp_path", "flake.timestamp_path", [
-  {default, "$(platform_tmp_dir)/flake_timestamp.dets"},
-  {datatype, file},
-  hidden
-]}.
-
-{mapping, "flake.allowable_downtime", "flake.allowable_downtime", [
-  {default, "30d"},
-  {datatype, {duration, ms}},
-  hidden
-]}.
-
-
 
 %% =============================================================================
 %% VALIDATORS

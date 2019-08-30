@@ -65,7 +65,6 @@
         uuid,
         %% Leapsight
         mops,
-        flake,
         tuplespace,
         art,
         wamp
