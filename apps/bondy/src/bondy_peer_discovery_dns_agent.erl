@@ -81,7 +81,6 @@ lookup(State, Timeout) ->
 
     case inet_res:resolve(SrvName, in, srv, [], Timeout) of
         {ok, DNSMessage} ->
-            _ = lager:debug("DNS lookup found ~p", [DNSMessage]),
             {ok, to_peer_list(DNSMessage), State};
         {error, Reason} ->
             _ = lager:error(
