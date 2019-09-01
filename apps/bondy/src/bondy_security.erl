@@ -152,13 +152,13 @@
     is_anonymous = false    ::  boolean()
 }).
 
--type context() :: #context{}.
--type bucket() :: {binary(), binary()} | binary().
--type permission() :: {binary()} | {binary(), bucket()}.
--type userlist() :: all | anonymous | [binary()].
--type metadata_key() :: binary().
--type metadata_value() :: term().
--type options() :: [{metadata_key(), metadata_value()}].
+-type context()             ::  #context{}.
+-type bucket()              ::  {binary(), binary()} | binary().
+-type permission()          ::  {binary()} | {binary(), bucket()}.
+-type userlist()            ::  all | anonymous | [binary()].
+-type metadata_key()        ::  binary().
+-type metadata_value()      ::  term().
+-type options()             ::  [{metadata_key(), metadata_value()}].
 
 
 %% -----------------------------------------------------------------------------
@@ -407,6 +407,8 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
 %% @private
 auth_with_data(UserData, M0) ->
     Uri = maps:get(realm_uri, M0),
+    IP = proplists:get_value(ip, maps:get(conn_info, M0)),
+
     F = fun
         ({{Un, CIDR}, {Source, Options}}, Acc) ->
             [{Un, CIDR, Source, Options}|Acc];
@@ -415,7 +417,7 @@ auth_with_data(UserData, M0) ->
     end,
     Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri), ?FOLD_OPTS),
     Sources = sort_sources(Sources0),
-    IP = proplists:get_value(ip, maps:get(conn_info, M0)),
+
     case match_source(Sources, maps:get(username, M0), IP) of
         {ok, Source, Opts} ->
             M1 = M0#{source_options => Opts},
