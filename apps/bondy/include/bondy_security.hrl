@@ -237,19 +237,22 @@
     }
 }).
 
-%% Override to make private_kesy requiered without a default
-%% Every node will load the config file and thus if we do not do this
-%% all of tehm will generate a differemt set ok keys concurrently.
-%% Even though the vsalue should converge, we would be wasting resources.
+%% Override to make private_keys not required on update
 -define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
     <<"private_keys">> => #{
         alias => private_keys,
         key => <<"private_keys">>,
-        required => true,
+        required => false,
         allow_undefined => false,
         allow_null => false,
         datatype => {list, binary},
         validator => fun
+            ([]) ->
+                Keys = [
+                    jose_jwk:generate_key({namedCurve, secp256r1})
+                    || _ <- lists:seq(1, 3)
+                ],
+                {ok, Keys};
             (Pems) when length(Pems) < 3 ->
                 false;
             (Pems) ->
