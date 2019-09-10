@@ -40,11 +40,18 @@
 %% =============================================================================
 
 
+-spec init() -> ok | no_return().
 
 init() ->
-    %% Init from environment
+    %% By now erlang has loaded the app.config file generated
+    %% dynamically by Cuttlefish from the combination of the
+    %% bondy.conf and advanced.config files into the bondy env
     Config0 = application:get_all_env(bondy),
-    Config1 = [{priv_dir, priv_dir()} | Config0],
+
+    %% We set the priv_dir parameter
+    PrivDir = priv_dir(),
+    Config1 = [{priv_dir, PrivDir} | Config0],
+
     %% We initialise the config, caching all values as code
     %% We set configs at first level only
     _ = [set(Key, Value) || {Key, Value} <- Config1],
