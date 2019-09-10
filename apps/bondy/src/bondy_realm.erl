@@ -260,8 +260,8 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-get_random_kid(#realm{private_keys = Map}) ->
-    Kids = maps:keys(Map),
+get_random_kid(#realm{private_keys = Keys}) ->
+    Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids).
 
 
