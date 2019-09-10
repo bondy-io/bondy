@@ -164,7 +164,12 @@ stop(_State) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc A utility function that we use to extract the version name that is
+%% injected by the bondy.app.src configuration file.
+%% @end
+%% -----------------------------------------------------------------------------
 setup_env(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->
