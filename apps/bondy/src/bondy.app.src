@@ -18,9 +18,10 @@
 
 {application, bondy,
  [
-    {description, "Leapsight Bondy is an open source networking platform for distributed MicroServices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
+    {description, "Leapsight Bondy is an open source distributed networking platform for microservices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
     {vsn, "0.8.7"},
     {registered, []},
+    %% We pass the version number in the bondy_app:start/2 arguments
     {mod, {application_starter, [bondy_app, [{vsn, "0.8.7"}]]}},
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
@@ -65,16 +66,21 @@
         uuid,
         %% Leapsight
         mops,
-        tuplespace,
         art,
         wamp
     ]},
     {included_applications, [
-        plum_db
+        plum_db,
+        tuplespace
     ]},
     {env, []},
     {modules, []},
     {maintainers, ["Alejandro M. Ramallo"]},
     {licenses, ["Apache 2.0"]},
-    {links, [{"Gitlab", "https://gitlab.com/leapsight/bondy"}]}
+    {links, [
+        {"Gitlab", "https://gitlab.com/leapsight/bondy"},
+        {"Github", "https://github/leapsight/bondy"},
+        {"Docs", "https://docs.getbondy.io"},
+        {"Website", "https://getbondy.io"}
+    ]}
  ]}.

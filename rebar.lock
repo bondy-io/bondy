@@ -107,7 +107,7 @@
  {<<"time_compat">>,{pkg,<<"time_compat">>,<<"0.0.1">>},2},
  {<<"tuplespace">>,
   {git,"https://gitlab.com/leapsight/tuplespace.git",
-       {ref,"9732bcd066c69a937599c4cca7e217ec40f2e373"}},
+       {ref,"c25c03a70c6628df8681541122ce8dccdd5b243f"}},
   0},
  {<<"types">>,{pkg,<<"types">>,<<"0.1.6">>},2},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.4.1">>},2},
