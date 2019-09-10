@@ -603,30 +603,27 @@ start_admin_listener({<<"https">>, Routes}) ->
 -spec start_http(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_http(Routes, Name) ->
-
-    cowboy:start_clear(
-        Name,
-        transport_opts(Name),
-        #{
-            env => #{
-                bondy => #{
-                    auth => #{
-                        schemes => [basic, digest, bearer]
-                    }
-                },
-                dispatch => cowboy_router:compile(Routes)
+    TranspOpts = transport_opts(Name),
+    ProtoOpts = #{
+        env => #{
+            bondy => #{
+                auth => #{
+                    schemes => [basic, digest, bearer]
+                }
             },
-            metrics_callback => fun bondy_cowboy_prometheus:observe/1,
-            %% cowboy_metrics_h must be first on the list
-            stream_handlers => [
-                cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
-            ],
-            middlewares => [
-                cowboy_router,
-                cowboy_handler
-            ]
-        }
-    ).
+            dispatch => cowboy_router:compile(Routes)
+        },
+        metrics_callback => fun bondy_cowboy_prometheus:observe/1,
+        %% cowboy_metrics_h must be first on the list
+        stream_handlers => [
+            cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
+        ],
+        middlewares => [
+            cowboy_router,
+            cowboy_handler
+        ]
+    },
+    cowboy:start_clear(Name, TranspOpts, ProtoOpts).
 
 
 %% -----------------------------------------------------------------------------
@@ -636,27 +633,25 @@ start_http(Routes, Name) ->
 -spec start_https(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
 
 start_https(Routes, Name) ->
-    cowboy:start_tls(
-        Name,
-        transport_opts(Name),
-        #{
-            env => #{
-                bondy => #{
-                    auth => #{
-                        schemes => [basic, digest, bearer]
-                    }
-                },
-                dispatch => cowboy_router:compile(Routes)
+    TranspOpts = transport_opts(Name),
+    ProtoOpts = #{
+        env => #{
+            bondy => #{
+                auth => #{
+                    schemes => [basic, digest, bearer]
+                }
             },
-            stream_handlers => [
-                cowboy_compress_h, cowboy_stream_h
-            ],
-            middlewares => [
-                cowboy_router,
-                cowboy_handler
-            ]
-        }
-    ).
+            dispatch => cowboy_router:compile(Routes)
+        },
+        stream_handlers => [
+            cowboy_compress_h, cowboy_stream_h
+        ],
+        middlewares => [
+            cowboy_router,
+            cowboy_handler
+        ]
+    },
+    cowboy:start_tls(Name, TranspOpts, ProtoOpts).
 
 
 validate_spec(Map) ->
@@ -859,8 +854,21 @@ transport_opts(Name) ->
     [
         {port, Port},
         {num_acceptors, PoolSize},
-        {max_connections, MaxConnections} | normalise(SocketOpts)
+        {max_connections, MaxConnections} | SocketOpts
     ].
+
+    %% #{
+    %%     port => Port,
+    %%     num_acceptors => PoolSize,
+    %%     max_connections => MaxConnections,
+    %%     %% handshake_timeout => timeout(),
+    %%     %% logger => module(),
+    %%     %% num_conns_sups => pos_integer(),
+    %%     %% num_listen_sockets => pos_integer(),
+    %%     %% shutdown => timeout() | brutal_kill,
+    %%     socket_opts => SocketOpts
+    %% }.
+
 
 normalise(Opts) ->
     Sndbuf = lists:keyfind(sndbuf, 1, Opts),
