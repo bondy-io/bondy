@@ -4,11 +4,6 @@
           "description" : "Magenta Public realm",
           "authmethods" : ["wampcra", "ticket", "anonymous"],
           "security_enabled" : true,
-          "private_keys": [
-              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
-              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIL1pG+GIs/rAV7Gaev65hPpXeNeMFWUhOv8TnPD7dPY4oAoGCCqGSM49\nAwEHoUQDQgAEAEjB2EC5kchCFuylw7Qcna4ERPGzkogcoInYLEQI1Crkag2wiHKU\naziyiCgs/sM4qt1Tg47an53BYPPfBUJhIA==\n-----END EC PRIVATE KEY-----\n\n",
-              "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIAJRhRKd0kWLeSv+ZqxaNZjePVLKb37neKF6+Yvbb2hFoAoGCCqGSM49\nAwEHoUQDQgAEjHJMWbqcWPemB7X+a1eZ1ctcoTAxdJqffp1Yil/Pbqe7mZAZ7bie\nmurWvNW9c4x6qTuHv7jcBiwyBYho3FBlMw==\n-----END EC PRIVATE KEY-----\n\n"
-          ],
           "users" : [
               {
                 "username" : "peer1",
@@ -63,16 +58,6 @@
                   "meta" : {
                     "description": "OAuth2 confidential client. A third-party application that wants access to the private resources of the Resource Owner. The OAuth client can make protected resource requests on behalf of the Resource Owner after the latter grants it authorization."
                   }
-              }
-          ],
-          "named_sources" : [
-              {
-                  "name" : "all",
-                  "cidr" : "0.0.0.0/0"
-              },
-              {
-                  "name" : "internal",
-                  "cidr" : "10.0.0.0/24"
               }
           ],
           "sources" : [
