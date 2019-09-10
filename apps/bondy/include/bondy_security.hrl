@@ -204,10 +204,9 @@
         allow_undefined => false,
         allow_null => false,
         datatype => {list, binary},
-        default => [
-            jose_jwk:generate_key({namedCurve, secp256r1})
-            || _ <- lists:seq(1, 3)
-        ],
+        %% We default to empty list but notice the validator function will
+        %% generate the keys in that case
+        default => [],
         validator => fun
             ([]) ->
                 Keys = [
