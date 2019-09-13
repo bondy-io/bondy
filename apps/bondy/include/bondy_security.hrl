@@ -137,6 +137,13 @@
     ]
 }).
 
+-define(GEN_PRIV_KEYS_FUN, fun() ->
+    [
+        jose_jwk:generate_key({namedCurve, secp256r1})
+        || _ <- lists:seq(1, 3)
+    ]
+end).
+
 -define(REALM_SPEC, #{
     <<"uri">> => #{
         alias => uri,
@@ -204,16 +211,12 @@
         allow_undefined => false,
         allow_null => false,
         datatype => {list, binary},
-        default => [
-            jose_jwk:generate_key({namedCurve, secp256r1})
-            || _ <- lists:seq(1, 3)
-        ],
+        %% We default to empty list but notice the validator function will
+        %% generate the keys in that case
+        default => ?GEN_PRIV_KEYS_FUN,
         validator => fun
             ([]) ->
-                Keys = [
-                    jose_jwk:generate_key({namedCurve, secp256r1})
-                    || _ <- lists:seq(1, 3)
-                ],
+                Keys = (?GEN_PRIV_KEYS_FUN)(),
                 {ok, Keys};
             (Pems) when length(Pems) < 3 ->
                 false;

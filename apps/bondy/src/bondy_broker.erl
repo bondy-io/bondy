@@ -289,19 +289,22 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 
     %% An (authorized) Subscriber to topic T will receive an event published to
     %% T if and only if all of the following statements hold true:
-    %% * if there is an eligible attribute present, the Subscriber's sessionid
-    %% is in this list
-    %% * if there is an eligible_authid attribute present, the
-    %% Subscriber's authid is in this list
-    %% * if there is an eligible_authrole attribute present, the Subscriber's
-    %% authrole is in this list
-    %% * if there is an exclude attribute present, the Subscriber's sessionid is NOT in this list
-    %% * if there is an exclude_authid attribute present, the Subscriber's
-    %% authid is NOT in this list
-    %% * if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list
-
+    %%
+    %% 1. if there is an eligible attribute present, the Subscriber's sessionid
+    %% is in this list [DONE]
+    %% 2. if there is an exclude attribute present, the Subscriber's sessionid is NOT in this list [DONE]
+    %% 3. if there is an eligible_authid attribute present, the
+    %% Subscriber's authid is in this list  [TODO]
+    %% 4. if there is an exclude_authid attribute present, the Subscriber's
+    %% authid is NOT in this list [TODO]
+    %% 5. if there is an eligible_authrole attribute present, the Subscriber's
+    %% authrole is in this list [TODO]
+    %% 6. if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list [TODO]
 
     %% Subscriber Blacklisting: we only support sessionIds for now
+    %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
+    %% and exclude_authrole, We need to add authid and authrole to the registry
+    %% entries so that we can match
     Exclusions0 = maps:get(exclude, Opts, []),
 
     %% Publisher exclusion: enabled by default
@@ -328,6 +331,10 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
     MyNode = bondy_peer_service:mynode(),
     PubId = bondy_utils:get_id(global),
+
+    %% TODO Consider creating a Broadcast tree out of the registry trie results
+    %% so that instead of us sending possibly millions of Erlang messages to
+    %% millions of peers (processes) we delegate that the peers.
 
     Fun = fun(Entry, NodeAcc) ->
         case bondy_registry_entry:node(Entry) of
