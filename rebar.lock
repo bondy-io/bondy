@@ -117,7 +117,7 @@
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
-  {git,"https://gitlab.com/leapsight/tuplespace.git",
+  {git,"https://gitlab.com/leapsight/wamp.git",
        {ref,"a9b3a53a373cd42f08b618824253fd23a0153984"}},
   0},
  {<<"wts">>,{pkg,<<"wts">>,<<"0.3.0">>},1}]}.
