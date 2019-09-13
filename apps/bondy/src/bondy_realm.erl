@@ -474,11 +474,14 @@ init(#realm{uri = Uri} = Realm, SecurityEnabled) ->
 
 
 %% @private
+maybe_enable_security(undefined, _) ->
+    ok;
+
 maybe_enable_security(true, Realm) ->
     enable_security(Realm);
 
-maybe_enable_security(false, _) ->
-    ok.
+maybe_enable_security(false, Realm) ->
+    disable_security(Realm).
 
 
 apply_config(Map0) ->
@@ -563,6 +566,7 @@ add(Map0, IsStrict, Spec) ->
 
 %% @private
 do_add(Map) ->
+    %% These are all defined either by the use or by the validation spec
     #{
         <<"uri">> := Uri,
         <<"description">> := Desc,
@@ -590,21 +594,17 @@ do_add(Map) ->
 
 %% @private
 do_update(Realm0, Map) ->
-    #{
-        <<"uri">> := Uri,
-        <<"description">> := Desc,
-        <<"authmethods">> := Method,
-        <<"security_enabled">> := SecurityEnabled,
-        <<"private_keys">> := KeyList
-    } = Map,
+    Desc = maps:get(<<"description">>, Map, Realm0#realm.description),
+    Method = maps:get(<<"authmethods">>, Map, Realm0#realm.authmethods),
+    SecurityEnabled = maps:get(<<"security_enabled">>, Map, undefined),
+    KeyList = maps:get(<<"private_keys">>, Map, undefined),
+
     Realm1 = Realm0#realm{
-        uri = Uri,
         description = Desc,
         authmethods = Method
     },
-    Realm2 = set_keys(Realm1, KeyList),
 
-    ok = plum_db:put(?PREFIX, Uri, Realm2),
+    Realm2 = set_keys(Realm1, KeyList),
     ok = maybe_enable_security(SecurityEnabled, Realm2),
 
     %% We create all RBAC entities defined in the Realm Spec map
@@ -612,11 +612,14 @@ do_update(Realm0, Map) ->
     ok = apply_config(users, Map),
     ok = apply_config(sources, Map),
     ok = apply_config(grants, Map),
-    ok = bondy_event_manager:notify({realm_updated, Uri}),
+    ok = bondy_event_manager:notify({realm_updated, Realm2#realm.uri}),
     Realm2.
 
 
 %% @private
+set_keys(Realm, undefined) ->
+    Realm;
+
 set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
     PrivateKeys = maps:from_list([
         begin
