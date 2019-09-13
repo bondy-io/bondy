@@ -27,6 +27,21 @@
 
 -define(PRIVATE_CONFIG, "private.config").
 -define(CONFIG, [
+    {wamp, [
+        {extended_options, [
+            {call, [
+                '_auth_claims'
+            ]},
+            {publish, [
+                '_auth_claims'
+            ]}
+        ]},
+        {extended_details, [
+            {invocation, [
+                '_auth_claims'
+            ]}
+        ]}
+    ]},
     {plum_db, [
         {prefixes, [
             %% ram
