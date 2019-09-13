@@ -488,7 +488,7 @@ apply_config(Map0) ->
         #realm{} = Realm ->
             do_update(Realm, Map1);
         {error, not_found} ->
-            do_add(Map1)
+            add(Map1)
     end,
     ok = apply_config(groups, Map1),
     ok = apply_config(users, Map1),
