@@ -43,42 +43,48 @@
 
 
 
--define(DEALER_FEATURES, #{
-    call_timeout => true,
-    shared_registration => true,
+-define(WAMP_DEALER_FEATURES, #{
     call_canceling => true,
+    call_timeout => true,
+    call_trustlevels => false,
+    caller_identification => true,
     pattern_based_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    caller_identification => false,
-    call_trustlevels => false,
+    reflection => false,
     registration_meta_api => false,
     registration_revocation => false,
     session_meta_api => false,
-    reflection => false,
-    sharded_registration => false
+    sharded_registration => false,
+    shared_registration => true
+}).
+-define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
+    caller_auth_claims => true
 }).
 
--define(CALLEE_FEATURES, #{
-    call_timeout => true,
+-define(WAMP_CALLEE_FEATURES, #{
     call_canceling => true,
-    shared_registration => true,
+    call_timeout => true,
+    call_trustlevels => false,
+    caller_identification => true,
+    pattern_based_registration => true,
     progressive_call_results => false,
     progressive_calls => false,
-    caller_identification => false,
-    call_trustlevels => false,
     registration_revocation => false,
     session_meta_api => false,
-    pattern_based_registration => true,
-    sharded_registration => false
+    sharded_registration => false,
+    shared_registration => true
+}).
+-define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
+    caller_auth_claims => true
 }).
 
 -define(CALLER_FEATURES, #{
+    call_canceling => true,
     call_timeout => true,
+    caller_identification => true,
     progressive_call_results => false,
-    progressive_calls => false,
-    call_canceling => false,
-    caller_identification => false
+    progressive_calls => false
 }).
 
 -define(BROKER_FEATURES, #{
@@ -86,7 +92,7 @@
     publisher_exclusion => true,
     event_history => false,
     publication_trustlevels => false,
-    publisher_identification => false,
+    publisher_identification => true,
     session_meta_api => false,
     sharded_subscription => false,
     subscriber_blackwhite_listing => false,
@@ -98,13 +104,13 @@
     pattern_based_subscription => true,
     event_history => false,
     publication_trustlevels => false,
-    publisher_identification => false,
+    publisher_identification => true,
     sharded_subscription => false
 }).
 
 -define(PUBLISHER_FEATURES, #{
     publisher_exclusion => true,
-    publisher_identification => false,
+    publisher_identification => true,
     subscriber_blackwhite_listing => false
 }).
 
