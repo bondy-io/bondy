@@ -113,12 +113,12 @@
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.4.1">>},2},
  {<<"utils">>,
   {git,"https://gitlab.com/leapsight/utils.git",
-       {ref,"d407503e52278662b3a48da4a234268a815be2b6"}},
+       {ref,"f0840745aee924c3a786195a6848b2c54327435c"}},
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"1.7.0">>},0},
  {<<"wamp">>,
   {git,"https://gitlab.com/leapsight/wamp.git",
-       {ref,"a9b3a53a373cd42f08b618824253fd23a0153984"}},
+       {ref,"a4eab4f5e431743cc27614394336e1a3a63b3f00"}},
   0},
  {<<"wts">>,{pkg,<<"wts">>,<<"0.3.0">>},1}]}.
 [

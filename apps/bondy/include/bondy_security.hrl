@@ -129,7 +129,7 @@
     ],
     sources => [
         #{
-            usernames => <<"anonymous">>,
+            usernames => [<<"anonymous">>],
             authmethod => <<"trust">>,
             cidr => <<"0.0.0.0/0">>,
             meta => #{}
@@ -143,6 +143,34 @@
         || _ <- lists:seq(1, 3)
     ]
 end).
+
+-define(GEN_PRIV_KEYS_VALIDATOR,
+    fun
+        ([]) ->
+            {ok, (?GEN_PRIV_KEYS_FUN)()};
+        (Pems) when length(Pems) < 3 ->
+            false;
+        (Pems) ->
+            try
+                Keys = lists:map(
+                    fun
+                        ({jose_jwk, _, _, _} = Key) ->
+                            Key;
+                        (Pem) ->
+                            case jose_jwk:from_pem(Pem) of
+                                {jose_jwk, _, _, _} = Key -> Key;
+                                _ -> false
+                            end
+                    end,
+                    Pems
+                ),
+                {ok, Keys}
+            catch
+                ?EXCEPTION(_, _, _) ->
+                    false
+            end
+    end
+).
 
 -define(REALM_SPEC, #{
     <<"uri">> => #{
@@ -210,33 +238,10 @@ end).
         required => true,
         allow_undefined => false,
         allow_null => false,
-        datatype => {list, binary},
         %% We default to empty list but notice the validator function will
         %% generate the keys in that case
         default => ?GEN_PRIV_KEYS_FUN,
-        validator => fun
-            ([]) ->
-                Keys = (?GEN_PRIV_KEYS_FUN)(),
-                {ok, Keys};
-            (Pems) when length(Pems) < 3 ->
-                false;
-            (Pems) ->
-                try
-                    Keys = lists:map(
-                        fun(Pem) ->
-                            case jose_jwk:from_pem(Pem) of
-                                {jose_jwk, _, _, _} = Key -> Key;
-                                _ -> false
-                            end
-                        end,
-                        Pems
-                    ),
-                    {ok, Keys}
-                catch
-                    ?EXCEPTION(_, _, _) ->
-                        false
-                end
-        end
+        validator => ?GEN_PRIV_KEYS_VALIDATOR
     }
 }).
 
@@ -248,33 +253,7 @@ end).
         required => false,
         allow_undefined => false,
         allow_null => false,
-        datatype => {list, binary},
-        validator => fun
-            ([]) ->
-                Keys = [
-                    jose_jwk:generate_key({namedCurve, secp256r1})
-                    || _ <- lists:seq(1, 3)
-                ],
-                {ok, Keys};
-            (Pems) when length(Pems) < 3 ->
-                false;
-            (Pems) ->
-                try
-                    Keys = lists:map(
-                        fun(Pem) ->
-                            case jose_jwk:from_pem(Pem) of
-                                {jose_jwk, _, _, _} = Key -> Key;
-                                _ -> false
-                            end
-                        end,
-                        Pems
-                    ),
-                    {ok, Keys}
-                catch
-                    ?EXCEPTION(_, _, _) ->
-                        false
-                end
-        end
+        validator => ?GEN_PRIV_KEYS_VALIDATOR
     }
 }).
 
@@ -404,22 +383,18 @@ end).
 }).
 
 -define(ROLES_DATATYPE, [
-    {in, [<<"all">>, all,  <<"anonymous">>, anonymous]},
+    {in, [<<"all">>, all]},
     {list, binary}
 ]).
 
 -define(ROLES_VALIDATOR, fun
-    (<<"anonymous">>) ->
-        {ok, anonymous};
     (<<"all">>) ->
         {ok, all};
     (all) ->
         true;
-    (anonymous) ->
-        true;
     (List) when is_list(List) ->
         A = sets:from_list(List),
-        B = sets:from_list([<<"all">>]),
+        B = sets:from_list([<<"all">>, all]),
         case sets:is_disjoint(A, B) of
             true ->
                 L = lists:map(
@@ -428,6 +403,8 @@ end).
                 ),
                 {ok, L};
             false ->
+                %% Error, "all" is not a role so it cannot
+                %% be mixed in a roles list
                 false
         end
 end).
@@ -439,9 +416,7 @@ end).
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => ?ROLES_DATATYPE,
-        %% all cannot be mixed anonymous or with custom usernames
-        %% in the same rule
+        %% datatype => ?ROLES_DATATYPE,
         validator => ?ROLES_VALIDATOR
     },
     <<"authmethod">> => #{
@@ -527,7 +502,7 @@ end).
         key => <<"uri">>,
         required => true,
         allow_null => false,
-        datatype => binary,
+        datatype => [binary, {in, [any, all]}],
         validator => fun
             (<<"*">>) ->
                 {ok, any};
@@ -552,7 +527,7 @@ end).
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => ?ROLES_DATATYPE,
+        %% datatype => ?ROLES_DATATYPE,
         validator => ?ROLES_VALIDATOR
     }
 }).

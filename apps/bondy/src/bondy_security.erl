@@ -2125,7 +2125,7 @@ delete_user_from_sources(RealmUri, Username) ->
 %% be found.
 unknown_roles(RoleList0, FullPrefix) ->
     RoleList = sets:to_list(sets:from_list(RoleList0)),
-    plum_db:fold(
+    Unknown = plum_db:fold(
         fun
             ({_, ['$deleted']}, Acc) ->
                 Acc;
@@ -2133,7 +2133,9 @@ unknown_roles(RoleList0, FullPrefix) ->
                 Acc -- [Rolename]
         end,
         RoleList,
-        FullPrefix).
+        FullPrefix
+    ),
+    lists:subtract(Unknown, [anonymous]).
 
 user_details(RealmUri, U) ->
     role_details(?USERS_PREFIX(RealmUri), U).
