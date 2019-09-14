@@ -58,7 +58,7 @@
                 "meta" : {}
             },
             {
-                "usernames" : "anonymous",
+                "usernames" : ["anonymous"],
                 "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
