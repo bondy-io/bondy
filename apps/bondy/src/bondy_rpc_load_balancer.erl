@@ -52,7 +52,7 @@
     %% TODO this should be a map
     %% #{strategy => #{id => queue_least_loaded, force_locality}}
     force_locality => #{
-        alias => <<"_force_locality">>,
+        alias => <<"force_locality">>,
         required => true,
         allow_null => false,
         allow_undefined => false,
