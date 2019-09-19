@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Develop
+
+### Added
+
+- Added a controlled phased startup process
+  - Bondy now starts in phases allowing to block on several steps using configuration parameters. The main benefit is to avoid starting up the WAMP client socket listeners before serveral subsystems have finish initialisation and/or some processes have been completed.
+    - `startup.wait_for_store_partitions` - controls whether to block further stages until all db partitions have been initialised, this includes loading all data into those entities stored in ram and disk. Default is `on`.
+    - `startup.wait_for_store_hashtrees` - defines whether Bondy will wait for the db hashtrees to be built before continuing with initialisation. Default is `on`.
+    - `startup.wait_for_store_aae_exchange` - Defines whether Bondy will wait for the first active anti-entropy exchange to be finished before continuing with initialisation. These only works if Bondy is part of a cluster i.e. when Peer Discovery and Automatic Cluster join is enabled.
+  - The Bondy Admin HTTP API listeners are started as soon as the store partitions and other subsystems are initilised. This allows for liveness probes to be able to check on Bondy and/or admin users to inspect and/or operate while the other phases are running.
+
+### Fixed
+
+- Several fixes to Security Configuration file format
+  - `sources.usernames` now takes a string "any" of a list of usernames, including "anonymous"
+  - `grants.roles` now takes a string "any" of a list of rolenames, including "anonymous"
+
 ## 0.8.6
 
 - First implementation of Peer Discovery and Automatic Cluster join.
