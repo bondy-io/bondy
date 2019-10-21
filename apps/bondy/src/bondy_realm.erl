@@ -220,11 +220,16 @@
 
 
 -record(realm, {
-    uri                         ::  uri(),
-    description                 ::  binary(),
-    authmethods                 ::  [binary()], % a wamp property
-    private_keys = #{}          ::  map(),
-    public_keys = #{}           ::  map()
+    uri                             ::  uri(),
+    description                     ::  binary(),
+    authmethods                     ::  [binary()], % a wamp property
+    private_keys = #{}              ::  map(),
+    public_keys = #{}               ::  map()
+    %% TODO
+    %% version                      ::  binary(),
+    %% options = #{}                ::  map()
+    %%     uri_validation_policy = loose   ::  strict | loose
+    %%     meta_api_enabled = true      ::  boolean()
 }).
 -type realm()       ::  #realm{}.
 
