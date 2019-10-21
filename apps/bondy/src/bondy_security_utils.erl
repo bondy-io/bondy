@@ -95,7 +95,7 @@ authorize(Permission, Resource, Ctxt) ->
     %% the data is in ets so it should be pretty fast.
     RealmUri = bondy_context:realm_uri(Ctxt),
     IsEnabled = bondy_realm:is_security_enabled(RealmUri),
-    maybe_authorize(IsEnabled, Permission, Resource, Ctxt).
+    maybe_authorize(Permission, Resource, Ctxt, IsEnabled).
 
 
 
@@ -106,11 +106,11 @@ authorize(Permission, Resource, Ctxt) ->
 
 
 %% @private
-maybe_authorize(true, Permission, Resource, Ctxt) ->
+maybe_authorize(Permission, Resource, Ctxt, true) ->
     SecCtxt = get_security_context(Ctxt),
     do_authorize(Permission, Resource, SecCtxt);
 
-maybe_authorize(false, _, _, _) ->
+maybe_authorize(_, _, _, false) ->
     ok.
 
 
