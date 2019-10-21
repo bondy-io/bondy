@@ -107,8 +107,7 @@ authorize(Permission, Resource, Ctxt) ->
 
 %% @private
 maybe_authorize(Permission, Resource, Ctxt, true) ->
-    SecCtxt = get_security_context(Ctxt),
-    do_authorize(Permission, Resource, SecCtxt);
+    do_authorize(Permission, Resource, get_security_context(Ctxt));
 
 maybe_authorize(_, _, _, false) ->
     ok.
