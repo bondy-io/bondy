@@ -34,6 +34,8 @@
 -include("bondy_security.hrl").
 
 -ifdef(OTP_RELEASE). %% => OTP is 21 or higher
+    %% We use persistent_term to cache the security status to avoid
+    %% accessing plum_db.
     -define(GET_SECURITY_STATUS(Uri),
         try persistent_term:get({Uri, security_status}) of
             Status -> Status
@@ -57,6 +59,7 @@
         ok
     ).
 -else.
+    %% We access plum_db which stores data in ets and disk.
     -define(GET_SECURITY_STATUS(Uri), bondy_security:status(Uri)).
     -define(ENABLE_SECURITY(Uri), bondy_security:enable(Uri)).
     -define(DISABLE_SECURITY(Uri), bondy_security:disable(Uri)).
@@ -64,7 +67,7 @@
 -endif.
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
--define(PREFIX, {security, realms}).
+-define(PDB_PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
     %% single class A network 10.0.0.0 – 10.255.255.255
     {{10, 0, 0, 0}, 8},
@@ -75,6 +78,7 @@
 ]).
 
 
+%% The maps_utils:validate/2 specification.
 -define(REALM_SPEC, #{
     <<"uri">> => #{
         alias => uri,
@@ -146,7 +150,9 @@
     }
 }).
 
-%% Override to make private_keys not required on update
+
+%% The overriden maps_utils:validate/2 specification
+%% to make private_keys not required on update
 -define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
     <<"private_keys">> => #{
         alias => private_keys,
@@ -296,20 +302,21 @@ apply_config() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the list of supported authentication methods for Realm.
 %% @end
 %% -----------------------------------------------------------------------------
--spec auth_methods(realm()) -> [binary()].
+-spec auth_methods(Realm :: realm()) -> [binary()].
 
 auth_methods(#realm{authmethods = Val}) ->
     Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returs `true' if Method is an authentication method supported by realm
+%% `Realm'. Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_auth_method(realm(), binary()) -> boolean().
+-spec is_auth_method(Realm :: realm(), Method :: binary()) -> boolean().
 
 is_auth_method(#realm{authmethods = L}, Method) ->
     lists:member(Method, L).
@@ -440,6 +447,7 @@ lookup(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec fetch(uri()) -> realm().
+
 fetch(Uri) ->
     case lookup(Uri) of
         #realm{} = Realm ->
@@ -449,9 +457,8 @@ fetch(Uri) ->
     end.
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will add a new one for Uri.
+%% @doc Retrieves the realm identified by Uri from the tuplespace. If the realm
+%% does not exist it will add a new one for Uri with the default configuration.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri()) -> realm().
@@ -532,7 +539,7 @@ delete(Uri) ->
             {error, active_users};
         false ->
             ok = ?ERASE_SECURITY_STATUS(Uri),
-            plum_db:delete(?PREFIX, Uri),
+            plum_db:delete(?PDB_PREFIX, Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
             ok
@@ -546,7 +553,7 @@ delete(Uri) ->
 -spec list() -> [realm()].
 
 list() ->
-    [V || {_K, [V]} <- plum_db:to_list(?PREFIX), V =/= '$deleted'].
+    [V || {_K, [V]} <- plum_db:to_list(?PDB_PREFIX), V =/= '$deleted'].
 
 
 %% -----------------------------------------------------------------------------
@@ -726,7 +733,7 @@ do_add(Map) ->
         authmethods = Method
     },
     Realm1 = set_keys(Realm0, KeyList),
-    ok = plum_db:put(?PREFIX, Uri, Realm1),
+    ok = plum_db:put(?PDB_PREFIX, Uri, Realm1),
 
     %% We create all RBAC entities defined in the Realm Spec map
     ok = apply_config(groups, Map),
@@ -797,7 +804,7 @@ select_first_available([H|T], I) ->
 %% @private
 -spec do_lookup(uri()) -> realm() | {error, not_found}.
 do_lookup(Uri) ->
-    case plum_db:get(?PREFIX, Uri) of
+    case plum_db:get(?PDB_PREFIX, Uri) of
         #realm{} = Realm ->
             Realm;
         undefined ->
@@ -811,6 +818,7 @@ validate_private_keys([]) ->
 
 validate_private_keys(Pems) when length(Pems) < 3 ->
     false;
+
 validate_private_keys(Pems) ->
     try
         Keys = lists:map(
