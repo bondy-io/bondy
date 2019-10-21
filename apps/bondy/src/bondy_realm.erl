@@ -768,6 +768,7 @@ do_update(Realm0, Map) ->
     },
 
     Realm2 = set_keys(Realm1, KeyList),
+    ok = plum_db:put(?PDB_PREFIX, Realm0#realm.uri, Realm2),
     ok = maybe_enable_security(SecurityEnabled, Realm2),
 
     %% We create all RBAC entities defined in the Realm Spec map
