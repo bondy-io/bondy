@@ -295,7 +295,7 @@ apply_config() ->
                         true ->
                             error(invalid_config);
                         false ->
-                            _ = lager:info(
+                            _ = lager:warning(
                                 "No configuration file found; path=~p",
                                 [FName]
                             ),
