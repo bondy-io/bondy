@@ -74,6 +74,91 @@
     {{192, 168, 0, 0}, 16}
 ]).
 
+
+-define(REALM_SPEC, #{
+    <<"uri">> => #{
+        alias => uri,
+        key => <<"uri">>,
+        required => true,
+        datatype => binary
+    },
+    <<"description">> => #{
+        alias => description,
+        key => <<"description">>,
+        required => true,
+        datatype => binary,
+        default => <<>>
+    },
+    <<"authmethods">> => #{
+        alias => authmethods,
+        key => <<"authmethods">>,
+        required => true,
+        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
+        default => ?WAMP_AUTH_METHODS
+    },
+    <<"security_enabled">> => #{
+        alias => security_enabled,
+        key => <<"security_enabled">>,
+        required => true,
+        datatype => boolean,
+        default => true
+    },
+    <<"users">> => #{
+        alias => users,
+        key => <<"users">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?USER_SPEC}
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?GROUP_SPEC}
+    },
+    <<"sources">> => #{
+        alias => sources,
+        key => <<"sources">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?SOURCE_SPEC}
+    },
+    <<"grants">> => #{
+        alias => grants,
+        key => <<"grants">>,
+        required => true,
+        default => [],
+        datatype => list,
+        validator => {list, ?GRANT_SPEC}
+    },
+    <<"private_keys">> => #{
+        alias => private_keys,
+        key => <<"private_keys">>,
+        required => true,
+        allow_undefined => false,
+        allow_null => false,
+        default => fun gen_private_keys/0,
+        validator => fun validate_private_keys/1
+    }
+}).
+
+%% Override to make private_keys not required on update
+-define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
+    <<"private_keys">> => #{
+        alias => private_keys,
+        key => <<"private_keys">>,
+        required => false,
+        allow_undefined => false,
+        allow_null => false,
+        validator => fun validate_private_keys/1
+    }
+}).
+
+
 %% The default configuration for the admin realm
 -define(BONDY_REALM, #{
     description => <<"The Bondy administrative realm">>,
@@ -698,3 +783,37 @@ do_lookup(Uri) ->
             {error, not_found}
     end.
 
+
+%% private
+validate_private_keys([]) ->
+    {ok, gen_private_keys()};
+
+validate_private_keys(Pems) when length(Pems) < 3 ->
+    false;
+validate_private_keys(Pems) ->
+    try
+        Keys = lists:map(
+            fun
+                ({jose_jwk, _, _, _} = Key) ->
+                    Key;
+                (Pem) ->
+                    case jose_jwk:from_pem(Pem) of
+                        {jose_jwk, _, _, _} = Key -> Key;
+                        _ -> false
+                    end
+            end,
+            Pems
+        ),
+        {ok, Keys}
+    catch
+        ?EXCEPTION(_, _, _) ->
+            false
+    end.
+
+
+%% @private
+gen_private_keys() ->
+    [
+        jose_jwk:generate_key({namedCurve, secp256r1})
+        || _ <- lists:seq(1, 3)
+    ].
