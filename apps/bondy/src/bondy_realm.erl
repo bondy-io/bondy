@@ -707,13 +707,18 @@ maybe_error(ok) ->
 add(Map0, IsStrict, Spec) ->
     #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, Spec),
     wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
-     case lookup(Uri) of
+    maybe_add(Map1, IsStrict).
+
+
+%% @private
+maybe_add(#{<<"uri">> := Uri} = Map, IsStrict) ->
+    case lookup(Uri) of
         #realm{} when IsStrict ->
             error({already_exists, Uri});
         #realm{} = Realm ->
-            do_update(Realm, Map1);
+            do_update(Realm, Map);
         {error, not_found} ->
-            do_add(Map1)
+            do_add(Map)
     end.
 
 
