@@ -176,16 +176,37 @@
                 <<"wamp.publish">>
             ],
             uri => <<"*">>,
+            roles => <<"all">>
+        },
+        #{
+            permissions => [
+                <<"wamp.register">>,
+                <<"wamp.unregister">>,
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.call">>,
+                <<"wamp.cancel">>,
+                <<"wamp.publish">>
+            ],
+            uri => <<"*">>,
             roles => [<<"anonymous">>]
         }
     ],
     sources => [
         #{
+            usernames => <<"all">>,
+            authmethod => <<"password">>,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{
+                <<"description">> => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+            }
+        },
+        #{
             usernames => [<<"anonymous">>],
             authmethod => <<"trust">>,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
-                <<"description">> => <<"Allows all users from any network authenticate as anonymous.">>
+                <<"description">> => <<"Allows all users from any network authenticate as anonymous. This should ideally be restricted to your local administrative or DMZ network.">>
             }
         }
     ]
@@ -442,7 +463,7 @@ get(Uri) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will create a new one for Uri.
+%% does not exist it will create a new one for Uri with configuration `Opts'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) -> realm().
@@ -452,7 +473,7 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         {error, not_found} when Uri == ?BONDY_REALM_URI ->
-            add(?BONDY_REALM, false);
+            add(?BONDY_REALM#{<<"uri">> => Uri}, false);
         {error, not_found} ->
             add(Opts#{<<"uri">> => Uri}, false)
     end.
