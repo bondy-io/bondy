@@ -246,7 +246,10 @@ enable_security(#realm{uri = Uri}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(realm()) -> ok.
+-spec disable_security(realm()) -> ok | {error, not_permitted}.
+
+disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
+    {error, not_permitted};
 
 disable_security(#realm{uri = Uri}) ->
     ?DISABLE_SECURITY(Uri).
@@ -508,6 +511,9 @@ init(#realm{uri = Uri} = Realm, SecurityEnabled) ->
 
 
 %% @private
+maybe_enable_security(_, #realm{uri = ?BONDY_REALM_URI} = Realm) ->
+    enable_security(Realm);
+
 maybe_enable_security(undefined, _) ->
     ok;
 
