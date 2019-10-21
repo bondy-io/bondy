@@ -74,6 +74,38 @@
     {{192, 168, 0, 0}, 16}
 ]).
 
+%% The default configuration for the admin realm
+-define(BONDY_REALM, #{
+    description => <<"The Bondy administrative realm">>,
+    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
+    security_enabled => true, % but we allow anonymous access
+    grants => [
+        #{
+            permissions => [
+                <<"wamp.register">>,
+                <<"wamp.unregister">>,
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.call">>,
+                <<"wamp.cancel">>,
+                <<"wamp.publish">>
+            ],
+            uri => <<"*">>,
+            roles => [<<"anonymous">>]
+        }
+    ],
+    sources => [
+        #{
+            usernames => [<<"anonymous">>],
+            authmethod => <<"trust">>,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{
+                <<"description">> => <<"Allows all users from any network authenticate as anonymous.">>
+            }
+        }
+    ]
+}).
+
 
 -record(realm, {
     uri                         ::  uri(),
@@ -331,6 +363,8 @@ get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Realm;
+        {error, not_found} when Uri == ?BONDY_REALM_URI ->
+            add(?BONDY_REALM, false);
         {error, not_found} ->
             add(Opts#{<<"uri">> => Uri}, false)
     end.

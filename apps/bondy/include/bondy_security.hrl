@@ -108,35 +108,6 @@
     wampcra
 ]).
 
-
--define(BONDY_REALM, #{
-    description => <<"The Bondy administrative realm.">>,
-    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
-    grants => [
-        #{
-            permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
-                <<"wamp.call">>,
-                <<"wamp.cancel">>,
-                <<"wamp.publish">>
-            ],
-            uri => <<"*">>,
-            roles => [<<"anonymous">>]
-        }
-    ],
-    sources => [
-        #{
-            usernames => [<<"anonymous">>],
-            authmethod => <<"trust">>,
-            cidr => <<"0.0.0.0/0">>,
-            meta => #{}
-        }
-    ]
-}).
-
 -define(GEN_PRIV_KEYS_FUN, fun() ->
     [
         jose_jwk:generate_key({namedCurve, secp256r1})
