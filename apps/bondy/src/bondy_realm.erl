@@ -660,6 +660,8 @@ apply_config(Map0) ->
 
 %% @private
 apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
+    GroupNames = [maps:get(<<"name">>, G) || G <- Groups],
+    _ = lager:debug("Adding; realm=~p, groups=~p", [Uri, GroupNames]),
     _ = [
         ok = maybe_error(bondy_security_group:add_or_update(Uri, Group))
         || Group <- Groups
@@ -667,6 +669,8 @@ apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
     ok;
 
 apply_config(users, #{<<"uri">> := Uri, <<"users">> := Users}) ->
+    Usernames = [maps:get(<<"username">>, U) || U <- Users],
+    _ = lager:debug("Adding users; realm=~p, users=~p", [Uri, Usernames]),
     _ = [
         ok = maybe_error(bondy_security_user:add_or_update(Uri, User))
         || User <- Users
