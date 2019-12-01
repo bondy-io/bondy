@@ -84,6 +84,7 @@
 %% =============================================================================
 
 
+%% TODO The value for 'body' is not a of type '[map,binary,tuple]' (return body)
 
 init(Req, St0) ->
     Session = undefined, %TODO
