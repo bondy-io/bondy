@@ -213,6 +213,7 @@
         alias => options,
         required => true,
         default => #{},
+        %% TODO we need to allow
         validator => ?SUBSCRIBE_OPTS_SPEC
     }
 }).

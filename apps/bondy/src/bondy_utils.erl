@@ -29,7 +29,6 @@
 -export([elapsed_time/2]).
 -export([foreach/2]).
 -export([generate_fragment/1]).
--export([get_flake_id/0]).
 -export([get_id/1]).
 -export([get_nonce/0]).
 -export([get_random_string/2]).
@@ -243,16 +242,6 @@ get_id({session, SessionId}) when is_integer(SessionId) ->
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)
     bondy_session:incr_seq(SessionId).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Calls flake_server:id/0 and returns the generated ID.
-%% @end
-%% -----------------------------------------------------------------------------
--spec get_flake_id() -> binary().
-get_flake_id() ->
-    {ok, Id} = flake_server:id(),
-    Id.
 
 
 %% -----------------------------------------------------------------------------

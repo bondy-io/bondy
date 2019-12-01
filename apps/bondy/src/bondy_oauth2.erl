@@ -361,13 +361,11 @@ revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
     {error, unsupported_operation}.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec revoke_refresh_tokens(bondy_realm:uri(), Username :: binary()) ->
-    ok.
+-spec revoke_refresh_tokens(bondy_realm:uri(), Username :: binary()) -> ok.
 
 revoke_refresh_tokens(RealmUri, Username) ->
     AllPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Username),
@@ -390,8 +388,7 @@ revoke_refresh_tokens(RealmUri, Username) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec revoke_refresh_tokens(
-    bondy_realm:uri(), Issuer :: binary(), Username :: binary()) ->
-    ok.
+    bondy_realm:uri(), Issuer :: binary(), Username :: binary()) -> ok.
 
 revoke_refresh_tokens(RealmUri, Issuer, Username) ->
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
@@ -411,7 +408,7 @@ revoke_refresh_tokens(RealmUri, Issuer, Username) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Removes all refresh tokens whose user has been removed.
-%% Function used for db maitenance.
+%% This function is used for db maintenance.
 %% @end
 %% -----------------------------------------------------------------------------
 revoke_dangling_tokens(RealmUri, Issuer) ->
@@ -433,7 +430,7 @@ revoke_dangling_tokens(RealmUri, Issuer) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Rebuilds refresh_token indices.
-%% Function used for db maitenance.
+%% This function is used for db maintenance.
 %% @end
 %% -----------------------------------------------------------------------------
 rebuild_token_indices(RealmUri, Issuer) ->
@@ -482,18 +479,21 @@ verify_jwt(RealmUri, JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(binary(), binary(), map()) ->
+-spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), Match :: map()) ->
     {ok, map()} | {error, error()}.
 
-verify_jwt(RealmUri, JWT, Match0) ->
+verify_jwt(RealmUri, JWTString, Match0) ->
     Match1 = Match0#{<<"aud">> => RealmUri},
-    case bondy_cache:get(RealmUri, JWT) of
+    case bondy_cache:get(RealmUri, JWTString) of
         {ok, Claims} ->
             %% We skip verification as we found the JWT
-            maybe_expired(matches(Claims, Match1), JWT);
+            maybe_expired(matches(Claims, Match1), JWTString);
         {error, not_found} ->
             %% We do verify the JWT and if valid we cache it
-            maybe_cache(maybe_expired(do_verify_jwt(JWT, Match1), JWT), JWT)
+            maybe_cache(
+                maybe_expired(do_verify_jwt(JWTString, Match1), JWTString),
+                JWTString
+            )
     end.
 
 

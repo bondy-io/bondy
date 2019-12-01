@@ -657,15 +657,17 @@ handle_call(#call{} = M, Ctxt0) ->
 prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
-    M0 = #{
+
+    Details = #{
         procedure => Uri,
         trust_level => 0
     },
+
     case DiscloseCaller orelse DiscloseMe of
         true ->
-            M0#{caller => bondy_context:session_id(Ctxt)};
+            Details#{caller => bondy_context:session_id(Ctxt)};
         false ->
-            M0
+            Details
     end.
 
 

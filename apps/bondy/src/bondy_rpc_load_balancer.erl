@@ -42,11 +42,17 @@
         allow_null => false,
         allow_undefined => false,
         datatype => {in, [
+            %% WAMP
             single, first, last, random, round_robin,
+            %% BONDY extensions
             queue_least_loaded, queue_least_loaded_sample
         ]}
     },
+    %% BONDY extension
+    %% TODO this should be a map
+    %% #{strategy => #{id => queue_least_loaded, force_locality}}
     force_locality => #{
+        alias => <<"force_locality">>,
         required => true,
         allow_null => false,
         allow_undefined => false,

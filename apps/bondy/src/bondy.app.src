@@ -18,19 +18,29 @@
 
 {application, bondy,
  [
-     {description, "Leapsight Bondy is an open source networking platform for distributed MicroServices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
-    {vsn, "0.8.6"},
+    {description, "Leapsight Bondy is an open source distributed networking platform for microservices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
+    {vsn, "0.8.7"},
     {registered, []},
-    {mod, {bondy_app, [{vsn, "0.8.6"}]}},
+    %% We pass the version number in the bondy_app:start/2 arguments
+    {mod, {application_starter, [bondy_app, [{vsn, "0.8.7"}]]}},
     {start_phases, [
+        %% We conditionally wait for plum_db partitions to be initialised
+        {init_db_partitions, []},
+        %% We enable the admin API
         {init_admin_listeners, []},
+        %% We configure all features and subsystems
         {configure_features, []},
+        %% We initialise the registry
         {init_registry, []},
-        {restore_aae_config, []},
+        %% We conditionally wait for plum_db hashtrees to be built
+        {init_db_hashtrees, []},
+        %% We condittionally trigger an exchange (if we are in cluster)
+        {aae_exchange, []},
+        %% We initialise all WAMP and HTTP listeners so clients can connect
         {init_listeners, []}
     ]},
     {applications,[
-        %% OTP
+        %% Erlang
         kernel,
         stdlib,
         sasl,
@@ -55,16 +65,22 @@
         sidejob,
         uuid,
         %% Leapsight
-        plum_db,
         mops,
-        flake,
-        tuplespace,
         art,
         wamp
+    ]},
+    {included_applications, [
+        plum_db,
+        tuplespace
     ]},
     {env, []},
     {modules, []},
     {maintainers, ["Alejandro M. Ramallo"]},
     {licenses, ["Apache 2.0"]},
-    {links, [{"Gitlab", "https://gitlab.com/leapsight/bondy"}]}
+    {links, [
+        {"Gitlab", "https://gitlab.com/leapsight/bondy"},
+        {"Github", "https://github/leapsight/bondy"},
+        {"Docs", "https://docs.getbondy.io"},
+        {"Website", "https://getbondy.io"}
+    ]}
  ]}.

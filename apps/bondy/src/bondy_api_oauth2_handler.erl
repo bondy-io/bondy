@@ -33,7 +33,6 @@
 
 -define(GRANT_TYPE, <<"grant_type">>).
 
-
 -define(HEADERS, ?CORS_HEADERS#{
     <<"content-type">> => <<"application/json; charset=utf-8">>
 }).
@@ -72,11 +71,8 @@
 
 
 %% Resource Owner Password Credentials Grant
-
-% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
-% "grant_type=password&username=admin&password=admin&scope=*"
-
-
+%% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
+%% "grant_type=password&username=admin&password=admin&scope=*"
 -define(RESOURCE_OWNER_SPEC, #{
     ?GRANT_TYPE => #{
         required => true,
@@ -109,11 +105,8 @@
 }).
 
 %% Client Credentials Grant
-
-% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
-% "grant_type=client_credentials&client_id=test&client_secret=test&scope=*"
-
-
+%% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
+%% "grant_type=client_credentials&client_id=test&client_secret=test&scope=*"
 -define(CLIENT_CREDENTIALS_SPEC, #{
     ?GRANT_TYPE => #{
         required => true,
@@ -139,9 +132,8 @@
 }).
 
 %% Refresh Token
-% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
-% "grant_type=refresh_token&client_id=test&client_secret=test&refresh_token=gcSwNN369G2Ks8cet2CQTzYdlebpQtkD&scope=*"
-
+%% curl -v -X POST http://192.168.1.41/api/0.2.0/oauth/token -d \
+%% "grant_type=refresh_token&client_id=test&client_secret=test&refresh_token=gcSwNN369G2Ks8cet2CQTzYdlebpQtkD&scope=*"
 -define(REFRESH_TOKEN_SPEC, #{
     ?GRANT_TYPE => #{
         required => true,
@@ -395,7 +387,7 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     %% According to RFC6749:
     %% The authorization server MAY issue a new refresh token, in which case
     %% the client MUST discard the old refresh token and replace it with the
-    %% new refresh token.  The authorization server MAY revoke the old
+    %% new refresh token. The authorization server MAY revoke the old
     %% refresh token after issuing a new refresh token to the client.
     %% If a new refresh token is issued, the refresh token scope MUST be
     %% identical to that of the refresh token included by the client in the
@@ -411,7 +403,6 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
             ),
             error({oauth2_invalid_request, Map0})
     end;
-
 
 token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
     %% TODO
@@ -483,7 +474,6 @@ revoke_token_flow(Data0, Req0, St) ->
 
 
 %% @private
-
 prepare_meta(password, Meta, #state{device_id = DeviceId})
 when DeviceId =/= undefined ->
      maps:put(<<"client_device_id">>, DeviceId, Meta);
@@ -546,6 +536,7 @@ prepare_request(Body, Headers, Req0) ->
     cowboy_req:set_resp_body(bondy_utils:maybe_encode(json, Body), Req1).
 
 
+%% @private
 token_response(JWT, RefreshToken, Claims, Req0) ->
     Scope = iolist_to_binary(
         lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),

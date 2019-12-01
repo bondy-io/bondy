@@ -83,7 +83,7 @@ new(From0, To0, Payload0, Opts) ->
 
     #peer_message{
         payload = validate_payload(Payload0),
-        id = bondy_utils:get_flake_id(),
+        id = ksuid:gen_id(millisecond),
         to = To1,
         from = From1,
         options = Opts

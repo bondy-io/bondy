@@ -108,171 +108,6 @@
     wampcra
 ]).
 
-
--define(BONDY_REALM, #{
-    description => <<"The Bondy administrative realm.">>,
-    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
-    grants => [
-        #{
-            permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
-                <<"wamp.call">>,
-                <<"wamp.cancel">>,
-                <<"wamp.publish">>
-            ],
-            uri => <<"*">>,
-            roles => [<<"anonymous">>]
-        }
-    ],
-    sources => [
-        #{
-            usernames => <<"anonymous">>,
-            authmethod => <<"trust">>,
-            cidr => <<"0.0.0.0/0">>,
-            meta => #{}
-        }
-    ]
-}).
-
--define(REALM_SPEC, #{
-    <<"uri">> => #{
-        alias => uri,
-        key => <<"uri">>,
-        required => true,
-        datatype => binary
-    },
-    <<"description">> => #{
-        alias => description,
-        key => <<"description">>,
-        required => true,
-        datatype => binary,
-        default => <<>>
-    },
-    <<"authmethods">> => #{
-        alias => authmethods,
-        key => <<"authmethods">>,
-        required => true,
-        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
-        default => ?WAMP_AUTH_METHODS
-    },
-    <<"security_enabled">> => #{
-        alias => security_enabled,
-        key => <<"security_enabled">>,
-        required => true,
-        datatype => boolean,
-        default => true
-    },
-    <<"users">> => #{
-        alias => users,
-        key => <<"users">>,
-        required => true,
-        default => [],
-        datatype => list,
-        validator => {list, ?USER_SPEC}
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>,
-        required => true,
-        default => [],
-        datatype => list,
-        validator => {list, ?GROUP_SPEC}
-    },
-    <<"sources">> => #{
-        alias => sources,
-        key => <<"sources">>,
-        required => true,
-        default => [],
-        datatype => list,
-        validator => {list, ?SOURCE_SPEC}
-    },
-    <<"grants">> => #{
-        alias => grants,
-        key => <<"grants">>,
-        required => true,
-        default => [],
-        datatype => list,
-        validator => {list, ?GRANT_SPEC}
-    },
-    <<"private_keys">> => #{
-        alias => private_keys,
-        key => <<"private_keys">>,
-        required => true,
-        allow_undefined => false,
-        allow_null => false,
-        datatype => {list, binary},
-        default => [
-            jose_jwk:generate_key({namedCurve, secp256r1})
-            || _ <- lists:seq(1, 3)
-        ],
-        validator => fun
-            ([]) ->
-                Keys = [
-                    jose_jwk:generate_key({namedCurve, secp256r1})
-                    || _ <- lists:seq(1, 3)
-                ],
-                {ok, Keys};
-            (Pems) when length(Pems) < 3 ->
-                false;
-            (Pems) ->
-                try
-                    Keys = lists:map(
-                        fun(Pem) ->
-                            case jose_jwk:from_pem(Pem) of
-                                {jose_jwk, _, _, _} = Key -> Key;
-                                _ -> false
-                            end
-                        end,
-                        Pems
-                    ),
-                    {ok, Keys}
-                catch
-                    ?EXCEPTION(_, _, _) ->
-                        false
-                end
-        end
-    }
-}).
-
-%% Override to make private_kesy requiered without a default
-%% Every node will load the config file and thus if we do not do this
-%% all of tehm will generate a differemt set ok keys concurrently.
-%% Even though the vsalue should converge, we would be wasting resources.
--define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
-    <<"private_keys">> => #{
-        alias => private_keys,
-        key => <<"private_keys">>,
-        required => true,
-        allow_undefined => false,
-        allow_null => false,
-        datatype => {list, binary},
-        validator => fun
-            (Pems) when length(Pems) < 3 ->
-                false;
-            (Pems) ->
-                try
-                    Keys = lists:map(
-                        fun(Pem) ->
-                            case jose_jwk:from_pem(Pem) of
-                                {jose_jwk, _, _, _} = Key -> Key;
-                                _ -> false
-                            end
-                        end,
-                        Pems
-                    ),
-                    {ok, Keys}
-                catch
-                    ?EXCEPTION(_, _, _) ->
-                        false
-                end
-        end
-    }
-}).
-
-
 -define(VALIDATE_USERNAME, fun
         (<<"all">>) ->
             false;
@@ -398,22 +233,18 @@
 }).
 
 -define(ROLES_DATATYPE, [
-    {in, [<<"all">>, all,  <<"anonymous">>, anonymous]},
+    {in, [<<"all">>, all]},
     {list, binary}
 ]).
 
 -define(ROLES_VALIDATOR, fun
-    (<<"anonymous">>) ->
-        {ok, anonymous};
     (<<"all">>) ->
         {ok, all};
     (all) ->
         true;
-    (anonymous) ->
-        true;
     (List) when is_list(List) ->
         A = sets:from_list(List),
-        B = sets:from_list([<<"all">>]),
+        B = sets:from_list([<<"all">>, all]),
         case sets:is_disjoint(A, B) of
             true ->
                 L = lists:map(
@@ -422,6 +253,8 @@
                 ),
                 {ok, L};
             false ->
+                %% Error, "all" is not a role so it cannot
+                %% be mixed in a roles list
                 false
         end
 end).
@@ -433,9 +266,7 @@ end).
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => ?ROLES_DATATYPE,
-        %% all cannot be mixed anonymous or with custom usernames
-        %% in the same rule
+        %% datatype => ?ROLES_DATATYPE,
         validator => ?ROLES_VALIDATOR
     },
     <<"authmethod">> => #{
@@ -521,7 +352,7 @@ end).
         key => <<"uri">>,
         required => true,
         allow_null => false,
-        datatype => binary,
+        datatype => [binary, {in, [any, all]}],
         validator => fun
             (<<"*">>) ->
                 {ok, any};
@@ -546,7 +377,7 @@ end).
         required => true,
         allow_null => false,
         allow_undefined => false,
-        datatype => ?ROLES_DATATYPE,
+        %% datatype => ?ROLES_DATATYPE,
         validator => ?ROLES_VALIDATOR
     }
 }).

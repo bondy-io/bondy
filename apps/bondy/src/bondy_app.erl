@@ -97,9 +97,16 @@ start(_Type, Args) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback
+%% @doc Application behaviour callback.
+%% The order in which this function is called with the different phases is
+%% defined in the bondy_app.src file.
 %% @end
 %% -----------------------------------------------------------------------------
+start_phase(init_db_partitions, normal, []) ->
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
+    ok;
+
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable certain operations during startup i.e. heartbeats
@@ -113,22 +120,17 @@ start_phase(configure_features, normal, []) ->
     ok;
 
 start_phase(init_registry, normal, []) ->
-    %% In previous versions of Bondy we piggy backed on a disk-only version of
-    %% plum_db to get registry synchronisation across the cluster.
-    %% During the previous registry initialisation no client should be
-    %% connected. This was a clean way of avoiding new registrations
-    %% interfiering with the registry restore and cleanup.
-    %% Starting from bondy 0.8.0 and the migration to plum_db 0.2.0 we no
-    %% longer store the registry on disk, just on ram.
-    %% However, we kept this step as it is clean and allows us to do
-    %% some validations and preparations.
     bondy_registry:init();
 
-start_phase(restore_aae_config, normal, []) ->
+start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
-    %% TODO conditionally force an AAE exchange here to get a the
-    %% registry in sync with the cluster before init_listeners
-    %% This might take a while.
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
+    ok;
+
+start_phase(aae_exchange, normal, []) ->
+    %% The application master will call this same phase in plum_db
+    %% we do nothing here
     ok;
 
 start_phase(init_listeners, normal, []) ->
@@ -162,7 +164,12 @@ stop(_State) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc A utility function that we use to extract the version name that is
+%% injected by the bondy.app.src configuration file.
+%% @end
+%% -----------------------------------------------------------------------------
 setup_env(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->
@@ -174,9 +181,9 @@ setup_env(Args) ->
 
 %% @private
 setup_bondy_realm() ->
-    %% We use get/2 to force the creation of the bondy realm
+    %% We use get/2 to force the creation of the bondy admin realm
     %% if it does not exist.
-    _ = bondy_realm:get(?BONDY_REALM_URI, ?BONDY_REALM),
+    _ = bondy_realm:get(?BONDY_REALM_URI),
     ok.
 
 
@@ -249,7 +256,8 @@ restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             ok = plum_db_config:set(aae_enabled, true),
-            _ = lager:info("Active anti-entropy (AAE) re-enabled");
+            _ = lager:info("Active anti-entropy (AAE) re-enabled"),
+            ok;
         false ->
             ok
     end.

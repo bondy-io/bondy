@@ -39,9 +39,11 @@
 -export([authorize/3]).
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -81,8 +83,6 @@ authenticate(_, _Scheme, _Realm, _Peer) ->
     {error, invalid_scheme}.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns 'ok' or an exception.
 %% @end
@@ -95,7 +95,7 @@ authorize(Permission, Resource, Ctxt) ->
     %% the data is in ets so it should be pretty fast.
     RealmUri = bondy_context:realm_uri(Ctxt),
     IsEnabled = bondy_realm:is_security_enabled(RealmUri),
-    maybe_authorize(IsEnabled, Permission, Resource, Ctxt).
+    maybe_authorize(Permission, Resource, Ctxt, IsEnabled).
 
 
 
@@ -106,11 +106,10 @@ authorize(Permission, Resource, Ctxt) ->
 
 
 %% @private
-maybe_authorize(true, Permission, Resource, Ctxt) ->
-    SecCtxt = get_security_context(Ctxt),
-    do_authorize(Permission, Resource, SecCtxt);
+maybe_authorize(Permission, Resource, Ctxt, true) ->
+    do_authorize(Permission, Resource, get_security_context(Ctxt));
 
-maybe_authorize(false, _, _, _) ->
+maybe_authorize(_, _, _, false) ->
     ok.
 
 
