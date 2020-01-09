@@ -20,14 +20,28 @@
 %% @doc
 %% This module implements a parser for the Bondy API Specification Format which
 %% is used to dynamically define one or more RESTful APIs.
-%% == API Specification Format
-%% === Host Spec
-%% === API Spec
-%% === Version Spec
-%% === Path Spec
-%% === Method Spec
-%% === Action Spec
-%% === Action Spec
+%%
+%% The parser uses maps_utils:validate and a number of validation specifications
+%% and as a result is its error reporting is not great but does its job.
+%% The plan is to replace this with an ad-hoc parser to give the user more
+%% useful error information.
+%%
+%% ## API Specification Format
+%%
+%% ### Host Spec
+%%
+%% ### API Spec
+%%
+%% ### Version Spec
+%%
+%% ### Path Spec
+%%
+%% ### Method Spec
+%%
+%% ### Action Spec
+%%
+%% ### Action Spec
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
@@ -114,7 +128,7 @@
         allow_null => false,
         datatype => binary,
         validator => fun
-            (<<"_">>) -> {ok, '_'}; % Cowboy requirement
+            (<<"_">>) -> {ok, '_'}; % Cowboy needs an atom
             (Val) -> {ok, Val}
         end
     },
