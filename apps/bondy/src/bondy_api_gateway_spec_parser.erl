@@ -987,11 +987,15 @@ from_file(Filename) ->
     catch
         ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
-                "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
+                "Error processing API Gateway Specification file; "
+                "reason=~p, file_name=~p",
+                [invalid_specification_format, Filename]
+            ),
             {error, invalid_specification_format};
         ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1059,9 +1063,11 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
             {S} <- Schemes
     ]),
     R1 = leap_relation:union(R0, A0),
+
     %% We project the desired output
     PMS = {function, collect, [?VAR(path), ?VAR(mod), ?VAR(state)]},
     Proj1 = {?VAR(scheme), ?VAR(host), {as, PMS, ?VAR(pms)}},
+
     % [{scheme, host, [{path, mode, state}]}]
     R2 = leap_relation:summarize(R1, Proj1, #{}),
     HPMS = {function, collect, [?VAR(host), ?VAR(pms)]},
