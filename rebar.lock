@@ -61,7 +61,7 @@
  {<<"metrics">>,{pkg,<<"metrics">>,<<"1.0.1">>},1},
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.2.0">>},1},
  {<<"mops">>,
-  {git,"git@gitlab.com:leapsight/mops.git",
+  {git,"https://gitlab.com/leapsight/mops.git",
        {ref,"23f94486b1433d57a45c946ac5e4fa36821ab68d"}},
   0},
  {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.7.0">>},0},
