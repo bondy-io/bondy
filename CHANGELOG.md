@@ -1,6 +1,11 @@
 # CHANGELOG
 
 ## Develop
+- API Gateway
+  - Fixes a bug in the validation of the response body which failed in case the body was not a MOPS expression, a binary or map. Now all external-friendly types are allows e.g. numbers, booleans, strings, binaries, maps, lists and MOPS expressions. This allows to return static content i.e. not a result of evaluating a MOPS expression in any given type of action.
+  - Upgraded MOPS which has better error reporting and sopport for a new function `random(N)` which returns N random members from a list.
+
+## 0.8.7
 
 ### Added
 
