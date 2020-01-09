@@ -695,7 +695,8 @@ load_dispatch_tables() ->
                 ?EXCEPTION(_, _, _) ->
                     _ = delete(K),
                     _ = lager:warning(
-                        "Removed invalid API Gateway specification from store"),
+                        "Removed invalid API Gateway specification from store"
+                    ),
                     []
             end
 
