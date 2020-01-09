@@ -678,6 +678,16 @@
 
 }).
 
+-define(BODY_ALL_DATATYPES, [
+    binary,
+    boolean,
+    list,
+    map,
+    number,
+    string,
+    ?MOPS_PROXY_FUN_TYPE
+]).
+
 -define(DEFAULT_STATIC_ACTION, #{
     <<"body">> => <<>>,
     <<"headers">> => #{}
@@ -698,7 +708,7 @@
     <<"body">> => #{
         alias => body,
         required => true,
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     }
 }).
 
@@ -753,9 +763,7 @@
     <<"body">> => #{
         alias => body,
         required => true,
-        %% TODO map? a body could be anything!
-        %% TODO Review this
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -868,7 +876,7 @@ end).
         alias => body,
         required => true,
         allow_null => false,
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     },
     <<"status_code">> => #{
         alias => status_code,
