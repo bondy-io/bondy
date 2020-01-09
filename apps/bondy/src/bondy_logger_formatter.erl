@@ -146,7 +146,7 @@ format_msg(Data0, Config) ->
 
 
 format_msg(Parents, Data, #{map_depth := 0} = Config) when is_map(Data) ->
-    to_string(truncate_key(Parents), Config)++"=... ";
+    to_string(truncate_key(Parents), Config) ++ "=... ";
 
 format_msg(Parents, Data, #{map_depth := Depth} = Config) when is_map(Data) ->
     maps:fold(fun
@@ -202,7 +202,7 @@ format_mfa({M, F, A}, Config) when is_atom(M), is_atom(F), is_list(A) ->
     format_mfa({M, F, length(A)}, Config);
 
 format_mfa(MFAStr, Config) -> % passing in a pre-formatted string value
-    to_string(MFAStr,Config).
+    to_string(MFAStr, Config).
 
 
 %% @private

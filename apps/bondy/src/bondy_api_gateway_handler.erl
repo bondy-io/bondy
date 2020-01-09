@@ -1029,8 +1029,21 @@ trim_trailing_slash(Bin) ->
 
 
 mops_eval(Expr, Ctxt) ->
-    try mops:eval(Expr, Ctxt)
+    try
+        mops:eval(Expr, Ctxt)
     catch
+        ?EXCEPTION(error, {invalid_expression, [Expr, Term]}, _) ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => iolist_to_binary([
+                    <<"There was an error evaluating the MOPS expression '">>,
+                    Expr,
+                    "' with value '",
+                    io_lib:format("~p", [Term]),
+                    "'"
+                ]),
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            });
         ?EXCEPTION(error, {badkey, Key}, _) ->
             throw(#{
                 <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
