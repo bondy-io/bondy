@@ -231,7 +231,7 @@ rebuild_dispatch_tables() ->
 -spec lookup(binary()) -> map() | {error, not_found}.
 
 lookup(Id) ->
-    case plum_db:get(?PREFIX, Id)  of
+    case plum_db:get(?PREFIX, Id) of
         Spec when is_map(Spec) ->
             Spec;
         undefined ->
