@@ -508,16 +508,29 @@ do_apply_config() ->
         undefined ->
             ok;
         FName ->
-            try jsx:consult(FName, [return_maps]) of
-                [Specs] ->
-                    _ = lager:info(
-                        "Loading configuration file; path=~p", [FName]),
-                    _ = [ok = load_spec(Spec) || Spec <- Specs],
-                    rebuild_dispatch_tables()
+            try
+                case jsx:consult(FName, [return_maps]) of
+                    [Spec] when is_map(Spec) ->
+                        ok = load_spec(Spec),
+                        rebuild_dispatch_tables();
+                    [[]] ->
+                        ok;
+                    [Specs] ->
+                        _ = lager:info(
+                            "Loading configuration file; path=~p", [FName]
+                        ),
+                        _ = [load_spec(Spec) || Spec <- Specs],
+                        rebuild_dispatch_tables()
+                end
             catch
                 ?EXCEPTION(error, badarg, _) ->
                     case filelib:is_file(FName) of
                         true ->
+                            %% _ = lager:error(
+                            %%     "Error while loading API specification; "
+                            %%     "path=~p, class=~p, reason=~p, stacktrace=~p",
+                            %%     [FName, Class, Reason, Stacktrace]
+                            %% ),
                             error(invalid_specification_format);
                         false ->
                             _ = lager:info(
@@ -525,7 +538,14 @@ do_apply_config() ->
                                 [FName]
                             ),
                             ok
-                    end
+                    end;
+                ?EXCEPTION(Class, Reason, Stacktrace) ->
+                    _ = lager:error(
+                        "Error while loading API specification; "
+                        "path=~p, class=~p, reason=~p, stacktrace=~p",
+                        [FName, Class, Reason, Stacktrace]
+                    ),
+                    ok
             end
     end.
 
@@ -540,17 +560,23 @@ load_spec(Map) when is_map(Map) ->
                 Id,
                 maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
             );
-        {error, _} = Error ->
-            Error
+        {error, Reason} ->
+            _ = lager:error(
+                "Error while loading API specification; reason=~p, api_id=~p", [Reason, maps:get(<<"id">>, Map, undefined)]
+            ),
+            throw(Reason)
     end;
 
 load_spec(FName) ->
     try jsx:consult(FName, [return_maps]) of
         [Spec] ->
-            load(Spec)
+            load_spec(Spec)
     catch
         ?EXCEPTION(error, badarg, _) ->
-            {error, invalid_specification_format}
+            _ = lager:error(
+                "Error while loading API specification; reason=~p, filename=~p", [invalid_specification_format, FName]
+            ),
+            throw(invalid_specification_format)
     end.
 
 
