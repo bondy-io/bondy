@@ -517,7 +517,7 @@ do_apply_config() ->
                         ok;
                     [Specs] ->
                         _ = lager:info(
-                            "Loading configuration file; path=~p", [FName]
+                            "Loading configuration file; filename=~p", [FName]
                         ),
                         _ = [load_spec(Spec) || Spec <- Specs],
                         rebuild_dispatch_tables()
@@ -542,7 +542,7 @@ do_apply_config() ->
                 ?EXCEPTION(Class, Reason, Stacktrace) ->
                     _ = lager:error(
                         "Error while loading API specification; "
-                        "path=~p, class=~p, reason=~p, stacktrace=~p",
+                        "filename=~p, class=~p, reason=~p, stacktrace=~p",
                         [FName, Class, Reason, Stacktrace]
                     ),
                     ok
