@@ -21,6 +21,11 @@
 ]}.
 
 
+{mapping, "log.console.formatter_config", "lager.handlers", [
+  {default, bondy},
+  {datatype, {enum, [default, bondy]}}
+]}.
+
 
 
 %% @doc where do you want the console.log output:
@@ -29,7 +34,7 @@
 %% console : standard out
 %% both : log.console.file and standard out.
 {mapping, "log.console", "lager.handlers", [
-  {default, file},
+  {default, console},
   {datatype, {enum, [off, file, console, both]}}
 ]}.
 
@@ -41,26 +46,26 @@
 
 %% @doc location of the console log
 {mapping, "log.console.file", "lager.handlers", [
-  {default, "{{platform_log_dir}}/console.log"}
+  {default, "{{platform_log_dir}}/console.log"},
+  {datatype, file}
 ]}.
 
-%% *gasp* notice the same @mapping!
 %% @doc location of the error log
 {mapping, "log.error.file", "lager.handlers", [
-  {default, "{{platform_log_dir}}/error.log"}
+  {default, "{{platform_log_dir}}/error.log"},
+  {datatype, file}
 ]}.
 
-%% *gasp* notice the same @mapping!
 %% @doc location of the debug log
 {mapping, "log.debug.file", "lager.handlers", [
-  {default, "{{platform_log_dir}}/debug.log"}
+  {default, "{{platform_log_dir}}/debug.log"},
+  {datatype, file}
 ]}.
 
-%% *gasp* notice the same @mapping!
-%% @doc turn on syslog
+%% @doc When 'on', enables log output to syslog
 {mapping, "log.syslog", "lager.handlers", [
   {default, off},
-  {datatype, {enum, [on, off]}}
+  {datatype, flag}
 ]}.
 
 { translation,
@@ -72,24 +77,56 @@
     end,
     ErrorHandler = case cuttlefish:conf_get("log.error.file", Conf) of
       undefined -> [];
-      ErrorFilename -> [{lager_file_backend, [{file, ErrorFilename},
-                                              {level, error},
-                                              {size, 10485760},
-                                              {date, "$D0"},
-                                              {count, 5}]}]
+      ErrorFilename -> [
+        {lager_file_backend, [
+          {file, ErrorFilename},
+          {level, error},
+          {size, 10485760},
+          {date, "$D0"},
+          {count, 5}
+        ]}
+      ]
     end,
 
     ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
     ConsoleLogFile = cuttlefish:conf_get("log.console.file", Conf),
     ConsoleLogForm = cuttlefish:conf_get("log.console.formatter", Conf),
+    ConsoleLogFormConfig = cuttlefish:conf_get("log.console.formatter_config", Conf),
 
-    ConsoleHandler = {lager_console_handler, ConsoleLogLevel},
-    ConsoleFileHandler = {lager_file_backend, [{file, ConsoleLogFile},
-                                                {formatter, ConsoleLogForm},
-                                                {level, ConsoleLogLevel},
-                                                {size, 10485760},
-                                                {date, "$D0"},
-                                                {count, 5}]},
+    BondyFormatterConfig = [
+      color,
+      date, " ", time,
+      " [", severity,"]",
+      " [", pid,
+      {module, [" ", module], ""},
+      {function, [":", function], ""},
+      {line, [":",line], ""}, "] ",
+      message,
+      "\e[0m\r\n"
+    ],
+
+    FormatterConfig = case ConsoleLogFormConfig of
+      bondy -> BondyFormatterConfig;
+      _ -> []
+    end,
+
+    ConsoleHandler = {lager_console_backend, [
+      %% {size, 10485760},
+      %% {date, "$D0"},
+      %% {count, 5}
+      {level, ConsoleLogLevel},
+      {formatter, ConsoleLogForm},
+      {formatter_config, FormatterConfig}
+    ]},
+    ConsoleFileHandler = {lager_file_backend, [
+      {file, ConsoleLogFile},
+      {formatter, ConsoleLogForm},
+      {formatter_config, FormatterConfig},
+      {level, ConsoleLogLevel},
+      {size, 10485760},
+      {date, "$D0"},
+      {count, 5}
+    ]},
 
     ConsoleHandlers = case cuttlefish:conf_get("log.console", Conf) of
       off -> [];
@@ -99,14 +136,20 @@
       _ -> []
     end,
     DebugHandler = case cuttlefish:conf_get("log.debug.file", Conf) of
-      undefined -> [];
-      DebugFilename -> [{lager_file_backend, [{file, DebugFilename},
-                                              {level, debug},
-                                              {size, 10485760},
-                                              {date, "$D0"},
-                                              {count, 5}]}]
+      undefined ->
+        [];
+      DebugFilename -> [
+        {lager_file_backend, [
+          {file, DebugFilename},
+          {level, debug},
+          {formatter, ConsoleLogForm},
+          {formatter_config, FormatterConfig},
+          {size, 10485760},
+          {date, "$D0"},
+          {count, 5}
+        ]}
+      ]
     end,
-
     SyslogHandler ++ ConsoleHandlers ++ ErrorHandler ++ DebugHandler
   end
 }.
@@ -116,7 +159,8 @@
 %% @doc Whether to write a crash log, and where.
 %% Commented/omitted/undefined means no crash logger.
 {mapping, "log.crash.file", "lager.crash_log", [
-  {default, "{{platform_log_dir}}/crash.log"}
+  {default, "{{platform_log_dir}}/crash.log"},
+  {datatype, file}
 ]}.
 
 %% @doc Maximum size in bytes of events in the crash log - defaults to 65536
