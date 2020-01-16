@@ -50,10 +50,20 @@
   {datatype, file}
 ]}.
 
+{mapping, "log.error.enabled", "lager.handlers", [
+  {default, off},
+  {datatype, flag}
+]}.
+
 %% @doc location of the error log
 {mapping, "log.error.file", "lager.handlers", [
   {default, "{{platform_log_dir}}/error.log"},
   {datatype, file}
+]}.
+
+{mapping, "log.debug.enabled", "lager.handlers", [
+  {default, off},
+  {datatype, flag}
 ]}.
 
 %% @doc location of the debug log
@@ -71,25 +81,6 @@
 { translation,
   "lager.handlers",
   fun(Conf) ->
-    SyslogHandler = case cuttlefish:conf_get("log.syslog", Conf) of
-      on ->  [{lager_syslog_backend, ["bondy", daemon, info]}];
-      _ -> []
-    end,
-    ErrorHandler = case cuttlefish:conf_get("log.error.file", Conf) of
-      undefined -> [];
-      ErrorFilename -> [
-        {lager_file_backend, [
-          {file, ErrorFilename},
-          {level, error},
-          {size, 10485760},
-          {date, "$D0"},
-          {count, 5}
-        ]}
-      ]
-    end,
-
-    ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
-    ConsoleLogFile = cuttlefish:conf_get("log.console.file", Conf),
     ConsoleLogForm = cuttlefish:conf_get("log.console.formatter", Conf),
     ConsoleLogFormConfig = cuttlefish:conf_get("log.console.formatter_config", Conf),
 
@@ -109,6 +100,58 @@
       bondy -> BondyFormatterConfig;
       _ -> []
     end,
+
+
+    SyslogHandler = case cuttlefish:conf_get("log.syslog", Conf) of
+      true ->
+        [{lager_syslog_backend, ["bondy", daemon, info]}];
+      _ ->
+        []
+    end,
+
+    ErrorHandler = case cuttlefish:conf_get("log.error.enabled", Conf) of
+      true ->
+        case cuttlefish:conf_get("log.error.file", Conf) of
+          undefined ->
+            [];
+          ErrorFilename -> [
+            {lager_file_backend, [
+              {file, ErrorFilename},
+              {level, error},
+              {size, 10485760},
+              {date, "$D0"},
+              {count, 5}
+            ]}
+          ]
+        end;
+      false ->
+        []
+    end,
+
+    DebugHandler = case cuttlefish:conf_get("log.debug.enabled", Conf) of
+      true ->
+        case cuttlefish:conf_get("log.error.file", Conf) of
+          undefined ->
+            [];
+          DebugFilename -> [
+            {lager_file_backend, [
+              {file, DebugFilename},
+              {level, error},
+              {formatter, ConsoleLogForm},
+              {formatter_config, FormatterConfig},
+              {size, 10485760},
+              {date, "$D0"},
+              {count, 5}
+            ]}
+          ]
+        end;
+      false ->
+        []
+    end,
+
+    ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
+    ConsoleLogFile = cuttlefish:conf_get("log.console.file", Conf),
+
 
     ConsoleHandler = {lager_console_backend, [
       %% {size, 10485760},
@@ -135,21 +178,7 @@
       both -> [ConsoleHandler, ConsoleFileHandler];
       _ -> []
     end,
-    DebugHandler = case cuttlefish:conf_get("log.debug.file", Conf) of
-      undefined ->
-        [];
-      DebugFilename -> [
-        {lager_file_backend, [
-          {file, DebugFilename},
-          {level, debug},
-          {formatter, ConsoleLogForm},
-          {formatter_config, FormatterConfig},
-          {size, 10485760},
-          {date, "$D0"},
-          {count, 5}
-        ]}
-      ]
-    end,
+
     SyslogHandler ++ ConsoleHandlers ++ ErrorHandler ++ DebugHandler
   end
 }.
