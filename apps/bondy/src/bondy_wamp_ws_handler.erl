@@ -314,7 +314,12 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, _) ->
         {ok, CBState} ->
             St = #state{frame_type = FrameType, protocol_state = CBState},
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
-            Opts = #{idle_timeout => ?CONN_TIMEOUT},
+            Opts = #{
+                %% max_frame_size => bondy_config:get()
+                %% Cowboy will close the connection if idle
+                %% for more than this value
+                idle_timeout => ?CONN_TIMEOUT
+            },
             {cowboy_websocket, Req1, St, Opts};
         {error, _Reason} ->
             %% Returning ok will cause the handler to
