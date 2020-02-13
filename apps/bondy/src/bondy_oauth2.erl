@@ -18,6 +18,16 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%%
+%% The following table documents the storage layout in plum_db of the token
+%% data and its indices:
+%%
+%% |Datum|Prefix|Key|Value|
+%% |---|---|---|---|
+%% |Refresh Token|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}|Token| TokenData|
+%% |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer}|Token|Issuer|
+%% |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ "," ++ Issuer ++ "," ++ Username}|DeviceId| Token|
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2).
@@ -72,14 +82,11 @@
 ).
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_MSECS, 2*60). % 2mins
+-define(LEEWAY_MSECS, 2 * 60). % 2 mins
 -define(EXPIRY_TIME_MSECS(Ts, MSecs), Ts + MSecs + ?LEEWAY_MSECS).
 
 
-%% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, RefreshToken} ->
-%% #bondy_oauth2_token{}
-%% * {{Realm ++ . ++ Issuer, "refresh_tokens"}, Sub} ->
-%% #bondy_oauth2_token{}
+
 -define(REFRESH_TOKENS_PREFIX(Realm, IssuerOrSub),
     {oauth2_refresh_tokens, <<Realm/binary, $,, IssuerOrSub/binary>>}
 ).
@@ -100,7 +107,8 @@
     is_active = true        ::  boolean
 }).
 
--type token()           ::  #bondy_oauth2_token{}.
+
+-type token_data()      ::  #bondy_oauth2_token{}.
 -type grant_type()      ::  client_credentials | password | authorization_code.
 -type error()           ::  oauth2_invalid_grant | no_such_realm.
 -type token_type()      ::  access_token | refresh_token.
@@ -134,24 +142,29 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the issuer a.k.a. ClientId of the token data.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec issuer(TokenData :: token_data()) -> binary().
+
 issuer(#bondy_oauth2_token{issuer = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the timestamp for the token data.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec issued_at(token_data()) -> pos_integer().
+
 issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Generates an access token and a refresh token. The access token is a JWT
-%% whereas the refresh token is a binary.
-%% The function stores the refresh token in the store.
+%% @doc Generates an access token and a refresh token.
+%% The access token is a JWT whereas the refresh token is a binary.
+%%
+%% The function stores the refresh token in the store and creates a number of
+%% store indices.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue_token(
@@ -170,14 +183,15 @@ issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Generates an access token and a refresh token. The access token is a JWT
-%% whereas the refresh token is a binary.
-%% The function stores the refresh token in the store.
+%% @doc Generates an access token and a refresh token.
+%% The access token is a JWT whereas the refresh token is a binary.
+%%
+%% The function stores the refresh token in the store and creates a number of
+%% store indices.
 %% @end
 %% -----------------------------------------------------------------------------
--spec issue_token(grant_type(), bondy_realm:uri(), token()) ->
-    {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
+-spec issue_token(grant_type(), bondy_realm:uri(), token_data()) ->
+    {ok, JWT :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, any()}.
 
 issue_token(GrantType, RealmUri, Data0) ->
@@ -190,9 +204,14 @@ issue_token(GrantType, RealmUri, Data0) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the data token_data() associated with `Token' or the tuple
+%% `{error, not_found}'.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec lookup_token(
+    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
+    token_data() | {error, not_found}.
+
 lookup_token(RealmUri, Issuer, Token) ->
     case plum_db:get(?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token) of
         #bondy_oauth2_token{} = Data -> Data;
@@ -205,9 +224,15 @@ lookup_token(RealmUri, Issuer, Token) ->
 %% After refreshing a token, the previous refresh token will be revoked
 %% @end
 %% -----------------------------------------------------------------------------
+-spec refresh_token(
+    Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
+    {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
+    | {error, oauth2_invalid_grant}.
+
 refresh_token(RealmUri, Issuer, Token) ->
     Now = ?NOW,
     Secs = ?REFRESH_TOKEN_TTL,
+
     case lookup_token(RealmUri, Issuer, Token) of
         #bondy_oauth2_token{issued_at = Ts}
         when ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now  ->
@@ -225,14 +250,15 @@ refresh_token(RealmUri, Issuer, Token) ->
                         "issuer=~p",
                         [Token, RealmUri, Issuer]
                     ),
+                    %% We remove all refresh tokens for this user
                     _ = revoke_tokens(refresh_token, RealmUri, Username),
                     {error, oauth2_invalid_grant};
                 _ ->
                     %% Issue new tokens
-
-                    %% We revoke the prev refresh token first becuase this also
-                    %% deletes the client_device_id index, if we do it later we
-                    %% would be deleting the new client_device_id index
+                    %% We revoke the previous refresh token first because this
+                    %% also deletes the client_device_id index,
+                    %% if we do it later we would be deleting the new
+                    %% client_device_id index
                     ok = revoke_refresh_token(RealmUri, Issuer, Token),
                     case
                         do_issue_token(bondy_realm:fetch(RealmUri), Data0, true)
@@ -332,7 +358,7 @@ revoke_refresh_token(RealmUri, Issuer, Username, DeviceId) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_tokens(
     Hint :: token_type() | undefined,
-    bondy_realm:uri(),
+    Realm :: bondy_realm:uri(),
     Username :: binary()) ->
         ok | {error, unsupported_operation}.
 
@@ -459,6 +485,7 @@ rebuild_token_indices(RealmUri, Issuer) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec decode_jwt(binary()) -> map().
+
 decode_jwt(JWT) ->
     {jose_jwt, Map} = jose_jwt:peek(JWT),
     Map.
@@ -468,8 +495,7 @@ decode_jwt(JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(binary(), binary()) ->
-    {ok, map()} | {error, error()}.
+-spec verify_jwt(binary(), binary()) -> {ok, map()} | {error, error()}.
 
 verify_jwt(RealmUri, JWT) ->
     verify_jwt(RealmUri, JWT, #{}).
@@ -595,10 +621,10 @@ store_token_indices(Uri, Token, #bondy_oauth2_token{} = Data) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Removes the refresh token from store.
-%% This also removes all store indices.
+%% This also removes all store indices for this refresh token.
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_revoke_refresh_token(bondy_realm:uri(), binary(), token()) -> ok.
+-spec do_revoke_refresh_token(bondy_realm:uri(), binary(), token_data()) -> ok.
 
 do_revoke_refresh_token(RealmUri, Token, #bondy_oauth2_token{} = Data) ->
     %% RFC: https://tools.ietf.org/html/rfc7009
@@ -648,6 +674,7 @@ sign(Key, Claims) ->
 
 %% @private
 -spec do_verify_jwt(binary(), map()) -> {ok, map()} | {error, error()}.
+
 do_verify_jwt(JWT, Match) ->
     try
         {jose_jwt, Map} = jose_jwt:peek(JWT),
