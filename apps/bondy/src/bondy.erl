@@ -45,6 +45,7 @@
 -export([send/4]).
 -export([start/0]).
 -export([aae_exchanges/0]).
+-export([is_remote_peer/1]).
 
 
 
@@ -153,6 +154,13 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+is_remote_peer({_, Node, _, _}) ->
+    Node =/= bondy_peer_service:mynode().
 
 
 %% =============================================================================
