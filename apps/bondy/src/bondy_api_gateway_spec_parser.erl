@@ -20,14 +20,28 @@
 %% @doc
 %% This module implements a parser for the Bondy API Specification Format which
 %% is used to dynamically define one or more RESTful APIs.
-%% == API Specification Format
-%% === Host Spec
-%% === API Spec
-%% === Version Spec
-%% === Path Spec
-%% === Method Spec
-%% === Action Spec
-%% === Action Spec
+%%
+%% The parser uses maps_utils:validate and a number of validation specifications
+%% and as a result is its error reporting is not great but does its job.
+%% The plan is to replace this with an ad-hoc parser to give the user more
+%% useful error information.
+%%
+%% ## API Specification Format
+%%
+%% ### Host Spec
+%%
+%% ### API Spec
+%%
+%% ### Version Spec
+%%
+%% ### Path Spec
+%%
+%% ### Method Spec
+%%
+%% ### Action Spec
+%%
+%% ### Action Spec
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_api_gateway_spec_parser).
@@ -114,7 +128,7 @@
         allow_null => false,
         datatype => binary,
         validator => fun
-            (<<"_">>) -> {ok, '_'}; % Cowboy requirement
+            (<<"_">>) -> {ok, '_'}; % Cowboy needs an atom
             (Val) -> {ok, Val}
         end
     },
@@ -664,6 +678,16 @@
 
 }).
 
+-define(BODY_ALL_DATATYPES, [
+    binary,
+    boolean,
+    list,
+    map,
+    number,
+    string,
+    ?MOPS_PROXY_FUN_TYPE
+]).
+
 -define(DEFAULT_STATIC_ACTION, #{
     <<"body">> => <<>>,
     <<"headers">> => #{}
@@ -684,7 +708,7 @@
     <<"body">> => #{
         alias => body,
         required => true,
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     }
 }).
 
@@ -739,9 +763,7 @@
     <<"body">> => #{
         alias => body,
         required => true,
-        %% TODO map? a body could be anything!
-        %% TODO Review this
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     },
     <<"timeout">> => #{
         alias => timeout,
@@ -854,7 +876,7 @@ end).
         alias => body,
         required => true,
         allow_null => false,
-        datatype => [map, binary, ?MOPS_PROXY_FUN_TYPE]
+        datatype => ?BODY_ALL_DATATYPES
     },
     <<"status_code">> => #{
         alias => status_code,
@@ -965,11 +987,15 @@ from_file(Filename) ->
     catch
         ?EXCEPTION(error, badarg, _) ->
             _ = lager:error(
-                "Error processing API Gateway Specification file, reason=~p, file_name=~p", [invalid_specification_format, Filename]),
+                "Error processing API Gateway Specification file; "
+                "reason=~p, file_name=~p",
+                [invalid_specification_format, Filename]
+            ),
             {error, invalid_specification_format};
         ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1037,9 +1063,11 @@ dispatch_table(L, RulesToAdd) when is_list(L), is_list(RulesToAdd) ->
             {S} <- Schemes
     ]),
     R1 = leap_relation:union(R0, A0),
+
     %% We project the desired output
     PMS = {function, collect, [?VAR(path), ?VAR(mod), ?VAR(state)]},
     Proj1 = {?VAR(scheme), ?VAR(host), {as, PMS, ?VAR(pms)}},
+
     % [{scheme, host, [{path, mode, state}]}]
     R2 = leap_relation:summarize(R1, Proj1, #{}),
     HPMS = {function, collect, [?VAR(host), ?VAR(pms)]},
@@ -1188,7 +1216,7 @@ parse_path_elements([H|T], P0, Ctxt) ->
                     })
             end
     end,
-    Eval = fun(V) -> mops:eval(V, Ctxt) end,
+    Eval = fun(V) -> mops_eval(V, Ctxt) end,
     P2 = maps:update_with(H, Eval, P1),
     parse_path_elements(T, P2, Ctxt);
 
@@ -1198,7 +1226,7 @@ parse_path_elements([], Path, _) ->
 
 %% @private
 parse_request_method(Method, Spec, Ctxt) when is_binary(Spec) ->
-    parse_request_method(Method, mops:eval(Spec, Ctxt), Ctxt);
+    parse_request_method(Method, mops_eval(Spec, Ctxt), Ctxt);
 
 %% parse_request_method(<<"options">>, Spec, Ctxt) ->
 %%     #{<<"response">> := Resp} = Spec,
@@ -1218,9 +1246,9 @@ parse_request_method(Method, Spec0, Ctxt) ->
     Spec1#{
         <<"action">> => parse_action(Method, Act, Ctxt),
         <<"response">> => parse_response(Method, Resp, Ctxt),
-        <<"body_max_bytes">> => mops:eval(MB, Ctxt),
-        <<"body_read_bytes">> => mops:eval(BL, Ctxt),
-        <<"body_read_seconds">> => mops:eval(SL, Ctxt)
+        <<"body_max_bytes">> => mops_eval(MB, Ctxt),
+        <<"body_read_bytes">> => mops_eval(BL, Ctxt),
+        <<"body_read_seconds">> => mops_eval(SL, Ctxt)
     }.
 
 
@@ -1239,19 +1267,19 @@ parse_request_method(Method, Spec0, Ctxt) ->
 
 parse_action(_, #{<<"type">> := <<"wamp_", _/binary>>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
+        mops_eval(maps:merge(?DEFAULT_WAMP_ACTION, Spec), Ctxt),
         ?WAMP_ACTION_SPEC
     );
 
 parse_action(_, #{<<"type">> := <<"forward">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
+        mops_eval(maps:merge(?DEFAULT_FWD_ACTION, Spec), Ctxt),
         ?FWD_ACTION_SPEC
     );
 
 parse_action(_, #{<<"type">> := <<"static">>} = Spec, Ctxt) ->
     maps_utils:validate(
-        mops:eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
+        mops_eval(maps:merge(?DEFAULT_STATIC_ACTION, Spec), Ctxt),
         ?STATIC_ACTION_SPEC
     );
 
@@ -1271,7 +1299,7 @@ parse_response(_, Spec0, Ctxt) ->
     OE0 = maps:get(<<"on_error">>, Spec0, ?DEFAULT_RESPONSE),
     [OR1, OE1] = [
         maps_utils:validate(
-            mops:eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
+            mops_eval(maps:merge(?DEFAULT_RESPONSE, X), Ctxt),
             ?RESPONSE_SPEC
         ) || X <- [OR0, OE0]
     ],
@@ -1342,7 +1370,7 @@ eval_vars(S0, Ctxt0) ->
     %% amongst them
     VFun = fun(Var, Val, ICtxt) ->
         IVars1 = maps:update(
-            Var, mops:eval(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
+            Var, mops_eval(Val, ICtxt), maps:get(?VARS_KEY, ICtxt)),
         maps:update(?VARS_KEY, IVars1, ICtxt)
     end,
     Ctxt1 = maps:fold(VFun, Ctxt0, Vars),
@@ -1350,7 +1378,7 @@ eval_vars(S0, Ctxt0) ->
     %% We evaluate defaults
     DFun = fun(Var, Val, ICtxt) ->
         IDefs1 = maps:update(
-            Var, mops:eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
+            Var, mops_eval(Val, ICtxt), maps:get(?DEFAULTS_KEY, ICtxt)),
         maps:update(?DEFAULTS_KEY, IDefs1, ICtxt)
     end,
     Ctxt2 = maps:fold(DFun, Ctxt1, Defs),
@@ -1664,3 +1692,33 @@ check_realm_exists(Uri) ->
     end.
 
 
+
+mops_eval(Expr, Ctxt) ->
+    try
+        mops:eval(Expr, Ctxt)
+    catch
+        ?EXCEPTION(error, {invalid_expression, [Expr, Term]}, _) ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => iolist_to_binary([
+                    <<"There was an error evaluating the MOPS expression '">>,
+                    Expr,
+                    "' with value '",
+                    io_lib:format("~p", [Term]),
+                    "'"
+                ]),
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            });
+        ?EXCEPTION(error, {badkey, Key}, _) ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            });
+        ?EXCEPTION(error, {badkeypath, Path}, _) ->
+            throw(#{
+                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
+                <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
+            })
+    end.

@@ -599,14 +599,23 @@ validate_max_len(_) ->
 %% 3 - 15: reserved for future serializers
 %% @end
 %% -----------------------------------------------------------------------------
-validate_encoding(1) -> {binary, json};
-validate_encoding(2) -> {binary, msgpack};
-% validate_encoding(3) -> {binary, cbor};
-validate_encoding(4) -> {binary, bert};
-validate_encoding(15) -> {binary, erl};
-validate_encoding(_) ->
-    %% TODO define correct error return
-    throw(serializer_unsupported).
+validate_encoding(1) ->
+    {binary, json};
+
+validate_encoding(2) ->
+    {binary, msgpack};
+
+validate_encoding(N) ->
+    case bondy_config:get([wamp_tcp, serializers, N], undefined) of
+        erl ->
+            {binary, erl};
+        bert ->
+            {binary, bert};
+        undefined ->
+            %% TODO define correct error return
+            throw(serializer_unsupported)
+    end.
+
 
 
 %% -----------------------------------------------------------------------------

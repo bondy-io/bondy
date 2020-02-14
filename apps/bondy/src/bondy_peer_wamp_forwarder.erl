@@ -144,12 +144,15 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Forwards a wamp message to a cluster peer (node). It returns ok when the
-%% remote bondy_peer_wamp_forwarder acknoledges the reception of the message,
-%% but it does not imply the message handler has actually received the message.
-%% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
+%% @doc Forwards a wamp message to a peer (cluster node).
+%% It returns `ok' when the remote bondy_peer_wamp_forwarder acknoledges the
+%% reception of the message, but it does not imply the message handler has
+%% actually received the message.
+%%
+%% This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP
 %% message types. It will fail with an exception if another type is passed
-%% as the second argument.
+%% as the third argument.
+%%
 %% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -210,6 +213,8 @@ broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec receive_ack(remote_peer_id(), timeout()) -> ok | no_return().
+
 receive_ack(Id, Timeout) ->
     %% We wait for the remote forwarder to send us an ACK
     %% to be sure the wamp peer received the message
@@ -217,11 +222,11 @@ receive_ack(Id, Timeout) ->
         #peer_ack{id = Id} ->
             ok;
         #peer_error{id = Id, reason = Reason} ->
-            exit(Reason)
+            error(Reason)
     after
         Timeout ->
             %% maybe_enqueue(Enqueue, SessionId, M, timeout)
-            exit(timeout)
+            error(timeout)
     end.
 
 
