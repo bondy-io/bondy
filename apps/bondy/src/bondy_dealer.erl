@@ -344,19 +344,6 @@ handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
     ok;
 
 handle_peer_message(
-    #error{request_type = ?CALL} = M, _Caller, Callee, _Opts) ->
-    %% A remote callee is returning an error to a local caller.
-    Fun = fun
-        (empty) ->
-            no_matching_promise(M);
-        ({ok, Promise}) ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, LocalCaller, M, #{})
-    end,
-    _ = bondy_rpc_promise:dequeue_call(M#error.request_id, Callee, Fun),
-    ok;
-
-handle_peer_message(
     #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
     %% A remote callee is returning an error to a local caller.
     Fun = fun
@@ -583,7 +570,14 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
-            CallError = M#error{request_id = CallId, request_type = ?CALL},
+            CallError = case bondy:is_remote_peer(Caller) of
+                true ->
+                    %% We reply the invocation message as the remote node has
+                    %% send us an invocation and not a call
+                    M;
+                false ->
+                    M#error{request_id = CallId, request_type = ?CALL}
+            end,
             bondy:send(Callee, Caller, CallError, #{})
     end,
     InvocationId = M#error.request_id,
