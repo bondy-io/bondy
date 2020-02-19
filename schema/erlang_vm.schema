@@ -20,6 +20,17 @@
   hidden
 ]}.
 
+%% @doc Sets scheduler busy wait threshold. Defaults to medium. The threshold
+%% determines how long schedulers are to busy wait when running out of work
+%% before going to sleep.
+%%
+%% For Docker deployments the recommendation is to use "none" and
+%% configure the +S option to the allocated number of CPU cores.
+{mapping, "erlang.sbwt", "vm_args.+sbwt", [
+  {default, medium},
+  {datatype, {enum, [none, very_short, short, medium, long, very_long]}}
+]}.
+
 %% @doc Sets the mapping of warning messages for error_logger.
 %% Messages sent to the error logger using one of the warning
 %% routines can be mapped either to errors (default), warnings

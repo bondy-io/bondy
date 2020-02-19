@@ -26,6 +26,7 @@
 -export([client_ip/1]).
 -export([real_ip/1]).
 -export([forwarded_for/1]).
+-export([set_meta_headers/1]).
 
 
 
@@ -70,3 +71,16 @@ forwarded_for(Req) ->
         [H|_] -> H;
         Val -> Val
     end.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_meta_headers(Req :: cowboy_req:req()) ->
+    NewReq :: cowboy_req:req().
+
+set_meta_headers(Req) ->
+    Meta = #{
+        <<"via">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
+    },
+    cowboy_req:set_resp_headers(Meta, Req).

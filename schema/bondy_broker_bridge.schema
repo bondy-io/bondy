@@ -142,7 +142,8 @@ end}.
 {mapping, "broker_bridge.kafka.clients.$name.auto_start_producers", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
   {datatype, flag},
   {default, on},
-  {include_default, "default"}
+  {include_default, "default"},
+  hidden
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -176,7 +177,14 @@ end}.
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc How many acknowledgements the kafka broker should receive from the
+%% clustered replicas before acking producer.
+%%  0: the broker will not send any response
+%%     (this is the only case where the broker will not reply to a request)
+%%  1: The leader will wait the data is written to the local log before
+%%    sending a response.
+%%  -1: If it is -1 the broker will block until the message is committed by
+%%    all in sync replicas before acking.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "broker_bridge.kafka.clients.$name.producer.required_acks", "bondy_broker_bridge.bridges.bondy_kafka_bridge.clients", [
