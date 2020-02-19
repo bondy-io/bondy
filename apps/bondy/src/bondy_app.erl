@@ -109,8 +109,11 @@ start_phase(init_db_partitions, normal, []) ->
 
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
-    %% This is to enable certain operations during startup i.e. heartbeats
-    %% and external liveness probe e.g. K8s
+    %% This is to enable certain operations during startup i.e. liveness and
+    %% readiness probes.
+    %% The /ping (liveness) and /metrics paths will now go live
+    %% The /ready (readyness) path will now go live but will return false as
+    %% bondy_config:get(status) will return `initialising'
     bondy_api_gateway:start_admin_listeners();
 
 start_phase(configure_features, normal, []) ->
@@ -138,6 +141,8 @@ start_phase(init_listeners, normal, []) ->
     %% the remaining HTTP, WS and TCP listeners for clients to connect
     ok = bondy_wamp_raw_handler:start_listeners(),
     ok = bondy_api_gateway:start_listeners(),
+    %% We flag the status, the /ready path will now return true.
+    ok = bondy_config:set(status, ready),
     ok.
 
 
@@ -146,6 +151,7 @@ start_phase(init_listeners, normal, []) ->
 %% @end
 %% -----------------------------------------------------------------------------
 prep_stop(_State) ->
+    ok = bondy_config:set(status, shutting_down),
     stop_router_services().
 
 
@@ -173,6 +179,7 @@ stop(_State) ->
 setup_env(Args) ->
     case lists:keyfind(vsn, 1, Args) of
         {vsn, Vsn} ->
+            ok = bondy_config:set(status, initialising),
             application:set_env(bondy, vsn, Vsn);
         false ->
             ok

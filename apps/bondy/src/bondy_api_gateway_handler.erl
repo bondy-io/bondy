@@ -130,7 +130,7 @@ options(Req, #{api_spec := Spec} = St) ->
             Headers0
     end,
     Headers2 = maps:put(<<"allow">>, Allowed, Headers1),
-    {ok, cowboy_req:set_resp_headers(Headers2, Req), St}.
+    {ok, set_resp_headers(Headers2, Req), St}.
 
 
 is_authorized(Req0, St0) ->
@@ -201,7 +201,7 @@ delete_resource(Req0, #{api_spec := Spec} = St0) ->
     case perform_action(Method, maps:get(Method, Spec), St1) of
         {ok, Response, St2} ->
             Headers = maps:get(<<"headers">>, Response),
-            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+            Req1 = set_resp_headers(Headers, Req0),
             {true, Req1, St2};
 
         {ok, StatusCode, Response, St2} ->
@@ -296,7 +296,7 @@ is_authorized(
             Req2 = reply(?HTTP_UNAUTHORIZED, json, Response, Req0),
             {stop, Req2, St0};
         {error, Reason} ->
-            Req1 = cowboy_req:set_resp_headers(eval_headers(Req0, St0), Req0),
+            Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
             Req2 = reply_auth_error(
                 Reason, <<"Bearer">>, Realm, json, Req1),
             {stop, Req2, St0}
@@ -331,7 +331,7 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
                 <<"body">> := Body,
                 <<"headers">> := Headers
             } = Response,
-            Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+            Req1 = set_resp_headers(Headers, Req0),
             {maybe_encode(Enc, Body, Spec), Req1, St1};
 
         {ok, StatusCode, Response, St1} ->
@@ -847,7 +847,7 @@ reply(HTTPCode, Enc, Response, Req0) ->
 prepare_request(Enc, Response, Req0) ->
     Body = maps:get(<<"body">>, Response),
     Headers = maps:get(<<"headers">>, Response),
-    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+    Req1 = set_resp_headers(Headers, Req0),
     cowboy_req:set_resp_body(maybe_encode(Enc, Body), Req1).
 
 
@@ -1113,3 +1113,8 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
         BodyLen
     ],
     lager:log(Level, self(), Format, lists:append(Head, Tail)).
+
+
+set_resp_headers(Headers, Req0) ->
+    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+    cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).

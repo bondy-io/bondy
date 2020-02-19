@@ -799,6 +799,7 @@ admin_base_routes() ->
         {'_', [
             {"/ws", bondy_wamp_ws_handler, #{}},
             {"/ping", bondy_http_ping_handler, #{}},
+            {"/ready", bondy_http_ready_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}
     ].
