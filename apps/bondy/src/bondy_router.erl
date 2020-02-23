@@ -94,8 +94,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(ROUTER_ROLES, #{
-    broker => ?BROKER_FEATURES,
-    dealer => ?DEALER_FEATURES
+    broker => #{features => ?BROKER_FEATURES},
+    dealer => #{features => ?DEALER_FEATURES}
 }).
 
 
