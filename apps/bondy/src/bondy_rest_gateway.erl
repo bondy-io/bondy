@@ -808,7 +808,7 @@ admin_base_routes() ->
 
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
-    File = Base ++ "/specs/bondy_admin_api.json",
+    File = filename:join(Base, "specs/bondy_admin_api.json"),
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
             Spec
