@@ -42,7 +42,7 @@ init(Req0, State) ->
 
 
 ready(<<"GET">>, Req) ->
-    Status = status_code(bondy_config:get(status)),
+    Status = status_code(bondy_config:get(status, undefined)),
     cowboy_req:reply(Status, Req);
 
 ready(_, Req) ->
