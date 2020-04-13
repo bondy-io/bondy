@@ -205,7 +205,8 @@ setup_partisan() ->
 setup_event_handlers() ->
     %% We replace the default OTP alarm handler with ours
     _ = bondy_event_manager:swap_watched_handler(
-        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
+        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
+    ),
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
     _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
     ok.
