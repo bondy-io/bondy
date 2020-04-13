@@ -66,12 +66,7 @@
     bondy_registry_entry:entry_type(),
     plum_db:continuation()
 }.
-
-
--type task() :: fun(
-    (bondy_registry_entry:details_map(), bondy_context:t()) ->
-        ok
-).
+-type task() :: fun((bondy_registry_entry:t(), bondy_context:t()) -> ok).
 
 
 -export_type([eot/0]).
@@ -175,9 +170,8 @@ info(?SUBSCRIPTION_TRIE) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add_local_subscription(uri(), uri(), map(), pid()) ->
-    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:details_map()}}.
-
+    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:t()}}.
 
 add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     Node = bondy_peer_service:mynode(),
@@ -207,8 +201,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
             %% "Subscription|id".
             FullPrefix = full_prefix(Type, RealmUri),
             Entry =  plum_db:get(FullPrefix, EntryKey),
-            Map = bondy_registry_entry:to_details_map(Entry),
-            {error, {already_exists, Map}}
+            {error, {already_exists, Entry}}
     end.
 
 
@@ -223,7 +216,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 %% already added before by the same _Subscriber_, the _Broker_ should not fail
 %% and answer with a "SUBSCRIBED" message, containing the existing
 %% "Subscription|id". So in this case this function returns
-%% {ok, bondy_registry_entry:details_map(), boolean()}.
+%% {ok, bondy_registry_entry:t(), boolean()}.
 %%
 %% In case of a registration, as a default, only a single Callee may
 %% register a procedure for an URI. However, when shared registrations are
@@ -241,8 +234,8 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 %% -----------------------------------------------------------------------------
 -spec add(
     bondy_registry_entry:entry_type(), uri(), map(), bondy_context:t()) ->
-    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:details_map()}}.
+    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:t()}}.
 
 
 add(Type, Uri, Options, Ctxt) ->
@@ -264,6 +257,9 @@ add(Type, Uri, Options, Ctxt) ->
     TrieKey = trie_key(Pattern),
     Trie = trie(Type),
 
+    %% TODO Match using plum_db instead as the tree should act only as a
+    %% materialized view and at the moment is not concurrent so a read can fail
+    %% when other process is updating the tree
     case art_server:match(TrieKey, Trie) of
         [] ->
             %% No matching registrations at all exists or
@@ -278,8 +274,7 @@ add(Type, Uri, Options, Ctxt) ->
             %% "Subscription|id".
             FullPrefix = full_prefix(Type, RealmUri),
             Entry =  plum_db:get(FullPrefix, EntryKey),
-            Map = bondy_registry_entry:to_details_map(Entry),
-            {error, {already_exists, Map}};
+            {error, {already_exists, Entry}};
 
         [{_, EntryKey} | _] when Type == registration ->
             EOpts = bondy_registry_entry:options(EntryKey),
@@ -308,8 +303,7 @@ add(Type, Uri, Options, Ctxt) ->
                 false ->
                     FullPrefix = full_prefix(Type, RealmUri),
                     Entry =  plum_db:get(FullPrefix, EntryKey),
-                    Map = bondy_registry_entry:to_details_map(Entry),
-                    {error, {already_exists, Map}}
+                    {error, {already_exists, Entry}}
             end
     end.
 
@@ -341,7 +335,9 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
 when is_function(Task, 2) orelse Task == undefined ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
-            _ = lager:info("Context has no session_id; failed to remove registry contents"),
+            _ = lager:info(
+                "Context has no session_id; failed to remove registry contents"
+            ),
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
@@ -483,7 +479,7 @@ when is_function(Task, 2) orelse Task == undefined ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the list of entries owned by the the active session.
+%% Returns the list of entries owned by the active session.
 %%
 %% This function is equivalent to calling {@link entries/2} with the RealmUri
 %% and SessionId extracted from the Context.
@@ -843,7 +839,7 @@ maybe_execute(undefined, _) ->
     ok;
 
 maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
-    _ = Fun(bondy_registry_entry:to_details_map(Entry)),
+    _ = Fun(Entry),
     ok.
 
 
@@ -947,9 +943,8 @@ add_to_trie(Entry) ->
     %% We add entry to the trie
     _ = art_server:set(trie_key(Entry), EntryKey, trie(Type)),
 
-    Map = bondy_registry_entry:to_details_map(Entry),
     IsFirstEntry = incr_counter(RealmUri, Uri, 1) =:= 1,
-    {ok, Map, IsFirstEntry}.
+    {ok, Entry, IsFirstEntry}.
 
 
 %% @private

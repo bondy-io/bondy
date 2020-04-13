@@ -166,7 +166,9 @@
 
 
 -define(DEFAULT_LIMIT, 1000).
-
+-define(RESERVED_NS(NS),
+    <<"Use of reserved namespace '", NS/binary, "'.">>
+).
 
 %% API
 -export([close_context/1]).
@@ -606,27 +608,49 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
 do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
     %% TODO Maybe
     %% ReqId = bondy_utils:get_id(global),
-    %% spawn with pool -> bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    %% spawn with pool -> bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
     %% {ok, ReqId, Ctxt}.
     ok = bondy_security_utils:authorize(<<"wamp.call">>, Uri, Ctxt),
     handle_call(M, Ctxt).
 
 
 %% @private
-handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M0,
+    Ctxt) ->
+    %% Deprecated API Call,
+    %% TODO set an alarm with ref to this client
+    NewUri = binary:replace(M0#call.procedure_uri, <<"com.leapsight.">>, <<>>),
+    M1 = M0#call{procedure_uri = NewUri},
+    handle_call(M1, Ctxt);
 
 handle_call(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"bondy.api_gateway.", _/binary>>} = M,
+    Ctxt) ->
+    bondy_rest_gateway_api_handler:handle_call(M, Ctxt);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.registration.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"bondy.security.", _/binary>>} = M,
+    Ctxt) ->
+    bondy_security_api_handler:handle_call(M, Ctxt);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
-    bondy_broker_wamp_handler:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"bondy.oauth2.", _/binary>>} = M,
+    Ctxt) ->
+    bondy_oauth2_api_handler:handle_call(M, Ctxt);
+
+handle_call(
+    #call{procedure_uri = <<"bondy.backup.", _/binary>>} = M,
+    Ctxt) ->
+    bondy_backup_api_handler:handle_call(M, Ctxt);
+
+handle_call(
+    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+    bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
+
+handle_call(
+    #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
 
 handle_call(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
@@ -685,31 +709,25 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% `{not_authorized | procedure_already_exists, binary()}' reason.
 %% @end
 %% -----------------------------------------------------------------------------
-handle_register(#register{procedure_uri = <<"bondy.", _/binary>>}, _) ->
-    throw({not_authorized, <<"Use of reserved namespace 'bondy'.">>});
-
-handle_register(
-    #register{procedure_uri = <<"com.leapsight.bondy.", _/binary>>}, _) ->
-    throw({
-        not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>
-    });
-
-handle_register(#register{procedure_uri = <<"wamp.", _/binary>>}, _) ->
-    throw({not_authorized, <<"Use of reserved namespace 'wamp'.">>});
-
 handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
+    ok = maybe_reserved_ns(Uri),
     ok = bondy_security_utils:authorize(<<"wamp.register">>, Uri, Ctxt),
 
     #register{options = Opts, request_id = ReqId} = M,
     PeerId = bondy_context:peer_id(Ctxt),
 
     case bondy_registry:add(registration, Uri, Opts, Ctxt) of
-        {ok, Details, IsFirst} ->
-            ok = on_register(IsFirst, Details, Ctxt),
-            Reply = wamp_message:registered(ReqId, maps:get(id, Details)),
+        {ok, Entry, IsFirst} ->
+            ok = on_register(IsFirst, Entry, Ctxt),
+            Id = bondy_registry_entry:id(Entry),
+            Reply = wamp_message:registered(ReqId, Id),
             bondy:send(PeerId, Reply);
-        {error, {already_exists, #{match := Policy}}} ->
-            Mssg = <<"The procedure is already registered by another peer with policy ", $', Policy/binary, $', $.>>,
+        {error, {already_exists, Entry}} ->
+            Policy = bondy_registry_entry:match_policy(Entry),
+            Mssg = <<
+                "The procedure is already registered by another peer ",
+                "with policy ", $', Policy/binary, $', $.
+            >>,
             Reply = wamp_message:error(
                 ?REGISTER,
                 ReqId,
@@ -750,25 +768,13 @@ handle_unregister(#unregister{} = M, Ctxt) ->
 
 
 %% @private
-unregister(<<"com.leapsight.bondy",  _/binary>>, _, _) ->
-    NS = <<"com.leapsight.bondy">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
-unregister(<<"bondy",  _/binary>>, _, _) ->
-    NS = <<"bondy">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
-unregister(<<"wamp", _/binary>>, _, _) ->
-    NS = <<"wamp">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
 unregister(Uri, M, Ctxt) ->
+    ok = maybe_reserved_ns(Uri),
     RegId = M#unregister.request_id,
     ok = bondy_security_utils:authorize(<<"wamp.unregister">>, Uri, Ctxt),
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:peer_id(Ctxt), Reply).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -1135,16 +1141,16 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 
 %% @private
-on_register(true, Map, Ctxt) ->
-    bondy_event_manager:notify({registration_created, Map, Ctxt});
+on_register(true, Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_created, Entry, Ctxt});
 
-on_register(false, Map, Ctxt) ->
-    bondy_event_manager:notify({registration_added, Map, Ctxt}).
+on_register(false, Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_added, Entry, Ctxt}).
 
 
 %% @private
-on_unregister(Map, Ctxt) ->
-    bondy_event_manager:notify({registration_removed, Map, Ctxt}).
+on_unregister(Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_removed, Entry, Ctxt}).
 
 
 %% @private
@@ -1250,3 +1256,17 @@ not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
         [Mssg],
         #{message => Mssg}
     ).
+
+
+%% @private
+maybe_reserved_ns(<<"com.leapsight.bondy",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"com.leapsight.bondy">>)});
+
+maybe_reserved_ns(<<"bondy",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"bondy">>)});
+
+maybe_reserved_ns(<<"wamp",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"wamp">>)});
+
+maybe_reserved_ns(_) ->
+    ok.

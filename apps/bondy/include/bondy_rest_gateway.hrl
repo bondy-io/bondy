@@ -1,8 +1,8 @@
--define(BONDY_BAD_GATEWAY_ERROR, <<"com.leapsight.bondy.error.bad_gateway">>).
--define(BONDY_API_GATEWAY_INVALID_EXPR_ERROR, <<"com.leapsight.bondy.error.api_gateway.invalid_expression">>).
+-define(BONDY_BAD_GATEWAY_ERROR, <<"bondy.error.bad_gateway">>).
+-define(BONDY_REST_GATEWAY_INVALID_EXPR_ERROR, <<"bondy.error.api_gateway.invalid_expression">>).
 
--define(BONDY_ALREADY_EXISTS_ERROR, <<"com.leapsight.bondy.error.already_exists">>).
--define(BONDY_NOT_FOUND_ERROR, <<"com.leapsight.bondy.error.not_found">>).
+-define(BONDY_ALREADY_EXISTS_ERROR, <<"bondy.error.already_exists">>).
+-define(BONDY_NOT_FOUND_ERROR, <<"bondy.error.not_found">>).
 
 -define(CORS_HEADERS, #{
     <<"access-control-allow-origin">> => <<"*">>,

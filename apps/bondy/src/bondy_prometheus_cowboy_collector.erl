@@ -95,7 +95,7 @@
 %% Replaces
 %% -module(prometheus_cowboy2_instrumenter).
 
--module(bondy_cowboy_prometheus).
+-module(bondy_prometheus_cowboy_collector).
 
 
 -export([setup/0]).

@@ -20,13 +20,13 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_oauth2_wamp_handler).
+-module(bondy_oauth2_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--define(LOOKUP_TOKEN, <<"com.leapsight.bondy.oauth2.lookup_token">>).
--define(REVOKE_TOKEN, <<"com.leapsight.bondy.oauth2.revoke_token">>).
--define(REVOKE_TOKENS, <<"com.leapsight.bondy.oauth2.revoke_tokens">>).
+-define(LOOKUP_TOKEN, <<"bondy.oauth2.lookup_token">>).
+-define(REVOKE_TOKEN, <<"bondy.oauth2.revoke_token">>).
+-define(REVOKE_TOKENS, <<"bondy.oauth2.revoke_tokens">>).
 
 -export([handle_call/2]).
 

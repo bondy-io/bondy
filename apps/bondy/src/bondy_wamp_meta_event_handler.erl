@@ -17,10 +17,11 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc An event handler to turn bondy events into WAMP events.
+%% @doc An event handler to generates WAMP Meta Events based on internal
+%% Bondy events
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_meta_events).
+-module(bondy_wamp_meta_event_handler).
 -behaviour(gen_event).
 -include("bondy.hrl").
 -include("bondy_backup.hrl").
@@ -106,7 +107,7 @@ handle_event({security_password_changed, RealmUri, Username}, State) ->
     {ok, State};
 
 handle_event({security_user_logged_in, RealmUri, Username, Meta}, State) ->
-    Uri = <<"com.leapsight.bondy.security.user_logged_in">>,
+    Uri = <<"bondy.security.user_logged_in">>,
     _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
     {ok, State};
 
@@ -140,12 +141,15 @@ handle_event({backup_restore_error, Args}, State) ->
     _ = bondy:publish(#{}, ?RESTORE_ERROR, Args, #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
-handle_event({registration_created, Map, Ctxt}, State) ->
+%% REGISTRATION META API
+
+handle_event({registration_created, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
             Uri = <<"wamp.registration.on_create">>,
             SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
+            RegId = bondy_registry_entry:id(Entry),
+            Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
                 #{}, Uri, [SessionId, RegId], Map, Ctxt),
             {ok, State};
@@ -153,12 +157,13 @@ handle_event({registration_created, Map, Ctxt}, State) ->
             {ok, State}
     end;
 
-handle_event({registration_added, Map, Ctxt}, State) ->
+handle_event({registration_added, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
             Uri = <<"wamp.registration.on_register">>,
             SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
+            RegId = bondy_registry_entry:id(Entry),
+            Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
                 #{}, Uri, [SessionId, RegId], Map, Ctxt),
             {ok, State};
@@ -166,12 +171,13 @@ handle_event({registration_added, Map, Ctxt}, State) ->
             {ok, State}
     end;
 
-handle_event({registration_deleted, Map, Ctxt}, State) ->
+handle_event({registration_deleted, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
             Uri = <<"wamp.registration.on_delete">>,
             SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
+            RegId = bondy_registry_entry:id(Entry),
+            Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
                 #{}, Uri, [SessionId, RegId], Map, Ctxt),
             {ok, State};
@@ -179,14 +185,87 @@ handle_event({registration_deleted, Map, Ctxt}, State) ->
             {ok, State}
     end;
 
-handle_event({registration_removed, Map, Ctxt}, State) ->
+handle_event({registration_removed, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
             Uri = <<"wamp.registration.on_unregister">>,
             SessionId = bondy_context:session_id(Ctxt),
-            RegId = maps:get(id, Map),
+            RegId = bondy_registry_entry:id(Entry),
+            Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
                 #{}, Uri, [SessionId, RegId], Map, Ctxt),
+            {ok, State};
+        false ->
+            {ok, State}
+    end;
+
+%% SUBSCRIPTION META API
+
+handle_event({subscription_created, Entry, Ctxt}, State) ->
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.subscription.on_create">>,
+            Opts = #{},
+            Args = [
+                bondy_registry_entry:session_id(Entry),
+                bondy_registry_entry:to_details_map(Entry)
+            ],
+            KWArgs = #{},
+            _ = bondy_broker:publish(Opts, Uri, Args, KWArgs, Ctxt),
+            {ok, State};
+        false ->
+            {ok, State}
+    end;
+
+handle_event({subscription_added, Entry, Ctxt}, State) ->
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.subscription.on_subscribe">>,
+            Opts = #{},
+            Args = [
+                bondy_registry_entry:session_id(Entry),
+                bondy_registry_entry:to_details_map(Entry)
+            ],
+            KWArgs = #{},
+            _ = bondy_broker:publish(Opts, Uri, Args, KWArgs, Ctxt),
+            {ok, State};
+        false ->
+            {ok, State}
+    end;
+
+handle_event({subscription_removed, Entry, Ctxt}, State) ->
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.subscription.on_unsubscribe">>,
+            Opts = #{},
+            Args = [
+                bondy_registry_entry:session_id(Entry),
+                bondy_registry_entry:id(Entry)
+            ],
+            %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
+            KWArgs = #{
+                <<"topic">> => bondy_registry_entry:uri(Entry)
+            },
+            _ = bondy_broker:publish(Opts, Uri, Args, KWArgs, Ctxt),
+            {ok, State};
+        false ->
+            {ok, State}
+    end;
+
+handle_event({subscription_deleted, Entry, Ctxt}, State) ->
+    case bondy_context:has_session(Ctxt) of
+        true ->
+            Uri = <<"wamp.subscription.on_delete">>,
+            Opts = #{},
+            Args = [
+                bondy_registry_entry:session_id(Entry),
+                bondy_registry_entry:id(Entry)
+            ],
+            %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
+            KWArgs = #{
+                <<"topic">> => bondy_registry_entry:uri(Entry)
+            },
+            _ = bondy_broker:publish(Opts, Uri, Args, KWArgs, Ctxt),
             {ok, State};
         false ->
             {ok, State}

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api_gateway.erl -
+%%  bondy_rest_gateway.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_gateway).
+-module(bondy_rest_gateway).
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -640,7 +640,7 @@ start_http(Routes, Name) ->
             },
             dispatch => cowboy_router:compile(Routes)
         },
-        metrics_callback => fun bondy_cowboy_prometheus:observe/1,
+        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
         %% cowboy_metrics_h must be first on the list
         stream_handlers => [
             cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
@@ -683,10 +683,10 @@ start_https(Routes, Name) ->
 
 validate_spec(Map) ->
     try
-        Spec = bondy_api_gateway_spec_parser:parse(Map),
+        Spec = bondy_rest_gateway_spec_parser:parse(Map),
         %% We compile it to validate the spec, if it is not valid it fill
         %% fail with badarg
-        SchemeTables = bondy_api_gateway_spec_parser:dispatch_table(Spec),
+        SchemeTables = bondy_rest_gateway_spec_parser:dispatch_table(Spec),
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
@@ -710,7 +710,7 @@ load_dispatch_tables() ->
     Specs = lists:sort([
         begin
             try
-                Parsed = bondy_api_gateway_spec_parser:parse(V),
+                Parsed = bondy_rest_gateway_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
                 _ = lager:info(
                     "Loading and parsing API Gateway specification from store"
@@ -731,7 +731,7 @@ load_dispatch_tables() ->
         {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
-    bondy_api_gateway_spec_parser:dispatch_table(
+    bondy_rest_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()).
 
 
@@ -785,7 +785,7 @@ base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_handler, #{}}
+            {"/ws", bondy_wamp_ws_connection_handler, #{}}
         ]}
     ].
 
@@ -798,9 +798,9 @@ base_routes() ->
 admin_base_routes() ->
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_handler, #{}},
-            {"/ping", bondy_http_ping_handler, #{}},
-            {"/ready", bondy_http_ready_handler, #{}},
+            {"/ws", bondy_wamp_ws_connection_handler, #{}},
+            {"/ping", bondy_admin_ping_http_handler, #{}},
+            {"/ready", bondy_admin_ready_http_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}
     ].
@@ -825,7 +825,7 @@ admin_spec() ->
 
 %% @private
 parse_specs(Specs, BaseRoutes) ->
-    case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
+    case [bondy_rest_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
             [
                 {<<"http">>, BaseRoutes},
@@ -836,7 +836,7 @@ parse_specs(Specs, BaseRoutes) ->
                 maybe_init_groups(maps:get(<<"realm_uri">>, Spec))
                 || Spec <- L
             ],
-            bondy_api_gateway_spec_parser:dispatch_table(L, BaseRoutes)
+            bondy_rest_gateway_spec_parser:dispatch_table(L, BaseRoutes)
     end.
 
 

@@ -114,12 +114,12 @@ start_phase(init_admin_listeners, normal, []) ->
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
-    bondy_api_gateway:start_admin_listeners();
+    bondy_rest_gateway:start_admin_listeners();
 
 start_phase(configure_features, normal, []) ->
     ok = bondy_realm:apply_config(),
     %% ok = bondy_oauth2:apply_config(),
-    ok = bondy_api_gateway:apply_config(),
+    ok = bondy_rest_gateway:apply_config(),
     ok;
 
 start_phase(init_registry, normal, []) ->
@@ -139,8 +139,8 @@ start_phase(aae_exchange, normal, []) ->
 start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
     %% the remaining HTTP, WS and TCP listeners for clients to connect
-    ok = bondy_wamp_raw_handler:start_listeners(),
-    ok = bondy_api_gateway:start_listeners(),
+    ok = bondy_wamp_rs_connection_handler:start_listeners(),
+    ok = bondy_rest_gateway:start_listeners(),
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),
     ok.
@@ -208,7 +208,7 @@ setup_event_handlers() ->
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
     ),
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
-    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
+    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_event_handler, []),
     ok.
 
 
@@ -224,25 +224,25 @@ setup_wamp_subscriptions() ->
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?USER_ADDED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?USER_DELETED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?USER_UPDATED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
         ?PASSWORD_CHANGED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     ok.
 
@@ -277,11 +277,11 @@ stop_router_services() ->
 
     %% We stop accepting new connections on HTTP/S and WS/S
     _ = lager:info("Suspending HTTP/S and WS/S listeners"),
-    ok = bondy_api_gateway:suspend_listeners(),
+    ok = bondy_rest_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
     _ = lager:info("Suspending TCP/TLS listeners"),
-    ok = bondy_wamp_raw_handler:suspend_listeners(),
+    ok = bondy_wamp_rs_connection_handler:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
     _ = lager:info("Shutting down all WAMP sessions"),
@@ -297,11 +297,11 @@ stop_router_services() ->
 
     %% We force the HTTP/S and WS/S connections to stop
     _ = lager:info("Terminating all HTTP/S and WS/S connections"),
-    ok = bondy_api_gateway:stop_listeners(),
+    ok = bondy_rest_gateway:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
     _ = lager:info("Terminating all TCP/TLS connections"),
-    ok = bondy_wamp_raw_handler:stop_listeners(),
+    ok = bondy_wamp_rs_connection_handler:stop_listeners(),
 
     _ = lager:info("Shutdown finished"),
     ok.

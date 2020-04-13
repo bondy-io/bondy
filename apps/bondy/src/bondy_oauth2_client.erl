@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api_client.erl -
+%%  bondy_oauth2_client.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_client).
+-module(bondy_oauth2_client).
 -include_lib("wamp/include/wamp.hrl").
 
 -define(ADD_SPEC, #{

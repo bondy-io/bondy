@@ -336,7 +336,7 @@ setup() ->
     ok = declare_net_metrics(),
     ok = declare_session_metrics(),
     ok = declare_wamp_metrics(),
-    ok = bondy_cowboy_prometheus:setup(),
+    ok = bondy_prometheus_cowboy_collector:setup(),
     Collectors = [
         prometheus_vm_memory_collector,
         prometheus_vm_statistics_collector,

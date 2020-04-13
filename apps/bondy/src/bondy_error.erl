@@ -57,7 +57,7 @@
 %% -----------------------------------------------------------------------------
 code_to_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
-    <<"com.leapsight.bondy.error.", R/binary>>;
+    <<"bondy.error.", R/binary>>;
 
 code_to_uri(<<"wamp.", _/binary>> = Reason) ->
     Reason;
@@ -69,7 +69,7 @@ code_to_uri(<<"com.", _/binary>> = Reason) ->
     Reason;
 
 code_to_uri(Reason) when is_binary(Reason) ->
-    <<"com.leapsight.bondy.error.", Reason/binary>>.
+    <<"bondy.error.", Reason/binary>>.
 
 
 

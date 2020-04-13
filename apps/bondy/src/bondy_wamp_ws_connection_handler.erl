@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_ws_handler.erl -
+%%  bondy_wamp_ws_connection_handler.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -44,7 +44,7 @@
 %% WebSocket subprotocol registry.
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_ws_handler).
+-module(bondy_wamp_ws_connection_handler).
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
