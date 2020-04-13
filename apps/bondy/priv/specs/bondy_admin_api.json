@@ -1212,7 +1212,6 @@
                         }
                     }
                 },
-
                 "/realms/:realm_uri/subscriptions" : {
                     "is_collection" : true,
                     "options": {
