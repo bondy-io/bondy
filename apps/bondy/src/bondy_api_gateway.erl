@@ -414,7 +414,8 @@ subscribe(State) ->
     }],
     ok = plum_db_events:subscribe(object_update, MS),
 
-    %% We subscribe WAMP events
+    %% We subscribe to WAMP events
+    %% We will handle then in handle_cast/2
     Opts = #{
         subscription_id => bondy_utils:get_id(global),
         match => <<"exact">>
