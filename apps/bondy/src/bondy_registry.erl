@@ -609,6 +609,13 @@ match(Type, Uri, RealmUri, Opts) ->
         lookup_entries(Type, {Result, ?EOT})
     catch
         throw:non_eligible_entries ->
+            {[], ?EOT};
+        error:badarg:Stacktrace ->
+            %% @TODO this will be fixed when art provides persistent tries
+            _ = lager:warning(
+                "Error while searching trie; stacktrace=~p",
+                [Stacktrace]
+            ),
             {[], ?EOT}
     end.
 
@@ -805,7 +812,7 @@ delete_from_trie(Entry) ->
             ok;
         error ->
             _ = lager:debug(
-                "Failed deleting element from trie; key=~p", [TrieKey]),
+                "Failed deleting entry from trie; key=~p", [TrieKey]),
             ok
     end.
 
@@ -859,16 +866,27 @@ do_remove(Key, Ctxt, Task) ->
 
 
 %% @private
-do_remove_all(?EOT, _, _) ->
+do_remove_all(Matches, SessionId, Fun) ->
+    do_remove_all(Matches, SessionId, Fun, []).
+
+
+do_remove_all(?EOT, _, _, _) ->
     ok;
 
-do_remove_all({[], ?EOT}, _, _) ->
+do_remove_all({[], ?EOT}, _, _, _) ->
     ok;
 
-do_remove_all({[], Cont}, SessionId, Fun) ->
-    do_remove_all(plum_db:match(Cont), SessionId, Fun);
+do_remove_all({[], Cont}, SessionId, Fun, Acc) when length(Acc) > 0 ->
+    %% Finally, we perform the Fun if any.
+    %% We do it here as opposed to in every iteration to minimise art trie
+    %% concurrency access,
+    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
+    do_remove_all(plum_db:match(Cont), SessionId, Fun, []);
 
-do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun) ->
+do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
+    do_remove_all(plum_db:match(Cont), SessionId, Fun, Acc);
+
+do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
     Sid = bondy_registry_entry:session_id(Entry),
     case SessionId =:= Sid orelse SessionId == '_' of
         true ->
@@ -878,10 +896,8 @@ do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun) ->
             %% This will broadcast the delete
             %% amongst the nodes in the cluster
             ok = plum_db:delete(full_prefix(Entry), EntryKey),
-            %% Finally, we perform the Fun if any
-            ok = maybe_execute(Fun, Entry),
             %% We continue traversing
-            do_remove_all({T, Cont}, SessionId, Fun);
+            do_remove_all({T, Cont}, SessionId, Fun, [Entry|Acc]);
         false ->
             %% No longer our session
             ok
