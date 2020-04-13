@@ -116,7 +116,7 @@ handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
 handle_call(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
     R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
         {ok, [RealmUri]} ->
-            list(RealmUri);
+            list(registration, RealmUri);
         {error, WampError} ->
             WampError
     end,
@@ -150,6 +150,14 @@ handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
 %% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
 %% @end
 %% -----------------------------------------------------------------------------
+handle_call(#call{procedure_uri = <<"bondy.subscription.list">>} = M, Ctxt) ->
+    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
+        {ok, [RealmUri]} ->
+            list(subscription, RealmUri);
+        {error, WampError} ->
+            WampError
+    end,
+    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
 handle_call(#call{procedure_uri = <<"wamp.subscription.list">>} = M, Ctxt) ->
     %% Retrieves subscription IDs listed according to match policies.
@@ -211,19 +219,15 @@ handle_call(#call{} = M, Ctxt) ->
 
 
 
-list(RealmUri) ->
-    list(RealmUri, fun bondy_registry_entry:to_map/1).
+list(Type, RealmUri) ->
+    list(Type, RealmUri, fun bondy_registry_entry:to_map/1).
 
-list(RealmUri, Fun) ->
-    Default = #{
-        ?EXACT_MATCH => [],
-        ?PREFIX_MATCH => [],
-        ?WILDCARD_MATCH => []
-    },
+
+list(Type, RealmUri, Fun) ->
     try
-        case bondy_registry:entries(registration, RealmUri, '_', '_') of
+        case bondy_registry:entries(Type, RealmUri, '_', '_') of
             [] ->
-                {ok, Default};
+                {ok, []};
             Entries ->
                 {ok, [Fun(E) || E <- Entries]}
         end
