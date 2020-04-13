@@ -18,8 +18,13 @@
 
 {application, bondy,
  [
-    {description, "Leapsight Bondy is an open source distributed networking platform for microservices and IoT applications written in Erlang. Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC)."},
-    {vsn, "0.8.8.1"},
+    {description,
+        "Leapsight Bondy is an open source distributed networking platform for "
+        "microservices and IoT applications written in Erlang. "
+        "Bondy implements the open Web Application Messaging Protocol (WAMP) "
+        "offering both Publish and Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC)."
+    },
+    {vsn, "0.9.0"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
     {mod, {application_starter, [bondy_app, [{vsn, "0.8.8.1"}]]}},
@@ -36,7 +41,8 @@
         {init_db_hashtrees, []},
         %% We condittionally trigger an exchange (if we are in cluster)
         {aae_exchange, []},
-        %% We initialise all WAMP and HTTP listeners so clients can connect
+        %% We initialise all WAMP TCP, Websocket and HTTP listeners
+        %% so clients can connect
         {init_listeners, []}
     ]},
     {applications,[

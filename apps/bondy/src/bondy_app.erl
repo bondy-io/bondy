@@ -104,13 +104,14 @@ start(_Type, Args) ->
 %% -----------------------------------------------------------------------------
 start_phase(init_db_partitions, normal, []) ->
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will initialise its partitions from disk.
     ok;
 
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable certain operations during startup i.e. liveness and
-    %% readiness probes.
+    %% readiness http probes.
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
@@ -128,18 +129,23 @@ start_phase(init_registry, normal, []) ->
 start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will calculate the Active Anti-entropy hashtrees.
     ok;
 
 start_phase(aae_exchange, normal, []) ->
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will try to perform an Active Anti-entropy exchange.
     ok;
 
 start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
-    %% the remaining HTTP, WS and TCP listeners for clients to connect
+    %% the remaining listeners for clients to connect
+    %% WAMP TCP listeners
     ok = bondy_wamp_rs_connection_handler:start_listeners(),
+    %% WAMP Websocket and REST Gateway HTTP listeners
+    %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_rest_gateway:start_listeners(),
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),
@@ -207,8 +213,10 @@ setup_event_handlers() ->
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
     ),
+    _ = bondy_event_manager:add_watched_handler(
+        bondy_wamp_meta_event_handler, []
+    ),
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
-    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_event_handler, []),
     ok.
 
 

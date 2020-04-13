@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_event_manager.erl -
+%%  bondy_alarm_handler.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
