@@ -729,7 +729,7 @@ registry_metrics() ->
     Info = bondy_registry:info(),
     L = [
         registry_metric(K, [{name, Name}], V)
-        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner
+        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner andalso K =/= heir
     ],
     [
         {registry_tries, gauge, "Registry tries count.", length(Info)}
