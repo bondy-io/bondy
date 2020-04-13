@@ -115,6 +115,12 @@ get(Key, Default) ->
 %% -----------------------------------------------------------------------------
 -spec set(Key :: atom() | tuple(), Default :: term()) -> ok.
 
+set(status, Value) ->
+    %% Typically we would change status during application_controller
+    %% lifecycle so to avoid a loop (resulting in timeout) we avoid
+    %% calling application:set_env/3.
+    bondy_mochiglobal:put(status, Value);
+
 set(Key, Value) ->
     application:set_env(?APP, Key, Value),
     bondy_mochiglobal:put(Key, Value).
