@@ -27,7 +27,7 @@
     {vsn, "0.9.0"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {application_starter, [bondy_app, [{vsn, "0.8.8.1"}]]}},
+    {mod, {application_starter, [bondy_app, [{vsn, "0.9.0"}]]}},
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
         {init_db_partitions, []},
