@@ -107,6 +107,13 @@
         datatype => boolean,
         default => true
     },
+    %% <<"message_retention_enabled">> => #{
+    %%     alias => message_retention_enabled,
+    %%     key => <<"message_retention_enabled">>,
+    %%     required => true,
+    %%     datatype => boolean,
+    %%     default => true
+    %% },
     <<"users">> => #{
         alias => users,
         key => <<"users">>,
