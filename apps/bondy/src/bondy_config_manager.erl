@@ -17,7 +17,8 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc A server that takes care of initialising the Bondy configuration.
+%% @doc A server that takes care of initialising the Bondy configuration
+%% with a set of statically define (and thus private) configuration options.
 %% All the logic is handled by the {@link bondy_config} helper module.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -32,12 +33,35 @@
             {call, [
                 '_auth_claims'
             ]},
+            {cancel, [
+                '_auth_claims'
+            ]},
+            {interrupt, [
+                '_auth_claims'
+            ]},
+            {register, [
+                '_auth_claims'
+            ]},
             {publish, [
+                '_auth_claims',
+                %% The ttl for retained events
+                '_retained_ttl'
+            ]},
+            {yield, [
                 '_auth_claims'
             ]}
         ]},
         {extended_details, [
+            {error, [
+                '_auth_claims'
+            ]},
+            {event, [
+                '_auth_claims'
+            ]},
             {invocation, [
+                '_auth_claims'
+            ]},
+            {result, [
                 '_auth_claims'
             ]}
         ]}
@@ -202,16 +226,37 @@ do_init() ->
     %% Filename = filename:join(PrivDir, ?PRIVATE_CONFIG),
     %% State = #state{filename = Filename},
     State = #state{filename = undefined},
-    apply_private_config({ok, ?CONFIG}, State).
+
+    apply_private_config(prepare_private_config(), State).
 
 
 
-%% @private
-%% apply_private_config(#state{filename = undefined} = State) ->
-%%     {ok, State};
+prepare_private_config() ->
+    maybe_configure_message_retention(?CONFIG).
 
-%% apply_private_config(#state{filename = Filename} = State) ->
-%%     apply_private_config(file:consult(Filename), State).
+
+maybe_configure_message_retention(Config0) ->
+    try
+        case bondy_config:get([wamp_message_retention, enabled]) of
+            true ->
+                Type = bondy_config:get([wamp_message_retention, storage_type]),
+                Prefixes0 = key_value:get([plum_db, prefixes], Config0),
+                Prefixes1 = [{retained_events, Type} | Prefixes0],
+                Config1 = key_value:set(
+                    [plum_db, prefixes], Prefixes1, Config0
+                ),
+                {ok, Config1};
+            false ->
+                {ok, Config0}
+        end
+    catch
+        _:Reason:Stacktrace ->
+            _ = lager:error(
+                "Error while preparing configuration; reason=~p, stacktrace=~p",
+                [Reason, Stacktrace]
+            ),
+            {error, Reason}
+    end.
 
 
 %% @private
@@ -229,10 +274,11 @@ apply_private_config({ok, Config}, State) ->
         {ok, State}
     catch
         error:Reason:Stacktrace ->
-        _ = lager:error(
-            "Error while applying private.config; reason=~p, stacktrace=~p",
-            [Reason, Stacktrace]
-        ),
-        {stop, Reason}
+            _ = lager:error(
+                "Error while applying private configuration options; "
+                " reason=~p, stacktrace=~p",
+                [Reason, Stacktrace]
+            ),
+            {stop, Reason}
     end.
 
