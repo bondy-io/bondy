@@ -121,6 +121,40 @@
   hidden
 ]}.
 
+{mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% How will Bondy store the retained messages.
+{mapping, "wamp.message_retention.storage_type", "bondy.wamp_message_retention.storage_type", [
+  {default, ram},
+  {datatype, {enum, [ram, disk, ram_disk]}}
+]}.
+
+%% Maximum number of messages that can be store in a Bondy node.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
+  {default, "1000000"},
+  {datatype, integer}
+]}.
+
+%% The max size for an event message.
+%% All events whose size exceeds this value will not be retained.
+{mapping, "wamp.message_retention.max_message_size", "bondy.wamp_message_retention.max_message_size", [
+  {default, "64KB"},
+  {datatype, bytesize}
+]}.
+
+%% The default Time To Live (TTL) in seconds Bondy will use for all retained
+%% messages not specifying a specific TTL.
+%% A value of 0 means a message will not be expired.
+{mapping, "wamp.message_retention.default_ttl", "bondy.wamp_message_retention.default_ttl", [
+  {default, "0"},
+  {datatype, [integer, {duration, s}]}
+]}.
+
 {mapping, "request_timeout", "bondy.request_timeout", [
   {default, "20s"}, % Long enough but not infinity
   {datatype, {duration, ms}},

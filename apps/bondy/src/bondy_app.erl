@@ -204,7 +204,8 @@ setup_bondy_realm() ->
 setup_partisan() ->
     %% We add the wamp_peer_messages channel to the configured channels
     Channels0 = partisan_config:get(channels, []),
-    partisan_config:set(channels, [wamp_peer_messages | Channels0]).
+    ok = partisan_config:set(channels, [wamp_peer_messages | Channels0]),
+    bondy_config:set(wamp_peer_channel, wamp_peer_messages).
 
 
 %% @private
