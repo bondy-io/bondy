@@ -423,6 +423,7 @@ get_random_kid(#realm{private_keys = Keys}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri(realm()) -> uri().
+
 uri(#realm{uri = Uri}) ->
     Uri.
 
