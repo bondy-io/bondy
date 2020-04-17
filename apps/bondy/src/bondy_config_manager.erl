@@ -27,45 +27,44 @@
 -include("bondy.hrl").
 
 -define(PRIVATE_CONFIG, "private.config").
--define(CONFIG, [
-    {wamp, [
-        {extended_options, [
-            {call, [
-                '_auth_claims'
-            ]},
-            {cancel, [
-                '_auth_claims'
-            ]},
-            {interrupt, [
-                '_auth_claims'
-            ]},
-            {register, [
-                '_auth_claims'
-            ]},
-            {publish, [
-                '_auth_claims',
-                %% The ttl for retained events
-                '_retained_ttl'
-            ]},
-            {yield, [
-                '_auth_claims'
-            ]}
-        ]},
-        {extended_details, [
-            {error, [
-                '_auth_claims'
-            ]},
-            {event, [
-                '_auth_claims'
-            ]},
-            {invocation, [
-                '_auth_claims'
-            ]},
-            {result, [
-                '_auth_claims'
-            ]}
-        ]}
+-define(WAMP_EXT_OPTIONS, [
+    {call, [
+        '_auth_claims'
     ]},
+    {cancel, [
+        '_auth_claims'
+    ]},
+    {interrupt, [
+        '_auth_claims'
+    ]},
+    {register, [
+        '_auth_claims'
+    ]},
+    {publish, [
+        '_auth_claims',
+        %% The ttl for retained events
+        '_retained_ttl'
+    ]},
+    {yield, [
+        '_auth_claims'
+    ]}
+]).
+-define(WAMP_EXT_DETAILS, [
+    {error, [
+        '_auth_claims'
+    ]},
+    {event, [
+        '_auth_claims'
+    ]},
+    {invocation, [
+        '_auth_claims'
+    ]},
+    {result, [
+        '_auth_claims'
+    ]}
+]).
+
+-define(CONFIG, [
     {plum_db, [
         {prefixes, [
             %% ram
@@ -226,7 +225,8 @@ do_init() ->
     %% Filename = filename:join(PrivDir, ?PRIVATE_CONFIG),
     %% State = #state{filename = Filename},
     State = #state{filename = undefined},
-
+    ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
+    ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS),
     apply_private_config(prepare_private_config(), State).
 
 
