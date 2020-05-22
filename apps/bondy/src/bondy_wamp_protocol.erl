@@ -609,7 +609,7 @@ abort(no_authmethod, St) ->
 
 abort(oauth2_unused_token, St) ->
     Reason = <<
-        "An OAuth2 token was included in the HTTP request's authorization"
+        "An access token was included in the HTTP request's authorization"
         " header but the 'oauth2' method was not found in the"
         " 'authmethods' parameter. Either remove the access token from the"
         " HTTP request or add the 'oauth2' method to the 'authmethods'"
@@ -619,11 +619,10 @@ abort(oauth2_unused_token, St) ->
 
 abort(oauth2_missing_token, St) ->
     Reason = <<
-        "The OAUTH2 authmethod was requested but an access token was not"
+        "The oauth2 authmethod was requested but an access token was not"
         " provided through the HTTP authorization header. Either provide"
         " an access token, remove 'oauth2' from the request's authmethods"
-        " option or sort the elments of the option to prioritize other"
-        " authmethod."
+        " option or sort the elements of the authmethods parameter to " " prioritize other authmethod."
     >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
@@ -631,7 +630,7 @@ abort(oauth2_invalid_grant, St) ->
     Reason = <<
         "The access token provided is expired, revoked, malformed,"
         " or invalid either because it does not match the Realm used in the"
-        " HELLO request, or because it was issued to another peer."
+        " request, or because it was issued to another peer."
     >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 

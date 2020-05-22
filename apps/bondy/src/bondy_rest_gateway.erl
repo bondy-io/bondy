@@ -217,7 +217,6 @@ dispatch_table(Listener) ->
 %% @end
 %% -----------------------------------------------------------------------------
 rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
     _ = [
         rebuild_dispatch_table(Scheme, Routes) ||
         {Scheme, Routes} <- load_dispatch_tables()
@@ -253,12 +252,14 @@ list() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Deletes the API Specification object identified by `Id'.
+%% Notice: Triggers a rebuild of the Cowboy dispatch tables.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(binary()) -> ok.
 
 delete(Id) when is_binary(Id) ->
     plum_db:delete(?PREFIX, Id),
+    ok = rebuild_dispatch_tables(),
     ok.
 
 
@@ -475,15 +476,7 @@ unsubscribe(State) ->
 %% @private
 do_start_listeners(public) ->
     _ = lager:info("Starting public HTTP/S listeners"),
-    DTables = case load_dispatch_tables() of
-        [] ->
-            [
-                {<<"http">>, base_routes()},
-                {<<"https">>, base_routes()}
-            ];
-        L ->
-            L
-    end,
+    DTables = load_dispatch_tables(),
     _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok;
 
@@ -766,8 +759,19 @@ load_dispatch_tables() ->
         {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
-    bondy_rest_gateway_spec_parser:dispatch_table(
-        [element(3, S) || S <- Specs], base_routes()).
+
+    Result = bondy_rest_gateway_spec_parser:dispatch_table(
+        [element(3, S) || S <- Specs], base_routes()),
+
+    case Result of
+        [] ->
+            [
+                {<<"http">>, base_routes()},
+                {<<"https">>, base_routes()}
+            ];
+        _ ->
+            Result
+    end.
 
 
 
@@ -954,4 +958,5 @@ normalise(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_realm_deleted(_RealmUri, State) ->
+    %% TODO
     State.
