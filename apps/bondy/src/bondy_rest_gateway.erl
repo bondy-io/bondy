@@ -349,18 +349,50 @@ handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
     %% we do nothing
     {noreply, State};
 
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
+
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
-    %% Cowboy dispatch tables
-    %% But since Specs depend on other objects being present and we also want
-    %% to avoid rebuilding the dispatch table multiple times, we just set a
-    %% flag on the state to rebuild the dispatch tables once we received an
-    %% exchange_finished event,
-    _ = lager:info("API Spec object_update received; key=~p", [Key]),
-    Acc = State#state.updated_specs,
-    {noreply, State#state{updated_specs = [Key|Acc]}};
+    %% Cowboy dispatch tables.
 
+    _ = lager:info("API Spec object_update received; key=~p", [Key]),
+
+    Specs = [Key|State0#state.updated_specs],
+    State1 = State0#state{updated_specs = Specs},
+    Status = {bondy_config:get(status), plum_db_config:get(aae_enabled)},
+
+    case Status of
+        {ready, false} ->
+            %% We finished initialising and AAE is disabled so
+            %% we try to rebuild immediately
+            ok = handle_spec_updates(State1),
+            {noreply, State1#state{updated_specs = []}};
+        {ready, true} ->
+            %% We finished initialising and AAE is enabled so
+            %% we try to rebuild immediately even though we do not have causal
+            %% ordering not consistency guarantees.
+
+            %% TODO if/when we have casual ordering and reliable delivery of
+            %% Security and API Gateway config we can trigger the rebuild
+            %% immediately, provided an exchange has not been.
+
+            %% TODO if rebuild disaptch tables fails, we should retry later on
+            ok = handle_spec_updates(State1),
+            {noreply, State1#state{updated_specs = []}};
+
+        {_, false} ->
+            %% We are either initialising or shutting down
+            {noreply, State1};
+        {_, true} ->
+            %% We might be initialising (and have not yet performed an AAE).
+            %% Since Specs depend on other objects being present and we
+            %% also want to avoid rebuilding the dispatch table multiple times
+            %% during initialisation, we just set a flag on the state to
+            %% rebuild the dispatch tables once we received an
+            %% exchange_finished event, that is we rebuild dispatch tables only
+            %% after an AAE exchange
+            {noreply, State1}
+    end;
 
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
@@ -403,6 +435,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+
+%% @private
 subscribe(State) ->
     %% We subscribe to change notifications in plum_db_events, we are
     %% interested in updates to API Specs coming from another node so that we
