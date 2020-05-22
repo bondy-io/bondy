@@ -266,7 +266,6 @@
                 (<<"/ws">> = P, _) ->
                     error({reserved_path, P});
                 (_, Val) ->
-                    % maps_utils:validate(Val, ?API_PATH)
                     Val
             end,
             {ok, maps:map(Inner, M1)}
@@ -1544,7 +1543,7 @@ security_scheme_rules(
         revoke_path => Revoke
     },
 
-    Mod = bondy_oauth2_resource_handler,
+    Mod = bondy_oauth2_rest_handler,
     [
         {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, St},
         %% Revoke is secured
