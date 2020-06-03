@@ -446,7 +446,7 @@ maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
     ExpectedSignature = St#wamp_state.auth_signature,
     Ctxt0 = St#wamp_state.context,
     Realm = bondy_context:realm_uri(Ctxt0),
-    Peer = bondy_context:peer(peer, Ctxt0),
+    Peer = bondy_context:peer(Ctxt0),
     AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
@@ -462,7 +462,7 @@ maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
 maybe_auth(?TICKET_AUTH, AuthId, Password, St) ->
     Ctxt0 = St#wamp_state.context,
     Realm = bondy_context:realm_uri(Ctxt0),
-    Peer = bondy_context:peer(peer, Ctxt0),
+    Peer = bondy_context:peer(Ctxt0),
     AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
