@@ -33,7 +33,7 @@
 %% *  "wamp.2.msgpack"
 %%
 %% With "wamp.2.json", _all_ WebSocket messages MUST BE of type *text*
-%% (UTF8 encoded arguments_kw) and use the JSON message serialization.
+%% (UTF8 encoded) and use the JSON message serialization.
 %%
 %% With "wamp.2.msgpack", _all_ WebSocket messages MUST BE of type
 %% *binary* and use the MsgPack message serialization.
@@ -146,10 +146,11 @@ init(Req0, _) ->
 
 
 
-
 %% =============================================================================
 %% COWBOY_WEBSOCKET CALLBACKS
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -244,15 +245,15 @@ websocket_info(_, St0) ->
     {ok, St0}.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Termination
 %% @end
 %% -----------------------------------------------------------------------------
 %% From : http://ninenines.eu/docs/en/cowboy/2.0/guide/handlers/
-%% Note that while this function may be called in a Websocket handler, it is generally not useful to do any clean up as the process terminates immediately after calling this callback when using Websocket.
+%% Note that while this function may be called in a Websocket handler, it is
+%% generally not useful to do any clean up as the process terminates
+%% immediately after calling this callback when using Websocket.
 terminate(normal, _Req, St) ->
     do_terminate(St);
 
@@ -302,6 +303,14 @@ terminate({remote, _Code, _Binary}, _Req, St) ->
     do_terminate(St).
 
 
+
+%% =============================================================================
+%% PRIVATE:
+%% =============================================================================
+
+
+
+%% @private
 handle_outbound(T, M, St) ->
     case bondy_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
         {ok, Bin, PSt} ->
@@ -316,12 +325,6 @@ handle_outbound(T, M, St) ->
                 Time, self(), {stop, normal}),
             reply(T, [Bin], St#state{protocol_state = PSt})
     end.
-
-
-
-%% =============================================================================
-%% PRIVATE:
-%% =============================================================================
 
 
 %% @private
