@@ -93,6 +93,11 @@
         ],
         "groups" : [
             {
+                "name" : "api_clients",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
                 "name" : "microservices",
                 "groups" : [],
                 "meta" : {}
