@@ -211,7 +211,7 @@ validate_options(Opts0) ->
         #{strategy := jump_consistent_hash} ->
             ErrorMap = bondy_error:map({
                 <<"missing_option">>,
-                <<"The option  '_routing_key' is required">>
+                <<"A value for option '_routing_key' or 'rkey' is required">>
             }),
             error(ErrorMap);
         Opts ->
