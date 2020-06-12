@@ -1147,25 +1147,25 @@ do_invoke({Strategy, L}, Fun, CallOpts0, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 load_balancer_options(Strategy, CallOpts0) ->
-    CallOpts1 = coerse_strategy(Strategy, CallOpts0),
-    coerse_routing_key(CallOpts1).
+    CallOpts1 = coerce_strategy(Strategy, CallOpts0),
+    coerce_routing_key(CallOpts1).
 
 
 %% @private
-coerse_strategy(_, #{runmode := <<"partition">>} = CallOpts) ->
+coerce_strategy(_, #{runmode := <<"partition">>} = CallOpts) ->
     maps:put(strategy, jump_consistent_hash, CallOpts);
 
-coerse_strategy(Strategy, CallOpts) ->
+coerce_strategy(Strategy, CallOpts) ->
     %% An invalid runmode value would have been caught by
     %% wamp_message's validation.
     maps:put(strategy, Strategy, CallOpts).
 
 
 %% @private
-coerse_routing_key(#{rkey := Value} = CallOpts) ->
+coerce_routing_key(#{rkey := Value} = CallOpts) ->
     maps:put('_routing_key', Value, CallOpts);
 
-coerse_routing_key(CallOpts) ->
+coerce_routing_key(CallOpts) ->
     CallOpts.
 
 
