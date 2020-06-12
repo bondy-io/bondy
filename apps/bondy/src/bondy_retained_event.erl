@@ -363,8 +363,8 @@ maybe_append(_, _, Acc) ->
 is_eligible(SessionId, Opts) ->
     case maps:find(eligible, Opts) of
         {ok, []} ->
-            %% Non eligible! Most probably a mistake but we need to
-            %% respect the semantics
+            %% Non eligible! The empty list is mot probably a mistake
+            %% but we need to respect the semantics
             false;
         {ok, List} ->
             lists:member(SessionId, List);
@@ -388,21 +388,3 @@ is_excluded(SessionId, Opts) ->
 is_expired(#bondy_retained_event{valid_to = T}) ->
     T > 0 andalso T =< erlang:system_time(second).
 
-
-%% %% @private
-%% wildcard_regex() ->
-%%     Regex = persistent_term:get({?MODULE, pattern}, undefined),
-%%     wildcard_regex(Rule, Regex).
-
-
-%% %% @private
-%% wildcard_regex(undefined) ->
-%%     %% End = ^([^*]*[^\.])[\.]+$
-%%     %% Start = ^[\.]+[^*]*$
-%%     %% Inset = ^([^*]*)[\.]{2}[^*]*$
-%%     {ok, Regex} = re:compile("^[\.]+[^*]*$|^([^*]*)[\.]{2}[^*]*$|^([^*]*[^\.])[\.]+$"),
-%%     ok = persistent_term:put({?MODULE, pattern}, Regex),
-%%     Regex;
-
-%% wildcard_regex(Regex) ->
-%%     Regex.
