@@ -907,16 +907,19 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% for that procedure.
     case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
-            reply_error(ProcUri, CallId, Ctxt0);
+            reply_error(no_such_procedure(ProcUri, CallId), Ctxt0);
         Regs ->
-            %% TODO Should we invoke all matching invocations?
-
             %% We invoke Fun for each entry
             Fun = fun
+                ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
+                    ok = reply_error(error_from_map(ErrorMap, CallId), Ctxt1),
+                    {ok, Ctxt1};
+
                 ({error, noproc}, Ctxt1) ->
                     %% The local process associated with the entry
                     %% is no longer alive.
-                    reply_error(ProcUri, CallId, Ctxt1);
+                    ok = reply_error(no_such_procedure(ProcUri, CallId), Ctxt1),
+                    {ok, Ctxt1};
                 (Entry, Ctxt1) ->
                     Callee = bondy_registry_entry:peer_id(Entry),
 
@@ -939,17 +942,17 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 
                     {ok, Ctxt2}
             end,
-            invoke(Regs, Fun, Ctxt0)
+            invoke_aux(Regs, Fun, Opts, Ctxt0)
     end.
 
 
 %% @private
--spec reply_error(uri(), id(), bondy_context:t()) -> ok.
+-spec reply_error(wamp_error(), bondy_context:t()) -> ok.
 
-reply_error(ProcUri, CallId, Ctxt) ->
+reply_error(Error, Ctxt) ->
     bondy:send(
         bondy_context:peer_id(Ctxt),
-        no_such_procedure(ProcUri, CallId)
+        Error
     ).
 
 
@@ -1022,17 +1025,17 @@ no_matching_promise(M) ->
 
 
 %% @private
-invoke({[], ?EOT}, _, _) ->
+invoke_aux({[], ?EOT}, _, _, _) ->
     ok;
 
-invoke({L, ?EOT}, Fun, Ctxt) ->
-    invoke(L, Fun, Ctxt);
+invoke_aux({L, ?EOT}, Fun, Opts, Ctxt) ->
+    invoke_aux(L, Fun, Opts, Ctxt);
 
-invoke({L, Cont}, Fun, Ctxt) ->
-    ok = invoke(L, Fun, Ctxt),
-    invoke(match_registrations(Cont), Fun, Ctxt);
+invoke_aux({L, Cont}, Fun, Opts, Ctxt) ->
+    ok = invoke_aux(L, Fun, Opts, Ctxt),
+    invoke_aux(match_registrations(Cont), Fun, Opts, Ctxt);
 
-invoke(L, Fun, Ctxt) when is_list(L) ->
+invoke_aux(L, Fun, Opts, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
     Triples = [{
@@ -1040,76 +1043,70 @@ invoke(L, Fun, Ctxt) when is_list(L) ->
         maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
         E
     } || E <- L],
-    invoke(Triples, undefined, Fun, Ctxt).
+    invoke_aux(Triples, undefined, Fun, Opts, Ctxt).
 
 
 %% @private
--spec invoke(
+-spec invoke_aux(
     [{uri(), Strategy :: binary(), Entry :: tuple()}],
     Acc :: tuple() | undefined,
     Fun :: function(),
+    Opts :: map(),
     Ctxt :: bondy_context:t()) ->
     ok.
 
-invoke([], undefined, _, _) ->
+invoke_aux([], undefined, _, _, _) ->
     ok;
 
-invoke([], {_, ?INVOKE_SINGLE, []}, _, _) ->
+invoke_aux([], {_, ?INVOKE_SINGLE, []}, _, _, _) ->
     ok;
 
-invoke([], {_, Invoke, L}, Fun, Ctxt0) ->
-    {ok, _Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+invoke_aux([], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
+    {ok, _Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     ok;
 
-invoke([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Ctxt0) ->
-    {ok, Ctxt1} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt0),
+invoke_aux([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Opts, Ctxt0) ->
+    {ok, Ctxt1} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt0),
     %% We add an accummulator to drop any subsequent matching Uris.
-    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt1);
+    invoke_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt1);
 
-invoke(
-    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last, Fun, Ctxt) ->
+invoke_aux(
+    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last,
+    Fun, Opts, Ctxt) ->
     %% A single invocation strategy and we have multiple registrations so we
     %% ignore them
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    invoke(T, Last, Fun, Ctxt);
+    invoke_aux(T, Last, Fun, Opts, Ctxt);
 
-invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
+invoke_aux([{Uri, Invoke, E}|T], undefined, Fun, Opts, Ctxt) ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
+    invoke_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt);
 
-invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
+invoke_aux([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Opts, Ctxt)  ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
+    invoke_aux(T, {Uri, Invoke, [E|L]}, Fun, Opts, Ctxt);
 
-invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+invoke_aux([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
     %% We found a different Uri so we invoke the previous one
-    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     %% The new one is a single so we also invoke and continue
-    {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt1),
-    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
+    {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt1),
+    invoke_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt2);
 
-invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+invoke_aux([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0)  ->
     %% We found another Uri so we invoke the previous one
-    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
-
-
-%% @private
-invocation_strategy(?INVOKE_SINGLE) -> single;
-invocation_strategy(?INVOKE_FIRST) -> first;
-invocation_strategy(?INVOKE_LAST) -> last;
-invocation_strategy(?INVOKE_RANDOM) -> random;
-invocation_strategy(?INVOKE_ROUND_ROBIN) -> round_robin.
+    invoke_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
@@ -1120,12 +1117,12 @@ invocation_strategy(?INVOKE_ROUND_ROBIN) -> round_robin.
 %% procedure
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_invoke(term(), function(), bondy_context:t()) ->
+-spec do_invoke(term(), function(), map(), bondy_context:t()) ->
     {ok, bondy_context:t()}.
 
-do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
-    Strategy = invocation_strategy(WAMPStrategy),
-    case bondy_rpc_load_balancer:get(L, #{strategy => Strategy}) of
+do_invoke({Strategy, L}, Fun, Opts0, Ctxt) ->
+    Opts1 = maps:put(strategy, Strategy, Opts0),
+    case bondy_rpc_load_balancer:get(L, Opts1) of
         {error, noproc} = Error ->
             Fun(Error, Ctxt);
         Entry ->
@@ -1157,6 +1154,21 @@ on_unregister(Entry, Ctxt) ->
 %% on_delete(Map, Ctxt) ->
 %%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
+
+error_from_map(Error, CallId) ->
+     Mssg = <<"The request failed due to invalid option parameters.">>,
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_INVALID_ARGUMENT,
+        [Mssg],
+        #{
+            message => Mssg,
+            details => Error,
+            description => <<"A required options parameter was missing in the request or while present they were malformed.">>
+        }
+    ).
 
 no_such_procedure(ProcUri, CallId) ->
     Mssg = <<

@@ -41,7 +41,9 @@
 %% FEATURES
 %% =============================================================================
 
-
+-define(INVOKE_JUMP_CONSISTENT_HASH, <<"jump_consistent_hash">>).
+-define(INVOKE_QUEUE_LEAST_LOADED, <<"queue_least_loaded">>).
+-define(INVOKE_QUEUE_LEAST_LOADED_SAMPLE, <<"queue_least_loaded_sample">>).
 
 -define(WAMP_DEALER_FEATURES, #{
     call_canceling => true,

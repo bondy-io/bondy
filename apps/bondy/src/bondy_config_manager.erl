@@ -29,7 +29,8 @@
 -define(PRIVATE_CONFIG, "private.config").
 -define(WAMP_EXT_OPTIONS, [
     {call, [
-        '_auth_claims'
+        '_auth_claims',
+        '_routing_key'
     ]},
     {cancel, [
         '_auth_claims'
@@ -38,18 +39,37 @@
         '_auth_claims'
     ]},
     {register, [
-        '_auth_claims'
+        '_auth_claims',
+        '_force_locality',
+        {invoke, [
+            <<"jump_consistent_hash">>,
+            <<"queue_least_loaded">>,
+            <<"queue_least_loaded_sample">>
+        ]}
     ]},
     {publish, [
         '_auth_claims',
         %% The ttl for retained events
-        '_retained_ttl'
+        '_retained_ttl',
+        '_routing_key'
+    ]},
+    {subscribe, [
+        '_auth_claims'
     ]},
     {yield, [
         '_auth_claims'
     ]}
 ]).
 -define(WAMP_EXT_DETAILS, [
+    {abort, [
+        '_auth_claims'
+    ]},
+    {welcome, [
+        '_auth_claims'
+    ]},
+    {goodbye, [
+        '_auth_claims'
+    ]},
     {error, [
         '_auth_claims'
     ]},
