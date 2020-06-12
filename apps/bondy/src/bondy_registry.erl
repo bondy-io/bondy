@@ -1068,6 +1068,7 @@ trie_ms(Opts) ->
         error ->
             []
     end,
+
     Conds2 = case maps:find(exclude, Opts) of
         {ok, []} ->
             Conds1;
