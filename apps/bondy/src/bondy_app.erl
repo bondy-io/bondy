@@ -269,6 +269,8 @@ suspend_aae() ->
             ok
     end.
 
+
+%% @private
 restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->

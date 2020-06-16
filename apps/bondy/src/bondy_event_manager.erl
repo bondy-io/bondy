@@ -23,6 +23,33 @@
 %% In addition, this module mirrors most of the gen_event API and adds variants
 %% with two arguments were the first argument is the defaul event manager
 %% (`bondy_event_manager').
+%%
+%% ```
+%%      +---------------------------------------+
+%%      |                                       |
+%%      |          bondy_event_manager          |
+%%      |                                       |
+%%      +---------------------------------------+
+%%                          |
+%%                          |
+%%                          v
+%%      +---------------------------------------+
+%%      |                                       |
+%%      |    bondy_event_handler_watcher_sup    |
+%%      |                                       |
+%%      +---------------------------------------+
+%%                          |
+%%                          +--------------------------------+
+%%                          |                                |
+%%       +---------------------------------------+       +---+---+
+%%       |                                       |       |       |
+%%       |     bondy_event_handler_watcher 1     |       |   N   |
+%%       |                                       |       |       |
+%%       +---------------------------------------+       +-------+
+%%
+%%                       simple_one_for_one
+%% '''
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_event_manager).

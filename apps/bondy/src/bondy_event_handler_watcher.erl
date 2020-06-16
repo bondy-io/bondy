@@ -18,7 +18,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc This module provides a bridge between WAMP events and OTP events.
+%% @doc Implements the event watcher capability as designed by Lager.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_event_handler_watcher).
