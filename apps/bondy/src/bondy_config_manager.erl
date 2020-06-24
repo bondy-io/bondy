@@ -41,6 +41,9 @@
     {register, [
         '_auth_claims',
         '_force_locality',
+        %% number of concurrent, outstanding calls that can exist
+        %% for a single endpoint
+        '_concurrency',
         {invoke, [
             <<"jump_consistent_hash">>,
             <<"queue_least_loaded">>,
