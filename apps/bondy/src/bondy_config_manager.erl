@@ -152,9 +152,6 @@
     ]}
 ]).
 
--record(state, {
-    filename     ::  file:filename() | undefined
-}).
 
 %% API
 -export([start_link/0]).
@@ -174,8 +171,9 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Starts the config manager process
 %% @end
 %% -----------------------------------------------------------------------------
 start_link() ->
@@ -188,8 +186,9 @@ start_link() ->
 %% =============================================================================
 
 
+
 init([]) ->
-    %% We do this in the init so that other processes in teh supervision tree
+    %% We do this here so that other processes in the supervision tree
     %% are not started before we finished with the configuration
     %% This should be fast anyway so no harm is done.
     do_init().
@@ -227,34 +226,28 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
+%% @private
 do_init() ->
     %% We initialised the Bondy app config
     ok = bondy_config:init(),
+
     %% Since advanced.config can be provided by the user at the
     %% platform_etd_dir location we need to override all those parameters
     %% which the user should not be able to set and also set
     %% other parameters which are required for Bondy to operate i.e. all
     %% dependencies, and are private.
-    %% We use a file name private.config. We do this instead of inlining the
-    %% code to enabled us to play with different configurations during
-    %% development.
-    %% Just thik of the private.config file as the internal equivalent to
-    %% advanced.config, although Cuttlefish does not know about it.
-
-    %% PrivDir = bondy_config:get(priv_dir),
-    %% Filename = filename:join(PrivDir, ?PRIVATE_CONFIG),
-    %% State = #state{filename = Filename},
-    State = #state{filename = undefined},
+    State = undefined,
     ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS),
     apply_private_config(prepare_private_config(), State).
 
 
-
+%% @private
 prepare_private_config() ->
     maybe_configure_message_retention(?CONFIG).
 
 
+%% @private
 maybe_configure_message_retention(Config0) ->
     try
         case bondy_config:get([wamp_message_retention, enabled], false) of
@@ -280,8 +273,8 @@ maybe_configure_message_retention(Config0) ->
 
 
 %% @private
-apply_private_config({error, Reason}, State) ->
-    {stop, {Reason, State#state.filename}};
+apply_private_config({error, Reason}, _State) ->
+    {stop, Reason};
 
 apply_private_config({ok, Config}, State) ->
     _ = lager:debug("Bondy private configuration started"),
