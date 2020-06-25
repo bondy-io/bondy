@@ -639,14 +639,25 @@ maybe_auth_challenge(true, Details, Realm, St0) ->
     case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
         true ->
             Ctxt0 = St0#wamp_state.context,
-            TempId = bondy_utils:uuid(),
-            Ctxt1 = Ctxt0#{
-                request_details => Details,
-                is_anonymous => true
-            },
-            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-            St1 = update_context(Ctxt2, St0),
-            {ok, St1};
+            Uri = bondy_realm:uri(Realm),
+            Peer = Peer = maps:get(peer, Ctxt0),
+            Result = bondy_security_utils:authenticate_anonymous(Uri, Peer),
+
+            case Result of
+                {ok, _Ctxt} ->
+
+                    TempId = bondy_utils:uuid(),
+                    Ctxt1 = Ctxt0#{
+                        request_details => Details,
+                        is_anonymous => true
+                    },
+                    Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
+                    St1 = update_context(Ctxt2, St0),
+                    {ok, St1};
+
+                {error, Reason} ->
+                    {error, {authentication_failed, Reason}, St0}
+            end;
         false ->
             {error, {missing_param, authid}, St0}
     end;
