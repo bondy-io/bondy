@@ -1967,7 +1967,7 @@ match_source([], _User, _PeerIP) ->
 
 match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
     Result =
-        (UserName == all orelse UserName == anonymous orelse UserName == User)
+        (UserName == all orelse UserName == User)
         andalso
         mask_address(IP, Mask) == mask_address(PeerIP, Mask),
 
