@@ -614,8 +614,6 @@ maybe_auth_challenge(_, {error, not_found}, St) ->
     #{realm_uri := Uri} = St#wamp_state.context,
     {error, {no_such_realm, Uri}, St};
 
-
-%% @private
 maybe_auth_challenge(Details, Realm, St) ->
     Enabled = bondy_realm:is_security_enabled(Realm),
     maybe_auth_challenge(Enabled, Details, Realm, St).
@@ -638,18 +636,28 @@ maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
 
 maybe_auth_challenge(true, Details, Realm, St0) ->
     %% There is no authid param, we check if anonymous is allowed
-    RealmUri = bondy_realm:uri(Realm),
-    case bondy_realm:is_security_enabled(RealmUri) of
+    case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
         true ->
             Ctxt0 = St0#wamp_state.context,
-            TempId = bondy_utils:uuid(),
-            Ctxt1 = Ctxt0#{
-                request_details => Details,
-                is_anonymous => true
-            },
-            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-            St1 = update_context(Ctxt2, St0),
-            {ok, St1};
+            Uri = bondy_realm:uri(Realm),
+            Peer = Peer = maps:get(peer, Ctxt0),
+            Result = bondy_security_utils:authenticate_anonymous(Uri, Peer),
+
+            case Result of
+                {ok, _Ctxt} ->
+
+                    TempId = bondy_utils:uuid(),
+                    Ctxt1 = Ctxt0#{
+                        request_details => Details,
+                        is_anonymous => true
+                    },
+                    Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
+                    St1 = update_context(Ctxt2, St0),
+                    {ok, St1};
+
+                {error, Reason} ->
+                    {error, {authentication_failed, Reason}, St0}
+            end;
         false ->
             {error, {missing_param, authid}, St0}
     end;
@@ -681,10 +689,9 @@ do_auth_challenge(User, Realm, St) ->
 
 
 %% @private
-do_auth_challenge([?ANON_AUTH|_], _, _, St0) ->
-    Ctxt1 = bondy_context:set_authid(
-        St0#wamp_state.context, bondy_utils:uuid()),
-    {ok, update_context(Ctxt1, St0)};
+do_auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
+    %% An authid was provided so we discard this method
+    do_auth_challenge(T, User, Realm, St0);
 
 do_auth_challenge([?COOKIE_AUTH|T], User, Realm, St) ->
     %% Unsupported

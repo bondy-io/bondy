@@ -47,6 +47,7 @@
 -export([alter_group/3]).
 -export([alter_user/3]).
 -export([authenticate/4]).
+-export([authenticate_anonymous/2]).
 -export([check_permission/2]).
 -export([check_permissions/2]).
 -export([del_group/2]).
@@ -369,8 +370,8 @@ get_grants(#context{grants=Val}) ->
 %% -----------------------------------------------------------------------------
 -spec authenticate(
     RealmUri :: uri(),
-    Username::binary(),
-    Password::binary() | {hash, binary()},
+    Username :: binary(),
+    Password :: binary() | {hash, binary()},
     ConnInfo :: [{atom(), any()}]) ->
         {ok, context()} |
         {error,
@@ -380,6 +381,7 @@ get_grants(#context{grants=Val}) ->
             | missing_password
             | no_matching_sources
         }.
+
 
 authenticate(RealmUri, Username, Password, ConnInfo) ->
     try
@@ -403,19 +405,35 @@ authenticate(RealmUri, Username, Password, ConnInfo) ->
             {error, {no_such_realm, RealmUri}}
     end.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+authenticate_anonymous(Uri, ConnInfo) ->
+    Sources = sort_sources(sources(Uri, anonymous)),
+    M0= #{
+        realm_uri => Uri,
+        username => anonymous,
+        conn_info => ConnInfo
+    },
+    IP = proplists:get_value(ip, ConnInfo),
+
+    case match_source(Sources, anonymous, IP) of
+        {ok, trust, Opts} ->
+            M1 = M0#{source_options => Opts},
+            auth_with_source(trust, undefined, M1);
+        {error, _} = Error ->
+            Error
+    end.
 
 %% @private
 auth_with_data(UserData, M0) ->
     Uri = maps:get(realm_uri, M0),
-    F = fun
-        ({{Un, CIDR}, {Source, Options}}, Acc) ->
-            [{Un, CIDR, Source, Options}|Acc];
-        ({{_, _}, ?TOMBSTONE}, Acc) ->
-            Acc
-    end,
-    Sources0 = plum_db:fold(F, [], ?SOURCES_PREFIX(Uri), ?FOLD_OPTS),
-    Sources = sort_sources(Sources0),
+    User = maps:get(realm_uri, M0),
+
+    Sources = sort_sources(sources(Uri, User)),
     IP = proplists:get_value(ip, maps:get(conn_info, M0)),
+
     case match_source(Sources, maps:get(username, M0), IP) of
         {ok, Source, Opts} ->
             M1 = M0#{source_options => Opts},
@@ -425,12 +443,34 @@ auth_with_data(UserData, M0) ->
     end.
 
 
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Returns all the sources for user including the ones for speacial
+%% use 'all'.
+%% @end
+%% -----------------------------------------------------------------------------
+sources(Realm, User) when is_binary(User) orelse User == anonymous ->
+    FP = {security_sources, Realm},
+    Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
+    L = lists:append([
+        plum_db:match(FP, {all, '_'}, Opts),
+        plum_db:match(FP, {User, '_'}, Opts)
+    ]),
+
+    [{U, CIDR, Source, Options} || {{U, CIDR}, {Source, Options}} <- L].
+
+
 %% @private
 auth_with_source(?ANON_AUTH, Data, M) ->
     auth_with_source(trust, Data, M);
 
 auth_with_source(?TRUST_AUTH, Data, M) ->
     auth_with_source(trust, Data, M);
+
+auth_with_source(trust, undefined, #{username := anonymous} = M) ->
+    {ok, get_anonymous_context(M)};
 
 auth_with_source(trust, _, M) ->
     %% trust always authenticates
@@ -1789,6 +1829,9 @@ get_context(#{username := U, realm_uri := R}) ->
     get_context(R, U).
 
 
+get_anonymous_context(#{username := U, realm_uri := R}) ->
+    get_anonymous_context(R, U).
+
 get_anonymous_context(RealmUri, Username) ->
     Grants = group_grants(accumulate_grants(RealmUri, anonymous, group)),
     #context{
@@ -1967,7 +2010,7 @@ match_source([], _User, _PeerIP) ->
 
 match_source([{UserName, {IP, Mask}, Source, Options} | Tail], User, PeerIP) ->
     Result =
-        (UserName == all orelse UserName == anonymous orelse UserName == User)
+        (UserName == all orelse UserName == User)
         andalso
         mask_address(IP, Mask) == mask_address(PeerIP, Mask),
 

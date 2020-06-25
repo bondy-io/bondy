@@ -36,6 +36,7 @@
 
 
 -export([authenticate/4]).
+-export([authenticate_anonymous/2]).
 -export([authorize/3]).
 
 
@@ -81,6 +82,15 @@ authenticate(_, undefined, _Realm, _Peer) ->
 
 authenticate(_, _Scheme, _Realm, _Peer) ->
     {error, invalid_scheme}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+authenticate_anonymous(Realm, Peer) ->
+    bondy_security:authenticate_anonymous(Realm, conn_info(Peer)).
+
 
 
 %% -----------------------------------------------------------------------------
