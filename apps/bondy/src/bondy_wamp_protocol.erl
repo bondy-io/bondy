@@ -678,10 +678,9 @@ do_auth_challenge(User, Realm, St) ->
 
 
 %% @private
-do_auth_challenge([?ANON_AUTH|_], _, _, St0) ->
-    Ctxt1 = bondy_context:set_authid(
-        St0#wamp_state.context, bondy_utils:uuid()),
-    {ok, update_context(Ctxt1, St0)};
+do_auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
+    %% An authid was provided so we discard this method
+    do_auth_challenge(T, User, Realm, St0);
 
 do_auth_challenge([?COOKIE_AUTH|T], User, Realm, St) ->
     %% Unsupported
