@@ -598,7 +598,8 @@ to_map(#realm{} = R) ->
         <<"uri">> => R#realm.uri,
         %% public_keys => R#realm.public_keys.
         <<"description">> => R#realm.description,
-        <<"authmethods">> => R#realm.authmethods
+        <<"authmethods">> => R#realm.authmethods,
+        <<"security_enabled">> => is_security_enabled(R)
     }.
 
 
@@ -609,31 +610,12 @@ to_map(#realm{} = R) ->
 %% =============================================================================
 
 
-
-%% @private
-init(#realm{uri = Uri} = Realm, SecurityEnabled) ->
-    User0 = #{
-        <<"username">> => <<"admin">>,
-        <<"password">> => <<"bondy">>
-    },
-    {ok, _User} = bondy_security_user:add(Uri, User0),
-    % Opts = [],
-    % _ = [
-    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
-    %     || CIDR <- ?LOCAL_CIDRS
-    % ],
-    %TODO remove this once we have the APIs to add sources
-    _ = bondy_security:add_source(Uri, all, {{0, 0, 0, 0}, 0}, password, []),
-    ok = maybe_enable_security(SecurityEnabled, Realm),
-    Realm.
-
-
 %% @private
 maybe_enable_security(_, #realm{uri = ?BONDY_REALM_URI} = Realm) ->
     enable_security(Realm);
 
-maybe_enable_security(undefined, _) ->
-    ok;
+maybe_enable_security(undefined, Realm) ->
+    enable_security(Realm);
 
 maybe_enable_security(true, Realm) ->
     enable_security(Realm);
@@ -642,15 +624,18 @@ maybe_enable_security(false, Realm) ->
     disable_security(Realm).
 
 
+%% @private
 apply_config(Map0) ->
     #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?UPDATE_REALM_SPEC),
     wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
+
     _ = case lookup(Uri) of
         #realm{} = Realm ->
             do_update(Realm, Map1);
         {error, not_found} ->
             add(Map1)
     end,
+
     ok = apply_config(groups, Map1),
     ok = apply_config(users, Map1),
     ok = apply_config(sources, Map1),
@@ -733,55 +718,65 @@ maybe_add(#{<<"uri">> := Uri} = Map, IsStrict) ->
 
 %% @private
 do_add(Map) ->
-    %% These are all defined either by the use or by the validation spec
-    #{
-        <<"uri">> := Uri,
-        <<"description">> := Desc,
-        <<"authmethods">> := Method,
-        <<"security_enabled">> := SecurityEnabled,
-        <<"private_keys">> := KeyList
-    } = Map,
-    Realm0 = #realm{
-        uri = Uri,
-        description = Desc,
-        authmethods = Method
-    },
-    Realm1 = set_keys(Realm0, KeyList),
-    ok = plum_db:put(?PDB_PREFIX, Uri, Realm1),
+    NewRealm = add_or_update(init(Map), Map),
+    ok = bondy_event_manager:notify({realm_added, NewRealm#realm.uri}),
+    NewRealm.
 
-    %% We create all RBAC entities defined in the Realm Spec map
-    ok = apply_config(groups, Map),
-    ok = apply_config(users, Map),
-    ok = apply_config(sources, Map),
-    ok = apply_config(grants, Map),
-
-    ok = bondy_event_manager:notify({realm_added, Uri}),
-    init(Realm1, SecurityEnabled).
 
 
 %% @private
-do_update(Realm0, Map) ->
-    Desc = maps:get(<<"description">>, Map, Realm0#realm.description),
-    Method = maps:get(<<"authmethods">>, Map, Realm0#realm.authmethods),
-    SecurityEnabled = maps:get(<<"security_enabled">>, Map, undefined),
-    KeyList = maps:get(<<"private_keys">>, Map, undefined),
+init(#{<<"uri">> := Uri}) ->
+    User0 = #{
+        <<"username">> => <<"admin">>,
+        <<"password">> => <<"bondy">>
+    },
+    {ok, _User} = bondy_security_user:add(Uri, User0),
+
+    % Opts = [],
+    % _ = [
+    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
+    %     || CIDR <- ?LOCAL_CIDRS
+    % ],
+    %TODO remove this once we have the APIs to add sources
+    _ = bondy_security:add_source(Uri, all, {{0, 0, 0, 0}, 0}, password, []),
+
+    #realm{uri = Uri}.
+
+
+
+%% @private
+do_update(Realm, Map) ->
+    NewRealm = add_or_update(Realm, Map),
+    ok = bondy_event_manager:notify({realm_updated, NewRealm#realm.uri}),
+    NewRealm.
+
+
+%% @private
+add_or_update(Realm0, Map) ->
+    #{
+        <<"description">> := Desc,
+        <<"authmethods">> := Method,
+        <<"security_enabled">> := SecurityEnabled
+    } = Map,
 
     Realm1 = Realm0#realm{
         description = Desc,
         authmethods = Method
     },
 
-    Realm2 = set_keys(Realm1, KeyList),
-    ok = plum_db:put(?PDB_PREFIX, Realm0#realm.uri, Realm2),
-    ok = maybe_enable_security(SecurityEnabled, Realm2),
-
-    %% We create all RBAC entities defined in the Realm Spec map
+    %% We update all RBAC entities defined in the Realm Spec map
     ok = apply_config(groups, Map),
     ok = apply_config(users, Map),
     ok = apply_config(sources, Map),
     ok = apply_config(grants, Map),
-    ok = bondy_event_manager:notify({realm_updated, Realm2#realm.uri}),
-    Realm2.
+
+    KeyList = maps:get(<<"private_keys">>, Map, undefined),
+    NewRealm = set_keys(Realm1, KeyList),
+
+    ok = plum_db:put(?PDB_PREFIX, NewRealm#realm.uri, NewRealm),
+    ok = maybe_enable_security(SecurityEnabled, NewRealm),
+
+    NewRealm.
 
 
 %% @private

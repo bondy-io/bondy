@@ -614,8 +614,6 @@ maybe_auth_challenge(_, {error, not_found}, St) ->
     #{realm_uri := Uri} = St#wamp_state.context,
     {error, {no_such_realm, Uri}, St};
 
-
-%% @private
 maybe_auth_challenge(Details, Realm, St) ->
     Enabled = bondy_realm:is_security_enabled(Realm),
     maybe_auth_challenge(Enabled, Details, Realm, St).
@@ -638,8 +636,7 @@ maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
 
 maybe_auth_challenge(true, Details, Realm, St0) ->
     %% There is no authid param, we check if anonymous is allowed
-    RealmUri = bondy_realm:uri(Realm),
-    case bondy_realm:is_security_enabled(RealmUri) of
+    case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
         true ->
             Ctxt0 = St0#wamp_state.context,
             TempId = bondy_utils:uuid(),
