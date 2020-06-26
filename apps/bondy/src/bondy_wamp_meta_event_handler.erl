@@ -24,8 +24,8 @@
 -module(bondy_wamp_meta_event_handler).
 -behaviour(gen_event).
 -include("bondy.hrl").
+-include("bondy_meta_api.hrl").
 -include("bondy_backup.hrl").
--include("bondy_security.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -record(state, {}).

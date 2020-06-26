@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -include("bondy.hrl").
+-include("bondy_security.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(SHUTDOWN_TIMEOUT, 5000).
@@ -32,6 +33,7 @@
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
+    auth_token              ::  binary() | undefined,
     auth_signature          ::  binary() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
@@ -385,7 +387,8 @@ handle_inbound_messages(
         ?WAMP_PROTOCOL_VIOLATION,
         <<"You've sent an AUTHENTICATE message more than once.">>,
         #{},
-        St);
+        St
+    );
 
 handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
@@ -407,7 +410,8 @@ handle_inbound_messages(
         ?WAMP_PROTOCOL_VIOLATION,
         <<"You need to request a session first by sending a HELLO message.">>,
         #{},
-        St);
+        St
+    );
 
 handle_inbound_messages(
     [H|T],
@@ -441,8 +445,8 @@ handle_inbound_messages(_, St, _) ->
 maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
     ExpectedSignature = St#wamp_state.auth_signature,
     Ctxt0 = St#wamp_state.context,
-    Realm = maps:get(realm_uri, Ctxt0),
-    Peer = maps:get(peer, Ctxt0),
+    Realm = bondy_context:realm_uri(Ctxt0),
+    Peer = bondy_context:peer(peer, Ctxt0),
     AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
@@ -457,8 +461,8 @@ maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
 
 maybe_auth(?TICKET_AUTH, AuthId, Password, St) ->
     Ctxt0 = St#wamp_state.context,
-    Realm = maps:get(realm_uri, Ctxt0),
-    Peer = maps:get(peer, Ctxt0),
+    Realm = bondy_context:realm_uri(Ctxt0),
+    Peer = bondy_context:peer(peer, Ctxt0),
     AuthId = bondy_context:authid(Ctxt0),
 
     Result = bondy_security_utils:authenticate(
@@ -502,15 +506,14 @@ maybe_open_session({error, Reason, St}) ->
 
 open_session(St0) ->
     try
-        #{
-            realm_uri := Uri,
-            authid := AuthId,
-            id := Id,
-            request_details := Details
-        } = Ctxt0 = St0#wamp_state.context,
+        Ctxt0 = St0#wamp_state.context,
+        Id = bondy_context:id(Ctxt0),
+        AuthId = bondy_context:authid(Ctxt0),
+        Realm = bondy_context:realm_uri(Ctxt0),
+        Details = bondy_context:request_details(Ctxt0),
 
         %% We open a session
-        Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Uri, Details),
+        Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Realm, Details),
 
         %% We set the session in the context
         Ctxt1 = Ctxt0#{session => Session},
@@ -548,12 +551,10 @@ abort(incompatible_message, St) ->
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
 
 abort({invalid_options, missing_client_role}, St) ->
-    Reason = <<"No client roles provided. Please provide at least one client role.">>,
+    Reason = <<
+        "No client roles provided. Please provide at least one client role."
+    >>,
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
-
-abort(no_authmethod, St) ->
-    Reason = <<"Router could not use the authmethods requested.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, invalid_scheme}, St) ->
     Reason = <<"Unsupported authentication scheme.">>,
@@ -572,14 +573,14 @@ abort({authentication_failed, missing_password}, St) ->
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, no_matching_sources}, St) ->
-    Reason = <<"The authentication source does not match the sources allowed for this role.">>,
+    Reason = <<
+        "The authentication source does not match the sources allowed"
+        " for this role."
+    >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
-abort({Code, Term}, St) when is_atom(Term) ->
-    abort({Code, ?CHARS2BIN(atom_to_list(Term))}, St);
-
-abort({no_such_realm, Uri}, St) ->
-    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
+abort({no_such_realm, Realm}, St) ->
+    Reason = <<"Realm '", Realm/binary, "' does not exist.">>,
     abort(?WAMP_NO_SUCH_REALM, Reason, #{}, St);
 
 abort({missing_param, Param}, St) ->
@@ -588,7 +589,54 @@ abort({missing_param, Param}, St) ->
 
 abort({no_such_role, AuthId}, St) ->
     Reason = <<"User '", AuthId/binary, "' does not exist.">>,
-    abort(?WAMP_NO_SUCH_ROLE, Reason, #{}, St).
+    abort(?WAMP_NO_SUCH_ROLE, Reason, #{}, St);
+
+abort({unsupported_authmethod, Param}, St) ->
+    Reason = <<
+        "Router could not use the '", Param/binary, "' authmethod requested."
+        " Either the method is not supported by the Router or it is not"
+        " allowed by the Realm."
+    >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort({invalid_authmethod, ?OAUTH2_AUTH = Method}, St) ->
+    Reason = <<"Router could not use the '", Method/binary, "' authmethod requested.">>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort(no_authmethod, St) ->
+    Reason = <<"Router could not use the authmethods requested.">>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort(oauth2_unused_token, St) ->
+    Reason = <<
+        "An OAuth2 token was included in the HTTP request's authorization"
+        " header but the 'oauth2' method was not found in the"
+        " 'authmethods' parameter. Either remove the access token from the"
+        " HTTP request or add the 'oauth2' method to the 'authmethods'"
+        " parameter."
+    >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort(oauth2_missing_token, St) ->
+    Reason = <<
+        "The OAUTH2 authmethod was requested but an access token was not"
+        " provided through the HTTP authorization header. Either provide"
+        " an access token, remove 'oauth2' from the request's authmethods"
+        " option or sort the elments of the option to prioritize other"
+        " authmethod."
+    >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort(oauth2_invalid_grant, St) ->
+    Reason = <<
+        "The access token provided is expired, revoked, malformed,"
+        " or invalid either because it does not match the Realm used in the"
+        " HELLO request, or because it was issued to another peer."
+    >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort({Code, Term}, St) when is_atom(Term) ->
+    abort({Code, ?CHARS2BIN(atom_to_list(Term))}, St).
 
 
 %% @private
@@ -620,14 +668,58 @@ maybe_auth_challenge(Details, Realm, St) ->
 
 
 %% @private
+maybe_auth_challenge(
+    true, Details, Realm, #wamp_state{auth_token = Token} = St0)
+    when Token =/= undefined ->
+    %% The client thas provided a JWT auth token in the HTTP headers.
+    %% Providing an OAUTH2 token dissables the HELLO.Details authmethods
+    %% requested.
+    %% so we immediately authenticate it if the JWT is valid.
+    %% Otherwise, we fail without checking the HELLO.details even if there
+    %% was a valid method requested.
+
+
+    _ = lager:debug(
+        "Initiating WAMP/WS authentication using OAUTH2 access token", []
+    ),
+
+    AuthMethods = maps:get(authmethods, Details, []),
+
+    case lists:member(?OAUTH2_AUTH, AuthMethods) of
+        true ->
+            case valid_authmethods([?OAUTH2_AUTH], Realm) of
+                [?OAUTH2_AUTH] ->
+                    Uri = bondy_realm:uri(Realm),
+                    case bondy_oauth2:verify_jwt(Uri, Token) of
+                        {ok, Claims} ->
+                            AuthId = maps:get(<<"sub">>, Claims),
+                            Ctxt0 = St0#wamp_state.context,
+                            Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+                            Ctxt2 = bondy_context:set_authid(Ctxt1, AuthId),
+                            St1 = update_context(Ctxt2, St0),
+                            {ok, St1};
+                        {error, Reason} when
+                        Reason == oauth2_invalid_grant orelse
+                        Reason == no_such_realm ->
+                            {error, Reason, St0}
+                    end;
+                _ ->
+                    %% oauth2 is not supported by the Realm
+                    {error, {unsupported_authmethod, ?OAUTH2_AUTH}, St0}
+            end;
+        false ->
+            %% It is an error to include a auth token and request other
+            %% authmethod than OAUTH2.
+            {error, oauth2_unused_token, St0}
+    end;
+
 maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:set_authid(
-        Ctxt0#{request_details => Details}, UserId),
-    St1 = update_context(Ctxt1, St0),
-    RealmUri = bondy_realm:uri(Realm),
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+    Ctxt2 = bondy_context:set_authid(Ctxt1, UserId),
+    St1 = update_context(Ctxt2, St0),
 
-    case bondy_security_user:lookup(RealmUri, UserId) of
+    case bondy_security_user:lookup(bondy_realm:uri(Realm), UserId) of
         {error, not_found} ->
             {error, {no_such_role, UserId}, St1};
         User ->
@@ -664,17 +756,17 @@ maybe_auth_challenge(true, Details, Realm, St0) ->
 
 maybe_auth_challenge(false, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:set_authid(
-        Ctxt0#{request_details => Details}, UserId),
-    St1 = update_context(Ctxt1, St0),
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+    Ctxt2 = bondy_context:set_authid(Ctxt1, UserId),
+    St1 = update_context(Ctxt2, St0),
     {ok, St1};
 
 maybe_auth_challenge(false, Details, _, St0) ->
-    Ctxt0 = St0#wamp_state.context,
     TempId = bondy_utils:uuid(),
-    Ctxt1 = bondy_context:set_authid(
-        Ctxt0#{request_details => Details}, TempId),
-    St1 = update_context(Ctxt1, St0),
+    Ctxt0 = St0#wamp_state.context,
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+    Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
+    St1 = update_context(Ctxt2, St0),
     {ok, St1}.
 
 
@@ -682,11 +774,15 @@ maybe_auth_challenge(false, Details, _, St0) ->
 do_auth_challenge(User, Realm, St) ->
     Details = bondy_context:request_details(St#wamp_state.context),
     AuthMethods0 = maps:get(authmethods, Details, []),
-    AuthMethods1 = [
-        X || X <- AuthMethods0, bondy_realm:is_auth_method(Realm, X)
-    ],
+    AuthMethods1 = valid_authmethods(AuthMethods0, Realm),
     do_auth_challenge(AuthMethods1, User, Realm, St).
 
+
+%% @private
+valid_authmethods(List, Realm) ->
+    [
+        X || X <- List, bondy_realm:is_auth_method(Realm, X)
+    ].
 
 %% @private
 do_auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
@@ -718,6 +814,11 @@ do_auth_challenge([?TICKET_AUTH = H|T], User, Realm, St0) ->
 do_auth_challenge([?TLS_AUTH|T], User, Realm, St) ->
     %% Unsupported
     do_auth_challenge(T, User, Realm, St);
+
+do_auth_challenge([?OAUTH2_AUTH|_], _, _, St) ->
+    %% If we got here it is because we do not have a token.
+    %% We fail as the request is invalid.
+    {error, oauth2_missing_token, St};
 
 do_auth_challenge([], _, _, St) ->
     {error, no_authmethod, St}.
@@ -828,10 +929,11 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 
 
 %% @private
-do_init(Subprotocol, Peer, _Opts) ->
+do_init(Subprotocol, Peer, Opts) ->
     State = #wamp_state{
         subprotocol = Subprotocol,
-        context = bondy_context:new(Peer, Subprotocol)
+        context = bondy_context:new(Peer, Subprotocol),
+        auth_token = maps:get(auth_token, Opts, undefined)
     },
     {ok, State}.
 

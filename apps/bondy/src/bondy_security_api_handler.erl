@@ -23,8 +23,7 @@
 -module(bondy_security_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_security.hrl").
-
+-include("bondy_meta_api.hrl").
 
 -export([handle_call/2]).
 

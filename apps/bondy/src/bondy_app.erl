@@ -22,9 +22,9 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_app).
 -behaviour(application).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy_security.hrl").
+-include("bondy.hrl").
+-include("bondy_meta_api.hrl").
 
 
 -export([start/2]).

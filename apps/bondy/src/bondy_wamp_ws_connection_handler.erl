@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_ws_connection_handler.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2020 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@
 -record(state, {
     frame_type              ::  bondy_wamp_protocol:frame_type(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
+    auth_token              ::  map(),
     hibernate = false       ::  boolean()
 }).
 
@@ -84,7 +85,7 @@
     | {module(), cowboy_req:req(), state(), timeout()}
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
-init(Req0, State) ->
+init(Req0, _) ->
     %% From [Cowboy's Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
     %% If the sec-websocket-protocol header was sent with the request for
     %% establishing a Websocket connection, then the Websocket handler must
@@ -95,11 +96,27 @@ init(Req0, State) ->
     ClientIP = bondy_http_utils:client_ip(Req0),
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
 
-    case select_subprotocol(Subprotocols) of
-        {ok, Subproto, BinProto} ->
-            do_init(Subproto, BinProto, Req0, State);
 
-        {error, missing_subprotocol} ->
+    try
+
+        {ok, Subproto, BinProto} = select_subprotocol(Subprotocols),
+
+        %% If we have a token we pass it to the WAMP protocol state so that
+        %% we can verify it and immediately authenticate the client using
+        %% the token stored information.
+        AuthToken = maybe_token(Req0),
+        State1 = #state{auth_token = AuthToken},
+
+        do_init(Subproto, BinProto, Req0, State1)
+
+    catch
+        throw:invalid_scheme ->
+            %% Returning ok will cause the handler
+            %% to stop in websocket_handle
+            Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
+            {ok, Req1, undefined};
+
+        throw:missing_subprotocol ->
             _ = lager:info(
                 "Closing WS connection. Missing value for header '~s'; " "client_ip=~s",
                 [?SUBPROTO_HEADER, ClientIP]
@@ -109,7 +126,7 @@ init(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
-        {error, invalid_subprotocol} ->
+        throw:invalid_subprotocol ->
             %% At the moment we only support WAMP, not plain WS
             _ = lager:info(
                 "Closing WS connection. Initialised without a valid value for http header '~s'; value=~p, client_ip=~s",
@@ -120,12 +137,13 @@ init(Req0, State) ->
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined};
 
-        {error, _Reason} ->
+        throw:_Reason ->
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
             {ok, Req1, undefined}
     end.
+
 
 
 
@@ -306,14 +324,26 @@ handle_outbound(T, M, St) ->
 %% =============================================================================
 
 
+%% @private
+maybe_token(Req) ->
+    case cowboy_req:parse_header(<<"authorization">>, Req) of
+        undefined -> undefined;
+        {bearer, Token} -> Token;
+        _ -> throw(invalid_scheme)
+    end.
+
 
 %% @private
-do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, _) ->
+do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
     Peer = cowboy_req:peer(Req0),
-    case bondy_wamp_protocol:init(Subproto, Peer, #{}) of
+    AuthToken = State#state.auth_token,
+    ProtocolOpts = #{auth_token => AuthToken},
+
+    case bondy_wamp_protocol:init(Subproto, Peer, ProtocolOpts) of
         {ok, CBState} ->
             St = #state{frame_type = FrameType, protocol_state = CBState},
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
+
             Opts = #{
                 %% max_frame_size => bondy_config:get()
                 %% Cowboy will close the connection if idle
@@ -337,26 +367,26 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, _) ->
 %% -----------------------------------------------------------------------------
 -spec select_subprotocol(list(binary()) | undefined) ->
     {ok, bondy_wamp_protocol:subprotocol(), binary()}
-    | {error, invalid_subprotocol | missing_subprotocol}.
+    | no_return().
 
 select_subprotocol(undefined) ->
-    {error, missing_subprotocol};
+    throw(missing_subprotocol);
 
 select_subprotocol(L) when is_list(L) ->
     try
         Fun = fun(X) ->
             case bondy_wamp_protocol:validate_subprotocol(X) of
                 {ok, SP} ->
-                    throw({ok, SP, X});
+                    throw({break, SP, X});
                 {error, invalid_subprotocol} ->
                     ok
             end
         end,
         ok = lists:foreach(Fun, L),
-        {error, invalid_subprotocol}
+        throw(invalid_subprotocol)
     catch
-        ?EXCEPTION(throw, {ok, _SP, _X} = OK, _) ->
-            OK
+        throw:{break, SP, X} ->
+            {ok, SP, X}
     end.
 
 

@@ -64,7 +64,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["wampcra", "ticket", "anonymous"],
+        "authmethods" : ["wampcra", "ticket", "anonymous", "oauth2"],
         "security_enabled" : true,
         "private_keys": [
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
@@ -72,6 +72,12 @@
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIAJRhRKd0kWLeSv+ZqxaNZjePVLKb37neKF6+Yvbb2hFoAoGCCqGSM49\nAwEHoUQDQgAEjHJMWbqcWPemB7X+a1eZ1ctcoTAxdJqffp1Yil/Pbqe7mZAZ7bie\nmurWvNW9c4x6qTuHv7jcBiwyBYho3FBlMw==\n-----END EC PRIVATE KEY-----\n\n"
         ],
         "users" : [
+            {
+                "username" : "app1",
+                "password" : "changethispassword",
+                "groups" : ["api_clients"],
+                "meta" : {}
+            },
             {
                 "username" : "peer1",
                 "password" : "changethispassword",
@@ -126,7 +132,7 @@
                 "meta" : {}
             },
             {
-                "usernames" : ["peer1", "peer2"],
+                "usernames" : ["peer1", "peer2", "app1"],
                 "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}

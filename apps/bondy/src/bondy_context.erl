@@ -67,6 +67,7 @@
 -export([close/2]).
 -export([encoding/1]).
 -export([has_session/1]).
+-export([id/1]).
 -export([is_anonymous/1]).
 -export([is_feature_enabled/3]).
 -export([is_closing/1]).
@@ -91,6 +92,7 @@
 -export([set_is_anonymous/2]).
 -export([set_peer/2]).
 -export([set_realm_uri/2]).
+-export([set_request_details/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
@@ -188,6 +190,15 @@ close(Ctxt0, Reason) ->
         error ->
             ok
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the context identifier.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec id(t()) -> id().
+
+id(#{id := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -383,6 +394,17 @@ request_id(#{request_id := Val}) ->
 -spec set_request_id(t(), id()) -> t().
 set_request_id(Ctxt, ReqId) ->
     Ctxt#{set_request_id => ReqId}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request details to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_details(t(), map()) -> t().
+
+set_request_details(Ctxt, Details) when is_map(Details) ->
+    Ctxt#{request_details => Details}.
 
 
 %% -----------------------------------------------------------------------------

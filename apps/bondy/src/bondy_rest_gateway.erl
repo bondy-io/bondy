@@ -24,7 +24,8 @@
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_security.hrl").
+-include("bondy_meta_api.hrl").
+
 
 
 -define(PREFIX, {api_gateway, api_specs}).

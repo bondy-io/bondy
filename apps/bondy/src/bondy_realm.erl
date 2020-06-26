@@ -90,8 +90,8 @@
         alias => authmethods,
         key => <<"authmethods">>,
         required => true,
-        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
-        default => ?WAMP_AUTH_METHODS
+        datatype => {list, {in, ?BONDY_WAMP_AUTH_METHODS}},
+        default => ?BONDY_WAMP_AUTH_METHODS
     },
     <<"security_enabled">> => #{
         alias => security_enabled,

@@ -24,7 +24,7 @@
 -module(bondy_rest_gateway_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_security.hrl").
+-include("bondy_meta_api.hrl").
 
 
 
