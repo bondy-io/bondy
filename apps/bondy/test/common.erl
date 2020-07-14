@@ -175,7 +175,6 @@
 	 suite/0,
      tests/1,
      start_bondy/0,
-     maybe_start_bondy/0,
      stop_bondy/0
 	]).
 
@@ -212,10 +211,10 @@ start_bondy() ->
             application:load(bondy),
             [application:set_env(bondy, K, V) || {K, V} <- ?BONDY],
 
-            {ok, _} = application:ensure_all_started(gproc),
-            {ok, _} = application:ensure_all_started(jobs),
-            {ok, _} = application:ensure_all_started(wamp),
-            {ok, _} = application:ensure_all_started(bondy),
+            maybe_error(application:ensure_all_started(gproc)),
+            maybe_error(application:ensure_all_started(jobs)),
+            maybe_error(application:ensure_all_started(wamp)),
+            maybe_error(application:ensure_all_started(bondy)),
         false ->
             persistent_term:put({?MODULE, bondy_started}, true),
             ok;
@@ -224,16 +223,6 @@ start_bondy() ->
     end.
 
 
-start_bondy() ->
-
-    %% dbg:tracer(), dbg:p(all,c),
-    %% dbg:tpl(application, '_', []),
-    [begin
-        application:unload(App),
-        application:load(App),
-        application:set_env(App, K, V)
-    end || {App, L} <- ?CONFIG, {K, V} <- L],
-
 stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
@@ -241,3 +230,7 @@ stop_bondy() ->
     application:stop(bondy).
 
 
+maybe_error({error, _} = Error) ->
+    error(Error);
+maybe_error({ok, _}) ->
+    ok.
