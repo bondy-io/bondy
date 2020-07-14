@@ -36,7 +36,7 @@ groups() ->
     ].
 
 init_per_suite(Config) ->
-    common:maybe_start_bondy(),
+    common:start_bondy(),
     plum_db_config:set(aae_enabled, false),
     Realm = bondy_realm:add(<<"com.foobar">>),
     RealmUri = bondy_realm:uri(Realm),

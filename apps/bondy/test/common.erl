@@ -215,7 +215,6 @@ start_bondy() ->
             maybe_error(application:ensure_all_started(jobs)),
             maybe_error(application:ensure_all_started(wamp)),
             maybe_error(application:ensure_all_started(bondy)),
-        false ->
             persistent_term:put({?MODULE, bondy_started}, true),
             ok;
         true ->

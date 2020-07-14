@@ -69,7 +69,7 @@ groups() ->
     ].
 
 init_per_suite(Config) ->
-    common:maybe_start_bondy(),
+    common:start_bondy(),
     [{realm_uri, <<"com.myrealm">>}|Config].
 
 end_per_suite(Config) ->
