@@ -3,7 +3,7 @@
  {<<"acceptor_pool">>,{pkg,<<"acceptor_pool">>,<<"1.0.0-rc.0">>},2},
  {<<"art">>,
   {git,"https://gitlab.com/leapsight/art.git",
-       {ref,"c81173ff8f4d6630cb5efb11d65236d00d1118df"}},
+       {ref,"a116d6eb5c8dc7d44e74b26b919404f56827cdb9"}},
   0},
  {<<"base64url">>,{pkg,<<"base64url">>,<<"0.0.1">>},1},
  {<<"bert">>,{pkg,<<"bert">>,<<"0.1.0">>},0},
