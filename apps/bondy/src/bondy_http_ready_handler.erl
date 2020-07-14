@@ -46,8 +46,8 @@ ready(<<"GET">>, Req) ->
     cowboy_req:reply(Status, Req);
 
 ready(_, Req) ->
-	%% Method not allowed.
-	cowboy_req:reply(405, Req).
+    %% Method not allowed.
+    cowboy_req:reply(405, Req).
 
 
 
