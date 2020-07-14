@@ -175,6 +175,7 @@
 	 suite/0,
      tests/1,
      start_bondy/0,
+     maybe_start_bondy/0,
      stop_bondy/0
 	]).
 
@@ -196,6 +197,16 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
+
+maybe_start_bondy() ->
+    case persistent_term:get(bondy_started, false) of
+        false ->
+            start_bondy();
+        true ->
+            ok
+    end.
+
+
 start_bondy() ->
 
     %% dbg:tracer(), dbg:p(all,c),
@@ -213,6 +224,7 @@ start_bondy() ->
     {ok, _} = application:ensure_all_started(gproc),
     {ok, _} = application:ensure_all_started(jobs),
     {ok, _} = application:ensure_all_started(bondy),
+    persistent_term:put(bondy_started, true),
     ok.
 
 stop_bondy() ->

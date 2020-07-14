@@ -256,11 +256,11 @@ add(Type, Uri, Options, Ctxt) ->
             %% So we do not match SessionId
             bondy_registry_entry:pattern(
                 Type, RealmUri, '_', '_', Uri, Options);
-
         subscription ->
             bondy_registry_entry:pattern(
                     Type, RealmUri, Node, SessionId, Uri, Options)
     end,
+
     TrieKey = trie_key(Pattern),
     Trie = trie(Type),
 
@@ -978,6 +978,7 @@ trie(subscription) -> ?SUBSCRIPTION_TRIE.
 
 -spec trie_key(bondy_registry_entry:t() | bondy_registry_entry:key()) ->
     art:key().
+
 trie_key(Entry) ->
     Policy = bondy_registry_entry:match_policy(Entry),
     trie_key(Entry, Policy).
@@ -1019,7 +1020,7 @@ trie_key(Entry, Policy) ->
     %% that rules out $#, so we use $,
     Key = <<RealmUri/binary, $,, Uri/binary>>,
 
-    %% We adde Node, SessionId, Id as suffix to disambiguate the entry in the
+    %% We add Node, SessionId, Id as suffix to disambiguate the entry in the
     %% trie
     case Policy of
         ?PREFIX_MATCH ->
@@ -1121,17 +1122,3 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
 
-
-%% maybe_trigger_exchange(_) ->
-%%     PeerService = bondy_peer_service:peer_service(),
-%%     case PeerService:members() of
-%%         {ok, []} ->
-%%             ok;
-%%         {ok, _} ->
-%%             %% We give plumtree_broadcast time to process the event
-%%             %% and update its state
-%%             timer:sleep(1000),
-%%             %% We manually force an exchange
-%%             plumtree_broadcast ! exchange_tick,
-%%             ok
-%%     end.
