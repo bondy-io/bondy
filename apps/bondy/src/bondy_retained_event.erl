@@ -6,7 +6,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(DB_PREFIX(Realm), {retained_events, Realm}).
-
+-define(EOT, '$end_of_table').
 
 -record(bondy_retained_event, {
     valid_to            ::  pos_integer(),
@@ -56,7 +56,6 @@
 
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -71,9 +70,12 @@ get(Realm, Topic) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation()) -> [t()] | continuation().
+-spec match(continuation()) -> {[t()] | continuation()} | ?EOT.
 
-match(Cont) ->
+match(#bondy_retained_continuation{opts = undefined}) ->
+    ?EOT;
+
+match(#bondy_retained_continuation{} = Cont) ->
     Realm = Cont#bondy_retained_continuation.realm,
     Topic = Cont#bondy_retained_continuation.topic,
     SessionId = Cont#bondy_retained_continuation.session_id,
@@ -91,7 +93,7 @@ match(Cont) ->
     Topic :: uri(),
     SessionId :: id(),
     Strategy :: binary()) ->
-    [t()] | {[t()], continuation()}.
+    {[t()], continuation()} | ?EOT.
 
 match(Realm, Topic, SessionId, Strategy) ->
     match(Realm, Topic, SessionId, Strategy, [{limit, 100}]).
@@ -107,12 +109,12 @@ match(Realm, Topic, SessionId, Strategy) ->
     SessionId :: id(),
     Strategy :: binary(),
     Opts :: plum_db:fold_opts()) ->
-    [t()] | {[t()], continuation()}.
+    {[t()], continuation()} | ?EOT.
 
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
     Result = get(Realm, Topic),
-    element(1, maybe_append(Result, SessionId, {[], 0}));
-
+    {Matches, 1} = maybe_append(Result, SessionId, {[], 0}),
+    {Matches, #bondy_retained_continuation{}};
 
 match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
     Len = byte_size(Topic),
@@ -121,7 +123,7 @@ match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
 
     Fun = fun
         ({{_, <<Prefix:Len/binary, _/binary>>}, Obj}, {_, Cnt} = Acc)
-        when Prefix =:= Topic andalso Cnt =< Limit ->
+        when Prefix =:= Topic andalso Cnt < Limit ->
             Result = plum_db_object:value(plum_db_object:resolve(Obj, lww)),
             maybe_append(Result, SessionId, Acc);
         ({{_, <<Prefix:Len/binary, _/binary>> = Key}, _}, {List, _})
@@ -135,7 +137,7 @@ match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
             },
             throw({break, {List, Cont}});
         (_, {List, _}) ->
-            throw({break, List})
+            throw({break, {List, ?EOT}})
     end,
     plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts);
 
@@ -145,7 +147,7 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     Limit = key_value:get(limit, Opts, 100),
 
     Fun = fun
-        ({{_, Key}, Obj}, {List, Cnt} = Acc) when Cnt =< Limit ->
+        ({{_, Key}, Obj}, {List, Cnt} = Acc) when Cnt < Limit ->
             case MatchFun(Key) of
                 true ->
                     Result = plum_db_object:value(
@@ -155,7 +157,7 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
                 false ->
                     Acc;
                 done ->
-                    throw({break, List})
+                    throw({break, {List, ?EOT}})
             end;
         ({{_, Key}, _}, {List, _}) ->
             Cont = #bondy_retained_continuation{
@@ -277,8 +279,6 @@ valid_to(0) ->
     0;
 valid_to(TTL) ->
     erlang:system_time(second) + TTL.
-
-
 
 
 %% @private

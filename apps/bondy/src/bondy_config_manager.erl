@@ -237,7 +237,7 @@ prepare_private_config() ->
 
 maybe_configure_message_retention(Config0) ->
     try
-        case bondy_config:get([wamp_message_retention, enabled]) of
+        case bondy_config:get([wamp_message_retention, enabled], false) of
             true ->
                 Type = bondy_config:get([wamp_message_retention, storage_type]),
                 Prefixes0 = key_value:get([plum_db, prefixes], Config0),
