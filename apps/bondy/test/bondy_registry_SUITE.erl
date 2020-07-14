@@ -67,15 +67,17 @@ add_subscription(Config) ->
     Opts = #{match => <<"exact">>},
 
     Uri = <<"com.a.b.c">>,
-    {ok, #{id := Id1} = Details0, true} = bondy_registry:add(
+
+    {ok, Entry, true} = bondy_registry:add(
         subscription, Uri, Opts, Ctxt
     ),
 
-    Entry = bondy_registry:lookup(subscription, Id1, Realm),
+    Id1 = bondy_registry_entry:id(Entry),
+    Found = bondy_registry:lookup(subscription, Id1, Realm),
 
     ?assertEqual(
-        Id1,
-        bondy_registry_entry:id(Entry)
+        Entry,
+        Found
     ),
     ?assertEqual(
         [Entry],
@@ -83,7 +85,7 @@ add_subscription(Config) ->
     ),
 
     ?assertEqual(
-        {error, {already_exists, Details0}},
+        {error, {already_exists, Entry}},
         bondy_registry:add(subscription, <<"com.a.b.c">>, Opts, Ctxt)
     ),
 
@@ -92,18 +94,23 @@ add_subscription(Config) ->
         bondy_registry_entry:id(bondy_registry:lookup(subscription, Id1, Realm))
     ),
 
-    {ok, #{id := Id2, match := <<"exact">>}, true} = bondy_registry:add(
+    {ok, Entry2, true} = bondy_registry:add(
         subscription, <<"com.a">>, Opts, Ctxt
     ),
+
+    Id2 = bondy_registry_entry:id(Entry2),
 
     ?assertEqual(
         Id2,
         bondy_registry_entry:id(bondy_registry:lookup(subscription, Id2, Realm))
     ),
 
-    {ok, #{id := Id3, match := <<"prefix">>}, true} = bondy_registry:add(
+    {ok, Entry3, true} = bondy_registry:add(
         subscription, <<"com.a.b">>, #{match => <<"prefix">>}, Ctxt
     ),
+
+    Id3 = bondy_registry_entry:id(Entry3),
+
     ?assertEqual(
         Id3,
         bondy_registry_entry:id(bondy_registry:lookup(subscription, Id3, Realm))
@@ -114,11 +121,11 @@ match_prefix(Config) ->
     Realm = ?config(realm_uri, Config),
     Ctxt = ?config(context, Config),
 
-    {ok, EMap, false} = bondy_registry:add(
+    {ok, Entry, false} = bondy_registry:add(
         subscription, <<"com.a">>, #{match => <<"prefix">>}, Ctxt
     ),
 
-    #{id := Id, match := <<"prefix">>} = EMap,
+    Id = bondy_registry_entry:id(Entry),
 
     E = bondy_registry:lookup(subscription, Id, Realm),
 
