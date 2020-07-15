@@ -41,7 +41,9 @@
 %% FEATURES
 %% =============================================================================
 
-
+-define(INVOKE_JUMP_CONSISTENT_HASH, <<"jump_consistent_hash">>).
+-define(INVOKE_QUEUE_LEAST_LOADED, <<"queue_least_loaded">>).
+-define(INVOKE_QUEUE_LEAST_LOADED_SAMPLE, <<"queue_least_loaded_sample">>).
 
 -define(WAMP_DEALER_FEATURES, #{
     call_canceling => true,
@@ -52,11 +54,11 @@
     progressive_call_results => false,
     progressive_calls => false,
     reflection => false,
-    registration_meta_api => false,
     registration_revocation => false,
-    session_meta_api => false,
     sharded_registration => false,
-    shared_registration => true
+    shared_registration => true,
+    registration_meta_api => true,
+    session_meta_api => false
 }).
 -define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
     caller_auth_claims => true
@@ -71,9 +73,9 @@
     progressive_call_results => false,
     progressive_calls => false,
     registration_revocation => false,
-    session_meta_api => false,
     sharded_registration => false,
-    shared_registration => true
+    shared_registration => true,
+    session_meta_api => false
 }).
 -define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
     caller_auth_claims => true
@@ -93,11 +95,11 @@
     event_history => false,
     publication_trustlevels => false,
     publisher_identification => true,
-    session_meta_api => false,
     sharded_subscription => false,
     subscriber_blackwhite_listing => false,
-    subscription_meta_api => false,
-    reflection => false
+    reflection => false,
+    session_meta_api => false,
+    subscription_meta_api => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
@@ -122,11 +124,11 @@
 %% =============================================================================
 
 
--define(BONDY_ERROR_NOT_IN_SESSION, <<"com.leapsight.bondy.error.not_in_session">>).
--define(BONDY_SESSION_ALREADY_EXISTS, <<"com.leapsight.bondy.error.session_already_exists">>).
+-define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
+-define(BONDY_SESSION_ALREADY_EXISTS, <<"bondy.error.session_already_exists">>).
 
--define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
--define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
+-define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
+-define(BONDY_INCONSISTENCY_ERROR, <<"bondy.error.unknown_error">>).
 
 -type local_peer_id()   ::  {
     Realm       ::  binary(),

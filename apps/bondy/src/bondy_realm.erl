@@ -33,38 +33,31 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
--ifdef(OTP_RELEASE). %% => OTP is 21 or higher
-    %% We use persistent_term to cache the security status to avoid
-    %% accessing plum_db.
-    -define(GET_SECURITY_STATUS(Uri),
-        try persistent_term:get({Uri, security_status}) of
-            Status -> Status
-        catch
-            error:badarg ->
-                Status = bondy_security:status(Uri),
-                ok = persistent_term:put({Uri, security_status}, Status),
-                Status
-        end
-    ).
-    -define(ENABLE_SECURITY(Uri),
-        bondy_security:enable(Uri),
-        persistent_term:put({Uri, security_status}, enabled)
-    ).
-    -define(DISABLE_SECURITY(Uri),
-        bondy_security:disable(Uri),
-        persistent_term:put({Uri, security_status}, disabled)
-    ).
-    -define(ERASE_SECURITY_STATUS(Uri),
-        _ = persistent_term:erase({Uri, security_status}),
-        ok
-    ).
--else.
-    %% We access plum_db which stores data in ets and disk.
-    -define(GET_SECURITY_STATUS(Uri), bondy_security:status(Uri)).
-    -define(ENABLE_SECURITY(Uri), bondy_security:enable(Uri)).
-    -define(DISABLE_SECURITY(Uri), bondy_security:disable(Uri)).
-    -define(ERASE_SECURITY_STATUS(_), ok).
--endif.
+%% We use persistent_term to cache the security status to avoid
+%% accessing plum_db.
+-define(GET_SECURITY_STATUS(Uri),
+    try persistent_term:get({Uri, security_status}) of
+        Status -> Status
+    catch
+        error:badarg ->
+            Status = bondy_security:status(Uri),
+            ok = persistent_term:put({Uri, security_status}, Status),
+            Status
+    end
+).
+-define(ENABLE_SECURITY(Uri),
+    bondy_security:enable(Uri),
+    persistent_term:put({Uri, security_status}, enabled)
+).
+-define(DISABLE_SECURITY(Uri),
+    bondy_security:disable(Uri),
+    persistent_term:put({Uri, security_status}, disabled)
+).
+-define(ERASE_SECURITY_STATUS(Uri),
+    _ = persistent_term:erase({Uri, security_status}),
+    ok
+).
+
 
 -define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PDB_PREFIX, {security, realms}).
@@ -97,8 +90,8 @@
         alias => authmethods,
         key => <<"authmethods">>,
         required => true,
-        datatype => {list, {in, ?WAMP_AUTH_METHODS}},
-        default => ?WAMP_AUTH_METHODS
+        datatype => {list, {in, ?BONDY_WAMP_AUTH_METHODS}},
+        default => ?BONDY_WAMP_AUTH_METHODS
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
@@ -107,6 +100,13 @@
         datatype => boolean,
         default => true
     },
+    %% <<"message_retention_enabled">> => #{
+    %%     alias => message_retention_enabled,
+    %%     key => <<"message_retention_enabled">>,
+    %%     required => true,
+    %%     datatype => boolean,
+    %%     default => true
+    %% },
     <<"users">> => #{
         alias => users,
         key => <<"users">>,
@@ -423,6 +423,7 @@ get_random_kid(#realm{private_keys = Keys}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri(realm()) -> uri().
+
 uri(#realm{uri = Uri}) ->
     Uri.
 

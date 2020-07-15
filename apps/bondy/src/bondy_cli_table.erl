@@ -23,7 +23,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_console_table).
+-module(bondy_cli_table).
 
 %% API
 -export([print/2, print/3,

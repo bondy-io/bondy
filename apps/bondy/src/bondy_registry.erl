@@ -66,12 +66,7 @@
     bondy_registry_entry:entry_type(),
     plum_db:continuation()
 }.
-
-
--type task() :: fun(
-    (bondy_registry_entry:details_map(), bondy_context:t()) ->
-        ok
-).
+-type task() :: fun((bondy_registry_entry:t(), bondy_context:t()) -> ok).
 
 
 -export_type([eot/0]).
@@ -116,6 +111,8 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -175,9 +172,8 @@ info(?SUBSCRIPTION_TRIE) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add_local_subscription(uri(), uri(), map(), pid()) ->
-    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:details_map()}}.
-
+    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:t()}}.
 
 add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     Node = bondy_peer_service:mynode(),
@@ -207,8 +203,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
             %% "Subscription|id".
             FullPrefix = full_prefix(Type, RealmUri),
             Entry =  plum_db:get(FullPrefix, EntryKey),
-            Map = bondy_registry_entry:to_details_map(Entry),
-            {error, {already_exists, Map}}
+            {error, {already_exists, Entry}}
     end.
 
 
@@ -223,7 +218,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 %% already added before by the same _Subscriber_, the _Broker_ should not fail
 %% and answer with a "SUBSCRIBED" message, containing the existing
 %% "Subscription|id". So in this case this function returns
-%% {ok, bondy_registry_entry:details_map(), boolean()}.
+%% {ok, bondy_registry_entry:t(), boolean()}.
 %%
 %% In case of a registration, as a default, only a single Callee may
 %% register a procedure for an URI. However, when shared registrations are
@@ -241,8 +236,8 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
 %% -----------------------------------------------------------------------------
 -spec add(
     bondy_registry_entry:entry_type(), uri(), map(), bondy_context:t()) ->
-    {ok, bondy_registry_entry:details_map(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:details_map()}}.
+    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
+    | {error, {already_exists, bondy_registry_entry:t()}}.
 
 
 add(Type, Uri, Options, Ctxt) ->
@@ -264,6 +259,9 @@ add(Type, Uri, Options, Ctxt) ->
     TrieKey = trie_key(Pattern),
     Trie = trie(Type),
 
+    %% TODO Match using plum_db instead as the tree should act only as a
+    %% materialized view and at the moment is not concurrent so a read can fail
+    %% when other process is updating the tree
     case art_server:match(TrieKey, Trie) of
         [] ->
             %% No matching registrations at all exists or
@@ -278,8 +276,7 @@ add(Type, Uri, Options, Ctxt) ->
             %% "Subscription|id".
             FullPrefix = full_prefix(Type, RealmUri),
             Entry =  plum_db:get(FullPrefix, EntryKey),
-            Map = bondy_registry_entry:to_details_map(Entry),
-            {error, {already_exists, Map}};
+            {error, {already_exists, Entry}};
 
         [{_, EntryKey} | _] when Type == registration ->
             EOpts = bondy_registry_entry:options(EntryKey),
@@ -308,8 +305,7 @@ add(Type, Uri, Options, Ctxt) ->
                 false ->
                     FullPrefix = full_prefix(Type, RealmUri),
                     Entry =  plum_db:get(FullPrefix, EntryKey),
-                    Map = bondy_registry_entry:to_details_map(Entry),
-                    {error, {already_exists, Map}}
+                    {error, {already_exists, Entry}}
             end
     end.
 
@@ -341,7 +337,9 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
 when is_function(Task, 2) orelse Task == undefined ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
-            _ = lager:info("Context has no session_id; failed to remove registry contents"),
+            _ = lager:info(
+                "Context has no session_id; failed to remove registry contents"
+            ),
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
@@ -483,7 +481,7 @@ when is_function(Task, 2) orelse Task == undefined ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the list of entries owned by the the active session.
+%% Returns the list of entries owned by the active session.
 %%
 %% This function is equivalent to calling {@link entries/2} with the RealmUri
 %% and SessionId extracted from the Context.
@@ -613,6 +611,13 @@ match(Type, Uri, RealmUri, Opts) ->
         lookup_entries(Type, {Result, ?EOT})
     catch
         throw:non_eligible_entries ->
+            {[], ?EOT};
+        error:badarg:Stacktrace ->
+            %% @TODO this will be fixed when art provides persistent tries
+            _ = lager:warning(
+                "Error while searching trie; stacktrace=~p",
+                [Stacktrace]
+            ),
             {[], ?EOT}
     end.
 
@@ -744,7 +749,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 init_tries(State0) ->
-    _ = lager:info("Initialising registry trie from store."),
+    _ = lager:info("Initialising in-memory registry tries from store."),
     Opts = [{resolver, lww}],
     Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
     {ok, State1} = init_tries(Iterator0, State0),
@@ -809,7 +814,7 @@ delete_from_trie(Entry) ->
             ok;
         error ->
             _ = lager:debug(
-                "Failed deleting element from trie; key=~p", [TrieKey]),
+                "Failed deleting entry from trie; key=~p", [TrieKey]),
             ok
     end.
 
@@ -843,7 +848,7 @@ maybe_execute(undefined, _) ->
     ok;
 
 maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
-    _ = Fun(bondy_registry_entry:to_details_map(Entry)),
+    _ = Fun(Entry),
     ok.
 
 
@@ -863,16 +868,27 @@ do_remove(Key, Ctxt, Task) ->
 
 
 %% @private
-do_remove_all(?EOT, _, _) ->
+do_remove_all(Matches, SessionId, Fun) ->
+    do_remove_all(Matches, SessionId, Fun, []).
+
+
+do_remove_all(?EOT, _, _, _) ->
     ok;
 
-do_remove_all({[], ?EOT}, _, _) ->
+do_remove_all({[], ?EOT}, _, _, _) ->
     ok;
 
-do_remove_all({[], Cont}, SessionId, Fun) ->
-    do_remove_all(plum_db:match(Cont), SessionId, Fun);
+do_remove_all({[], Cont}, SessionId, Fun, Acc) when length(Acc) > 0 ->
+    %% Finally, we perform the Fun if any.
+    %% We do it here as opposed to in every iteration to minimise art trie
+    %% concurrency access,
+    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
+    do_remove_all(plum_db:match(Cont), SessionId, Fun, []);
 
-do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun) ->
+do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
+    do_remove_all(plum_db:match(Cont), SessionId, Fun, Acc);
+
+do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
     Sid = bondy_registry_entry:session_id(Entry),
     case SessionId =:= Sid orelse SessionId == '_' of
         true ->
@@ -882,10 +898,8 @@ do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun) ->
             %% This will broadcast the delete
             %% amongst the nodes in the cluster
             ok = plum_db:delete(full_prefix(Entry), EntryKey),
-            %% Finally, we perform the Fun if any
-            ok = maybe_execute(Fun, Entry),
             %% We continue traversing
-            do_remove_all({T, Cont}, SessionId, Fun);
+            do_remove_all({T, Cont}, SessionId, Fun, [Entry|Acc]);
         false ->
             %% No longer our session
             ok
@@ -921,6 +935,7 @@ decr_counter(RealmUri, Uri, N) ->
 %% -----------------------------------------------------------------------------
 -spec prefix(bondy_registry_entry:entry_type(), uri() | '_') ->
     term().
+
 prefix(subscription, RealmUri) ->
     ?SUBS_FULL_PREFIX(RealmUri);
 
@@ -947,9 +962,8 @@ add_to_trie(Entry) ->
     %% We add entry to the trie
     _ = art_server:set(trie_key(Entry), EntryKey, trie(Type)),
 
-    Map = bondy_registry_entry:to_details_map(Entry),
     IsFirstEntry = incr_counter(RealmUri, Uri, 1) =:= 1,
-    {ok, Map, IsFirstEntry}.
+    {ok, Entry, IsFirstEntry}.
 
 
 %% @private
@@ -1054,6 +1068,7 @@ trie_ms(Opts) ->
         error ->
             []
     end,
+
     Conds2 = case maps:find(exclude, Opts) of
         {ok, []} ->
             Conds1;

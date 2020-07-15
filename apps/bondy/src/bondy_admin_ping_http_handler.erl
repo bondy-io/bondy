@@ -1,6 +1,6 @@
 
 %% =============================================================================
-%%  bondy_http_ready_handler.erl -
+%%  bondy_admin_ping_http_handler.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -22,40 +22,13 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_http_ready_handler).
+-module(bondy_admin_ping_http_handler).
 
 -export([init/2]).
 
 
 
-%% =============================================================================
-%% API
-%% =============================================================================
-
-
-
 init(Req0, State) ->
-    Method = cowboy_req:method(Req0),
     Req1 = bondy_http_utils:set_meta_headers(Req0),
-    Req2 = ready(Method, Req1),
+    Req2 = cowboy_req:reply(204, Req1),
     {ok, Req2, State}.
-
-
-ready(<<"GET">>, Req) ->
-    Status = status_code(bondy_config:get(status)),
-    cowboy_req:reply(Status, Req);
-
-ready(_, Req) ->
-    %% Method not allowed.
-    cowboy_req:reply(405, Req).
-
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-status_code(ready) -> 204;
-status_code(_) -> 503.

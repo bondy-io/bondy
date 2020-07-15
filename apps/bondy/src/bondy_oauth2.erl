@@ -512,21 +512,23 @@ verify_jwt(RealmUri, JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), Match :: map()) ->
+-spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), MatchSpec :: map()) ->
     {ok, map()} | {error, error()}.
 
-verify_jwt(RealmUri, JWTString, Match0) ->
-    Match1 = Match0#{<<"aud">> => RealmUri},
+verify_jwt(RealmUri, JWTString, MatchSpec) ->
+
     case bondy_cache:get(RealmUri, JWTString) of
         {ok, Claims} ->
             %% We skip verification as we found the JWT
-            maybe_expired(matches(Claims, Match1), JWTString);
+            maybe_expired(matches(RealmUri, Claims, MatchSpec), JWTString);
         {error, not_found} ->
-            %% We do verify the JWT and if valid we cache it
-            maybe_cache(
-                maybe_expired(do_verify_jwt(JWTString, Match1), JWTString),
-                JWTString
-            )
+            %% This JWT might still be valid i.e. created by another Bondy
+            %% node and we have never received the broadcast,
+            %% so we verify it and if valid we cache it
+            Result = maybe_expired(
+                do_verify_jwt(RealmUri, JWTString, MatchSpec), JWTString
+            ),
+            maybe_cache(Result, JWTString)
     end.
 
 
@@ -684,28 +686,40 @@ sign(Key, Claims) ->
 
 
 %% @private
--spec do_verify_jwt(binary(), map()) -> {ok, map()} | {error, error()}.
+-spec do_verify_jwt(Realm :: binary(), binary(), map()) ->
+    {ok, map()} | {error, error()}.
 
-do_verify_jwt(JWT, Match) ->
+do_verify_jwt(RealmUri, JWT, Match) ->
     try
         {jose_jwt, Map} = jose_jwt:peek(JWT),
         #{
-            <<"aud">> := RealmUri,
+            <<"aud">> := JWTRealmUri,
             <<"kid">> := Kid
         } = Map,
+
+        %% An early check, matches/3 will also check realm but we do it
+        %% here to avoid verifying if we already know there will not be
+        %% a match.
+        JWTRealmUri == RealmUri orelse throw(oauth2_invalid_grant),
+
+        %% We check the realm actualyy exists
         Realm = bondy_realm:fetch(RealmUri),
+
+        %% Finally we try to verify the JWT
         case bondy_realm:get_public_key(Realm, Kid) of
             undefined ->
                 {error, oauth2_invalid_grant};
             JWK ->
                 case jose_jwt:verify(JWK, JWT) of
                     {true, {jose_jwt, Claims}, _} ->
-                        matches(Claims, Match);
+                        matches(RealmUri, Claims, Match);
                     {false, {jose_jwt, _Claims}, _} ->
                         {error, oauth2_invalid_grant}
                 end
         end
     catch
+        throw:Reason ->
+            {error, Reason};
         ?EXCEPTION(error, no_such_realm, _) ->
             {error, no_such_realm};
         ?EXCEPTION(error, _, _) ->
@@ -746,9 +760,11 @@ maybe_expired(Error, _) ->
 
 
 %% @private
-matches(Claims, Match) ->
-    Keys = maps:keys(Match),
-    case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Match) of
+matches(RealmUri, Claims, Spec0) ->
+    Spec1 = Spec0#{<<"aud">> => RealmUri},
+    Keys = maps:keys(Spec1),
+
+    case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Spec1) of
         true ->
             {ok, Claims};
         false ->

@@ -16,15 +16,15 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc An implementation of app_config behaviour.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_config).
+-behaviour(app_config).
 
--define(ERROR, '$error_badarg').
 -define(APP, bondy).
+
 
 -export([get/1]).
 -export([get/2]).
@@ -40,23 +40,16 @@
 %% =============================================================================
 
 
--spec init() -> ok | no_return().
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 init() ->
-    %% By now erlang has loaded the app.config file generated
-    %% dynamically by Cuttlefish from the combination of the
-    %% bondy.conf and advanced.config files into the bondy env
-    Config0 = application:get_all_env(bondy),
-
-    %% We set the priv_dir parameter
-    PrivDir = priv_dir(),
-    Config1 = [{priv_dir, PrivDir} | Config0],
-
-    %% We initialise the config, caching all values as code
-    %% We set configs at first level only
-    _ = [set(Key, Value) || {Key, Value} <- Config1],
+    ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
     _ = lager:info("Bondy configuration initialised"),
     ok.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -65,25 +58,8 @@ init() ->
 %% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
-get([H|T]) ->
-    case get(H) of
-        Term when is_map(Term) ->
-            case maps_utils:get_path(T, Term, ?ERROR) of
-                ?ERROR -> error(badarg);
-                Value -> Value
-            end;
-        Term when is_list(Term) ->
-            get_path(T, Term, ?ERROR);
-        _ ->
-            %% We cannot get(T) from a term which is neither a map nor a list
-            undefined
-    end;
-
-get(Key) when is_tuple(Key) ->
-    get(tuple_to_list(Key));
-
 get(Key) ->
-    bondy_mochiglobal:get(Key).
+    app_config:get(?APP, Key).
 
 
 %% -----------------------------------------------------------------------------
@@ -92,73 +68,21 @@ get(Key) ->
 %% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
-get([H|T], Default) ->
-    case get(H, Default) of
-        Term when is_map(Term) ->
-            maps_utils:get_path(T, Term, Default);
-        Term when is_list(Term) ->
-            get_path(T, Term, Default);
-        _ ->
-            Default
-    end;
-
-get(Key, Default) when is_tuple(Key) ->
-    get(tuple_to_list(Key), Default);
-
 get(Key, Default) ->
-    bondy_mochiglobal:get(Key, Default).
+    app_config:get(?APP, Key, Default).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec set(Key :: atom() | tuple(), Default :: term()) -> ok.
+-spec set(Key :: key_value:key() | tuple(), Value :: term()) -> ok.
+
+set(status, Value) ->
+    %% Typically we would change status during application_controller
+    %% lifecycle so to avoid a loop (resulting in timeout) we avoid
+    %% calling application:set_env/3.
+    persistent_term:put({?APP, status}, Value);
 
 set(Key, Value) ->
-    application:set_env(?APP, Key, Value),
-    bondy_mochiglobal:put(Key, Value).
-
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Returns the app's priv dir
-%% @end
-%% -----------------------------------------------------------------------------
-priv_dir() ->
-    case code:priv_dir(bondy) of
-        {error, bad_name} ->
-            filename:join(
-                [filename:dirname(code:which(?MODULE)), "..", "priv"]);
-        Val ->
-            Val
-    end.
-
-
-%% @private
-get_path([H|T], Term, Default) when is_list(Term) ->
-    case lists:keyfind(H, 1, Term) of
-        false when Default == ?ERROR ->
-            error(badarg);
-        false ->
-            Default;
-        {H, Child} ->
-            get_path(T, Child, Default)
-    end;
-
-get_path([], Term, _) ->
-    Term;
-
-get_path(_, _, ?ERROR) ->
-    error(badarg);
-
-get_path(_, _, Default) ->
-    Default.
+    app_config:set(?APP, Key, Value).

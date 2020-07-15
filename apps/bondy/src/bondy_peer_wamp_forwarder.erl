@@ -385,9 +385,9 @@ cast_message(Mssg, BinPid) ->
 
 %% @private
 do_cast_message(Node, Mssg, BinPid) ->
-    Channel = channel(),
-    ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
+    Channel = bondy_config:get(wamp_peer_channel, default),
+    ServerRef = ?MODULE,
     Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
 
 
@@ -406,14 +406,4 @@ peer_error(Reason, Mssg) ->
         id = bondy_peer_message:id(Mssg),
         reason = Reason
     }.
-
-
-channel() ->
-    Channels = partisan_config:get(channels),
-    case lists:member(wamp_peer_messages, Channels) of
-        true ->
-            wamp_peer_messages;
-        false ->
-            default
-    end.
 

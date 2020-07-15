@@ -59,7 +59,7 @@
 -export([terminate/3]).
 -export([code_change/4]).
 
-%% gen_satatem states
+%% gen_statem states
 -export([discovering/3]).
 -export([joined/3]).
 -export([disabled/3]).

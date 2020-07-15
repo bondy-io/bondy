@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api_utils.erl -
+%%  bondy_rest_gateway_utils.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_utils).
+-module(bondy_rest_gateway_utils).
 
 -type state_fun() :: fun((any()) -> any()).
 -export_type([state_fun/0]).

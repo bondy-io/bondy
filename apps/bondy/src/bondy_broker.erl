@@ -438,8 +438,8 @@ subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     case
         bondy_registry:add_local_subscription(RealmUri, Topic, Opts, Pid)
     of
-        {ok, #{id := SubsId}, _} ->
-            {ok, SubsId};
+        {ok, Entry, _} ->
+            {ok, bondy_registry_entry:id(Entry)};
         {error, {already_exists, _}} ->
             {error, already_exists}
     end.
@@ -468,30 +468,25 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 -spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
 
 unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
+    unsubscribe(SubsId, bondy_context:local_context(RealmUri));
+
+unsubscribe(SubsId, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
     case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
         Entry ->
             case bondy_registry:remove(Entry) of
                 ok ->
-                    ok;
-                {ok, _} ->
-                    ok;
+                    on_unsubscribe(Entry, Ctxt);
+                {ok, false} ->
+                    on_unsubscribe(Entry, Ctxt);
+                {ok, true} ->
+                    on_delete(Entry, Ctxt);
                 Error ->
                     Error
             end
-    end;
-
-unsubscribe(SubsId, Ctxt) ->
-    case bondy_registry:remove(subscription, SubsId, Ctxt) of
-        ok ->
-            on_unsubscribe(SubsId, Ctxt);
-        {ok, false} ->
-            on_unsubscribe(SubsId, Ctxt);
-        {ok, true} ->
-            on_delete(SubsId, Ctxt);
-        Error ->
-            Error
     end.
 
 
@@ -663,12 +658,14 @@ subscribe(M, Ctxt) ->
     %% TODO check authorization and reply with wamp.error.not_authorized if not
 
     case bondy_registry:add(subscription, Topic, Opts, Ctxt) of
-        {ok, #{id := Id} = Details, true} ->
+        {ok, Entry, true} ->
+            Id = bondy_registry_entry:id(Entry),
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
-            on_create(Details, Ctxt);
-        {ok, #{id := Id}, false} ->
+            on_create(Entry, Ctxt);
+        {ok, Entry, false} ->
+            Id = bondy_registry_entry:id(Entry),
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
-            on_subscribe(Id, Ctxt);
+            on_subscribe(Entry, Ctxt);
         {error, {already_exists, #{id := Id}}} ->
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id))
     end.
@@ -684,7 +681,7 @@ subscribe(M, Ctxt) ->
 -spec unsubscribe_all(bondy_context:t()) -> ok.
 
 unsubscribe_all(Ctxt) ->
-    bondy_registry:remove_all(subscription, Ctxt).
+    bondy_registry:remove_all(subscription, Ctxt, fun on_unsubscribe/2).
 
 
 
@@ -839,39 +836,30 @@ publish_fold([], Fun, Acc) when is_function(Fun, 2) ->
 
 
 %% @private
-on_create(Details, Ctxt) ->
-    Map = #{
-        <<"session">> => bondy_context:session_id(Ctxt),
-        <<"subscriptionDetails">> => Details
-    },
-    % TODO Records stats
-    _ = publish(#{}, <<"wamp.subscription.on_create">>, [], Map, Ctxt),
-    ok.
+-spec on_create(bondy_registry_entry:t(), bondy_context:t()) -> ok.
+
+on_create(Entry, Ctxt) ->
+    bondy_event_manager:notify({subscription_created, Entry, Ctxt}).
 
 
 %% @private
-on_subscribe(SubsId, Ctxt) ->
-    % TODO Records stats
-    on_event(<<"wamp.subscription.on_subscribe">>, SubsId, Ctxt).
+-spec on_subscribe(bondy_registry_entry:t(), bondy_context:t()) -> ok.
+
+on_subscribe(Entry, Ctxt) ->
+    bondy_event_manager:notify({subscription_added, Entry, Ctxt}).
 
 
 %% @private
-on_unsubscribe(SubsId, Ctxt) ->
-    % TODO Records stats
-    on_event(<<"wamp.subscription.on_unsubscribe">>, SubsId, Ctxt).
+-spec on_unsubscribe(bondy_registry_entry:t(), bondy_context:t()) -> ok.
 
+on_unsubscribe(Entry, Ctxt) ->
+    bondy_event_manager:notify({subscription_removed, Entry, Ctxt}).
 
-%% @private
-on_delete(SubsId, Ctxt) ->
-    % TODO Records stats
-    on_event(<<"wamp.subscription.on_delete">>, SubsId, Ctxt).
 
 
 %% @private
-on_event(Uri, SubsId, Ctxt) ->
-    Map = #{
-        <<"session">> => bondy_context:session_id(Ctxt),
-        <<"subscription">> => SubsId
-    },
-    _ = publish(#{}, Uri, [], Map, Ctxt),
-    ok.
+-spec on_delete(bondy_registry_entry:t(), bondy_context:t()) -> ok.
+
+on_delete(Entry, Ctxt) ->
+    bondy_event_manager:notify({subscription_deleted, Entry, Ctxt}).
+

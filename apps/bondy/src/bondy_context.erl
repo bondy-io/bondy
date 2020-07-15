@@ -53,6 +53,8 @@
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),
     request_details => map(),
+    is_closing => boolean(),
+    is_shutting_down => boolean(),
     %% Metadata
     user_info => map()
 }.
@@ -60,22 +62,25 @@
 
 -export([agent/1]).
 -export([authid/1]).
+-export([call_timeout/1]).
 -export([close/1]).
+-export([close/2]).
+-export([encoding/1]).
 -export([has_session/1]).
--export([is_feature_enabled/3]).
+-export([id/1]).
 -export([is_anonymous/1]).
--export([new/0]).
+-export([is_feature_enabled/3]).
+-export([is_closing/1]).
+-export([is_shutting_down/1]).
 -export([local_context/1]).
+-export([new/0]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
 -export([peer_id/1]).
 -export([realm_uri/1]).
--export([request_id/1]).
--export([call_timeout/1]).
--export([set_call_timeout/2]).
--export([set_is_anonymous/2]).
 -export([request_details/1]).
+-export([request_id/1]).
 -export([request_timeout/1]).
 -export([request_timestamp/1]).
 -export([reset/1]).
@@ -83,15 +88,17 @@
 -export([session/1]).
 -export([session_id/1]).
 -export([set_authid/2]).
+-export([set_call_timeout/2]).
+-export([set_is_anonymous/2]).
 -export([set_peer/2]).
+-export([set_realm_uri/2]).
+-export([set_request_details/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
--export([set_subprotocol/2]).
--export([set_realm_uri/2]).
--export([subprotocol/1]).
 -export([set_session/2]).
--export([encoding/1]).
+-export([set_subprotocol/2]).
+-export([subprotocol/1]).
 
 
 
@@ -112,8 +119,8 @@ new() ->
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         request_id => undefined,
-        call_timeout => bondy_config:get(wamp_call_timeout),
-        request_timeout => bondy_config:get(request_timeout)
+        call_timeout => bondy_config:get(wamp_call_timeout, undefined),
+        request_timeout => bondy_config:get(request_timeout, undefined)
     }.
 
 
@@ -153,21 +160,45 @@ reset(Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Closes the context. This function calls {@link bondy_session:close/1}
-%% and {@link bondy_router:close_context/1}.
+%% Closes the context. This function calls close/2 with `normal' as reason.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(t()) -> ok.
 
 close(Ctxt0) ->
+    close(Ctxt0, normal).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Closes the context. This function calls {@link bondy_session:close/1}
+%% and {@link bondy_router:close_context/1}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close(t(), Reason :: normal | shutdown) -> ok.
+
+close(Ctxt0, Reason) ->
+    Ctxt = Ctxt0#{
+        is_closing => true,
+        is_shutting_down => Reason =:= shutdown
+    },
     %% We cleanup router first as cleanup requires the session
-    case maps:find(session, Ctxt0) of
+    case maps:find(session, Ctxt) of
         {ok, Session} ->
-            _ = bondy_router:close_context(Ctxt0),
+            _ = bondy_router:close_context(Ctxt),
             bondy_session:close(Session);
         error ->
             ok
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the context identifier.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec id(t()) -> id().
+
+id(#{id := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -367,6 +398,17 @@ set_request_id(Ctxt, ReqId) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Sets the current request details to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_details(t(), map()) -> t().
+
+set_request_details(Ctxt, Details) when is_map(Details) ->
+    Ctxt#{request_details => Details}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Returns the current request timeout.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -456,6 +498,28 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 
 is_anonymous(Ctxt) ->
     maps:get(is_anonymous, Ctxt, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the context and session are closing.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_closing(t()) -> boolean().
+
+is_closing(Ctxt) ->
+    maps:get(is_closing, Ctxt, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if bondy is shutting down
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_shutting_down(t()) -> boolean().
+
+is_shutting_down(Ctxt) ->
+    maps:get(is_shutting_down, Ctxt, false).
 
 
 %% -----------------------------------------------------------------------------

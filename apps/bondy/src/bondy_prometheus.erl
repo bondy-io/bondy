@@ -336,7 +336,7 @@ setup() ->
     ok = declare_net_metrics(),
     ok = declare_session_metrics(),
     ok = declare_wamp_metrics(),
-    ok = bondy_cowboy_prometheus:setup(),
+    ok = bondy_prometheus_cowboy_collector:setup(),
     Collectors = [
         prometheus_vm_memory_collector,
         prometheus_vm_statistics_collector,
@@ -729,7 +729,7 @@ registry_metrics() ->
     Info = bondy_registry:info(),
     L = [
         registry_metric(K, [{name, Name}], V)
-        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner
+        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner andalso K =/= heir
     ],
     [
         {registry_tries, gauge, "Registry tries count.", length(Info)}

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api_gateway.erl -
+%%  bondy_rest_gateway.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -20,11 +20,12 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_gateway).
+-module(bondy_rest_gateway).
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_security.hrl").
+-include("bondy_meta_api.hrl").
+
 
 
 -define(PREFIX, {api_gateway, api_specs}).
@@ -216,7 +217,6 @@ dispatch_table(Listener) ->
 %% @end
 %% -----------------------------------------------------------------------------
 rebuild_dispatch_tables() ->
-    %% We get a dispatch table per scheme
     _ = [
         rebuild_dispatch_table(Scheme, Routes) ||
         {Scheme, Routes} <- load_dispatch_tables()
@@ -252,12 +252,14 @@ list() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Deletes the API Specification object identified by `Id'.
+%% Notice: Triggers a rebuild of the Cowboy dispatch tables.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(binary()) -> ok.
 
 delete(Id) when is_binary(Id) ->
     plum_db:delete(?PREFIX, Id),
+    ok = rebuild_dispatch_tables(),
     ok.
 
 
@@ -348,18 +350,50 @@ handle_info({plum_db_event, exchange_finished, {_, _}}, State) ->
     %% we do nothing
     {noreply, State};
 
-handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State) ->
+
+handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
-    %% Cowboy dispatch tables
-    %% But since Specs depend on other objects being present and we also want
-    %% to avoid rebuilding the dispatch table multiple times, we just set a
-    %% flag on the state to rebuild the dispatch tables once we received an
-    %% exchange_finished event,
-    _ = lager:info("API Spec object_update received; key=~p", [Key]),
-    Acc = State#state.updated_specs,
-    {noreply, State#state{updated_specs = [Key|Acc]}};
+    %% Cowboy dispatch tables.
 
+    _ = lager:info("API Spec object_update received; key=~p", [Key]),
+
+    Specs = [Key|State0#state.updated_specs],
+    State1 = State0#state{updated_specs = Specs},
+    Status = {bondy_config:get(status), plum_db_config:get(aae_enabled)},
+
+    case Status of
+        {ready, false} ->
+            %% We finished initialising and AAE is disabled so
+            %% we try to rebuild immediately
+            ok = handle_spec_updates(State1),
+            {noreply, State1#state{updated_specs = []}};
+        {ready, true} ->
+            %% We finished initialising and AAE is enabled so
+            %% we try to rebuild immediately even though we do not have causal
+            %% ordering not consistency guarantees.
+
+            %% TODO if/when we have casual ordering and reliable delivery of
+            %% Security and API Gateway config we can trigger the rebuild
+            %% immediately, provided an exchange has not been.
+
+            %% TODO if rebuild disaptch tables fails, we should retry later on
+            ok = handle_spec_updates(State1),
+            {noreply, State1#state{updated_specs = []}};
+
+        {_, false} ->
+            %% We are either initialising or shutting down
+            {noreply, State1};
+        {_, true} ->
+            %% We might be initialising (and have not yet performed an AAE).
+            %% Since Specs depend on other objects being present and we
+            %% also want to avoid rebuilding the dispatch table multiple times
+            %% during initialisation, we just set a flag on the state to
+            %% rebuild the dispatch tables once we received an
+            %% exchange_finished event, that is we rebuild dispatch tables only
+            %% after an AAE exchange
+            {noreply, State1}
+    end;
 
 handle_info(
     {'DOWN', Ref, process, Pid, _Reason},
@@ -402,6 +436,8 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+
+%% @private
 subscribe(State) ->
     %% We subscribe to change notifications in plum_db_events, we are
     %% interested in updates to API Specs coming from another node so that we
@@ -414,7 +450,8 @@ subscribe(State) ->
     }],
     ok = plum_db_events:subscribe(object_update, MS),
 
-    %% We subscribe WAMP events
+    %% We subscribe to WAMP events
+    %% We will handle then in handle_cast/2
     Opts = #{
         subscription_id => bondy_utils:get_id(global),
         match => <<"exact">>
@@ -439,15 +476,7 @@ unsubscribe(State) ->
 %% @private
 do_start_listeners(public) ->
     _ = lager:info("Starting public HTTP/S listeners"),
-    DTables = case load_dispatch_tables() of
-        [] ->
-            [
-                {<<"http">>, base_routes()},
-                {<<"https">>, base_routes()}
-            ];
-        L ->
-            L
-    end,
+    DTables = load_dispatch_tables(),
     _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok;
 
@@ -639,7 +668,7 @@ start_http(Routes, Name) ->
             },
             dispatch => cowboy_router:compile(Routes)
         },
-        metrics_callback => fun bondy_cowboy_prometheus:observe/1,
+        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
         %% cowboy_metrics_h must be first on the list
         stream_handlers => [
             cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
@@ -682,10 +711,10 @@ start_https(Routes, Name) ->
 
 validate_spec(Map) ->
     try
-        Spec = bondy_api_gateway_spec_parser:parse(Map),
+        Spec = bondy_rest_gateway_spec_parser:parse(Map),
         %% We compile it to validate the spec, if it is not valid it fill
         %% fail with badarg
-        SchemeTables = bondy_api_gateway_spec_parser:dispatch_table(Spec),
+        SchemeTables = bondy_rest_gateway_spec_parser:dispatch_table(Spec),
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
@@ -709,7 +738,7 @@ load_dispatch_tables() ->
     Specs = lists:sort([
         begin
             try
-                Parsed = bondy_api_gateway_spec_parser:parse(V),
+                Parsed = bondy_rest_gateway_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
                 _ = lager:info(
                     "Loading and parsing API Gateway specification from store"
@@ -730,8 +759,19 @@ load_dispatch_tables() ->
         {K, [V]} <- plum_db:to_list(?PREFIX),
         V =/= '$deleted'
     ]),
-    bondy_api_gateway_spec_parser:dispatch_table(
-        [element(3, S) || S <- Specs], base_routes()).
+
+    Result = bondy_rest_gateway_spec_parser:dispatch_table(
+        [element(3, S) || S <- Specs], base_routes()),
+
+    case Result of
+        [] ->
+            [
+                {<<"http">>, base_routes()},
+                {<<"https">>, base_routes()}
+            ];
+        _ ->
+            Result
+    end.
 
 
 
@@ -784,7 +824,7 @@ base_routes() ->
     %% The WS entrypoint required for WAMP WS subprotocol
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_handler, #{}}
+            {"/ws", bondy_wamp_ws_connection_handler, #{}}
         ]}
     ].
 
@@ -797,9 +837,9 @@ base_routes() ->
 admin_base_routes() ->
     [
         {'_', [
-            {"/ws", bondy_wamp_ws_handler, #{}},
-            {"/ping", bondy_http_ping_handler, #{}},
-            {"/ready", bondy_http_ready_handler, #{}},
+            {"/ws", bondy_wamp_ws_connection_handler, #{}},
+            {"/ping", bondy_admin_ping_http_handler, #{}},
+            {"/ready", bondy_admin_ready_http_handler, #{}},
             {"/metrics/[:registry]", prometheus_cowboy2_handler, []}
         ]}
     ].
@@ -807,7 +847,7 @@ admin_base_routes() ->
 
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
-    File = Base ++ "/specs/bondy_admin_api.json",
+    File = filename:join(Base, "specs/bondy_admin_api.json"),
     try jsx:consult(File, [return_maps]) of
         [Spec] ->
             Spec
@@ -824,7 +864,7 @@ admin_spec() ->
 
 %% @private
 parse_specs(Specs, BaseRoutes) ->
-    case [bondy_api_gateway_spec_parser:parse(S) || S <- Specs] of
+    case [bondy_rest_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
             [
                 {<<"http">>, BaseRoutes},
@@ -835,7 +875,7 @@ parse_specs(Specs, BaseRoutes) ->
                 maybe_init_groups(maps:get(<<"realm_uri">>, Spec))
                 || Spec <- L
             ],
-            bondy_api_gateway_spec_parser:dispatch_table(L, BaseRoutes)
+            bondy_rest_gateway_spec_parser:dispatch_table(L, BaseRoutes)
     end.
 
 
@@ -918,4 +958,5 @@ normalise(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 on_realm_deleted(_RealmUri, State) ->
+    %% TODO
     State.

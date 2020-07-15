@@ -33,7 +33,7 @@
 %% load regulation. Inn case a maximum pool capacity has been reached,
 %% the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
-%% e.g. {@link bondy_wamp_ws_handler}).
+%% e.g. {@link bondy_wamp_ws_connection_handler}).
 %%
 %% The router also handles messages synchronously in those
 %% cases where it needs to preserve message ordering guarantees.
@@ -94,8 +94,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(ROUTER_ROLES, #{
-    broker => ?BROKER_FEATURES,
-    dealer => ?DEALER_FEATURES
+    broker => #{features => ?BROKER_FEATURES},
+    dealer => #{features => ?DEALER_FEATURES}
 }).
 
 
@@ -293,10 +293,6 @@ do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
 
 do_forward(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    async_forward(M, Ctxt);
-
-do_forward(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
     async_forward(M, Ctxt);
 
 do_forward(#call{} = M, Ctxt0) ->

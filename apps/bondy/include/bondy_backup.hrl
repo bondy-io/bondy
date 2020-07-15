@@ -24,9 +24,9 @@
 
 
 
--define(CREATE_BACKUP, <<"com.leapsight.bondy.backup.create">>).
--define(BACKUP_STATUS, <<"com.leapsight.bondy.backup.status">>).
--define(RESTORE_BACKUP, <<"com.leapsight.bondy.backup.restore">>).
+-define(CREATE_BACKUP, <<"bondy.backup.create">>).
+-define(BACKUP_STATUS, <<"bondy.backup.status">>).
+-define(RESTORE_BACKUP, <<"bondy.backup.restore">>).
 
 
 
@@ -36,9 +36,9 @@
 
 
 
--define(BACKUP_STARTED, <<"com.leapsight.bondy.backup.backup_started">>).
--define(BACKUP_FINISHED, <<"com.leapsight.bondy.backup.backup_finished">>).
--define(BACKUP_ERROR, <<"com.leapsight.bondy.backup.backup_error">>).
--define(RESTORE_STARTED, <<"com.leapsight.bondy.backup.restored_started">>).
--define(RESTORE_FINISHED, <<"com.leapsight.bondy.backup.restored_finished">>).
--define(RESTORE_ERROR, <<"com.leapsight.bondy.backup.restore_error">>).
+-define(BACKUP_STARTED, <<"bondy.backup.backup_started">>).
+-define(BACKUP_FINISHED, <<"bondy.backup.backup_finished">>).
+-define(BACKUP_ERROR, <<"bondy.backup.backup_error">>).
+-define(RESTORE_STARTED, <<"bondy.backup.restored_started">>).
+-define(RESTORE_FINISHED, <<"bondy.backup.restored_finished">>).
+-define(RESTORE_ERROR, <<"bondy.backup.restore_error">>).

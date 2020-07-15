@@ -70,7 +70,7 @@
   {validators, ["=<1024"]}
 ]}.
 
-%% @see erlang.schedulers.total
+%% @see erlang.schedulers.online
 {mapping, "erlang.schedulers.online", "vm_args.+S", [
   {default, undefined},
   {datatype, integer},

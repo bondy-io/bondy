@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api_gateway_spec_parser.erl - parses the Bondy API Specification file
+%%  bondy_rest_gateway_spec_parser.erl - parses the Bondy API Specification file
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -44,17 +44,17 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_gateway_spec_parser).
+-module(bondy_rest_gateway_spec_parser).
 -include("http_api.hrl").
 -include("bondy.hrl").
--include("bondy_api_gateway.hrl").
+-include("bondy_rest_gateway.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
 -define(STATUS_CODES_KEY, <<"status_codes">>).
 -define(LANGUAGES_KEY, <<"languages">>).
--define(MOD_PREFIX, "bondy_api_gateway_handler_").
+-define(MOD_PREFIX, "bondy_rest_gateway_rest_handler_").
 
 -define(DEFAULT_CONN_TIMEOUT, 8000).
 -define(DEFAULT_TIMEOUT, 60000).
@@ -81,7 +81,7 @@
     ?BONDY_ALREADY_EXISTS_ERROR =>              ?HTTP_BAD_REQUEST,
     ?BONDY_NOT_FOUND_ERROR =>                   ?HTTP_NOT_FOUND,
     ?BONDY_BAD_GATEWAY_ERROR =>                 ?HTTP_SERVICE_UNAVAILABLE,
-    ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR =>    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR =>    ?HTTP_INTERNAL_SERVER_ERROR,
     ?BONDY_ERROR_TIMEOUT =>                     ?HTTP_GATEWAY_TIMEOUT,
     ?WAMP_AUTHORIZATION_FAILED =>               ?HTTP_FORBIDDEN,
     ?WAMP_CANCELLED =>                          ?HTTP_BAD_REQUEST,
@@ -266,7 +266,6 @@
                 (<<"/ws">> = P, _) ->
                     error({reserved_path, P});
                 (_, Val) ->
-                    % maps_utils:validate(Val, ?API_PATH)
                     Val
             end,
             {ok, maps:map(Inner, M1)}
@@ -1506,8 +1505,8 @@ dispatch_table_path(
 
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
-    Mod = bondy_api_gateway_handler,
-    %% Args required by bondy_api_gateway_handler
+    Mod = bondy_rest_gateway_rest_handler,
+    %% Args required by bondy_rest_gateway_rest_handler
     Languages = [string:lowercase(X) || X <- maps:get(?LANGUAGES_KEY, Version)],
     Args = #{
         api_spec => Spec3,
@@ -1544,7 +1543,7 @@ security_scheme_rules(
         revoke_path => Revoke
     },
 
-    Mod = bondy_api_oauth2_handler,
+    Mod = bondy_oauth2_rest_handler,
     [
         {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, St},
         %% Revoke is secured
@@ -1699,7 +1698,7 @@ mops_eval(Expr, Ctxt) ->
     catch
         ?EXCEPTION(error, {invalid_expression, [Expr, Term]}, _) ->
             throw(#{
-                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
                     Expr,
@@ -1711,13 +1710,13 @@ mops_eval(Expr, Ctxt) ->
             });
         ?EXCEPTION(error, {badkey, Key}, _) ->
             throw(#{
-                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         ?EXCEPTION(error, {badkeypath, Path}, _) ->
             throw(#{
-                <<"code">> => ?BONDY_API_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })

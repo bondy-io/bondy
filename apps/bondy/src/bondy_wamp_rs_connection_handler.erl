@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_raw_handler.erl -
+%%  bondy_wamp_rs_connection_handler.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -21,7 +21,7 @@
 %% A ranch handler for the wamp protocol over either tcp or tls transports.
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_raw_handler).
+-module(bondy_wamp_rs_connection_handler).
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
 -include("bondy.hrl").
@@ -314,7 +314,7 @@ start_listeners([H|T]) ->
                 H,
                 ranch_mod(H),
                 transport_opts(H),
-                bondy_wamp_raw_handler,
+                bondy_wamp_rs_connection_handler,
                 []
             ),
             %% _ = ranch:set_max_connections(H, MaxConns),

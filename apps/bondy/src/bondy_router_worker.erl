@@ -60,6 +60,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_pool() -> ok.
+
 start_pool() ->
     case do_start_pool() of
         {ok, _Child} -> ok;

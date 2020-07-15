@@ -175,7 +175,6 @@
 	 suite/0,
      tests/1,
      start_bondy/0,
-     maybe_start_bondy/0,
      stop_bondy/0
 	]).
 
@@ -197,39 +196,40 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
-
-maybe_start_bondy() ->
-    case persistent_term:get(bondy_started, false) of
+start_bondy() ->
+    case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
-            start_bondy();
+            %% dbg:tracer(), dbg:p(all,c),
+            %% dbg:tpl(application, '_', []),
+            [begin
+                application:unload(App),
+                application:load(App),
+                application:set_env(App, K, V)
+            end || {App, L} <- ?CONFIG, {K, V} <- L],
+
+            application:unload(bondy),
+            application:load(bondy),
+            [application:set_env(bondy, K, V) || {K, V} <- ?BONDY],
+
+            maybe_error(application:ensure_all_started(gproc)),
+            maybe_error(application:ensure_all_started(jobs)),
+            maybe_error(application:ensure_all_started(wamp)),
+            maybe_error(application:ensure_all_started(bondy)),
+            persistent_term:put({?MODULE, bondy_started}, true),
+            ok;
         true ->
             ok
     end.
 
 
-start_bondy() ->
-
-    %% dbg:tracer(), dbg:p(all,c),
-    %% dbg:tpl(application, '_', []),
-    [begin
-        application:unload(App),
-        application:load(App),
-        application:set_env(App, K, V)
-    end || {App, L} <- ?CONFIG, {K, V} <- L],
-
-    application:unload(bondy),
-    application:load(bondy),
-    [application:set_env(bondy, K, V) || {K, V} <- ?BONDY],
-
-    {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
-    {ok, _} = application:ensure_all_started(bondy),
-    persistent_term:put(bondy_started, true),
-    ok.
-
 stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
+    persistent_term:put({?MODULE, bondy_started}, false),
     application:stop(bondy).
 
 
+maybe_error({error, _} = Error) ->
+    error(Error);
+maybe_error({ok, _}) ->
+    ok.

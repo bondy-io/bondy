@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_backup_wamp_handler.erl -
+%%  bondy_backup_api_handler.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -21,7 +21,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_backup_wamp_handler).
+-module(bondy_backup_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_backup.hrl").

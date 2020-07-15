@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_api_resource_owner).
+-module(bondy_oauth2_resource_owner).
 -include_lib("wamp/include/wamp.hrl").
 
 

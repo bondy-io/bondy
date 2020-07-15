@@ -294,7 +294,7 @@ leave(["cluster", "leave"], [], []) ->
 %% @end
 %% -----------------------------------------------------------------------------
 load_api(["gateway", "load-api"], [{filename, FName}], []) ->
-    case bondy_api_gateway:load(FName) of
+    case bondy_rest_gateway:load(FName) of
         ok ->
             Text = io_lib:format("The API Gateway Specification was succesfully loaded.", []),
             %% TODO Also Print table of resulting API/Versions

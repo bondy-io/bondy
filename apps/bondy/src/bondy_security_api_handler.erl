@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_security_wamp_handler.erl -
+%%  bondy_security_api_handler.erl -
 %%
 %%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -20,11 +20,10 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_security_wamp_handler).
+-module(bondy_security_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_security.hrl").
-
+-include("bondy_meta_api.hrl").
 
 -export([handle_call/2]).
 

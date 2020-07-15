@@ -366,19 +366,25 @@ get_option(#entry{options = Opts}, Key, Default) ->
 -spec to_details_map(t()) -> details_map().
 
 to_details_map(#entry{key = Key} = E) ->
-    #{
+    Details = #{
         id =>  Key#entry_key.entry_id,
         created => E#entry.created,
         uri => E#entry.uri,
-        match => E#entry.match_policy,
-        invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
-    }.
+        match => E#entry.match_policy
+    },
+    case type(E) of
+        registration ->
+            Details#{
+                invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
+            };
+        _ ->
+            Details
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Converts the entry into a map according to the WAMP protocol Details
-%% dictionary format.
+%% Converts the entry into a map
 %% @end
 %% -----------------------------------------------------------------------------
 -spec to_map(t()) -> details_map().

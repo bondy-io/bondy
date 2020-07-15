@@ -69,7 +69,7 @@ groups() ->
     ].
 
 init_per_suite(Config) ->
-    common:maybe_start_bondy(),
+    common:start_bondy(),
     [{realm_uri, <<"com.myrealm">>}|Config].
 
 end_per_suite(Config) ->
@@ -139,7 +139,7 @@ api_client_add(Config) ->
         <<"client_id">> => ClientId,
         <<"client_secret">> => Secret
     },
-    {ok, #{<<"client_id">> := ClientId}} = bondy_api_client:add(
+    {ok, #{<<"client_id">> := ClientId}} = bondy_oauth2_client:add(
         ?config(realm_uri, Prev), In),
     {save_config, [{client_id, ClientId}, {client_secret, Secret} | Prev]}.
 
@@ -165,7 +165,7 @@ api_client_update(Config) ->
         <<"sources">> => [],
         <<"username">> => ClientId
     },
-    {ok, Out} = bondy_api_client:update(
+    {ok, Out} = bondy_oauth2_client:update(
         RealmUri, ClientId,
         #{
             <<"client_secret">> => Secret,
@@ -193,7 +193,7 @@ api_client_auth3(Config) ->
 
 api_client_delete(Config) ->
     {api_client_auth3, Prev} = ?config(saved_config, Config),
-    ok = bondy_api_client:remove(
+    ok = bondy_oauth2_client:remove(
         ?config(realm_uri, Config), ?config(client_id, Prev)),
     {save_config, Prev}.
 
@@ -215,7 +215,7 @@ resource_owner_add(Config) ->
     },
     {ok, #{
         <<"username">> := Username
-    }} = bondy_api_resource_owner:add(?config(realm_uri, Config), R),
+    }} = bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R),
     {save_config, [{username, Username}, {password, <<"ale">>} | Config]}.
 
 resource_owner_auth1(Config) ->
@@ -233,7 +233,7 @@ resource_owner_update(Config) ->
     Username = ?config(username, Prev),
     Pass = <<"New-Password">>,
     #{<<"groups">> := Gs} = bondy_security_user:lookup(RealmUri, Username),
-    {ok, _} = bondy_api_resource_owner:update(
+    {ok, _} = bondy_oauth2_resource_owner:update(
         RealmUri,
         Username,
         #{
@@ -281,7 +281,7 @@ resource_owner_auth3(Config) ->
 
 resource_owner_delete(Config) ->
     {resource_owner_auth3, Prev} = ?config(saved_config, Config),
-    ok = bondy_api_resource_owner:remove(
+    ok = bondy_oauth2_resource_owner:remove(
         ?config(realm_uri, Config), ?config(username, Prev)),
     {save_config, Prev}.
 
@@ -381,7 +381,7 @@ password_token_crud_1(Config) ->
         <<"client_id">> => ClientId,
         <<"client_secret">> => bondy_utils:generate_fragment(48)
     },
-    {ok, _} = bondy_api_client:add(Uri, Client),
+    {ok, _} = bondy_oauth2_client:add(Uri, Client),
     U = <<"ale">>,
     R = #{
         <<"username">> => U,
@@ -389,7 +389,7 @@ password_token_crud_1(Config) ->
         <<"meta">> => #{},
         <<"groups">> => []
     },
-    {ok, _} = bondy_api_resource_owner:add(Uri, R),
+    {ok, _} = bondy_oauth2_resource_owner:add(Uri, R),
 
     {ok, _JWT0, RToken0, _Claims0} = bondy_oauth2:issue_token(
         password, Uri, ClientId, U, [], #{}

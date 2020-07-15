@@ -17,7 +17,8 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc A server that takes care of initialising the Bondy configuration.
+%% @doc A server that takes care of initialising the Bondy configuration
+%% with a set of statically define (and thus private) configuration options.
 %% All the logic is handled by the {@link bondy_config} helper module.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -26,22 +27,67 @@
 -include("bondy.hrl").
 
 -define(PRIVATE_CONFIG, "private.config").
--define(CONFIG, [
-    {wamp, [
-        {extended_options, [
-            {call, [
-                '_auth_claims'
-            ]},
-            {publish, [
-                '_auth_claims'
-            ]}
-        ]},
-        {extended_details, [
-            {invocation, [
-                '_auth_claims'
-            ]}
+-define(WAMP_EXT_OPTIONS, [
+    {call, [
+        '_auth_claims',
+        '_routing_key'
+    ]},
+    {cancel, [
+        '_auth_claims'
+    ]},
+    {interrupt, [
+        '_auth_claims'
+    ]},
+    {register, [
+        '_auth_claims',
+        '_force_locality',
+        %% number of concurrent, outstanding calls that can exist
+        %% for a single endpoint
+        '_concurrency',
+        {invoke, [
+            <<"jump_consistent_hash">>,
+            <<"queue_least_loaded">>,
+            <<"queue_least_loaded_sample">>
         ]}
     ]},
+    {publish, [
+        '_auth_claims',
+        %% The ttl for retained events
+        '_retained_ttl',
+        '_routing_key'
+    ]},
+    {subscribe, [
+        '_auth_claims'
+    ]},
+    {yield, [
+        '_auth_claims'
+    ]}
+]).
+-define(WAMP_EXT_DETAILS, [
+    {abort, [
+        '_auth_claims'
+    ]},
+    {welcome, [
+        '_auth_claims'
+    ]},
+    {goodbye, [
+        '_auth_claims'
+    ]},
+    {error, [
+        '_auth_claims'
+    ]},
+    {event, [
+        '_auth_claims'
+    ]},
+    {invocation, [
+        '_auth_claims'
+    ]},
+    {result, [
+        '_auth_claims'
+    ]}
+]).
+
+-define(CONFIG, [
     {plum_db, [
         {prefixes, [
             %% ram
@@ -109,9 +155,6 @@
     ]}
 ]).
 
--record(state, {
-    filename     ::  file:filename() | undefined
-}).
 
 %% API
 -export([start_link/0]).
@@ -131,8 +174,9 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Starts the config manager process
 %% @end
 %% -----------------------------------------------------------------------------
 start_link() ->
@@ -145,8 +189,9 @@ start_link() ->
 %% =============================================================================
 
 
+
 init([]) ->
-    %% We do this in the init so that other processes in teh supervision tree
+    %% We do this here so that other processes in the supervision tree
     %% are not started before we finished with the configuration
     %% This should be fast anyway so no harm is done.
     do_init().
@@ -184,39 +229,55 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
+%% @private
 do_init() ->
     %% We initialised the Bondy app config
     ok = bondy_config:init(),
+
     %% Since advanced.config can be provided by the user at the
     %% platform_etd_dir location we need to override all those parameters
     %% which the user should not be able to set and also set
     %% other parameters which are required for Bondy to operate i.e. all
     %% dependencies, and are private.
-    %% We use a file name private.config. We do this instead of inlining the
-    %% code to enabled us to play with different configurations during
-    %% development.
-    %% Just thik of the private.config file as the internal equivalent to
-    %% advanced.config, although Cuttlefish does not know about it.
-
-    %% PrivDir = bondy_config:get(priv_dir),
-    %% Filename = filename:join(PrivDir, ?PRIVATE_CONFIG),
-    %% State = #state{filename = Filename},
-    State = #state{filename = undefined},
-    apply_private_config({ok, ?CONFIG}, State).
-
+    State = undefined,
+    ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
+    ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS),
+    apply_private_config(prepare_private_config(), State).
 
 
 %% @private
-%% apply_private_config(#state{filename = undefined} = State) ->
-%%     {ok, State};
-
-%% apply_private_config(#state{filename = Filename} = State) ->
-%%     apply_private_config(file:consult(Filename), State).
+prepare_private_config() ->
+    maybe_configure_message_retention(?CONFIG).
 
 
 %% @private
-apply_private_config({error, Reason}, State) ->
-    {stop, {Reason, State#state.filename}};
+maybe_configure_message_retention(Config0) ->
+    try
+        case bondy_config:get([wamp_message_retention, enabled], false) of
+            true ->
+                Type = bondy_config:get([wamp_message_retention, storage_type]),
+                Prefixes0 = key_value:get([plum_db, prefixes], Config0),
+                Prefixes1 = [{retained_events, Type} | Prefixes0],
+                Config1 = key_value:set(
+                    [plum_db, prefixes], Prefixes1, Config0
+                ),
+                {ok, Config1};
+            false ->
+                {ok, Config0}
+        end
+    catch
+        _:Reason:Stacktrace ->
+            _ = lager:error(
+                "Error while preparing configuration; reason=~p, stacktrace=~p",
+                [Reason, Stacktrace]
+            ),
+            {error, Reason}
+    end.
+
+
+%% @private
+apply_private_config({error, Reason}, _State) ->
+    {stop, Reason};
 
 apply_private_config({ok, Config}, State) ->
     _ = lager:debug("Bondy private configuration started"),
@@ -229,10 +290,11 @@ apply_private_config({ok, Config}, State) ->
         {ok, State}
     catch
         error:Reason:Stacktrace ->
-        _ = lager:error(
-            "Error while applying private.config; reason=~p, stacktrace=~p",
-            [Reason, Stacktrace]
-        ),
-        {stop, Reason}
+            _ = lager:error(
+                "Error while applying private configuration options; "
+                " reason=~p, stacktrace=~p",
+                [Reason, Stacktrace]
+            ),
+            {stop, Reason}
     end.
 
