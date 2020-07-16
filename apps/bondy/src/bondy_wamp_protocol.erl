@@ -727,31 +727,39 @@ maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
 
 maybe_auth_challenge(true, Details, Realm, St0) ->
     %% There is no authid param, we check if anonymous is allowed
-    case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
+    AuthMethods = maps:get(authmethods, Details, []),
+
+    case lists:member(?ANON_AUTH, AuthMethods) of
         true ->
-            Ctxt0 = St0#wamp_state.context,
-            Uri = bondy_realm:uri(Realm),
-            Peer = Peer = maps:get(peer, Ctxt0),
-            Result = bondy_security_utils:authenticate_anonymous(Uri, Peer),
+            case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
+                true ->
+                    Ctxt0 = St0#wamp_state.context,
+                    Uri = bondy_realm:uri(Realm),
+                    Peer = Peer = maps:get(peer, Ctxt0),
+                    Result = bondy_security_utils:authenticate_anonymous(
+                        Uri, Peer
+                    ),
+                    case Result of
+                        {ok, _Ctxt} ->
+                            TempId = bondy_utils:uuid(),
+                            Ctxt1 = Ctxt0#{
+                                request_details => Details,
+                                is_anonymous => true
+                            },
+                            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
+                            St1 = update_context(Ctxt2, St0),
+                            {ok, St1};
 
-            case Result of
-                {ok, _Ctxt} ->
-
-                    TempId = bondy_utils:uuid(),
-                    Ctxt1 = Ctxt0#{
-                        request_details => Details,
-                        is_anonymous => true
-                    },
-                    Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-                    St1 = update_context(Ctxt2, St0),
-                    {ok, St1};
-
-                {error, Reason} ->
-                    {error, {authentication_failed, Reason}, St0}
+                        {error, Reason} ->
+                            {error, {authentication_failed, Reason}, St0}
+                    end;
+                false ->
+                    {error, {missing_param, <<"authid">>}, St0}
             end;
         false ->
-            {error, {missing_param, authid}, St0}
+            {error, {missing_param, <<"authid">>}, St0}
     end;
+
 
 maybe_auth_challenge(false, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
@@ -821,6 +829,10 @@ do_auth_challenge([?OAUTH2_AUTH|_], _, _, St) ->
 
 do_auth_challenge([], _, _, St) ->
     {error, no_authmethod, St}.
+
+
+
+
 
 
 %% @private
