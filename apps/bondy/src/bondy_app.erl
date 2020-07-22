@@ -287,15 +287,21 @@ stop_router_services() ->
     _ = lager:info("Initiating shutdown"),
 
     %% We stop accepting new connections on HTTP/S and WS/S
-    _ = lager:info("Suspending HTTP/S and WS/S listeners"),
+    _ = lager:info(
+        "Suspending HTTP/S and WS/S listeners. "
+        "No new connections will be accepted."
+    ),
     ok = bondy_rest_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
-    _ = lager:info("Suspending TCP/TLS listeners"),
+    _ = lager:info(
+        "Suspending TCP/TLS listeners"
+        "No new connections will be accepted."
+    ),
     ok = bondy_wamp_rs_connection_handler:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
-    _ = lager:info("Shutting down all WAMP sessions"),
+    _ = lager:info("Shutting down all WAMP sessions."),
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully
