@@ -381,7 +381,7 @@ init_evictor() ->
         %% We sleep for 60 secs (jobs standard min rate is 1/sec)
         timer:sleep(60 * 1000)
     end,
-    jobs:add_queue(bondy_retained_message_eviction,[
+    jobs:add_queue(bondy_retained_message_eviction, [
         {producer, Fun},
         {regulators, [
             {counter, [{limit, 1}]}
