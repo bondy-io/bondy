@@ -130,7 +130,7 @@ shutdown() ->
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
     ),
-    Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
+    Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
 
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
