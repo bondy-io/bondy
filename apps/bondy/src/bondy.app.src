@@ -69,6 +69,7 @@
         redbug,
         observer_cli,
         sidejob,
+        jobs,
         uuid,
         %% Leapsight
         mops,
