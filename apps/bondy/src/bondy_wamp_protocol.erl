@@ -686,6 +686,8 @@ maybe_auth_challenge(
 
     case lists:member(?OAUTH2_AUTH, AuthMethods) of
         true ->
+            %% TODO check that if authid was providd it is the same as the one
+            %% in the token
             case valid_authmethods([?OAUTH2_AUTH], Realm) of
                 [?OAUTH2_AUTH] ->
                     Uri = bondy_realm:uri(Realm),
