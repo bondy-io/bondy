@@ -726,8 +726,8 @@ maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
     end;
 
 maybe_auth_challenge(true, Details, Realm, St0) ->
-    %% There is no authid param, we check if anonymous is allowed
-    AuthMethods = maps:get(authmethods, Details, []),
+    %% Default to anonymous in case authmethods is empty
+    AuthMethods = maps:get(authmethods, Details, [?ANON_AUTH]),
 
     case lists:member(?ANON_AUTH, AuthMethods) of
         true ->
