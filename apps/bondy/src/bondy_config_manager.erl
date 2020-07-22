@@ -257,7 +257,7 @@ maybe_configure_message_retention(Config0) ->
             true ->
                 Type = bondy_config:get([wamp_message_retention, storage_type]),
                 Prefixes0 = key_value:get([plum_db, prefixes], Config0),
-                Prefixes1 = [{retained_events, Type} | Prefixes0],
+                Prefixes1 = [{retained_messages, Type} | Prefixes0],
                 Config1 = key_value:set(
                     [plum_db, prefixes], Prefixes1, Config0
                 ),

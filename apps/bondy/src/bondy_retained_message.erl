@@ -2,13 +2,13 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_retained_event).
+-module(bondy_retained_message).
 -include_lib("wamp/include/wamp.hrl").
 
--define(DB_PREFIX(Realm), {retained_events, Realm}).
+-define(DB_PREFIX(Realm), {retained_messages, Realm}).
 -define(EOT, '$end_of_table').
 
--record(bondy_retained_event, {
+-record(bondy_retained_message, {
     valid_to            ::  pos_integer(),
     publication_id      ::  id(),
     match_opts          ::  map(),
@@ -28,25 +28,35 @@
     opts                ::  list()
 }).
 
--type t()               ::  #bondy_retained_event{}.
+-define(RESOLVER, lww).
+
+-type t()               ::  #bondy_retained_message{}.
+-type eot()             ::  ?EOT.
 -type continuation()    ::  #bondy_retained_continuation{}.
 -type match_opts()      ::  #{
     eligible => [id()],
     exclude => [id()]
 }.
+-type evict_fun()       ::  fun((uri(), t()) -> ok).
 
 -export_type([t/0]).
 -export_type([match_opts/0]).
+-export_type([eot/0]).
+-export_type([continuation/0]).
 
 
 -export([evict_expired/0]).
+-export([evict_expired/1]).
+-export([evict_expired/2]).
 -export([put/4]).
 -export([put/5]).
 -export([get/2]).
+-export([take/2]).
 -export([match/1]).
 -export([match/4]).
 -export([match/5]).
 -export([to_event/2]).
+-export([size/1]).
 
 
 
@@ -63,14 +73,37 @@
 -spec get(Realm :: uri(), Topic :: uri()) -> t() | undefined.
 
 get(Realm, Topic) ->
-    plum_db:get(?DB_PREFIX(Realm), Topic).
+    Opts = [{resolver, ?RESOLVER}],
+    plum_db:get(?DB_PREFIX(Realm), Topic, Opts).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation()) -> {[t()] | continuation()} | ?EOT.
+-spec take(Realm :: uri(), Topic :: uri()) -> t() | undefined.
+
+take(Realm, Topic) ->
+    Opts = [{resolver, ?RESOLVER}],
+    plum_db:take(?DB_PREFIX(Realm), Topic, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec size(t()) -> integer().
+
+size(Mssg) ->
+    term_size(Mssg).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec match(continuation()) -> {[t()] | continuation()} | eot().
 
 match(#bondy_retained_continuation{opts = undefined}) ->
     ?EOT;
@@ -93,7 +126,7 @@ match(#bondy_retained_continuation{} = Cont) ->
     Topic :: uri(),
     SessionId :: id(),
     Strategy :: binary()) ->
-    {[t()], continuation()} | ?EOT.
+    {[t()], continuation()} | eot().
 
 match(Realm, Topic, SessionId, Strategy) ->
     match(Realm, Topic, SessionId, Strategy, [{limit, 100}]).
@@ -109,7 +142,7 @@ match(Realm, Topic, SessionId, Strategy) ->
     SessionId :: id(),
     Strategy :: binary(),
     Opts :: plum_db:fold_opts()) ->
-    {[t()], continuation()} | ?EOT.
+    {[t()], continuation()} | eot().
 
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
     Result = get(Realm, Topic),
@@ -124,7 +157,9 @@ match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
     Fun = fun
         ({{_, <<Prefix:Len/binary, _/binary>>}, Obj}, {_, Cnt} = Acc)
         when Prefix =:= Topic andalso Cnt < Limit ->
-            Result = plum_db_object:value(plum_db_object:resolve(Obj, lww)),
+            Result = plum_db_object:value(
+                plum_db_object:resolve(Obj, ?RESOLVER)
+            ),
             maybe_append(Result, SessionId, Acc);
         ({{_, <<Prefix:Len/binary, _/binary>> = Key}, _}, {List, _})
         when Prefix =:= Topic ->
@@ -151,7 +186,7 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
             case MatchFun(Key) of
                 true ->
                     Result = plum_db_object:value(
-                        plum_db_object:resolve(Obj, lww)
+                        plum_db_object:resolve(Obj, ?RESOLVER)
                     ),
                     maybe_append(Result, SessionId, Acc);
                 false ->
@@ -182,9 +217,8 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     Event :: wamp_event(),
     MatchOpts :: match_opts()) -> ok.
 
-put(Realm, Topic, Event = #event{}, MatchOpts) ->
-    Retained = new(Event, MatchOpts, 0),
-    plum_db:put(?DB_PREFIX(Realm), Topic, Retained).
+put(Realm, Topic, Event, MatchOpts) ->
+    put(Realm, Topic, Event, MatchOpts, 0).
 
 
 %% -----------------------------------------------------------------------------
@@ -201,7 +235,25 @@ put(Realm, Topic, Event = #event{}, MatchOpts) ->
 
 put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
     Retained = new(Event, MatchOpts, TTL),
-    plum_db:put(?DB_PREFIX(Realm), Topic, Retained).
+    %% We abuse the Modifier to get cheap access to the existing value if any
+    Size = term_size(Retained),
+
+    Modifier = fun
+        (Value) when Value == undefined orelse Value == '$deleted' ->
+            bondy_retained_message_manager:incr_counters(Realm, 1, Size),
+            Retained;
+        (Values) ->
+            ok = bondy_retained_message_manager:decr_counters(
+                Realm, 1, term_size(Values)
+            ),
+            ok = bondy_retained_message_manager:incr_counters(
+                Realm, 1, Size
+            ),
+            Retained
+    end,
+
+    %% plum_db:put(?DB_PREFIX(Realm), Topic, Retained).
+    plum_db:put(?DB_PREFIX(Realm), Topic, Modifier).
 
 
 %% -----------------------------------------------------------------------------
@@ -213,15 +265,15 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
 to_event(Retained, SubscriptionId) ->
     wamp_message:event(
         SubscriptionId,
-        Retained#bondy_retained_event.publication_id,
-        maps:put(retained, true, Retained#bondy_retained_event.details),
-        Retained#bondy_retained_event.arguments,
-        Retained#bondy_retained_event.arguments_kw
+        Retained#bondy_retained_message.publication_id,
+        maps:put(retained, true, Retained#bondy_retained_message.details),
+        Retained#bondy_retained_message.arguments,
+        Retained#bondy_retained_message.arguments_kw
     ).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Evict expired retained events from all realms.
+%% @doc Evict expired retained messages from all realms.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec evict_expired() -> non_neg_integer().
@@ -231,25 +283,39 @@ evict_expired() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Evict expired retained events from realm `Realm'.
+%% @doc Evict expired retained messages from realm `Realm'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec evict_expired(uri() | '_') -> non_neg_integer().
 
-evict_expired(Realm) when is_binary(Realm) orelse Realm == '_' ->
+evict_expired(Realm) ->
+    evict_expired(Realm, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Evict expired retained messages from realm `Realm' or all realms if
+%% wildcard '_' is used.
+%% Evaluates function Fun for each entry passing Realm and Entry as arguments.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec evict_expired(uri() | '_', evict_fun() | undefined) -> non_neg_integer().
+
+evict_expired(Realm, EvictFun)
+when is_binary(Realm) orelse Realm == '_'
+andalso is_function(EvictFun, 2) ->
     Now = erlang:system_time(second),
     Fun = fun({{FP, Key}, Obj}, Acc) ->
-        case plum_db_object:value(plum_db_object:resolve(Obj, lww)) of
-            #bondy_retained_event{valid_to = T}
+        case plum_db_object:value(plum_db_object:resolve(Obj, ?RESOLVER)) of
+            #bondy_retained_message{valid_to = T} = Mssg
             when T > 0 andalso T =< Now  ->
                 _ = plum_db:delete(FP, Key),
+                ok = maybe_eval(Realm, EvictFun, Mssg),
                 Acc + 1;
             _ ->
                 Acc
         end
     end,
     plum_db:fold_elements(Fun, 0, ?DB_PREFIX(Realm)).
-
 
 
 %% =============================================================================
@@ -264,7 +330,7 @@ evict_expired(Realm) when is_binary(Realm) orelse Realm == '_' ->
 new(#event{} = Event, MatchOps, TTL)
 when is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0 ->
     %% Todo manage alternative when event has encoded payload in the future
-    #bondy_retained_event{
+    #bondy_retained_message{
         valid_to = valid_to(TTL),
         publication_id = Event#event.publication_id,
         match_opts = MatchOps,
@@ -342,8 +408,8 @@ subsumes(_, _) ->
 
 
 %% @private
-maybe_append(#bondy_retained_event{} = Event, SessionId, {List, Cnt} = Acc) ->
-    Opts = Event#bondy_retained_event.match_opts,
+maybe_append(#bondy_retained_message{} = Event, SessionId, {List, Cnt} = Acc) ->
+    Opts = Event#bondy_retained_message.match_opts,
     try
         not is_expired(Event) orelse throw(break),
         not is_excluded(SessionId, Opts) orelse throw(break),
@@ -385,6 +451,28 @@ is_excluded(SessionId, Opts) ->
     end.
 
 %% @private
-is_expired(#bondy_retained_event{valid_to = T}) ->
+is_expired(#bondy_retained_message{valid_to = T}) ->
     T > 0 andalso T =< erlang:system_time(second).
 
+
+%% @private
+maybe_eval(_, undefined, _) ->
+    ok;
+
+maybe_eval(Realm, Fun, Mssg) ->
+    try
+        Fun(Realm, Mssg)
+    catch
+        Class:Reason:Stacktrace ->
+            _ = lagger:error(
+                "Error while evaluating user function; "
+                "class=~p, reason=~p, stacktrace=~p",
+                [Class, Reason, Stacktrace]
+            ),
+            ok
+    end.
+
+
+%% @private
+term_size(Term) ->
+    erts_debug:flat_size(Term) * erlang:system_info(wordsize).

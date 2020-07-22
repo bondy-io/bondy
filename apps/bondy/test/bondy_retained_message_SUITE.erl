@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_retained_event_SUITE.erl -
+%%  bondy_retained_message_SUITE.erl -
 %%
 %%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
 %%
@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_retained_event_SUITE).
+-module(bondy_retained_message_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 -compile([nowarn_export_all, export_all]).
@@ -53,17 +53,17 @@ put(Config0) ->
     R = <<"com.leapsight.test">>,
     T = <<"com.foo.bar.1">>,
     Event = wamp_message:event(1, 1, #{}),
-    ok = bondy_retained_event:put(R, T, Event, #{}),
+    ok = bondy_retained_message:put(R, T, Event, #{}),
     ?assertEqual(
-        bondy_retained_event,
-        element(1, bondy_retained_event:get(R, T))
+        bondy_retained_message,
+        element(1, bondy_retained_message:get(R, T))
     ),
-    ok = bondy_retained_event:put(R, <<"com.foo.bar.1.1">>, Event, #{}),
-    ok = bondy_retained_event:put(R, <<"com.foo.bar.1.2">>, Event, #{}),
+    ok = bondy_retained_message:put(R, <<"com.foo.bar.1.1">>, Event, #{}),
+    ok = bondy_retained_message:put(R, <<"com.foo.bar.1.2">>, Event, #{}),
     _ = [
         begin
             Topic = <<"com.foo.bar.2.", (integer_to_binary(X))/binary>>,
-            bondy_retained_event:put(R, Topic, Event, #{})
+            bondy_retained_message:put(R, Topic, Event, #{})
         end || X <- lists:seq(1, 500)
     ],
     Config = [{realm, R}, {topic, T} | Config0],
@@ -74,7 +74,7 @@ exact_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
     R = ?config(realm, SavedConfig),
     T = ?config(topic, SavedConfig),
-    {Result, _} = bondy_retained_event:match(R, T, 1, <<"exact">>),
+    {Result, _} = bondy_retained_message:match(R, T, 1, <<"exact">>),
     ?assertEqual(1, length(Result)),
     {save_config, SavedConfig}.
 
@@ -83,7 +83,7 @@ prefix_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
     R = ?config(realm, SavedConfig),
     T = ?config(topic, SavedConfig),
-    {Result, _}  = bondy_retained_event:match(R, T, 1, <<"prefix">>),
+    {Result, _}  = bondy_retained_message:match(R, T, 1, <<"prefix">>),
     ?assertEqual(3, length(Result)),
     {save_config, SavedConfig}.
 
@@ -91,11 +91,11 @@ prefix_match(Config) ->
 wildcard_match(Config) ->
     SavedConfig = element(2, ?config(saved_config, Config)),
     R = ?config(realm, SavedConfig),
-    {Result, _} = bondy_retained_event:match(
+    {Result, _} = bondy_retained_message:match(
         R, <<"com...">>, 1, <<"wildcard">>),
     ?assertEqual(1, length(Result)),
-    {L1, C1} = bondy_retained_event:match(R, <<"com....">>, 1, <<"wildcard">>),
+    {L1, C1} = bondy_retained_message:match(R, <<"com....">>, 1, <<"wildcard">>),
     ?assertEqual(100, length(L1)),
-    {L2, C2} = bondy_retained_event:match(C1),
+    {L2, C2} = bondy_retained_message:match(C1),
     ?assertEqual(100, length(L2)),
     ?assertNotEqual(C1, C2).

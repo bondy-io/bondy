@@ -91,6 +91,7 @@ init([]) ->
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?WORKER(bondy_registry, [], permanent, 5000),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
+        ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
         ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
         ?WORKER(bondy_backup, [], permanent, 5000),
         ?WORKER(bondy_rest_gateway, [], permanent, 5000),

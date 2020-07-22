@@ -116,15 +116,17 @@ close_context(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec features() -> map().
+
 features() ->
     ?BROKER_FEATURES.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns true if feature F is enabled by the broker.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_feature_enabled(binary()) -> boolean().
+
 is_feature_enabled(F) when is_binary(F) ->
     maps:get(F, ?BROKER_FEATURES, false).
 
@@ -161,7 +163,8 @@ handle_message(#publish{} = M, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Handles a message sent by a peer node through the
+%% bondy_peer_wamp_forwarder.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_peer_message(
@@ -328,13 +331,21 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
             MatchOpts0#{eligible => sets:to_list(Eligible)}
     end,
 
+    %% We find the matching subscriptions
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
     MyNode = bondy_peer_service:mynode(),
     PubId = bondy_utils:get_id(global),
 
     %% TODO Consider creating a Broadcast tree out of the registry trie results
     %% so that instead of us sending possibly millions of Erlang messages to
-    %% millions of peers (processes) we delegate that the peers.
+    %% millions of peers (processes) we delegate that to peers.
+
+    MakeEvent = fun(SubsId) ->
+        wamp_message:event(SubsId, PubId, Details, Args, ArgsKw)
+    end,
+
+    %% If retained options is provided the message will be retained
+    ok = maybe_retain(Opts, RealmUri, TopicUri, MatchOpts, MakeEvent),
 
     Fun = fun(Entry, NodeAcc) ->
         case bondy_registry_entry:node(Entry) of
@@ -345,8 +356,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                 case bondy_registry_entry:session_id(Entry) of
                     undefined ->
                         %% A bondy_subscriber
-                        Event = wamp_message:event(
-                            SubsId, PubId, Details, Args, ArgsKw),
+                        Event = MakeEvent(SubsId),
                         ok = bondy_subscriber:handle_event(Pid, Event),
                         NodeAcc;
                     ESessionId ->
@@ -355,11 +365,12 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                             {error, not_found} ->
                                 NodeAcc;
                             ESession ->
-                                Event = wamp_message:event(
-                                    SubsId, PubId, Details, Args, ArgsKw),
+                                Event = MakeEvent(SubsId),
                                 ok = bondy:send(
-                                    bondy_session:peer_id(ESession), Event),
-                                    NodeAcc
+                                    bondy_session:peer_id(ESession),
+                                    Event
+                                ),
+                                NodeAcc
                         end
                 end;
             Node ->
@@ -553,7 +564,7 @@ maybe_unsubscribe(Topic, M, Ctxt) ->
     end.
 
 
-
+%% @private
 maybe_publish(M, Ctxt) ->
 
     Opts = M#publish.options,
@@ -839,6 +850,7 @@ publish_fold([], Fun, Acc) when is_function(Fun, 2) ->
 -spec on_create(bondy_registry_entry:t(), bondy_context:t()) -> ok.
 
 on_create(Entry, Ctxt) ->
+    ok = send_retained(Entry),
     bondy_event_manager:notify({subscription_created, Entry, Ctxt}).
 
 
@@ -846,6 +858,7 @@ on_create(Entry, Ctxt) ->
 -spec on_subscribe(bondy_registry_entry:t(), bondy_context:t()) -> ok.
 
 on_subscribe(Entry, Ctxt) ->
+    ok = send_retained(Entry),
     bondy_event_manager:notify({subscription_added, Entry, Ctxt}).
 
 
@@ -863,3 +876,46 @@ on_unsubscribe(Entry, Ctxt) ->
 on_delete(Entry, Ctxt) ->
     bondy_event_manager:notify({subscription_deleted, Entry, Ctxt}).
 
+
+%% @private
+maybe_retain(#{retain := true} = Opts, Realm, Topic, MatchOpts, MakeEvent) ->
+    %% We treat it as a template passing 0
+    %% as the real SubsId will be provided by the user in
+    %% bondy_retained_message:to_event/2 when retrieving it
+    Event = MakeEvent(0),
+    TTL = maps:get('_retained_ttl', Opts, undefined),
+    bondy_retained_message_manager:put(Realm, Topic, Event, MatchOpts, TTL);
+
+maybe_retain(_, _, _, _, _) ->
+    ok.
+
+
+%% @private
+send_retained(Entry) ->
+    Realm = bondy_registry_entry:realm_uri(Entry),
+    Topic = bondy_registry_entry:topic_uri(Entry),
+    SubsId = bondy_registry_entry:entry_id(Entry),
+    Policy = bondy_registry_entry:match_policy(Entry),
+    SubsId = bondy_registry_entry:id(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    Session = bondy_session:lookup(SessionId),
+
+    Matches = to_bondy_utils_cont(
+        bondy_retained_message_manager:match(Realm, Topic, SessionId, Policy)
+    ),
+
+    bondy_utils:foreach(
+        fun(M) ->
+            Event = bondy_retained_message:to_event(M, SubsId),
+            catch bondy:send(bondy_session:peer_id(Session), Event)
+        end,
+        Matches
+    ).
+
+
+%% @private
+to_bondy_utils_cont({L, Cont}) when is_list(L) ->
+    {L, fun() -> bondy_retained_message_manager:match(Cont) end};
+
+to_bondy_utils_cont(Term) ->
+    Term.
