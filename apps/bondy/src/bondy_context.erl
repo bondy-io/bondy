@@ -77,6 +77,7 @@
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
+-export([peername/1]).
 -export([peer_id/1]).
 -export([realm_uri/1]).
 -export([request_details/1]).
@@ -208,6 +209,17 @@ id(#{id := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec peer(t()) -> bondy_session:peer().
 peer(#{peer := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peername(t()) -> binary().
+
+peername(#{peer := Val}) ->
+    inet_utils:peername_to_binary(Val).
 
 
 %% -----------------------------------------------------------------------------
