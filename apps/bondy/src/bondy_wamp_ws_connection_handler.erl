@@ -50,8 +50,8 @@
 -include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
-%% arrives on the socket after ?CONN_TIMEOUT
--define(CONN_TIMEOUT, 60000*10).
+%% arrives on the socket after ?IDLE_TIMEOUT
+-define(IDLE_TIMEOUT, 60000*10).
 -define(SUBPROTO_HEADER, <<"sec-websocket-protocol">>).
 
 
@@ -236,7 +236,10 @@ websocket_info({timeout, _Ref, _Msg}, St) ->
 websocket_info({stop, Reason}, St) ->
     Peer = bondy_wamp_protocol:peer(St#state.protocol_state),
     SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
-    _ = lager:debug(<<"WS WAMP session shutdown, reason=~p, peer=~p, session_id=~p">>, [Reason, Peer, SessionId]),
+    _ = lager:info(
+        "Connection closing; reason=~p, peer=~p, session_id=~p",
+        [Reason, Peer, SessionId]
+    ),
     %% ok = do_terminate(St),
     {stop, St};
 
@@ -267,6 +270,7 @@ terminate(remote, _Req, St) ->
     do_terminate(St);
 
 terminate({error, closed}, _Req, St) ->
+    _ = log(info, <<"Connection closed by peer; reason=~p,">>, [normal], St),
     do_terminate(St);
 
 terminate({error, badencoding}, _Req, St) ->
@@ -346,13 +350,9 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
         {ok, CBState} ->
             St = #state{frame_type = FrameType, protocol_state = CBState},
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
-
-            Opts = #{
-                %% max_frame_size => bondy_config:get()
-                %% Cowboy will close the connection if idle
-                %% for more than this value
-                idle_timeout => ?CONN_TIMEOUT
-            },
+            Opts = maps_utils:from_property_list(
+                bondy_config:get(wamp_websocket)
+            ),
             {cowboy_websocket, Req1, St, Opts};
         {error, _Reason} ->
             %% Returning ok will cause the handler to
@@ -418,6 +418,25 @@ frame(Type, E) when Type == text orelse Type == binary ->
     {Type, E}.
 
 
+%% @private
+log(Level, Prefix, Head, St)
+when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+    Format = iolist_to_binary([
+        Prefix,
+        <<
+            " session_id=~p, peername=~s, agent=~p"
+            ", protocol=wamp, transport=websocket, frame_type=~p, encoding=~p"
+        >>
+    ]),
 
+    Ctxt = bondy_wamp_protocol:context(St#state.protocol_state),
 
+    Tail = [
+        bondy_wamp_protocol:session_id(St#state.protocol_state),
+        bondy_context:peername(Ctxt),
+        bondy_wamp_protocol:agent(St#state.protocol_state),
+        St#state.frame_type,
+        bondy_context:encoding(Ctxt)
+    ],
+    lager:log(Level, self(), Format, lists:append(Head, Tail)).
 

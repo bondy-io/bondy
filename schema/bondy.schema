@@ -101,7 +101,6 @@
   {datatype, {flag, on, off}}
 ]}.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Not currently working, leave the value as 'session'
 %% @end
@@ -138,6 +137,15 @@
 {mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
   {default, "1000000"},
   {datatype, integer}
+]}.
+
+
+%% Maximum space in memory used by retained messages.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_memory", "bondy.wamp_message_retention.max_memory", [
+  {default, "1GB"},
+  {datatype, bytesize}
 ]}.
 
 %% The max size for an event message.
@@ -579,6 +587,160 @@
 
 
 %% =============================================================================
+%% WAMP WEBSOCKET
+%% =============================================================================
+
+{mapping, "wamp.websocket.idle_timeout", "bondy.wamp_websocket.idle_timeout", [
+  {default, "1m"},
+  {datatype, {duration, ms}}
+]}.
+
+%% Maximum frame size allowed by this Websocket handler. Cowboy will close the
+%% connection when a client attempts to send a frame that goes over this limit.
+%% For fragmented frames this applies to the size of the reconstituted frame.
+%%
+%% A value of cero means un unbounded size (internally translated to 'infinity')
+{mapping, "wamp.websocket.max_frame_size", "bondy.wamp_websocket.max_frame_size", [
+  {default, 0},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.max_frame_size",
+ fun(Conf) ->
+  TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
+  case TheLimit of
+      0 -> infinite;
+      Int when is_integer(Int) andalso Int > 0 -> Int;
+      _ ->
+          %% This would have been caught earlier in datatype validation
+          cuttlefish:invalid("should be a non negative integer")
+  end
+ end
+}.
+
+
+%% Defines if Websocket compression (permessage-deflate extension) is enabled
+%% or not. If enabled it will be negotiated with supporting clients.
+{mapping, "wamp.websocket.compression_enabled", "bondy.wamp_websocket.compress", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+
+%% Compression level to use. A value between 0 and 9
+%% * 0 (none), gives no compression
+%% * 1 (best_speed) gives best speed
+%% * 9 (best_compression) gives best compression
+{mapping, "wamp.websocket.deflate.level", "bondy.wamp_websocket.deflate_opts.level", [
+  {default, 5},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.level",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.level", Conf) of
+      Int when is_integer(Int) andalso Int >= 0 andalso Int =< 9 -> Int;
+      _ ->
+          %% This would have been caught earlier in datatype validation
+          cuttlefish:invalid(
+            "should be an integer between 0 and 9")
+  end
+ end
+}.
+
+%% Specifies how much memory is to be allocated for the internal compression
+%% state. An integer between 1 and 9, where 1 uses minimum memory but is slow
+%% and reduces compression ratio while 9 uses maximum memory for optimal speed.
+{mapping, "wamp.websocket.deflate.mem_level", "bondy.wamp_websocket.deflate_opts.mem_level", [
+  {default, 8},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.mem_level",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.mem_level", Conf) of
+      Int when is_integer(Int) andalso Int >= 1 andalso Int =< 9 -> Int;
+      _ ->
+          %% This would have been caught earlier in datatype validation
+          cuttlefish:invalid(
+            "should be an integer between 1 and 9")
+  end
+ end
+}.
+
+%% Tunes the compression algorithm. Use the following values:
+%%  -   default for normal data
+%%  -   filtered for data produced by a filter (or predictor)
+%%  -   huffman_only to force Huffman encoding only (no string match)
+%%  -   rle to limit match distances to one (run-length encoding)
+%%
+%% Filtered data consists mostly of small values with a somewhat random
+%% distribution. In this case, the compression algorithm is tuned to compress
+%% them better. The effect of filtered is to force more Huffman coding and less
+%% string matching; it is somewhat intermediate between default and
+%% huffman_only. rle is designed to be almost as fast as huffman_only, but
+%% gives better compression for PNG image data.
+%%
+%% Strategy affects only the compression ratio, but not the correctness of the
+%% compressed output even if it is not set appropriately.
+{mapping, "wamp.websocket.deflate.strategy", "bondy.wamp_websocket.deflate_opts.strategy", [
+  {default, default},
+  {datatype, {enum, [default, filtered, huffman_only, rle]}}
+]}.
+
+%%  Using no_takeover can severly limit the usefulness of compression.
+{mapping, "wamp.websocket.deflate.server_context_takeover", "bondy.wamp_websocket.deflate_opts.server_context_takeover", [
+  {default, takeover},
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%%  Using no_takeover can severly limit the usefulness of compression.
+{mapping, "wamp.websocket.deflate.client_context_takeover", "bondy.wamp_websocket.deflate_opts.client_context_takeover", [
+  {default, takeover},
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%% The base two logarithm of the window size (the size of the history buffer).
+%% It is to be in the range 8 through 15. Larger values result in better
+%% compression at the expense of memory usage.
+{mapping, "wamp.websocket.deflate.server_max_window_bits", "bondy.wamp_websocket.deflate_opts.server_max_window_bits", [
+  {default, 11},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.server_max_window_bits",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.server_max_window_bits", Conf) of
+      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
+      _ ->
+          cuttlefish:invalid(
+            "should be an integer between 8 and 15")
+  end
+ end
+}.
+
+%% The base two logarithm of the window size (the size of the history buffer).
+%% It is to be in the range 8 through 15. Larger values result in better
+%% compression at the expense of memory usage.
+{mapping, "wamp.websocket.deflate.client_max_window_bits", "bondy.wamp_websocket.deflate_opts.client_max_window_bits", [
+  {default, 11},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.client_max_window_bits",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.client_max_window_bits", Conf) of
+      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
+      _ ->
+          cuttlefish:invalid(
+            "should be an integer between 8 and 15")
+  end
+ end
+}.
+
+
+
+%% =============================================================================
 %% WAMP RAW SOCKET
 %% =============================================================================
 
@@ -703,7 +865,7 @@ end}.
 
 
 %% =============================================================================
-%% WAMP TCP TLS
+%% WAMP RAWSOCKET TLS
 %% =============================================================================
 
 
