@@ -146,7 +146,7 @@ match(Realm, Topic, SessionId, Strategy) ->
 
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
     Result = get(Realm, Topic),
-    {Matches, 1} = maybe_append(Result, SessionId, {[], 0}),
+    {Matches, _} = maybe_append(Result, SessionId, {[], 0}),
     {Matches, #bondy_retained_continuation{}};
 
 match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->

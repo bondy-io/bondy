@@ -893,8 +893,8 @@ maybe_retain(_, _, _, _, _) ->
 %% @private
 send_retained(Entry) ->
     Realm = bondy_registry_entry:realm_uri(Entry),
-    Topic = bondy_registry_entry:topic_uri(Entry),
-    SubsId = bondy_registry_entry:entry_id(Entry),
+    Topic = bondy_registry_entry:uri(Entry),
+    SubsId = bondy_registry_entry:id(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),
     SubsId = bondy_registry_entry:id(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
