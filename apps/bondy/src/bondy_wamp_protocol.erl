@@ -33,7 +33,6 @@
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
-    auth_token              ::  binary() | undefined,
     auth_signature          ::  binary() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
@@ -473,6 +472,24 @@ maybe_auth(?TICKET_AUTH, AuthId, Password, St) ->
             open_session(St);
         {error, Reason} ->
             abort({authentication_failed, Reason}, St)
+    end;
+
+maybe_auth(?OAUTH2_AUTH, AuthId, Token, St0) ->
+    Ctxt0 = St0#wamp_state.context,
+    RealmUri = bondy_context:realm_uri(Ctxt0),
+    AuthId = bondy_context:authid(Ctxt0),
+
+    case bondy_oauth2:verify_jwt(RealmUri, Token) of
+        {ok, #{<<"sub">> := AuthId}} ->
+            open_session(St0);
+        {ok, _} ->
+            %% The authid does not match the token's sub!
+            %% TODO Flag as potential threat and limit attempts
+            abort({authentication_failed, oauth2_invalid_grant}, St0);
+        {error, Reason} when
+        Reason == oauth2_invalid_grant orelse
+        Reason == no_such_realm ->
+            abort({authentication_failed, Reason}, St0)
     end.
 
 
@@ -579,6 +596,14 @@ abort({authentication_failed, no_matching_sources}, St) ->
     >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
+abort({authentication_failed, oauth2_invalid_grant}, St) ->
+    Reason = <<
+        "The access token provided is expired, revoked, malformed,"
+        " or invalid either because it does not match the Realm used in the"
+        " request, or because it was issued to another peer."
+    >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
 abort({no_such_realm, Realm}, St) ->
     Reason = <<"Realm '", Realm/binary, "' does not exist.">>,
     abort(?WAMP_NO_SUCH_REALM, Reason, #{}, St);
@@ -605,33 +630,6 @@ abort({invalid_authmethod, ?OAUTH2_AUTH = Method}, St) ->
 
 abort(no_authmethod, St) ->
     Reason = <<"Router could not use the authmethods requested.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort(oauth2_unused_token, St) ->
-    Reason = <<
-        "An access token was included in the HTTP request's authorization"
-        " header but the 'oauth2' method was not found in the"
-        " 'authmethods' parameter. Either remove the access token from the"
-        " HTTP request or add the 'oauth2' method to the 'authmethods'"
-        " parameter."
-    >>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort(oauth2_missing_token, St) ->
-    Reason = <<
-        "The oauth2 authmethod was requested but an access token was not"
-        " provided through the HTTP authorization header. Either provide"
-        " an access token, remove 'oauth2' from the request's authmethods"
-        " option or sort the elements of the authmethods parameter to " " prioritize other authmethod."
-    >>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort(oauth2_invalid_grant, St) ->
-    Reason = <<
-        "The access token provided is expired, revoked, malformed,"
-        " or invalid either because it does not match the Realm used in the"
-        " request, or because it was issued to another peer."
-    >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({Code, Term}, St) when is_atom(Term) ->
@@ -667,53 +665,6 @@ maybe_auth_challenge(Details, Realm, St) ->
 
 
 %% @private
-maybe_auth_challenge(
-    true, Details, Realm, #wamp_state{auth_token = Token} = St0)
-    when Token =/= undefined ->
-    %% The client thas provided a JWT auth token in the HTTP headers.
-    %% Providing an OAUTH2 token dissables the HELLO.Details authmethods
-    %% requested.
-    %% so we immediately authenticate it if the JWT is valid.
-    %% Otherwise, we fail without checking the HELLO.details even if there
-    %% was a valid method requested.
-
-
-    _ = lager:debug(
-        "Initiating WAMP/WS authentication using OAUTH2 access token", []
-    ),
-
-    AuthMethods = maps:get(authmethods, Details, []),
-
-    case lists:member(?OAUTH2_AUTH, AuthMethods) of
-        true ->
-            %% TODO check that if authid was providd it is the same as the one
-            %% in the token
-            case valid_authmethods([?OAUTH2_AUTH], Realm) of
-                [?OAUTH2_AUTH] ->
-                    Uri = bondy_realm:uri(Realm),
-                    case bondy_oauth2:verify_jwt(Uri, Token) of
-                        {ok, Claims} ->
-                            AuthId = maps:get(<<"sub">>, Claims),
-                            Ctxt0 = St0#wamp_state.context,
-                            Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
-                            Ctxt2 = bondy_context:set_authid(Ctxt1, AuthId),
-                            St1 = update_context(Ctxt2, St0),
-                            {ok, St1};
-                        {error, Reason} when
-                        Reason == oauth2_invalid_grant orelse
-                        Reason == no_such_realm ->
-                            {error, Reason, St0}
-                    end;
-                _ ->
-                    %% oauth2 is not supported by the Realm
-                    {error, {unsupported_authmethod, ?OAUTH2_AUTH}, St0}
-            end;
-        false ->
-            %% It is an error to include a auth token and request other
-            %% authmethod than OAUTH2.
-            {error, oauth2_unused_token, St0}
-    end;
-
 maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
@@ -793,6 +744,7 @@ valid_authmethods(List, Realm) ->
         X || X <- List, bondy_realm:is_auth_method(Realm, X)
     ].
 
+
 %% @private
 do_auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
     %% An authid was provided so we discard this method
@@ -824,16 +776,17 @@ do_auth_challenge([?TLS_AUTH|T], User, Realm, St) ->
     %% Unsupported
     do_auth_challenge(T, User, Realm, St);
 
-do_auth_challenge([?OAUTH2_AUTH|_], _, _, St) ->
-    %% If we got here it is because we do not have a token.
-    %% We fail as the request is invalid.
-    {error, oauth2_missing_token, St};
+do_auth_challenge([?OAUTH2_AUTH = H|T], User, Realm, St0) ->
+    case bondy_security_user:has_password(User) of
+        true ->
+            {ok, Extra, St1} = challenge_extra(H, User, St0),
+            {challenge, H, Extra, St1};
+        false ->
+            do_auth_challenge(T, User, Realm, St0)
+    end;
 
 do_auth_challenge([], _, _, St) ->
     {error, no_authmethod, St}.
-
-
-
 
 
 
@@ -893,7 +846,8 @@ challenge_extra(?WAMPCRA_AUTH, User, St0) ->
 
     {ok, Extra, St1};
 
-challenge_extra(?TICKET_AUTH, _UserId, St0) ->
+challenge_extra(Method, _UserId, St0)
+when Method == ?TICKET_AUTH; Method == ?OAUTH2_AUTH ->
     Extra = #{},
     Millis = erlang:system_time(millisecond),
     St1 = St0#wamp_state{auth_timestamp = Millis},
@@ -942,11 +896,10 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 
 
 %% @private
-do_init(Subprotocol, Peer, Opts) ->
+do_init(Subprotocol, Peer, _Opts) ->
     State = #wamp_state{
         subprotocol = Subprotocol,
-        context = bondy_context:new(Peer, Subprotocol),
-        auth_token = maps:get(auth_token, Opts, undefined)
+        context = bondy_context:new(Peer, Subprotocol)
     },
     {ok, State}.
 
