@@ -626,7 +626,7 @@
 %% take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
 %% interval times wamp.websocket.ping.max_attempts results in a value higher
 %% than this option.
-%% Notice that for some clients using this option alone is not enought to keep
+%% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
 %% If the client supports Websocket PING control messages, enabled them,
 %% otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
