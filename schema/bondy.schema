@@ -590,31 +590,29 @@
 %% WAMP WEBSOCKET
 %% =============================================================================
 
-%% @doc Defines if Websocket PING control message functionality is enabled or
+%% @doc Defines if Websockets PING control message functionality is enabled or
 %% not. This option affects server (Bondy) initiated pings only. Some clients
 %% might also initiate ping requests and Bondy will always respond to those
 %% even if this option is turned off.
-%% This feature is usefull to keep a connection alive and validate the
-%$ connection is healthy. For example Browsers will typically kill websocket
+%% This feature is useful to keep a connection alive and validate the
+%% connection is healthy. For example, Browsers will typically kill websocket
 %% connections after 60s and will not initiate PINGs.
 {mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If ping is enabled, this value controls the interval in which Bondy
-%% sends PING control messages.
-%%
+%% @doc If wamp.websocket.ping.enabled is 'on', this value controls the interval
+%% in which Bondy sends WebSockets PING control messages.
 {mapping, "wamp.websocket.ping.interval", "bondy.wamp_websocket.ping.interval", [
   {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If ping is enabled, this value controls how many missed pings are
-%% considered a timeout. Thus, after this number of attempts Bondy will drop
-%% the connection. If the value is infinity Bondy will never timeout based on
-%% missed pings.
-%%
+%% @doc If wamp.websocket.ping.enabled is 'on', this value controls how many
+%% missed pings are considered a timeout. Thus, after this number of attempts
+%% Bondy will drop the connection.
+%% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
   "wamp.websocket.ping.max_attempts",
   "bondy.wamp_websocket.ping.max_attempts",
@@ -625,7 +623,7 @@
 }.
 
 %% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when wamp.websocket.ping.enabled is on and wamp.websocket.ping.
+%% take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
 %% interval times wamp.websocket.ping.max_attempts results in a value higher
 %% than this option.
 %% Notice that for some clients using this option alone is not enought to keep
