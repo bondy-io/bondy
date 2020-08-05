@@ -55,12 +55,16 @@
 -define(SUBPROTO_HEADER, <<"sec-websocket-protocol">>).
 
 
-
 -record(state, {
     frame_type              ::  bondy_wamp_protocol:frame_type(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     auth_token              ::  map(),
-    hibernate = false       ::  boolean()
+    hibernate = false       ::  boolean(),
+    ping_enabled            ::  boolean(),
+    ping_interval           ::  timeout(),
+    ping_interval_ref       ::  reference() | undefined,
+    ping_max_attempts       ::  integer(),
+    ping_attempts = 0       ::  integer()
 }).
 
 -type state()               ::  #state{}.
@@ -167,7 +171,7 @@ websocket_init(#state{protocol_state = undefined} = St) ->
     {reply, Frame, St};
 
 websocket_init(St) ->
-    {ok, St}.
+    {ok, reset_ping_interval(St)}.
 
 
 %% -----------------------------------------------------------------------------
@@ -179,37 +183,42 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above,
     %% review and eliminate.
-    _ = lager:error(<<"Unsupported message ~p">>, [Data]),
+    _ = lager:error(
+        "Connection closing; reason=unsupported_message, message=~p", [Data]
+    ),
     {stop, St};
 
-websocket_handle({ping, _Msg}, St) ->
-    %% Cowboy already handles pings for us
-    %% We ignore this message and carry on listening
+websocket_handle(ping, St) ->
+    %% Cowboy already replies to pings for us, we do nothing
     {ok, St};
 
-websocket_handle({pong, _Msg}, St) ->
-    %% We ignore this message and carry on listening
+websocket_handle({ping, _}, St) ->
+    %% Cowboy already replies to pings for us, we do nothing
     {ok, St};
 
-websocket_handle({T, Data}, #state{frame_type = T} = St) ->
-    case bondy_wamp_protocol:handle_inbound(Data, St#state.protocol_state) of
+websocket_handle({pong, <<"bondy">>}, St0) ->
+    {ok, reset_ping_attempts(St0)};
+
+
+websocket_handle({T, Data}, #state{frame_type = T} = St0) ->
+    case bondy_wamp_protocol:handle_inbound(Data, St0#state.protocol_state) of
         {ok, PSt} ->
-            {ok, St#state{protocol_state = PSt}};
+            {ok, St0#state{protocol_state = PSt}};
         {reply, L, PSt} ->
-            reply(T, L, St#state{protocol_state = PSt});
+            reply(T, L, St0#state{protocol_state = PSt});
         {stop, PSt} ->
-            {stop, St#state{protocol_state = PSt}};
+            {stop, St0#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             self() ! {stop, normal},
-            reply(T, L, St#state{protocol_state = PSt});
+            reply(T, L, St0#state{protocol_state = PSt});
         {stop, Reason, L, PSt} ->
             self() ! {stop, Reason},
-            reply(T, L, St#state{protocol_state = PSt})
+            reply(T, L, St0#state{protocol_state = PSt})
     end;
 
 websocket_handle(Data, St) ->
     %% We ignore this message and carry on listening
-    _ = lager:debug(<<"Unsupported message ~p">>, [Data]),
+    _ = log(debug, "Received unsupported message; message=~p", [Data], St),
     {ok, St}.
 
 
@@ -228,19 +237,20 @@ websocket_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     ok = bondy:ack(Pid, Ref),
     handle_outbound(St#state.frame_type, M, St);
 
-websocket_info({timeout, _Ref, _Msg}, St) ->
-    %% erlang:start_timer(1000, self(), <<"How' you doin'?">>),
-    %% reply(text, Msg, St);
+websocket_info(
+    {timeout, Ref, ping_interval}, #state{ping_interval_ref = Ref} = St) ->
+    send_ping(St);
+
+websocket_info({timeout, _Ref, Msg}, St) ->
+    _ = log(debug, "Received unknown timeout; message=~p", [Msg], St),
     {ok, St};
 
+websocket_info({stop, shutdown = Reason}, St) ->
+    _ = log(info, "Connection closing; reason=~p", [Reason], St),
+    {stop, St};
+
 websocket_info({stop, Reason}, St) ->
-    Peer = bondy_wamp_protocol:peer(St#state.protocol_state),
-    SessionId = bondy_wamp_protocol:session_id(St#state.protocol_state),
-    _ = lager:info(
-        "Connection closing; reason=~p, peer=~p, session_id=~p",
-        [Reason, Peer, SessionId]
-    ),
-    %% ok = do_terminate(St),
+    _ = log(error, "Connection closing; reason=~p", [Reason], St),
     {stop, St};
 
 websocket_info(_, St0) ->
@@ -264,6 +274,12 @@ terminate(stop, _Req, St) ->
     do_terminate(St);
 
 terminate(timeout, _Req, St) ->
+    Timeout = bondy_config:get([wamp_websocket, idle_timeout]),
+    _ = log(error,
+        "Connection closing; reason=idle_timeout, idle_timeout=~p,",
+        [Timeout],
+        St
+    ),
     do_terminate(St);
 
 terminate(remote, _Req, St) ->
@@ -283,23 +299,23 @@ terminate({error, _Other}, _Req, St) ->
     do_terminate(St);
 
 terminate({crash, error, Reason}, _Req, St) ->
-    _ = lager:error(
+    _ = log(error,
         "Process crashed, error=error, reason=~p",
-        [Reason]
+        [Reason], St
     ),
     do_terminate(St);
 
 terminate({crash, exit, Reason}, _Req, St) ->
-    _ = lager:error(
+    _ = log(error,
         "Process crashed, error=exit, reason=~p",
-        [Reason]
+        [Reason], St
     ),
     do_terminate(St);
 
 terminate({crash, throw, Reason}, _Req, St) ->
-    _ = lager:error(
+    _ = log(error,
         "Process crashed, error=throw, reason=~p",
-        [Reason]
+        [Reason], St
     ),
     do_terminate(St);
 
@@ -345,14 +361,19 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
     Peer = cowboy_req:peer(Req0),
     AuthToken = State#state.auth_token,
     ProtocolOpts = #{auth_token => AuthToken},
+    AllOpts = maps_utils:from_property_list(bondy_config:get(wamp_websocket)),
+    {PingOpts, Opts} = maps:take(ping, AllOpts),
 
     case bondy_wamp_protocol:init(Subproto, Peer, ProtocolOpts) of
         {ok, CBState} ->
-            St = #state{frame_type = FrameType, protocol_state = CBState},
+            St = #state{
+                frame_type = FrameType,
+                protocol_state = CBState,
+                ping_enabled = maps:get(enabled, PingOpts),
+                ping_interval = maps:get(interval, PingOpts),
+                ping_max_attempts = maps:get(max_attempts, PingOpts)
+            },
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
-            Opts = maps_utils:from_property_list(
-                bondy_config:get(wamp_websocket)
-            ),
             {cowboy_websocket, Req1, St, Opts};
         {error, _Reason} ->
             %% Returning ok will cause the handler to
@@ -398,6 +419,7 @@ do_terminate(undefined) ->
     ok;
 
 do_terminate(St) ->
+    ok = cancel_timer(St#state.ping_interval_ref),
     bondy_wamp_protocol:terminate(St#state.protocol_state).
 
 
@@ -440,3 +462,49 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     ],
     lager:log(Level, self(), Format, lists:append(Head, Tail)).
 
+
+
+
+
+%% =============================================================================
+%% PRIVATE: PING & TIMEOUT
+%% =============================================================================
+
+
+%% @private
+reset_ping_attempts(St) ->
+    St#state{ping_attempts = 0}.
+
+
+%% @private
+reset_ping_interval(#state{ping_enabled = true} = St) ->
+    Ref = erlang:start_timer(St#state.ping_interval, self(), ping_interval),
+    St#state{ping_interval_ref = Ref};
+
+reset_ping_interval(St) ->
+    St.
+
+
+%% @private
+send_ping(#state{ping_attempts = N, ping_max_attempts = M} = St) when N > M ->
+    _ = log(
+        error,
+        "Connection closing; reason=ping_timeout, attempts=~p",
+        [N],
+        St
+    ),
+    {stop, St};
+
+send_ping(St0) ->
+    St1 = reset_ping_interval(St0),
+    St2 = St1#state{ping_attempts = St0#state.ping_attempts + 1},
+    {reply, {ping, <<"bondy">>}, St2}.
+
+
+%% @private
+cancel_timer(Ref) when is_reference(Ref) ->
+    _ = erlang:cancel_timer(Ref),
+    ok;
+
+cancel_timer(_) ->
+    ok.

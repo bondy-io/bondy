@@ -549,7 +549,7 @@
   {datatype, bytesize}
 ]}.
 
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
+%% If on, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
@@ -590,10 +590,53 @@
 %% WAMP WEBSOCKET
 %% =============================================================================
 
-{mapping, "wamp.websocket.idle_timeout", "bondy.wamp_websocket.idle_timeout", [
-  {default, "1m"},
+%% @doc Defines if Websocket PING control message functionality is enabled or
+%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% might also initiate ping requests and Bondy will always respond to those
+%% even if this option is turned off.
+%% This feature is usefull to keep a connection alive and validate the
+%$ connection is healthy. For example Browsers will typically kill websocket
+%% connections after 60s and will not initiate PINGs.
+{mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc If ping is enabled, this value controls the interval in which Bondy
+%% sends PING control messages.
+%%
+{mapping, "wamp.websocket.ping.interval", "bondy.wamp_websocket.ping.interval", [
+  {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
+
+%% @doc If ping is enabled, this value controls how many missed pings are
+%% considered a timeout. Thus, after this number of attempts Bondy will drop
+%% the connection. If the value is infinity Bondy will never timeout based on
+%% missed pings.
+%%
+{mapping,
+  "wamp.websocket.ping.max_attempts",
+  "bondy.wamp_websocket.ping.max_attempts",
+  [
+    {default, 3},
+    {datatype, [integer, {atom, infinity}]}
+  ]
+}.
+
+%% @doc Drops the connection after a period of inactivity. This option does not
+%% take effect when wamp.websocket.ping.enabled is on and wamp.websocket.ping.
+%% interval times wamp.websocket.ping.max_attempts results in a value higher
+%% than this option.
+%% Notice that for some clients using this option alone is not enought to keep
+%% a connection alive as the client will drop the connection due to inactivity.
+%% If the client supports Websocket PING control messages, enabled them,
+%% otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
+{mapping, "wamp.websocket.idle_timeout", "bondy.wamp_websocket.idle_timeout", [
+  {default, "8h"},
+  {datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
 
 %% Maximum frame size allowed by this Websocket handler. Cowboy will close the
 %% connection when a client attempts to send a frame that goes over this limit.
@@ -601,22 +644,22 @@
 %%
 %% A value of cero means un unbounded size (internally translated to 'infinity')
 {mapping, "wamp.websocket.max_frame_size", "bondy.wamp_websocket.max_frame_size", [
-  {default, 0},
-  {datatype, integer}
+  {default, infinity},
+  {datatype, [{atom, infinity}, integer]}
 ]}.
 
-{translation, "bondy.wamp_websocket.max_frame_size",
- fun(Conf) ->
-  TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
-  case TheLimit of
-      0 -> infinite;
-      Int when is_integer(Int) andalso Int > 0 -> Int;
-      _ ->
-          %% This would have been caught earlier in datatype validation
-          cuttlefish:invalid("should be a non negative integer")
-  end
- end
-}.
+% {translation, "bondy.wamp_websocket.max_frame_size",
+%  fun(Conf) ->
+%   TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
+%   case TheLimit of
+%       0 -> infinite;
+%       Int when is_integer(Int) andalso Int > 0 -> Int;
+%       _ ->
+%           %% This would have been caught earlier in datatype validation
+%           cuttlefish:invalid("should be a non negative integer")
+%   end
+%  end
+% }.
 
 
 %% Defines if Websocket compression (permessage-deflate extension) is enabled

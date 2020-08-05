@@ -295,7 +295,7 @@ stop_router_services() ->
 
     %% We stop accepting new connections on TCP/TLS
     _ = lager:info(
-        "Suspending TCP/TLS listeners"
+        "Suspending TCP/TLS listeners. "
         "No new connections will be accepted."
     ),
     ok = bondy_wamp_rs_connection_handler:suspend_listeners(),

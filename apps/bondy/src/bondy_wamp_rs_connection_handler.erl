@@ -261,7 +261,7 @@ handle_info(
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
-    _ = log(debug, "Ping timeout, sending second ping;", [], State),
+    _ = log(debug, "Ping timeout, sending another ping;", [], State),
     %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
