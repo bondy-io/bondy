@@ -187,15 +187,28 @@
     revoke_path => #{
         required  => true,
         datatype => binary
+    },
+    %% Shall we return the refresh token in the body or as cookie
+    refresh_token_cookie => #{
+        required  => true,
+        default => false,
+        datatype => boolean
+    },
+    secure_cookies => #{
+        required  => true,
+        default => false,
+        datatype => boolean
     }
 }).
 
 -record(state, {
-    realm_uri           ::  binary(),
-    client_id           ::  binary() | undefined,
-    device_id           ::  binary() | undefined,
-    token_path          ::  binary(),
-    revoke_path         ::  binary()
+    realm_uri               ::  binary(),
+    client_id               ::  binary() | undefined,
+    device_id               ::  binary() | undefined,
+    token_path              ::  binary(),
+    revoke_path             ::  binary(),
+    refresh_token_cookie    ::  boolean(),
+    secure_cookies          ::  boolean()
 }).
 
 
@@ -230,7 +243,9 @@ init(Req, Opts0) ->
         realm_uri = maps:get(realm_uri, Opts1),
         client_id = maps:get(client_id, Opts1, undefined),
         token_path = maps:get(token_path, Opts1),
-        revoke_path = maps:get(revoke_path, Opts1)
+        revoke_path = maps:get(revoke_path, Opts1),
+        refresh_token_cookie = maps:get(refresh_token_cookie, Opts1),
+        secure_cookies = maps:get(secure_cookies, Opts1)
     },
     {cowboy_rest, Req, St}.
 
@@ -405,7 +420,7 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     end;
 
 token_flow(#{?GRANT_TYPE := <<"authorization_code">>} = _Map, _, _) ->
-    %% TODO
+    %% TODO https://tools.ietf.org/html/rfc7636
     error({oauth2_unsupported_grant_type, <<"authorization_code">>});
 
 token_flow(Map, _, _) ->
@@ -419,7 +434,7 @@ refresh_token(RefreshToken, Req0, St) ->
 
     case bondy_oauth2:refresh_token(Realm, Issuer, RefreshToken) of
         {ok, JWT, RT1, Claims} ->
-            Req1 = token_response(JWT, RT1, Claims, Req0),
+            Req1 = token_response(JWT, RT1, Claims, Req0, St),
             ok = on_login(Realm, Issuer, #{}),
             {true, Req1, St};
         {error, Error} ->
@@ -438,7 +453,7 @@ issue_token(Type, Username, Req0, St0) ->
 
     case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Username, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
-            Req1 = token_response(JWT, RefreshToken, Claims, Req0),
+            Req1 = token_response(JWT, RefreshToken, Claims, Req0, St0),
             ok = on_login(RealmUri, Username, Meta),
             {true, Req1, St0};
         {error, Reason} ->
@@ -537,27 +552,44 @@ prepare_request(Body, Headers, Req0) ->
 
 
 %% @private
-token_response(JWT, RefreshToken, Claims, Req0) ->
+token_response(JWT, RefreshToken, Claims, Req0, St) ->
     Scope = iolist_to_binary(
         lists:join(<<$,>>, maps:get(<<"groups">>, Claims))),
-    Exp = maps:get(<<"exp">>, Claims),
+    Seconds = maps:get(<<"exp">>, Claims),
 
     Body0 = #{
         <<"token_type">> => <<"bearer">>,
         <<"access_token">> => JWT,
         <<"scope">> => Scope,
-        <<"expires_in">> => Exp
+        <<"expires_in">> => Seconds
     },
 
-    Body1 = case RefreshToken =:= undefined of
-        true ->
-            Body0;
-        false ->
-            Body0#{
+    case RefreshToken of
+        undefined ->
+            prepare_request(Body0, #{}, Req0);
+        RefreshToken when St#state.refresh_token_cookie ->
+            Req1 = cowboy_req:set_resp_cookie(
+                <<"refresh_token">>,
+                RefreshToken,
+                Req0,
+                #{
+                    secure => St#state.secure_cookies,
+                    %% The cookie will not be accessible in JS,
+                    %% to prevent client-side scripts from accessing it
+                    http_only => true,
+                    max_age => Seconds,
+                    %% Browser will only send cookie when accessing
+                    %% the token path
+                    path => St#state.token_path
+                }
+            ),
+            prepare_request(Body0, #{}, Req1);
+        RefreshToken ->
+            Body1 = Body0#{
                 <<"refresh_token">> => RefreshToken
-            }
-    end,
-    prepare_request(Body1, #{}, Req0).
+            },
+            prepare_request(Body1, #{}, Req0)
+    end.
 
 
 %% @private
