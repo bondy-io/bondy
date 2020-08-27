@@ -530,7 +530,9 @@ open_session(St0) ->
         Details = bondy_context:request_details(Ctxt0),
 
         %% We open a session
-        Session = bondy_session:open(Id, maps:get(peer, Ctxt0), Realm, Details),
+        Session = bondy_session_manager:open(
+            Id, maps:get(peer, Ctxt0), Realm, Details
+        ),
 
         %% We set the session in the context
         Ctxt1 = Ctxt0#{session => Session},
