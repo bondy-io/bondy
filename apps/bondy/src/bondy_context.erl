@@ -41,7 +41,7 @@
     %% Realm and Session
     realm_uri => uri(),
     node => atom(),
-    session => bondy_session:session() | undefined,
+    session => bondy_session:t() | undefined,
     %% Peer Info
     peer => bondy_session:peer(),
     authmethod => binary(),
@@ -176,7 +176,7 @@ close(Ctxt0) ->
 %% and {@link bondy_router:close_context/1}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close(t(), Reason :: normal | shutdown) -> ok.
+-spec close(t(), Reason :: normal | crash | shutdown) -> ok.
 
 close(Ctxt0, Reason) ->
     Ctxt = Ctxt0#{
@@ -187,7 +187,7 @@ close(Ctxt0, Reason) ->
     case maps:find(session, Ctxt) of
         {ok, Session} ->
             _ = bondy_router:close_context(Ctxt),
-            bondy_session:close(Session);
+            bondy_session_manager:close(Session);
         error ->
             ok
     end.
@@ -362,7 +362,7 @@ has_session(#{}) -> false.
 %% Sets the sessionId to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_session(t(), bondy_session:session()) -> t().
+-spec set_session(t(), bondy_session:t()) -> t().
 set_session(Ctxt, S) ->
     Ctxt#{session => S}.
 
@@ -384,7 +384,7 @@ peer_id(#{session := S}) ->
 %% Fetches and returns the bondy_session for the associated sessionId.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session(t()) -> bondy_session:session() | no_return().
+-spec session(t()) -> bondy_session:t() | no_return().
 session(#{session := S}) ->
     S.
 

@@ -231,10 +231,10 @@
     %%     uri_validation_policy = loose   ::  strict | loose
     %%     meta_api_enabled = true      ::  boolean()
 }).
--type realm()       ::  #realm{}.
+-type t()                           ::  #realm{}.
 
 
--export_type([realm/0]).
+-export_type([t/0]).
 -export_type([uri/0]).
 
 -export([add/1]).
@@ -310,7 +310,7 @@ apply_config() ->
 %% @doc Returns the list of supported authentication methods for Realm.
 %% @end
 %% -----------------------------------------------------------------------------
--spec auth_methods(Realm :: realm()) -> [binary()].
+-spec auth_methods(Realm :: t()) -> [binary()].
 
 auth_methods(#realm{authmethods = Val}) ->
     Val.
@@ -321,7 +321,7 @@ auth_methods(#realm{authmethods = Val}) ->
 %% `Realm'. Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_auth_method(Realm :: realm(), Method :: binary()) -> boolean().
+-spec is_auth_method(Realm :: t(), Method :: binary()) -> boolean().
 
 is_auth_method(#realm{authmethods = L}, Method) ->
     lists:member(Method, L).
@@ -331,7 +331,7 @@ is_auth_method(#realm{authmethods = L}, Method) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_security_enabled(realm() | uri()) -> boolean().
+-spec is_security_enabled(t() | uri()) -> boolean().
 
 is_security_enabled(R) ->
     security_status(R) =:= enabled.
@@ -341,7 +341,7 @@ is_security_enabled(R) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec security_status(realm() | uri()) -> enabled | disabled.
+-spec security_status(t() | uri()) -> enabled | disabled.
 
 security_status(#realm{uri = Uri}) ->
     security_status(Uri);
@@ -354,7 +354,7 @@ security_status(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec enable_security(realm()) -> ok.
+-spec enable_security(t()) -> ok.
 
 enable_security(#realm{uri = Uri}) ->
     ?ENABLE_SECURITY(Uri).
@@ -364,7 +364,7 @@ enable_security(#realm{uri = Uri}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(realm()) -> ok | {error, not_permitted}.
+-spec disable_security(t()) -> ok | {error, not_permitted}.
 
 disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, not_permitted};
@@ -377,7 +377,7 @@ disable_security(#realm{uri = Uri}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec public_keys(realm()) -> [map()].
+-spec public_keys(t()) -> [map()].
 
 public_keys(#realm{public_keys = Keys}) ->
     [jose_jwk:to_map(K) || K <- Keys].
@@ -387,7 +387,7 @@ public_keys(#realm{public_keys = Keys}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_private_key(realm(), Kid :: integer()) -> map() | undefined.
+-spec get_private_key(t(), Kid :: integer()) -> map() | undefined.
 
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
@@ -400,7 +400,7 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_public_key(realm(), Kid :: integer()) -> map() | undefined.
+-spec get_public_key(t(), Kid :: integer()) -> map() | undefined.
 
 get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
@@ -422,7 +422,7 @@ get_random_kid(#realm{private_keys = Keys}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec uri(realm()) -> uri().
+-spec uri(t()) -> uri().
 
 uri(#realm{uri = Uri}) ->
     Uri.
@@ -435,7 +435,7 @@ uri(#realm{uri = Uri}) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(uri()) -> realm() | {error, not_found}.
+-spec lookup(uri()) -> t() | {error, not_found}.
 
 lookup(Uri) ->
     case do_lookup(Uri)  of
@@ -452,7 +452,7 @@ lookup(Uri) ->
 %% does not exist it fails with reason '{badarg, Uri}'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(uri()) -> realm().
+-spec fetch(uri()) -> t().
 
 fetch(Uri) ->
     case lookup(Uri) of
@@ -467,7 +467,7 @@ fetch(Uri) ->
 %% does not exist it will add a new one for Uri with the default configuration.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri()) -> realm().
+-spec get(uri()) -> t().
 
 get(Uri) ->
     get(Uri, #{}).
@@ -479,7 +479,7 @@ get(Uri) ->
 %% does not exist it will create a new one for Uri with configuration `Opts'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri(), map()) -> realm().
+-spec get(uri(), map()) -> t().
 
 get(Uri, Opts) ->
     case lookup(Uri) of
@@ -496,7 +496,7 @@ get(Uri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri() | map()) -> realm() | no_return().
+-spec add(uri() | map()) -> t() | no_return().
 
 add(Uri) when is_binary(Uri) ->
     add(#{<<"uri">> => Uri});
@@ -509,7 +509,7 @@ add(Map) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(map(), boolean()) -> realm() | no_return().
+-spec add(map(), boolean()) -> t() | no_return().
 
 add(Map, IsStrict) ->
     add(Map, IsStrict, ?REALM_SPEC).
@@ -519,7 +519,7 @@ add(Map, IsStrict) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), map()) -> realm() | no_return().
+-spec update(uri(), map()) -> t() | no_return().
 
 update(_Uri, Map) ->
     add(Map, false, ?UPDATE_REALM_SPEC).
@@ -556,7 +556,7 @@ delete(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec list() -> [realm()].
+-spec list() -> [t()].
 
 list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PDB_PREFIX), V =/= '$deleted'].
@@ -566,7 +566,7 @@ list() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_auth_method(realm(), [binary()]) -> any().
+-spec select_auth_method(t(), [binary()]) -> any().
 
 select_auth_method(Realm, []) ->
     select_auth_method(Realm, [?DEFAULT_AUTH_METHOD]);
@@ -809,7 +809,7 @@ select_first_available([H|T], I) ->
 
 
 %% @private
--spec do_lookup(uri()) -> realm() | {error, not_found}.
+-spec do_lookup(uri()) -> t() | {error, not_found}.
 do_lookup(Uri) ->
     case plum_db:get(?PDB_PREFIX, Uri) of
         #realm{} = Realm ->

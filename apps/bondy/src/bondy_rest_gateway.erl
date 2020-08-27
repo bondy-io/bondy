@@ -674,8 +674,7 @@ start_http(Routes, Name) ->
             cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
         ],
         middlewares => [
-            cowboy_router,
-            cowboy_handler
+            cowboy_router, cowboy_handler
         ]
     },
     cowboy:start_clear(Name, TranspOpts, ProtoOpts).
