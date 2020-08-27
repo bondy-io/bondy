@@ -170,6 +170,7 @@ websocket_init(#state{protocol_state = undefined} = St) ->
     {reply, Frame, St};
 
 websocket_init(St) ->
+    _ = log(info, "Established connection with peer;", [], St),
     {ok, reset_ping_interval(St)}.
 
 
