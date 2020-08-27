@@ -71,7 +71,6 @@ start_link() ->
 
 
 
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
@@ -89,6 +88,7 @@ init([]) ->
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
+        ?WORKER(bondy_session_manager, [], permanent, 5000),
         ?WORKER(bondy_registry, [], permanent, 5000),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),

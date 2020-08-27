@@ -96,7 +96,6 @@ init(Req0, _) ->
     %% select one of these subprotocol and send it back to the client,
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
-
     ClientIP = bondy_http_utils:client_ip(Req0),
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
 
@@ -197,6 +196,7 @@ websocket_handle({ping, _}, St) ->
     {ok, St};
 
 websocket_handle({pong, <<"bondy">>}, St0) ->
+    %% We've got an answer to a Bondy-initiated ping.
     {ok, reset_ping_attempts(St0)};
 
 
@@ -283,43 +283,54 @@ terminate(timeout, _Req, St) ->
     do_terminate(St);
 
 terminate(remote, _Req, St) ->
+    %% The remote endpoint closed the connection without giving any further
+    %% details.
+    _ = log(info, "Connection closed by peer; reason=~p,", [unknown], St),
     do_terminate(St);
 
-terminate({error, closed}, _Req, St) ->
-    _ = log(info, <<"Connection closed by peer; reason=~p,">>, [normal], St),
-    do_terminate(St);
-
-terminate({error, badencoding}, _Req, St) ->
-    do_terminate(St);
-
-terminate({error, badframe}, _Req, St) ->
-    do_terminate(St);
-
-terminate({error, _Other}, _Req, St) ->
-    do_terminate(St);
-
-terminate({crash, error, Reason}, _Req, St) ->
-    _ = log(error,
-        "Process crashed, error=error, reason=~p",
-        [Reason], St
+terminate({remote, Code, Payload}, _Req, St) ->
+    _ = log(
+        info,
+        "Connection closed by peer; reason=remote, code=~p, payload=~p",
+        [Code, Payload],
+        St
     ),
     do_terminate(St);
 
-terminate({crash, exit, Reason}, _Req, St) ->
+terminate({error, closed = Reason}, _Req, St) ->
+    %% The socket has been closed brutally without a close frame being received
+    %% first.
+    _ = log(error, "Connection closed brutally; reason=~p,", [Reason], St),
+    do_terminate(St);
+
+terminate({error, badencoding = Reason}, _Req, St) ->
+    %% A text frame was sent by the client with invalid encoding. All text
+    %% frames must be valid UTF-8.
+    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    do_terminate(St);
+
+terminate({error, badframe = Reason}, _Req, St) ->
+    %% A protocol error has been detected.
+    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    do_terminate(St);
+
+terminate({error, Reason}, _Req, St) ->
+    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    do_terminate(St);
+
+terminate({crash, Class, Reason}, _Req, St) ->
+    %% A crash occurred in the handler.
     _ = log(error,
-        "Process crashed, error=exit, reason=~p",
-        [Reason], St
+        "Process crashed, error=~p, reason=~p",
+        [Class, Reason], St
     ),
     do_terminate(St);
 
-terminate({crash, throw, Reason}, _Req, St) ->
-    _ = log(error,
-        "Process crashed, error=throw, reason=~p",
-        [Reason], St
+terminate(Other, _Req, St) ->
+        _ = log(error,
+        "Process crashed, reason=~p",
+        [Other], St
     ),
-    do_terminate(St);
-
-terminate({remote, _Code, _Binary}, _Req, St) ->
     do_terminate(St).
 
 
@@ -441,7 +452,9 @@ frame(Type, E) when Type == text orelse Type == binary ->
 
 
 %% @private
-log(Level, Prefix, Head, St)
+
+
+log(Level, Prefix, Head, #state{} = St)
 when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
         Prefix,
@@ -460,7 +473,10 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
         St#state.frame_type,
         bondy_context:encoding(Ctxt)
     ],
-    lager:log(Level, self(), Format, lists:append(Head, Tail)).
+    lager:log(Level, self(), Format, lists:append(Head, Tail));
+
+log(Level, Prefix, Head, _) ->
+    lager:log(Level, self(), Prefix, Head).
 
 
 

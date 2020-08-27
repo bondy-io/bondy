@@ -186,7 +186,7 @@ handle_event({socket_error, Procotol, Transport, Peername}, State) ->
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({session_opened, RealmUri, Id, Agent, Peer}, State) ->
+handle_event({session_opened, RealmUri, Id, Agent, Peer, _Pid}, State) ->
     Labels = get_session_labels(RealmUri, Id, Agent, Peer),
     ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
