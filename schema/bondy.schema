@@ -663,7 +663,7 @@
 %% Defines if Websocket compression (permessage-deflate extension) is enabled
 %% or not. If enabled it will be negotiated with supporting clients.
 {mapping, "wamp.websocket.compression_enabled", "bondy.wamp_websocket.compress", [
-  {default, on},
+  {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
