@@ -47,6 +47,7 @@
     hibernate = false       ::  boolean(),
     start_time              ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
+    active_n = 100          ::  once | -32768..32767,
     buffer = <<>>           ::  binary()
 }).
 -type state() :: #state{}.
@@ -158,23 +159,28 @@ tcp_connections() ->
 
 
 init({Ref, Socket, Transport, _Opts0}) ->
+
+
+    St0 = #state{
+        start_time = erlang:monotonic_time(second),
+        transport = Transport
+    },
+
     %% We must call ranch:accept_ack/1 before doing any socket operation.
     %% This will ensure the connection process is the owner of the socket.
     %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
-    Transport:setopts(Socket, [{active, once}, {packet, 0}]),
 
+    Transport:setopts(Socket, [{active, active_n(St0)}, {packet, 0}]),
     {ok, Peername} = inet:peername(Socket),
 
-    St = #state{
-        start_time = erlang:monotonic_time(second),
+    St1 = St0#state{
         socket = Socket,
-        peername = inet_utils:peername_to_binary(Peername),
-        transport = Transport
+        peername = inet_utils:peername_to_binary(Peername)
     },
-    ok = socket_opened(St),
-    gen_server:enter_loop(?MODULE, [], St, ?TIMEOUT).
 
+    ok = socket_opened(St1),
+    gen_server:enter_loop(?MODULE, [], St1, ?TIMEOUT).
 
 
 handle_info(
@@ -182,7 +188,7 @@ handle_info(
     #state{socket = Socket, protocol_state = undefined} = St0) ->
     case handle_handshake(MaxLen, Encoding, St0) of
         {ok, St1} ->
-            (St1#state.transport):setopts(Socket, [{active, once}]),
+            ok = maybe_active_once(St1),
             {noreply, St1, ?TIMEOUT};
         {stop, Reason, St1} ->
             {stop, Reason, St1}
@@ -207,13 +213,33 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
     %% We append the newly received data to the existing buffer
     Buffer = St0#state.buffer,
     St1 = St0#state{buffer = <<>>},
+
     case handle_data(<<Buffer/binary, Data/binary>>, St1) of
         {ok, St2} ->
-            (St2#state.transport):setopts(Socket, [{active, once}]),
+            ok = maybe_active_once(St2),
             {noreply, St2, ?TIMEOUT};
         {stop, Reason, St2} ->
             {stop, Reason, St2}
     end;
+
+handle_info({tcp_passive, Socket}, #state{socket = Socket} = St) ->
+    %% We are using {active, N} and we consumed N messages from the socket
+    ok = reset_inet_opts(St),
+    {noreply, St, ?TIMEOUT};
+
+handle_info({tcp_closed, _Socket}, State) ->
+    ok = socket_closed(false, State),
+    {stop, normal, State};
+
+handle_info({tcp_error, Socket, Reason}, State) ->
+    _ = log(
+        error,
+        "Connection closing due to tcp_error; reason=~p, socket='~p',",
+        [Reason, Socket],
+        State
+    ),
+    ok = socket_closed(true, State),
+    {stop, Reason, State};
 
 handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_router in those cases
@@ -230,19 +256,6 @@ handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
     %% We send the message to the peer
     handle_outbound(M, St);
 
-handle_info({tcp_closed, _Socket}, State) ->
-    ok = socket_closed(false, State),
-    {stop, normal, State};
-
-handle_info({tcp_error, Socket, Reason}, State) ->
-    _ = log(
-        error,
-        "Connection closing due to tcp_error; reason=~p, socket='~p',",
-        [Reason, Socket],
-        State
-    ),
-    ok = socket_closed(true, State),
-    {stop, Reason, State};
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
     _ = log(debug, "Connection timeout, sending first ping;", [], State0),
@@ -736,3 +749,30 @@ normalise(Opts) ->
         false ->
             Opts
     end.
+
+
+
+active_n(#state{active_n = N}) ->
+    %% TODO make this dynamic based on adaptive algorithm that takes into
+    %% account:
+    %% - overall node load
+    %% - this socket traffic i.e. slow traffic => once, high traffic => N
+    N.
+
+
+%% @private
+maybe_active_once(#state{active_n = once} = State) ->
+    Transport = State#state.transport,
+    Socket = State#state.socket,
+    Transport:setopts(Socket, [{active, once}]);
+
+maybe_active_once(_) ->
+    ok.
+
+
+%% @private
+reset_inet_opts(#state{} = State) ->
+    Transport = State#state.transport,
+    Socket = State#state.socket,
+    N = active_n(State),
+    Transport:setopts(Socket, [{active, N}]).
