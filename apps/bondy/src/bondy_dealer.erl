@@ -309,7 +309,13 @@ handle_message(M, Ctxt) ->
         do_handle_message(M, Ctxt)
     catch
         _:{not_authorized, Reason} ->
-            Reply = not_authorized_error(Reason, M, Ctxt),
+            Reply = wamp_message:error_from(
+                M
+                #{},
+                ?WAMP_NOT_AUTHORIZED,
+                [Reason],
+                #{message => Reason}
+            ),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
@@ -1280,32 +1286,6 @@ not_found_error(M, _Ctxt) ->
             message => Mssg,
             description => <<"The unregister request failed.">>
         }
-    ).
-
-
-%% @private
-not_authorized_error(Reason, #register{} = M, Ctxt) ->
-    not_authorized_error(?REGISTER, M#register.request_id, Reason, Ctxt);
-
-not_authorized_error(Reason, #unregister{} = M, Ctxt) ->
-    not_authorized_error(?UNREGISTER, M#unregister.request_id, Reason, Ctxt);
-
-not_authorized_error(Reason, #call{} = M, Ctxt) ->
-    not_authorized_error(?CALL, M#call.request_id, Reason, Ctxt);
-
-not_authorized_error(Reason, #cancel{} = M, Ctxt) ->
-    not_authorized_error(?CANCEL, M#cancel.request_id, Reason, Ctxt).
-
-
-%% @private
-not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
-    wamp_message:error(
-        Type,
-        ReqId,
-        #{},
-        ?WAMP_NOT_AUTHORIZED,
-        [Mssg],
-        #{message => Mssg}
     ).
 
 

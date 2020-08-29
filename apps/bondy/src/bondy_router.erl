@@ -346,9 +346,8 @@ async_forward(M, Ctxt0) ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             ErrorMap = bondy_error:map(Reason),
-            Reply = wamp_message:error(
-                ?UNSUBSCRIBE,
-                M#unsubscribe.request_id,
+            Reply = wamp_message:error_from(
+                M,
                 #{},
                 ?WAMP_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],

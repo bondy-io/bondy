@@ -50,9 +50,8 @@ no_such_procedure_error(#call{} = M) ->
         "There are no registered procedures matching the uri",
         $\s, $', (M#call.procedure_uri)/binary, $', $.
     >>,
-    wamp_message:error(
-        ?CALL,
-        M#call.request_id,
+    wamp_message:error_from(
+        M,
         #{},
         ?WAMP_NO_SUCH_PROCEDURE,
         [Mssg],
@@ -255,9 +254,8 @@ maybe_error({error, #error{} = Error}, _) ->
 maybe_error({error, Reason}, #call{} = M) ->
     #{<<"code">> := Code} = Map = bondy_error:map(Reason),
     Mssg = maps:get(<<"message">>, Map, <<>>),
-    wamp_message:error(
-        ?CALL,
-        M#call.request_id,
+    wamp_message:error_from(
+        M,
         #{},
         bondy_error:code_to_uri(Code),
         [Mssg],

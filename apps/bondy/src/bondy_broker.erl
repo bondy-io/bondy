@@ -523,7 +523,7 @@ maybe_subscribe(M, Ctxt) ->
             subscribe(M, Ctxt)
     catch
         error:{not_authorized, Reason} ->
-            Reply = not_authorized_error(Reason, M, Ctxt),
+            Reply = not_authorized_error(M, Reason),
             bondy:send(bondy_context:peer_id(Ctxt), Reply),
             ok
     end.
@@ -558,7 +558,7 @@ maybe_unsubscribe(Topic, M, Ctxt) ->
         unsubscribe(SubsId, Ctxt)
     catch
         error:{not_authorized, Reason} ->
-            Reply = not_authorized_error(Reason, M, Ctxt),
+            Reply = not_authorized_error(M, Reason),
             bondy:send(bondy_context:peer_id(Ctxt), Reply),
             ok
     end.
@@ -616,33 +616,22 @@ maybe_publish(M, Ctxt) ->
         error:{not_authorized, AReason} when Acknowledge == true ->
             bondy:send(
                 bondy_context:peer_id(Ctxt),
-                not_authorized_error(AReason, M, Ctxt)
+                not_authorized_error(M, AReason)
             ),
             ok;
         error:{not_authorized, _} ->
             ok
     end.
 
-%% @private
-not_authorized_error(Reason, #subscribe{} = M, Ctxt) ->
-    not_authorized_error(?SUBSCRIBE, M#subscribe.request_id, Reason, Ctxt);
-
-not_authorized_error(Reason, #unsubscribe{} = M, Ctxt) ->
-    not_authorized_error(?UNSUBSCRIBE, M#unsubscribe.request_id, Reason, Ctxt);
-
-not_authorized_error(Reason, #publish{} = M, Ctxt) ->
-    not_authorized_error(?PUBLISH, M#publish.request_id, Reason, Ctxt).
-
 
 %% @private
-not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
-    wamp_message:error(
-        Type,
-        ReqId,
+not_authorized_error(M, Reason) ->
+    wamp_message:error_from(
+        M,
         #{},
         ?WAMP_NOT_AUTHORIZED,
-        [Mssg],
-        #{message => Mssg}
+        [Reason],
+        #{message => Reason}
     ).
 
 
