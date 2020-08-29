@@ -245,6 +245,7 @@
 -export([handle_info/2]).
 -export([terminate/2]).
 -export([code_change/3]).
+-export([handle_continue/2]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
 
@@ -368,20 +369,28 @@ init([]) ->
         bridges = BridgesMap
     },
 
-    %% Uncomment the following if we decide to store config in plum_db
+    {ok, State0, {continue, init_bridges}}.
+
+
+
+handle_continue(init_bridges, State0) ->
     %% At the moment we are assumming bridges are only configured on startup
-    %% through a config file
-    %% ok = plum_db_subscribe(),
+    %% through a config file.
 
     case init_bridges(State0) of
         {ok, State1} ->
             SpecFile = application:get_env(
-                bondy_broker_bridge, config_file, undefined),
-            load_config(SpecFile, State1);
-        {error, _} = Error ->
-            Error
+                bondy_broker_bridge, config_file, undefined
+            ),
+            case load_config(SpecFile, State1) of
+                {ok, State2} ->
+                    {noreply, State2};
+                {error, Reason} ->
+                    {stop, Reason, State1}
+            end;
+        {error, Reason} ->
+            {stop, Reason, State0}
     end.
-
 
 
 handle_call(bridges, _From, State) ->
