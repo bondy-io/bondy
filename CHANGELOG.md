@@ -1,9 +1,31 @@
 # CHANGELOG
 
-## Develop
-- API Gateway
-  - Fixes a bug in the validation of the response body which failed in case the body was not a MOPS expression, a binary or map. Now all external-friendly types are allows e.g. numbers, booleans, strings, binaries, maps, lists and MOPS expressions. This allows to return static content i.e. not a result of evaluating a MOPS expression in any given type of action.
-  - Upgraded MOPS which has better error reporting and support for a new function `random(N)` which returns N random members from a list. If the value random is applied is static, this will yield the same results on every request.
+## 0.8.8
+### Added
+
+* API Gateway
+    * The API specification body object now supports any external-friendly data type e.g. erlang tuples, pids, references excluded.
+    * Fixes a bug in the validation of the response body which failed in case the body was not a MOPS expression, a binary or map. Now all external-friendly types are allows e.g. numbers, booleans, strings, binaries, maps, lists and MOPS expressions. This allows to return static content i.e. not a result of evaluating a MOPS expression in any given type of action.
+    * Upgraded MOPS which has better error reporting and support for a new function `random(N)` which returns N random members from a list. If the value random is applied is static, this will yield the same results on every request.
+
+### Fixed
+
+* API Gateway 
+    * Minor fixes to enhance error handling and logging
+    * Fixed a case where an invalid API Specification can crash the gateway process during startup
+* Configuration
+    * Fixed an error in which private/default lager configuration would override user configuration (bondy.conf)
+    * OAuth2
+        * Fixed a bug on the removal of refresh token indices during refresh token revocation.
+* Clustering
+    * Fixed missing handler for WAMP ERROR(CALL) messages forwarded by a peer node
+
+### Changed
+
+* Configuration
+    * The WAMP raw socket serialiser slot assignment is now configurable. Bondy provides Erlang (erl) and BERT serialisers in addition to JSON and Messagepack. This change allows the user to configure to which of the 13 available slots (3..15) are those serialisers mapped to.
+
+
 
 ## 0.8.7
 
