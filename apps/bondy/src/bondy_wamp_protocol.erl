@@ -843,7 +843,7 @@ challenge_extra(?WAMPCRA_AUTH, User, St0) ->
     Millis = erlang:convert_time_unit(Microsecs, microsecond, millisecond),
     %% We compute the signature to compare it to what the client will send
     %% will send on the AUTHENTICATE.signature which is base64-encoded.
-    Signature = base64:encode(crypto:hmac(sha256, Hash, Challenge)),
+    Signature = base64:encode(crypto:mac(hmac, sha256, Hash, Challenge)),
     St1 = St0#wamp_state{auth_timestamp = Millis, auth_signature = Signature},
 
     {ok, Extra, St1};
