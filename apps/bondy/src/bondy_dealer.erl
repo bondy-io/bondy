@@ -664,9 +664,6 @@ handle_call(#call{} = M, Ctxt0) ->
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
 
-    %% TODO check if authorized and if not throw
-    %% wamp.error.not_authorized
-
     Caller = bondy_context:peer_id(Ctxt0),
     Fun = fun
         (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
@@ -1132,12 +1129,14 @@ do_invoke({Strategy, L}, Fun, CallOpts0, Ctxt) ->
 
         case bondy_rpc_load_balancer:get(L, Opts) of
             {error, noproc} = Error ->
+                %% We trid all callees in the list `L' but none was alive
                 throw(Error);
             Entry ->
                 Fun(Entry, Ctxt)
         end
     catch
         throw:{error, _} = ErrorMap ->
+            %% Unexpected error ocurred
             Fun(ErrorMap, Ctxt)
     end.
 
