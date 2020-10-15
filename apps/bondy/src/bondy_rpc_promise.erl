@@ -171,7 +171,7 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
         _ = lager:debug(
             "RPC Promise evicted from queue;"
             " realm_uri=~p, caller_session_id=~p, invocation_id=~p, call_id=~p"
-            " ttl=~p",
+            " timeout=~p",
             [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
         )
     end,
