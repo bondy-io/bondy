@@ -1,7 +1,8 @@
 %% =============================================================================
 %%  bondy_rest_gateway_rest_handler.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2019 Ngineo Limited. All rights reserved.
+%%  Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -703,6 +704,8 @@ perform_action(
     Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
     WampCtxt0 = wamp_context(RealmUri, Peer, St1),
+
+
     WampCtxt = bondy_context:set_call_timeout(WampCtxt0, CallTimeout),
 
     case bondy:call(P, Opts, A, Akw, WampCtxt) of
