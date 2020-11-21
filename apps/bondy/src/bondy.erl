@@ -228,7 +228,7 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% TODO we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    Timeout = case maps:find(call_timeout, Opts) of
+    Timeout = case maps:find(timeout, Opts) of
         {ok, 0} -> bondy_config:get(wamp_call_timeout);
         {ok, Val} -> Val;
         error -> bondy_config:get(wamp_call_timeout)
