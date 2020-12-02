@@ -692,31 +692,23 @@ handle_info(
         "Object update notification; object=~p, previous=~p",
         [Obj, PrevObj]
     ),
-    Node = bondy_registry_entry:node(Key),
-    _ = case Node =:= bondy_peer_service:mynode() of
-        true ->
-            %% This should not be happenning as only we can change our
-            %% registrations. We do nothing.
+    case maybe_resolve(Obj) of
+        '$deleted' when PrevObj =/= undefined ->
+            %% We do this since we need to know the Match Policy of the
+            %% entry in order to generate the trie key and we want to
+            %% avoid including yet another element to the entry_key
+            Reconciled = plum_db_object:resolve(PrevObj, lww),
+            OldEntry = plum_db_object:value(Reconciled),
+            %% This works because registry entries are immutable
+            _ = delete_from_trie(OldEntry);
+        '$deleted' when PrevObj == undefined ->
+            %% We got a delete for an entry we do not know anymore.
+            %% This happens when the registry has just been reset
+            %% as we do not persist registrations any more
             ok;
-        false ->
-            case maybe_resolve(Obj) of
-                '$deleted' when PrevObj =/= undefined ->
-                    %% We do this since we need to know the Match Policy of the
-                    %% entry in order to generate the trie key and we want to
-                    %% avoid including yet another element to the entry_key
-                    Reconciled = plum_db_object:resolve(PrevObj, lww),
-                    OldEntry = plum_db_object:value(Reconciled),
-                    %% This works because registry entries are immutable
-                    _ = delete_from_trie(OldEntry);
-                '$deleted' when PrevObj == undefined ->
-                    %% We got a delete for an entry we do not know anymore.
-                    %% This happens when the registry has just been reset
-                    %% as we do not persist registrations any more
-                    ok;
-                Entry ->
-                    %% We only add to trie
-                    add_to_trie(Entry)
-            end
+        Entry ->
+            %% We only add to trie
+            add_to_trie(Entry)
     end,
     {noreply, State};
 
