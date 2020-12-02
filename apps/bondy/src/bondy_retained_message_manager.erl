@@ -318,27 +318,19 @@ handle_info(
         "Object update notification; object=~p, previous=~p",
         [Obj, PrevObj]
     ),
-    Node = bondy_registry_entry:node(Key),
-
-    _ = case Node =:= bondy_peer_service:mynode() of
-        true ->
-            %% We do nothing
+    case maybe_resolve(Obj) of
+        '$deleted' when PrevObj =/= undefined ->
+            %% We make sure we get the last event from the dvvset
+            Reconciled = plum_db_object:resolve(PrevObj, lww),
+            OldMessg = plum_db_object:value(Reconciled),
+            maybe_decr_counters(Realm, OldMessg);
+        '$deleted' when PrevObj == undefined ->
+            %% We got a delete for an entry we do not know anymore.
+            %% This happens when the registry has just been reset
+            %% as we do not persist registrations any more
             ok;
-        false ->
-            case maybe_resolve(Obj) of
-                '$deleted' when PrevObj =/= undefined ->
-                    %% We make sure we get the last event from the dvvset
-                    Reconciled = plum_db_object:resolve(PrevObj, lww),
-                    OldMessg = plum_db_object:value(Reconciled),
-                    maybe_decr_counters(Realm, OldMessg);
-                '$deleted' when PrevObj == undefined ->
-                    %% We got a delete for an entry we do not know anymore.
-                    %% This happens when the registry has just been reset
-                    %% as we do not persist registrations any more
-                    ok;
-                Mssg ->
-                    maybe_incr_counters(Realm, Mssg)
-            end
+        Mssg ->
+            maybe_incr_counters(Realm, Mssg)
     end,
     {noreply, State};
 
