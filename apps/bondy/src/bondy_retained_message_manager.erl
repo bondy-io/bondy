@@ -312,7 +312,7 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 handle_info(
-    {plum_db_event, object_update, {{{_, Realm}, Key}, Obj, PrevObj}},
+    {plum_db_event, object_update, {{{_, Realm}, _Key}, Obj, PrevObj}},
     State) ->
     _ = lager:debug(
         "Object update notification; object=~p, previous=~p",
