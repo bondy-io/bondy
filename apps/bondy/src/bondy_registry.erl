@@ -686,7 +686,7 @@ handle_cast(Event, State) ->
 
 
 handle_info(
-    {plum_db_event, object_update, {{{_, _}, Key}, Obj, PrevObj}},
+    {plum_db_event, object_update, {{{_, _}, _Key}, Obj, PrevObj}},
     State) ->
     _ = lager:debug(
         "Object update notification; object=~p, previous=~p",
