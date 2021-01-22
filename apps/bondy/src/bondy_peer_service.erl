@@ -1,8 +1,7 @@
 %% =============================================================================
 %%  bondy_peer_service.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited. All rights reserved.
-%%  Copyright (c) 2020 Leapsight Holdings Limited. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%  Copyright (c) 2015 Christopher Meiklejohn.  All Rights Reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
