@@ -1,0 +1,188 @@
+
+%% =============================================================================
+%%  replace-env-vars - Takes a file and generates another file by substituting
+%%  all instances of variables i.e. the string ${VARNAME}, with the environment
+%%  variable value of the same variable name i.e. VARNAME.
+%%
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%  http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+-define(RESET, "\e[0m").
+-define(NC, "\033[0m").
+-define(GREEN, "\033[0;32m").
+-define(RED, "\033[0;31m").
+
+-define(LOG_ERROR(Reason, Args),
+    io:format(
+        "~s===> [replace_os_vars] Error: " ++ Reason ++ "~s~n",
+        [?RED | Args] ++ [?RESET]
+    )
+).
+
+-define(LOG_INFO(Reason, Args),
+    io:format(
+        "~s===> [replace_os_vars] " ++ Reason ++ "~s~n",
+        [?NC | Args] ++ [?RESET]
+    )
+).
+
+-export([main/1]).
+
+
+main([Dir]) ->
+    Files = files(Dir),
+    replace(Dir, Files);
+
+main([]) ->
+    ?LOG_ERROR("Missing directory", []);
+
+main(Args) ->
+    ?LOG_ERROR("Invalid arguments ~p", [Args]).
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+files(Dir) ->
+    filelib:wildcard("*.template", Dir).
+
+
+replace(_, []) ->
+    ok;
+
+replace(Dir, Files) ->
+    Fun = fun(Relative, Acc) ->
+        Filename = filename:join(Dir, Relative),
+        ?LOG_INFO("Found template file ~p", [Filename]),
+        case file:read_file(Filename) of
+            {ok, Bin0} ->
+                try
+                    String0 = unicode:characters_to_list(Bin0),
+                    String1 = replace_env_vars(String0),
+                    Bin1 = unicode:characters_to_binary(String1),
+                    NewFilename = filename:join(Dir, drop_extension(Relative)),
+                    case file:write_file(NewFilename, Bin1) of
+                        ok ->
+                            ?LOG_INFO("Replaced environment variables and generated output file ~p", [NewFilename]),
+                            ok;
+                        {error, Reason} ->
+                            throw(Reason)
+                    end,
+                    Acc orelse false
+                catch
+                    throw:{unset, Varname} ->
+                        ?LOG_ERROR(
+                            "Replacement failed for file ~p. The environment variable name ~p is unset.",
+                            [Filename, Varname]
+                        ),
+                        false;
+                    _:EReason ->
+                        ?LOG_ERROR(
+                            "Replacement failed for file ~p. Reason: ~p",
+                            [Filename, EReason]
+                        ),
+                        false
+                end;
+            {error, Reason} ->
+                ?LOG_ERROR(
+                    "Failed reading file ~p. Reason: ~p.", [Filename, Reason]
+                ),
+                false
+        end
+    end,
+    Result = lists:foldl(Fun, true, Files),
+    Result orelse halt(1),
+    ok.
+
+
+
+
+%% =============================================================================
+%% BORROWED FROM rebar3/src/rebar_prv_shell.erl
+%% =============================================================================
+
+
+%% -------------------------------------------------------------------
+%%
+%% rebar: Erlang Build Tools
+%%
+%% Copyright (c) 2011 Trifork
+%%
+%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%% of this software and associated documentation files (the "Software"), to deal
+%% in the Software without restriction, including without limitation the rights
+%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%% copies of the Software, and to permit persons to whom the Software is
+%% furnished to do so, subject to the following conditions:
+%%
+%% The above copyright notice and this permission notice shall be included in
+%% all copies or substantial portions of the Software.
+%%
+%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+%% THE SOFTWARE.
+%% -------------------------------------------------------------------
+
+
+
+%% @doc quick and simple variable substitution writeup.
+%% Supports `${varname}' but not `$varname' nor nested
+%% values such as `${my_${varname}}'.
+%% The variable are also defined as only supporting
+%% the form `[a-zA-Z_]+[a-zA-Z0-9_]*' as per the POSIX
+%% standard.
+-spec replace_env_vars(string()) -> unicode:charlist().
+replace_env_vars("") -> "";
+replace_env_vars("${" ++ Str) ->
+    case until_var_end(Str) of
+        {ok, VarName, Rest} ->
+            replace_varname(VarName) ++ replace_env_vars(Rest);
+        error ->
+            "${" ++ replace_env_vars(Str)
+    end;
+replace_env_vars([Char|Str]) ->
+    [Char | replace_env_vars(Str)].
+
+until_var_end(Str) ->
+    case re:run(Str, "([a-zA-Z_]+[a-zA-Z0-9_]*)}", [{capture, [1], list}]) of
+        nomatch ->
+            error;
+        {match, [Name]} ->
+            {ok, Name, drop_varname(Name, Str)}
+    end.
+
+replace_varname(Var) ->
+    %% os:getenv(Var, "") is only available in OTP-18.0
+    case os:getenv(Var) of
+        % false -> "";
+        false -> throw({unset, Var});
+        Val -> Val
+    end.
+
+drop_varname("", "}" ++ Str) -> Str;
+drop_varname([_|Var], [_|Str]) -> drop_varname(Var, Str).
+
+
+drop_extension(Filename) ->
+    string:replace(Filename, ".template", "").

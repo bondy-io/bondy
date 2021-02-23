@@ -4,9 +4,24 @@
 ## Cookie for distributed erlang
 -setcookie bondy
 
-+P 2000000
-+K true
-+A64
-
 ## Explicit connections only.
 -connect_all false
+-hidden
+
+## Time Correction
++c
++C multi_time_warp
+
+## Max processes
++P 2000000
+
+## Kernel polling
++K true
+
+## Async I/O threads
++A 64
+
+## Increase distribution port buffer size.
++zdbbl 32768
+
++sbwt none

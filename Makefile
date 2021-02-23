@@ -1,7 +1,10 @@
 
 REBAR            = rebar3
 
-.PHONY: compile test xref dialyzer
+.PHONY: genvars compile test xref dialyzer
+
+genvars:
+	@cp config/prod/legacy_vars.config vars.generated
 
 compile-no-deps:
 	${REBAR} compile

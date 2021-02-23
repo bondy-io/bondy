@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -e
+
+NC='\033[0m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+RED='\033[0;31m'
+
+echo "${GREEN}===> Running Bondy pre_start hook"
+echo "${YELLOW}===> Searching for template files in 'bondy/etc/'"
+relx_escript ./bin/replace-env-vars ./etc/
+echo "${YELLOW}===> Searching for template files in 'bondy/releases/{{release_version}}'"
+relx_escript ./bin/replace-env-vars ./releases/{{release_version}}/

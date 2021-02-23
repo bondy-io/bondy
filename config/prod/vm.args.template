@@ -1,8 +1,5 @@
-## Name of the node
--name bondy@127.0.0.1
-
-## Cookie for distributed erlang
--setcookie bondy
+-name ${BONDY_ERL_NODENAME}
+-cookie ${BONDY_ERL_DISTRIBUTED_COOKIE}
 
 ## Explicit connections only.
 -connect_all false
@@ -25,3 +22,5 @@
 +zdbbl 32768
 
 +sbwt none
+
+-args_file releases/{{release_version}}/generated/vm.generated.args
