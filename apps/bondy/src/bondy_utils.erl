@@ -33,6 +33,8 @@
 -export([get_nonce/0]).
 -export([get_random_string/2]).
 -export([is_uuid/1]).
+-export([json_consult/1]).
+-export([json_consult/2]).
 -export([log/5]).
 -export([maybe_encode/2]).
 -export([merge_map_flags/2]).
@@ -178,11 +180,13 @@ maybe_encode(erl, Term) ->
    binary_to_term(Term);
 
 maybe_encode(json, Term) ->
-    case jsx:is_json(Term) of
-        true ->
-            Term;
-        false ->
-            jsx:encode(Term)
+    %% TODO this is wrong, we should be pasing the metadada so that we know in
+    %% which encoding the Term is
+    case jsone:try_decode(Term) of
+        {ok, JSON} ->
+            JSON;
+        {error, _} ->
+            jsone:encode(Term, [undefined_as_null, {object_key_type, string}])
     end;
 
  maybe_encode(msgpack, Term) ->
@@ -206,7 +210,7 @@ decode(json, <<>>) ->
     <<>>;
 
 decode(json, Term) ->
-    jsx:decode(Term, [return_maps]);
+    jsone:decode(Term, [undefined_as_null]);
 
 decode(msgpack, Term) ->
     Opts = [{map_format, map}, {unpack_str, as_binary}],
@@ -345,3 +349,34 @@ get_random_string(Length, AllowedChars) ->
         end,
         [],
         lists:seq(1, Length)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec json_consult(File :: file:name_all()) -> any().
+
+json_consult(File) ->
+    json_consult(File, [undefined_as_null]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec json_consult(File :: file:name_all(), Opts :: list()) ->
+    {ok, any()} | {error, any()}.
+
+json_consult(File, Opts) when is_list(Opts) ->
+    case file:read_file(File) of
+        {ok, JSONBin}  ->
+            case jsone:try_decode(JSONBin, Opts) of
+                {ok, Term, _} ->
+                    {ok, Term};
+                {error, {badarg, [{_, Reason, _}]}} ->
+                    {error, {badarg, Reason}}
+            end;
+        {error, _} = Error ->
+            Error
+    end.

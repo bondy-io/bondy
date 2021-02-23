@@ -546,23 +546,23 @@ load_config(Map, State) when is_map(Map) ->
     end;
 
 load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
+    case bondy_utils:json_consult(FName) of
+        {ok, Spec} ->
             _ = lager:info(
-                "Loading configuration file; path=~p", [FName]),
-            load_config(Spec, State)
-    catch
-        ?EXCEPTION(error, badarg, _) ->
-            case filelib:is_file(FName) of
-                true ->
-                    {{error, invalid_specification_format}, State};
-                false ->
-                    _ = lager:info(
-                        "No configuration file found; path=~p",
-                        [FName]
-                    ),
-                    {ok, State}
-            end
+                "Loading configuration file; path=~p", [FName]
+            ),
+            load_config(Spec, State);
+        {error, enoent} ->
+            {ok, State};
+        {error, {badarg, Reason}} ->
+            {{error, {invalid_specification_format, Reason}}, State};
+        {error, Reason} ->
+            _ = lager:error(
+                "Error processing configuration file. "
+                "reason=~p, filename=~p",
+                [Reason, FName]
+            ),
+            exit(badarg)
     end;
 
 load_config(undefined, State) ->

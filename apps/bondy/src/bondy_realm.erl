@@ -280,27 +280,25 @@ apply_config() ->
         undefined ->
             ok;
         FName ->
-            try jsx:consult(FName, [return_maps]) of
-                [Realms] ->
+            case bondy_utils:json_consult(FName) of
+                {ok, Realms} ->
                     _ = lager:info(
                         "Loading configuration file; path=~p", [FName]),
                     %% We add the realm and allow an update if it already
                     %% exists in the database, by setting IsStrict
                     %% argument to false
                     _ = [apply_config(Realm) || Realm <- Realms],
-                    ok
-            catch
-                ?EXCEPTION(error, badarg, _) ->
-                    case filelib:is_file(FName) of
-                        true ->
-                            error(invalid_config);
-                        false ->
-                            _ = lager:warning(
-                                "No configuration file found; path=~p",
-                                [FName]
-                            ),
-                            ok
-                    end
+                    ok;
+                {error, enoent} ->
+                    _ = lager:warning(
+                        "No configuration file found; path=~p",
+                        [FName]
+                    ),
+                    ok;
+                {error, {badarg, Reason}} ->
+                    error({invalid_config, Reason});
+                {error, Reason} ->
+                    error(Reason)
             end
     end.
 

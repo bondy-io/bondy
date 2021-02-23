@@ -57,11 +57,10 @@
         %% Third party
         clique,
         cowboy,
-        cuttlefish,
         erlang_term,
         hackney,
         jose,
-        jsx,
+        jsone,
         lager,
         msgpack,
         opencensus,

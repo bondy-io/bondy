@@ -806,7 +806,7 @@ challenge_extra(?WAMPCRA_AUTH, User, St0) ->
     %% The CHALLENGE.Details.challenge|string is a string the client needs to
     %% create a signature for.
     Microsecs = erlang:system_time(microsecond),
-    Challenge = jsx:encode(#{
+    Challenge = jsone:encode(#{
         authmethod => ?WAMPCRA_AUTH,
         authid => UserId,
         authprovider => <<"com.leapsight.bondy">>,

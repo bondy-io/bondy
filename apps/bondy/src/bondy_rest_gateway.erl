@@ -534,48 +534,50 @@ do_stop_listeners(admin) ->
 
 do_apply_config() ->
     case bondy_config:get([api_gateway, config_file]) of
-        undefined ->
-            ok;
-        FName ->
-            try
-                case jsx:consult(FName, [return_maps]) of
-                    [Spec] when is_map(Spec) ->
-                        ok = load_spec(Spec),
-                        rebuild_dispatch_tables();
-                    [[]] ->
-                        ok;
-                    [Specs] ->
-                        _ = lager:info(
-                            "Loading configuration file; filename=~p", [FName]
-                        ),
-                        _ = [load_spec(Spec) || Spec <- Specs],
-                        rebuild_dispatch_tables()
-                end
-            catch
-                ?EXCEPTION(error, badarg, _) ->
-                    case filelib:is_file(FName) of
-                        true ->
-                            %% _ = lager:error(
-                            %%     "Error while loading API specification; "
-                            %%     "path=~p, class=~p, reason=~p, stacktrace=~p",
-                            %%     [FName, Class, Reason, Stacktrace]
-                            %% ),
-                            error(invalid_specification_format);
-                        false ->
-                            _ = lager:info(
-                                "No configuration file found; path=~p",
-                                [FName]
-                            ),
-                            ok
-                    end;
-                ?EXCEPTION(Class, Reason, Stacktrace) ->
-                    _ = lager:error(
-                        "Error while loading API specification; "
-                        "filename=~p, class=~p, reason=~p, stacktrace=~p",
-                        [FName, Class, Reason, Stacktrace]
-                    ),
-                    ok
-            end
+        undefined -> ok;
+        FName -> do_apply_config(FName)
+    end.
+
+
+%% @private
+do_apply_config(FName) ->
+    try
+        case bondy_utils:json_consult(FName) of
+            {ok, Spec} when is_map(Spec) ->
+                ok = load_spec(Spec),
+                rebuild_dispatch_tables();
+            {ok, []} ->
+                ok;
+            {ok, Specs} when is_list(Specs) ->
+                _ = lager:info(
+                    "Loading configuration file; filename=~p", [FName]
+                ),
+                _ = [load_spec(Spec) || Spec <- Specs],
+                rebuild_dispatch_tables();
+            {error, enoent} ->
+                _ = lager:warning(
+                    "No configuration file found; path=~p",
+                    [FName]
+                ),
+                ok;
+            {error, {badarg, Reason}} ->
+                error({invalid_specification_format, Reason});
+            {error, Reason} ->
+                _ = lager:error(
+                    "Error while loading API specification; "
+                    "filename=~p, reason=~p",
+                    [FName, Reason]
+                ),
+                ok
+        end
+    catch
+        Class:EReason:Stacktrace ->
+            _ = lager:error(
+                "Error while loading API specification; "
+                "filename=~p, class=~p, reason=~p, stacktrace=~p",
+                [FName, Class, EReason, Stacktrace]
+            ),
+            ok
     end.
 
 
@@ -597,16 +599,27 @@ load_spec(Map) when is_map(Map) ->
     end;
 
 load_spec(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
-            load_spec(Spec)
-    catch
-        ?EXCEPTION(error, badarg, _) ->
+    case bondy_utils:json_consult(FName) of
+        {ok, Spec} when is_map(Spec) ->
+            ok = load_spec(Spec),
+            rebuild_dispatch_tables();
+        {ok, []} ->
+            ok;
+        {error, {badarg, Reason}} ->
             _ = lager:error(
-                "Error while loading API specification; reason=~p, filename=~p", [invalid_specification_format, FName]
+                "Error while loading API specification; reason=~p, filename=~p",
+                [Reason, FName]
+            ),
+            throw(invalid_specification_format);
+        {error, Reason} ->
+            _ = lager:error(
+                "Error while loading API specification; reason=~p, filename=~p",
+                [Reason, FName]
             ),
             throw(invalid_specification_format)
     end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -847,16 +860,23 @@ admin_base_routes() ->
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
     File = filename:join(Base, "specs/bondy_admin_api.json"),
-    try jsx:consult(File, [return_maps]) of
-        [Spec] ->
-            Spec
-    catch
-        ?EXCEPTION(error, badarg, _) ->
+    case bondy_utils:json_consult(File) of
+        {ok, Spec} ->
+            Spec;
+        {error, {badarg, Reason}} ->
             _ = lager:error(
                 "Error processing API Gateway Specification file. "
                 "File not found or invalid specification format, "
-                "type=error, reason=badarg, file_name=~p",
-                [File]),
+                "reason=~p, filename=~p",
+                [Reason, File]
+            ),
+            exit(badarg);
+        {error, Reason} ->
+            _ = lager:error(
+                "Error processing API Gateway Specification file. "
+                "reason=~p, filename=~p",
+                [Reason, File]
+            ),
             exit(badarg)
     end.
 
