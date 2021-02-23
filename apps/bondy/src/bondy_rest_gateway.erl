@@ -641,11 +641,11 @@ add(Id, Spec) when is_binary(Id), is_map(Spec) ->
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_listener({<<"http">>, Routes}) ->
-    {ok, _} = start_http(Routes, ?HTTP),
+    ok = start_http(Routes, ?HTTP),
     ok;
 
 start_listener({<<"https">>, Routes}) ->
-    {ok, _} = start_https(Routes, ?HTTPS),
+    ok = start_https(Routes, ?HTTPS),
     ok.
 
 
@@ -656,11 +656,11 @@ start_listener({<<"https">>, Routes}) ->
 -spec start_admin_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_admin_listener({<<"http">>, Routes}) ->
-    {ok, _} = start_http(Routes, ?ADMIN_HTTP),
+    ok = start_http(Routes, ?ADMIN_HTTP),
     ok;
 
 start_admin_listener({<<"https">>, Routes}) ->
-    {ok, _} = start_https(Routes, ?ADMIN_HTTPS),
+    ok = start_https(Routes, ?ADMIN_HTTPS),
     ok.
 
 
@@ -690,7 +690,18 @@ start_http(Routes, Name) ->
             cowboy_router, cowboy_handler
         ]
     },
-    cowboy:start_clear(Name, TranspOpts, ProtoOpts).
+    case cowboy:start_clear(Name, TranspOpts, ProtoOpts) of
+        {ok, _} ->
+            ok;
+        {error, eaddrinuse} ->
+            _ = lager:error(
+                "Cannot start admin HTTP listener, address is in use; reason=eaddrinuse, transport_opts=~p",
+                [TranspOpts]
+            ),
+            {error, eaddrinuse};
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -718,7 +729,18 @@ start_https(Routes, Name) ->
             cowboy_handler
         ]
     },
-    cowboy:start_tls(Name, TranspOpts, ProtoOpts).
+    case cowboy:start_tls(Name, TranspOpts, ProtoOpts) of
+        {ok, _} ->
+            ok;
+        {error, eaddrinuse} ->
+            _ = lager:error(
+                "Cannot start HTTPS listener, address is in use; reason=eaddrinuse, transport_opts=~p",
+                [TranspOpts]
+            ),
+            {error, eaddrinuse};
+        {error, _} = Error ->
+            Error
+    end.
 
 
 validate_spec(Map) ->
