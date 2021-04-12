@@ -143,7 +143,7 @@ start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
     %% the remaining listeners for clients to connect
     %% WAMP TCP listeners
-    ok = bondy_wamp_rs_connection_handler:start_listeners(),
+    ok = bondy_wamp_tcp:start_listeners(),
     %% WAMP Websocket and REST Gateway HTTP listeners
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_rest_gateway:start_listeners(),
@@ -178,7 +178,7 @@ stop(_State) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc A utility function that we use to extract the version name that is
+%% @doc A utility function we use to extract the version name that is
 %% injected by the bondy.app.src configuration file.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -194,7 +194,7 @@ setup_env(Args) ->
 
 %% @private
 setup_bondy_realm() ->
-    %% We use get/2 to force the creation of the bondy admin realm
+    %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
     _ = bondy_realm:get(?BONDY_REALM_URI),
     ok.
@@ -204,7 +204,8 @@ setup_bondy_realm() ->
 setup_partisan() ->
     %% We add the wamp_peer_messages channel to the configured channels
     Channels0 = partisan_config:get(channels, []),
-    ok = partisan_config:set(channels, [wamp_peer_messages | Channels0]),
+    Channels1 = [wamp_peer_messages | Channels0],
+    ok = partisan_config:set(channels, Channels1),
     bondy_config:set(wamp_peer_channel, wamp_peer_messages).
 
 
@@ -227,7 +228,7 @@ setup_event_handlers() ->
 %% @end
 %% -----------------------------------------------------------------------------
 setup_wamp_subscriptions() ->
-    %% TODO moved this into each app when we finish restructuring
+    %% TODO move this into each app when we finish restructuring
     Opts = #{match => <<"exact">>},
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
@@ -263,7 +264,8 @@ suspend_aae() ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = plum_db_config:set(aae_enabled, false),
             _ = lager:info(
-                "Temporarily disabled active anti-entropy (AAE) during initialisation"),
+                "Temporarily disabled active anti-entropy (AAE) during initialisation"
+            ),
             ok;
         false ->
             ok
@@ -298,7 +300,7 @@ stop_router_services() ->
         "Suspending TCP/TLS listeners. "
         "No new connections will be accepted."
     ),
-    ok = bondy_wamp_rs_connection_handler:suspend_listeners(),
+    ok = bondy_wamp_tcp:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
     _ = lager:info("Shutting down all WAMP sessions."),
@@ -318,7 +320,7 @@ stop_router_services() ->
 
     %% We force the TCP/TLS connections to stop
     _ = lager:info("Terminating all TCP/TLS connections"),
-    ok = bondy_wamp_rs_connection_handler:stop_listeners(),
+    ok = bondy_wamp_tcp:stop_listeners(),
 
     _ = lager:info("Shutdown finished"),
     ok.

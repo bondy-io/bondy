@@ -25,6 +25,15 @@ devrun:
 
 	cp examples/config/broker_bridge_config.json _build/dev/rel/bondy/etc/broker_bridge_config.json
 
-	tools/replace-env-vars -i config/dev/bondy.conf -o _build/dev/rel/bondy/etc/bondy.conf
+	priv/tools/replace-env-vars -i config/dev/bondy.conf -o _build/dev/rel/bondy/etc/bondy.conf
 
 	_build/dev/rel/bondy/bin/bondy console
+
+
+test1:
+	rebar3 as test1 release
+	_build/test1/rel/bondy/bin/bondy console
+
+prod:
+	rebar3 as prod release
+	_build/prod/rel/bondy/bin/bondy console

@@ -641,11 +641,11 @@ add(Id, Spec) when is_binary(Id), is_map(Spec) ->
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_listener({<<"http">>, Routes}) ->
-    ok = start_http(Routes, ?HTTP),
+    ok = maybe_start_http(Routes, ?HTTP),
     ok;
 
 start_listener({<<"https">>, Routes}) ->
-    ok = start_https(Routes, ?HTTPS),
+    ok = maybe_start_https(Routes, ?HTTPS),
     ok.
 
 
@@ -656,22 +656,31 @@ start_listener({<<"https">>, Routes}) ->
 -spec start_admin_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_admin_listener({<<"http">>, Routes}) ->
-    ok = start_http(Routes, ?ADMIN_HTTP),
+    ok = maybe_start_http(Routes, ?ADMIN_HTTP),
     ok;
 
 start_admin_listener({<<"https">>, Routes}) ->
-    ok = start_https(Routes, ?ADMIN_HTTPS),
+    ok = maybe_start_https(Routes, ?ADMIN_HTTPS),
     ok.
+
+
+maybe_start_http(Routes, Name) ->
+    case bondy_config:get([Name, enabled], true) of
+        true ->
+            start_http(Routes, Name);
+        false ->
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_http(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
+-spec start_http(list(), atom()) -> ok | {error, any()}.
 
 start_http(Routes, Name) ->
-    TranspOpts = transport_opts(Name),
+    {TransportOpts, _OtherTransportOpts}  = transport_opts(Name),
     ProtoOpts = #{
         env => #{
             bondy => #{
@@ -690,13 +699,13 @@ start_http(Routes, Name) ->
             cowboy_router, cowboy_handler
         ]
     },
-    case cowboy:start_clear(Name, TranspOpts, ProtoOpts) of
+    case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
             ok;
         {error, eaddrinuse} ->
             _ = lager:error(
-                "Cannot start admin HTTP listener, address is in use; reason=eaddrinuse, transport_opts=~p",
-                [TranspOpts]
+                "Cannot start HTTP listener, address is in use; name=~p,reason=eaddrinuse, transport_opts=~p",
+                [Name, TransportOpts]
             ),
             {error, eaddrinuse};
         {error, _} = Error ->
@@ -704,14 +713,22 @@ start_http(Routes, Name) ->
     end.
 
 
+maybe_start_https(Routes, Name) ->
+    case bondy_config:get([Name, enabled], true) of
+        true ->
+            start_https(Routes, Name);
+        false ->
+            ok
+    end.
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_https(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
+-spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
-    TranspOpts = transport_opts(Name),
+    {TransportOpts, _OtherTransportOpts} = transport_opts(Name),
     ProtoOpts = #{
         env => #{
             bondy => #{
@@ -729,13 +746,13 @@ start_https(Routes, Name) ->
             cowboy_handler
         ]
     },
-    case cowboy:start_tls(Name, TranspOpts, ProtoOpts) of
+    case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
             ok;
         {error, eaddrinuse} ->
             _ = lager:error(
-                "Cannot start HTTPS listener, address is in use; reason=eaddrinuse, transport_opts=~p",
-                [TranspOpts]
+                "Cannot start HTTPS listener, address is in use; name=~p, reason=eaddrinuse, transport_opts=~p",
+                [Name, TransportOpts]
             ),
             {error, eaddrinuse};
         {error, _} = Error ->
@@ -752,7 +769,7 @@ validate_spec(Map) ->
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+        _:Reason:_ ->
             {error, Reason}
     end.
 
@@ -781,7 +798,7 @@ load_dispatch_tables() ->
                 ),
                 {K, Ts, Parsed}
             catch
-                ?EXCEPTION(_, _, _) ->
+                _:_:_ ->
                     _ = delete(K),
                     _ = lager:warning(
                         "Removed invalid API Gateway specification from store"
@@ -955,16 +972,18 @@ transport_opts(Name) ->
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
 
     %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
+    {SocketOpts, OtherSocketOpts} = case lists:keyfind(socket_opts, 1, Opts) of
         {socket_opts, L} -> normalise(L);
         false -> []
     end,
 
-    [
-        {port, Port},
-        {num_acceptors, PoolSize},
-        {max_connections, MaxConnections} | SocketOpts
-    ].
+    TransportOpts = #{
+        num_acceptors => PoolSize,
+        max_connections =>  MaxConnections,
+        socket_opts => [{port, Port}, SocketOpts]
+    },
+    {TransportOpts, OtherSocketOpts}.
+
 
     %% #{
     %%     port => Port,
@@ -979,17 +998,28 @@ transport_opts(Name) ->
     %% }.
 
 
-normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
+normalise(Opts0) ->
+    Sndbuf = lists:keyfind(sndbuf, 1, Opts0),
+    Recbuf = lists:keyfind(recbuf, 1, Opts0),
+
+    Opts1 = case Sndbuf =/= false andalso Recbuf =/= false of
         true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            Buffer0 = lists:keyfind(buffer, 1, Opts0),
             Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+            lists:keystore(buffer, 1, Opts0, {buffer, Buffer1});
         false ->
-            Opts
-    end.
+            Opts0
+    end,
+
+    lists:splitwith(
+        fun
+            ({backlog, _}) -> false;
+            ({nodelay, _}) -> false;
+            ({keepalive, _}) -> false;
+            ({_, _}) -> true
+        end,
+        Opts1
+    ).
 
 
 

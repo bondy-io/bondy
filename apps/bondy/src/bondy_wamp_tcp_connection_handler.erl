@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_rs_connection_handler.erl -
+%%  bondy_wamp_tcp_connection_handler.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -21,15 +21,13 @@
 %% A ranch handler for the wamp protocol over either tcp or tls transports.
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_rs_connection_handler).
+-module(bondy_wamp_tcp_connection_handler).
 -behaviour(gen_server).
 -behaviour(ranch_protocol).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 
--define(TCP, wamp_tcp).
--define(TLS, wamp_tls).
 -define(TIMEOUT, ?PING_TIMEOUT * 2).
 -define(PING_TIMEOUT, 10000). % 10 secs
 
@@ -54,13 +52,6 @@
 
 
 -export([start_link/4]).
--export([start_listeners/0]).
--export([suspend_listeners/0]).
--export([resume_listeners/0]).
--export([stop_listeners/0]).
--export([connections/0]).
--export([tcp_connections/0]).
--export([tls_connections/0]).
 
 
 -export([init/1]).
@@ -81,74 +72,10 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Starts the tcp and tls raw socket listeners
-%% @end
-%% -----------------------------------------------------------------------------
--spec start_listeners() -> ok.
-
-start_listeners() ->
-    start_listeners([?TCP, ?TLS]).
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec stop_listeners() -> ok.
-
-stop_listeners() ->
-    catch ranch:stop_listener(?TCP),
-    catch ranch:stop_listener(?TLS),
-    ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec suspend_listeners() -> ok.
-
-suspend_listeners() ->
-    catch ranch:suspend_listener(?TCP),
-    catch ranch:suspend_listener(?TLS),
-    ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec resume_listeners() -> ok.
-
-resume_listeners() ->
-    catch ranch:resume_listener(?TCP),
-    catch ranch:resume_listener(?TLS),
-    ok.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Ref, Socket, Transport, Opts) ->
     {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-connections() ->
-    tls_connections() ++ tcp_connections().
-
-tls_connections() ->
-    ranch:procs(?TLS, connections).
-
-
-tcp_connections() ->
-    ranch:procs(?TCP, connections).
 
 
 
@@ -159,8 +86,6 @@ tcp_connections() ->
 
 
 init({Ref, Socket, Transport, _Opts0}) ->
-
-
     St0 = #state{
         start_time = erlang:monotonic_time(second),
         transport = Transport
@@ -171,7 +96,8 @@ init({Ref, Socket, Transport, _Opts0}) ->
     %% It expects the listener’s name as argument.
     ok = ranch:accept_ack(Ref),
 
-    Transport:setopts(Socket, [{active, active_n(St0)}, {packet, 0}]),
+    Opts = bondy_config:get([Ref, socket_opts], []),
+    Transport:setopts(Socket, [{active, active_n(St0)}, {packet, 0} | Opts]),
     {ok, Peername} = inet:peername(Socket),
 
     St1 = St0#state{
@@ -308,38 +234,10 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
-start_listeners([]) ->
-    ok;
-
-start_listeners([H|T]) ->
-    Opts = bondy_config:get(H),
-    case lists:keyfind(enabled, 1, Opts) of
-        {_, true} ->
-            {ok, _} = ranch:start_listener(
-                H,
-                ranch_mod(H),
-                transport_opts(H),
-                bondy_wamp_rs_connection_handler,
-                []
-            ),
-            %% _ = ranch:set_max_connections(H, MaxConns),
-            start_listeners(T);
-        {_, false} ->
-            start_listeners(T)
-    end.
-
-
-%% @private
-ranch_mod(?TCP) -> ranch_tcp;
-ranch_mod(?TLS) -> ranch_ssl.
 
 
 %% @private
@@ -441,8 +339,6 @@ handle_data(Data, St) ->
     {ok, St#state{buffer = Data}}.
 
 
-
-
 -spec handle_outbound(any(), state()) ->
     {noreply, state(), timeout()}
     | {stop, normal, state()}.
@@ -480,11 +376,6 @@ handle_outbound(M, St0) ->
                     {stop, Reason, St1}
             end
     end.
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
 
 
 %% @private
@@ -718,40 +609,6 @@ socket_closed(false, St) ->
 
 
 %% @private
-transport_opts(Name) ->
-    Opts = bondy_config:get(Name),
-    {_, Port} = lists:keyfind(port, 1, Opts),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
-
-    %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
-        {socket_opts, L} -> normalise(L);
-        false -> []
-    end,
-
-    [
-        {port, Port},
-        {num_acceptors, PoolSize},
-        {max_connections, MaxConnections} | normalise(SocketOpts)
-    ].
-
-
-%% @private
-normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
-        true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
-            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
-        false ->
-            Opts
-    end.
-
-
-
 active_n(#state{active_n = N}) ->
     %% TODO make this dynamic based on adaptive algorithm that takes into
     %% account:

@@ -357,19 +357,19 @@
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "api_gateway.https.buffer", "bondy.api_gateway_https.socket_opts.buffer", [
+{mapping, "admin_api.https.buffer", "bondy.admin_api_https.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
+{mapping, "admin_api.https.nodelay", "bondy.admin_api_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.socket_opts.backlog", [
+{mapping, "admin_api.https.backlog", "bondy.admin_api_https.socket_opts.backlog", [
   {datatype, integer},
   {default, 1024}
 ]}.
@@ -403,6 +403,11 @@
 %% =============================================================================
 
 
+{mapping, "api_gateway.http.enabled", "bondy.api_gateway_http.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
 %% @doc api_gateway.http.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
@@ -425,12 +430,6 @@
   {default, 500000}
 ]}.
 
-
-
-
-%% =============================================================================
-%% API GATEWAY
-%% =============================================================================
 
 %% -----------------------------------------------------------------------------
 %% @doc The filename of a the API Gatyeway JSON configuration file, which
@@ -496,6 +495,11 @@
 %% API GATEWAY TLS
 %% =============================================================================
 
+
+{mapping, "api_gateway.https.enabled", "bondy.api_gateway_https.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
 
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
