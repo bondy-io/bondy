@@ -22,7 +22,7 @@
 %%
 %% It is enabled by using the following options in the bondy.conf file
 %%
-%% ```shell
+%% ```bash
 %% cluster.peer_discovery_agent.type = bondy_peer_discovery_dns_agent
 %% cluster.peer_discovery_agent.config.service_name = my-service-name
 %% '''

@@ -21,11 +21,11 @@
 %% @doc
 %% An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 %% providing pattern matching capabilities including support for WAMP's
-%% version 2.0 match policies (exact, prefix and wilcard).
+%% version 2.0 match policies (exact, prefix and wildcard).
 %%
 %% The registry is stored both in memory (tuplespace) and disk (plum_db).
 %% Also a trie-based indexed is used for exact and prefix matching currently
-%% while support for wilcard matching is soon to be supported.
+%% while support for wildcard matching is soon to be supported.
 %%
 %% This module also provides a singleton server to perform the initialisation
 %% of the tuplespace from the plum_db copy.
@@ -1011,7 +1011,7 @@ trie_key(Entry, Policy) ->
             %% This will act as a pattern
             <<>>;
         _ when SessionId == <<>> ->
-            %% As we currently do not support wilcard matching in art, we turn
+            %% As we currently do not support wildcard matching in art, we turn
             %% this into a prefix matching query
             <<>>;
         Y ->
@@ -1022,7 +1022,7 @@ trie_key(Entry, Policy) ->
     %% art uses $\31 for separating the suffixes of the key so we cannot
     %% use it.
     %% WAMP reserves the use of $\s, $#, $. and $, for the broker,
-    %% so we could use them but MQTT uses $+ and $# for wilcard patterns
+    %% so we could use them but MQTT uses $+ and $# for wildcard patterns
     %% that rules out $#, so we use $,
     Key = <<RealmUri/binary, $,, Uri/binary>>,
 
