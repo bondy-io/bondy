@@ -55,7 +55,7 @@
  {<<"jobs">>,{pkg,<<"jobs">>,<<"0.9.0">>},0},
  {<<"jose">>,
   {git,"https://github.com/potatosalad/erlang-jose.git",
-       {ref,"e1dcdd98dd01656522fe8255b736ed4a7389be23"}},
+       {ref,"794ae1dcba69cecfb42354c7896d1414d2e9a364"}},
   0},
  {<<"jsone">>,{pkg,<<"jsone">>,<<"1.5.5">>},1},
  {<<"jsx">>,{pkg,<<"jsx">>,<<"2.9.0">>},0},
