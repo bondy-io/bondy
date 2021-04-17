@@ -34,6 +34,14 @@ test1:
 	rebar3 as test1 release
 	_build/test1/rel/bondy/bin/bondy console
 
+test2:
+	rebar3 as test2 release
+	_build/test2/rel/bondy/bin/bondy console
+
+test3:
+	rebar3 as test3 release
+	_build/test3/rel/bondy/bin/bondy console
+
 prod:
 	rebar3 as prod release
 	_build/prod/rel/bondy/bin/bondy console

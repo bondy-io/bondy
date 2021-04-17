@@ -1,8 +1,8 @@
 ## Name of the node
--name ${BONDY_ERL_NODENAME}
+-name bondy3@127.0.0.1
 
 ## Cookie for distributed erlang
--cookie ${BONDY_ERL_DISTRIBUTED_COOKIE}
+-setcookie bondy
 
 ## Explicit connections only.
 -connect_all false

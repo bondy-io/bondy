@@ -1,5 +1,5 @@
 ## Name of the node
--name bondy@127.0.0.1
+-name bondy1@127.0.0.1
 
 ## Cookie for distributed erlang
 -setcookie bondy
@@ -25,3 +25,5 @@
 +zdbbl 32768
 
 +sbwt none
+
+-args_file releases/{{release_version}}/generated/vm.generated.args
