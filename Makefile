@@ -30,18 +30,18 @@ devrun:
 	_build/dev/rel/bondy/bin/bondy console
 
 
-test1:
-	rebar3 as test1 release
-	_build/test1/rel/bondy/bin/bondy console
+node1:
+	${REBAR} as node1 release
+	_build/node1/rel/bondy/bin/bondy console
 
-test2:
-	rebar3 as test2 release
-	_build/test2/rel/bondy/bin/bondy console
+node2:
+	${REBAR} as node2 release
+	_build/node2/rel/bondy/bin/bondy console
 
-test3:
-	rebar3 as test3 release
-	_build/test3/rel/bondy/bin/bondy console
+node3:
+	${REBAR} as node3 release
+	_build/node3/rel/bondy/bin/bondy console
 
 prod:
-	rebar3 as prod release
+	${REBAR} as prod release
 	_build/prod/rel/bondy/bin/bondy console
