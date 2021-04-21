@@ -23,7 +23,6 @@
 <tr><td><a href="bondy_broker.md" class="module">bondy_broker</a></td></tr>
 <tr><td><a href="bondy_broker_wamp_handler.md" class="module">bondy_broker_wamp_handler</a></td></tr>
 <tr><td><a href="bondy_cache.md" class="module">bondy_cache</a></td></tr>
-<tr><td><a href="bondy_cli.md" class="module">bondy_cli</a></td></tr>
 <tr><td><a href="bondy_config.md" class="module">bondy_config</a></td></tr>
 <tr><td><a href="bondy_config_manager.md" class="module">bondy_config_manager</a></td></tr>
 <tr><td><a href="bondy_console_table.md" class="module">bondy_console_table</a></td></tr>

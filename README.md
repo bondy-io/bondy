@@ -15,13 +15,16 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 
 ## Quick Start
 
-Bondy requires Erlang/OTP 21.2 or higher and `rebar3`.
+### Requirements
 
-The fastest way to get going is to have the [rebar3_run](https://www.rebar3.org/docs/using-available-plugins#section-run-release) plugin.
+* [Erlang](https://www.erlang.org/) 23.3.1 or later
+* [Rebar3](https://rebar3.readme.io/)
+* [Libsodium](https://github.com/jedisct1/libsodium)
+
 
 ### Run a first node
 
-We will start a node named `bondy1@127.0.0.1` which uses the following variables from the config file (`config/test1/vars.config`).
+We will start a node named `bondy1@127.0.0.1` which uses the following variables from the config file (`config/test/node_1_vars.config`).
 
 |Transport|Description|Port|
 |---|---|---|
@@ -35,7 +38,7 @@ We will start a node named `bondy1@127.0.0.1` which uses the following variables
 
 
 ```bash
-rebar3 as test1 run
+make node1
 ```
 
 #### Create a Realm
@@ -64,7 +67,7 @@ curl -X "DELETE" "http://localhost:18081/realms/com.myrealm/security_enabled" \
 
 #### Run a second node
 
-We start a second node named `bondy2@127.0.0.1` which uses the following variables from the config file (`config/test2/vars.config`).
+We start a second node named `bondy2@127.0.0.1` which uses the following variables from the config file (`config/test/node_2_vars.config`).
 
 |Transport|Description|Port|
 |:---|:---|:---|
@@ -77,10 +80,10 @@ We start a second node named `bondy2@127.0.0.1` which uses the following variabl
 |TLS|WAMP Raw Socket|18185|
 
 ```bash
-rebar3 as test2 run
+make node2
 ```
 
-#### Connect the nodes
+#### Connect the two nodes
 
 In `bondy1@127.0.0.1` erlang's shell type:
 

@@ -29,6 +29,9 @@ devrun:
 
 	_build/dev/rel/bondy/bin/bondy console
 
+prodrun:
+	${REBAR} as prod release
+	_build/prod/rel/bondy/bin/bondy console
 
 node1:
 	${REBAR} as node1 release
@@ -42,6 +45,4 @@ node3:
 	${REBAR} as node3 release
 	_build/node3/rel/bondy/bin/bondy console
 
-prod:
-	${REBAR} as prod release
-	_build/prod/rel/bondy/bin/bondy console
+

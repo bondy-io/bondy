@@ -83,7 +83,6 @@ start(_Type, Args) ->
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
             ok = bondy_router_worker:start_pool(),
-            ok = bondy_cli:register(),
             ok = setup_bondy_realm(),
             ok = setup_event_handlers(),
             ok = setup_wamp_subscriptions(),

@@ -55,11 +55,11 @@
         tools,
         runtime_tools,
         %% Third party
-        clique,
         cowboy,
         erlang_term,
         hackney,
         jose,
+        enacl,
         jsone,
         lager,
         msgpack,
