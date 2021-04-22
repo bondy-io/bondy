@@ -179,7 +179,7 @@ maybe_encode(bert, Term) ->
 maybe_encode(erl, Term) ->
    binary_to_term(Term);
 
-maybe_encode(json, Term) ->
+maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be pasing the metadada so that we know in
     %% which encoding the Term is
     case jsone:try_decode(Term) of
@@ -189,7 +189,10 @@ maybe_encode(json, Term) ->
             jsone:encode(Term, [undefined_as_null, {object_key_type, string}])
     end;
 
- maybe_encode(msgpack, Term) ->
+maybe_encode(json, Term) ->
+    jsone:encode(Term, [undefined_as_null, {object_key_type, string}]);
+
+maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
      Opts = [{map_format, map}, {pack_str, from_binary}],
      msgpack:pack(Term, Opts);
