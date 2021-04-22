@@ -276,7 +276,7 @@
 -spec apply_config() -> ok | no_return().
 
 apply_config() ->
-    case bondy_config:get([security, config_file]) of
+    case bondy_config:get([security, config_file], undefined) of
         undefined ->
             ok;
         FName ->

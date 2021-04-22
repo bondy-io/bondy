@@ -22,19 +22,27 @@
 -define(RESET, "\e[0m").
 -define(NC, "\033[0m").
 -define(GREEN, "\033[0;32m").
+-define(YELLOW, "\033[0;33m").
 -define(RED, "\033[0;31m").
 
 -define(LOG_ERROR(Reason, Args),
     io:format(
-        "~s===> [replace_os_vars] Error: " ++ Reason ++ "~s~n",
+        "~s===> [error] replace-env-vars " ++ Reason ++ "~s~n",
         [?RED | Args] ++ [?RESET]
     )
 ).
 
 -define(LOG_INFO(Reason, Args),
     io:format(
-        "~s===> [replace_os_vars] " ++ Reason ++ "~s~n",
+        "~s===> [info] replace-env-vars " ++ Reason ++ "~s~n",
         [?NC | Args] ++ [?RESET]
+    )
+).
+
+-define(LOG_WARNING(Reason, Args),
+    io:format(
+        "~s===> [info] replace-env-vars " ++ Reason ++ "~s~n",
+        [?YELLOW | Args] ++ [?RESET]
     )
 ).
 
@@ -42,8 +50,14 @@
 
 
 main([Dir]) ->
-    Files = files(Dir),
-    replace(Dir, Files);
+    ?LOG_WARNING("Searching for template files in ~p", [Dir]),
+
+    case files(Dir) of
+        [] ->
+            ?LOG_INFO("No template files found in ~p", [Dir]);
+        Files ->
+            replace(Dir, Files)
+    end;
 
 main([]) ->
     ?LOG_ERROR("Missing directory", []);

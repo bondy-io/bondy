@@ -533,7 +533,7 @@ do_stop_listeners(admin) ->
 -spec do_apply_config() -> ok | no_return().
 
 do_apply_config() ->
-    case bondy_config:get([api_gateway, config_file]) of
+    case bondy_config:get([api_gateway, config_file], undefined) of
         undefined -> ok;
         FName -> do_apply_config(FName)
     end.

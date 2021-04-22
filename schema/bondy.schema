@@ -78,8 +78,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.config_file", "bondy.security.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/security_config.json"}
+  {datatype, file}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -438,8 +437,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/api_gateway_config.json"}
+  {datatype, file}
 ]}.
 
 

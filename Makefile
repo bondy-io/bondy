@@ -1,5 +1,7 @@
 
-REBAR            = rebar3
+REBAR = rebar3
+BONDY_ERL_NODENAME ?= bondy@127.0.0.1
+BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
 
 .PHONY: genvars compile test xref dialyzer
 
@@ -25,13 +27,11 @@ devrun:
 
 	cp examples/config/broker_bridge_config.json _build/dev/rel/bondy/etc/broker_bridge_config.json
 
-	priv/tools/replace-env-vars -i config/dev/bondy.conf -o _build/dev/rel/bondy/etc/bondy.conf
-
 	_build/dev/rel/bondy/bin/bondy console
 
 prodrun:
 	${REBAR} as prod release
-	_build/prod/rel/bondy/bin/bondy console
+	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
 
 node1:
 	${REBAR} as node1 release

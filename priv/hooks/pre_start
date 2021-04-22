@@ -6,9 +6,12 @@ NC='\033[0m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
+# This Rebar3 variable will be reaplced during release creation provided there
+# is an overlay template action copying the file to the release.
+BONDY_ETC_DIR={{platform_etc_dir}}
+BONDY_RELEASE_DIR=./releases/{{release_version}}/
 
-echo "${GREEN}===> Running Bondy pre_start hook"
-echo "${YELLOW}===> Searching for template files in 'bondy/etc/'"
-relx_escript ./bin/replace-env-vars ./etc/
-echo "${YELLOW}===> Searching for template files in 'bondy/releases/{{release_version}}'"
-relx_escript ./bin/replace-env-vars ./releases/{{release_version}}/
+echo "${GREEN}===> Running Bondy Rebar3 pre_start hook"
+relx_escript ./bin/validate-config ${BONDY_ETC_DIR} ${BONDY_RELEASE_DIR}
+relx_escript ./bin/replace-env-vars ${BONDY_ETC_DIR}
+relx_escript ./bin/replace-env-vars ${BONDY_RELEASE_DIR}
