@@ -364,21 +364,32 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 init_evictor() ->
+
     Decr = fun(Realm, Mssg) ->
         decr_counters(Realm, 1, bondy_retained_message:size(Mssg))
     end,
     Fun = fun() ->
         N = bondy_retained_message:evict_expired('_', Decr),
-        _ = lager:info("Evicted ~p retained messages", [N]),
+        _ = case N > 0 of
+            true ->
+                _ = lager:info("Evicted ~p retained messages", [N]),
+                ok;
+            false ->
+                ok
+        end,
         %% We sleep for 60 secs (jobs standard min rate is 1/sec)
         timer:sleep(60 * 1000)
     end,
-    jobs:add_queue(bondy_retained_message_eviction, [
+
+    ok = jobs:add_queue(bondy_retained_message_eviction, [
         {producer, Fun},
         {regulators, [
             {counter, [{limit, 1}]}
         ]}
-    ]).
+    ]),
+
+    _ = lager:info("Retained message evictor initialised"),
+    ok.
 
 
 %% @private

@@ -1,0 +1,127 @@
+
+%% =============================================================================
+%%  validate-config - Validates the necessary configuration files for Bondy
+%%  are present.
+%%
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%  http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+
+-define(RESET, "\e[0m").
+-define(NC, "\033[0m").
+-define(GREEN, "\033[0;32m").
+-define(YELLOW, "\033[0;33m").
+-define(RED, "\033[0;31m").
+
+-define(LOG_ERROR(Reason, Args),
+    io:format(
+        "~s===> [error] validate-config" ++ Reason ++ "~s~n",
+        [?RED | Args] ++ [?RESET]
+    )
+).
+
+-define(LOG_INFO(Reason, Args),
+    io:format(
+        "~s===> [info] validate-config " ++ Reason ++ "~s~n",
+        [?NC | Args] ++ [?RESET]
+    )
+).
+
+-define(LOG_WARNING(Reason, Args),
+    io:format(
+        "~s===> [info] validate-config " ++ Reason ++ "~s~n",
+        [?YELLOW | Args] ++ [?RESET]
+    )
+).
+
+
+-export([main/1]).
+
+
+main([EtcDir, _ReleaseDir]) ->
+    ?LOG_WARNING("Validating configuration files", []),
+    Etc = sets:from_list(files(EtcDir)),
+    Bondy = sets:from_list(["bondy.conf", "bondy.conf.template"]),
+
+    BondyCheck = case sets:to_list(sets:intersection(Bondy, Etc)) of
+        [] ->
+            ?LOG_INFO(
+                "The Bondy configuration file was not found. Bondy will use the default configuration. Otherwise please make sure a \"bondy.conf\" file (or \"bondy.conf.template\" in case environment variables replacement is required) is present in the ~p directory",
+                [EtcDir]
+            ),
+            true;
+        [B1] ->
+            ?LOG_INFO(
+                "Bondy configuration file ~p was found in ~p directory",
+                [B1, EtcDir]
+            ),
+            true;
+        [B1, B2] ->
+            ?LOG_ERROR(
+                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Please provide only one of them i.e. use \"bondy.conf.template\" in case environment variables replacement is required).",
+                [B1, B2, EtcDir]
+            ),
+            false
+    end,
+
+    % Etc = sets:from_list(files(EtcDir)),
+    % Erlang = sets:from_list(["vm.args", "vm.args.template"]),
+    % _ErlangCheck = case sets:to_list(sets:intersection(Erlang, All)) of
+    %     [] ->
+    %         ?LOG_ERROR(
+    %             "No Erlang VM arguments file was found, please make sure your \"vm.args\" file (or \"vm.args.template\" in case environment variables replacement is required) is present in the ~p directory. An Erlang VM Arguments is required with at least the -name and -cookie parameters.",
+    %             [Dir]
+    %         ),
+    %         false;
+    %     [E1] ->
+    %         ?LOG_INFO(
+    %             "Erlang VM arguments file ~p was found in ~p directory",
+    %             [E1 , Dir]
+    %         ),
+    %         true;
+    %     [E1, E2] ->
+    %         ?LOG_ERROR(
+    %             "Both Erlang VM arguments file variants (~p and ~p) were found in ~p directory. Please provide only one of them i.e. use \"vm.args.template\" in case environment variables replacement is required).",
+    %             [E1, E2, Dir]
+    %         ),
+    %         false
+    % end,
+    BondyCheck orelse halt(1),
+    %% ErlangCheck orelse halt(1),
+
+    ok;
+
+main(Args) ->
+    ?LOG_ERROR(
+        "Invalid arguments ~p.",
+        [Args]
+    ),
+    halt(1).
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+files(Dir) ->
+    filelib:wildcard("*.*", Dir).
+
+
+
+

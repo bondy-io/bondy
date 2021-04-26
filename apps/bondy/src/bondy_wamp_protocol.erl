@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_protocol.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -806,7 +806,7 @@ challenge_extra(?WAMPCRA_AUTH, User, St0) ->
     %% The CHALLENGE.Details.challenge|string is a string the client needs to
     %% create a signature for.
     Microsecs = erlang:system_time(microsecond),
-    Challenge = jsx:encode(#{
+    Challenge = jsone:encode(#{
         authmethod => ?WAMPCRA_AUTH,
         authid => UserId,
         authprovider => <<"com.leapsight.bondy">>,
@@ -843,7 +843,7 @@ challenge_extra(?WAMPCRA_AUTH, User, St0) ->
     Millis = erlang:convert_time_unit(Microsecs, microsecond, millisecond),
     %% We compute the signature to compare it to what the client will send
     %% will send on the AUTHENTICATE.signature which is base64-encoded.
-    Signature = base64:encode(crypto:hmac(sha256, Hash, Challenge)),
+    Signature = base64:encode(crypto:mac(hmac, sha256, Hash, Challenge)),
     St1 = St0#wamp_state{auth_timestamp = Millis, auth_signature = Signature},
 
     {ok, Extra, St1};

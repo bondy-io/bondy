@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_realm.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -270,37 +270,38 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Loads a security config file if defined and applies its definitions.
+%% @doc Loads a security config file from
+%% `bondy_config:get([security, config_file])` if defined and applies its
+%% definitions.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_config() -> ok | no_return().
 
 apply_config() ->
-    case bondy_config:get([security, config_file]) of
+    case bondy_config:get([security, config_file], undefined) of
         undefined ->
             ok;
         FName ->
-            try jsx:consult(FName, [return_maps]) of
-                [Realms] ->
+            case bondy_utils:json_consult(FName) of
+                {ok, Realms} ->
                     _ = lager:info(
-                        "Loading configuration file; path=~p", [FName]),
+                        "Loading configuration file; path=~p", [FName]
+                    ),
                     %% We add the realm and allow an update if it already
                     %% exists in the database, by setting IsStrict
                     %% argument to false
                     _ = [apply_config(Realm) || Realm <- Realms],
-                    ok
-            catch
-                ?EXCEPTION(error, badarg, _) ->
-                    case filelib:is_file(FName) of
-                        true ->
-                            error(invalid_config);
-                        false ->
-                            _ = lager:warning(
-                                "No configuration file found; path=~p",
-                                [FName]
-                            ),
-                            ok
-                    end
+                    ok;
+                {error, enoent} ->
+                    _ = lager:warning(
+                        "No configuration file found; path=~p",
+                        [FName]
+                    ),
+                    ok;
+                {error, {badarg, Reason}} ->
+                    error({invalid_config, Reason});
+                {error, Reason} ->
+                    error(Reason)
             end
     end.
 
@@ -646,8 +647,6 @@ apply_config(Map0) ->
 
 %% @private
 apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
-    GroupNames = [maps:get(<<"name">>, G) || G <- Groups],
-    _ = lager:debug("Adding; realm=~p, groups=~p", [Uri, GroupNames]),
     _ = [
         ok = maybe_error(bondy_security_group:add_or_update(Uri, Group))
         || Group <- Groups
@@ -655,8 +654,6 @@ apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
     ok;
 
 apply_config(users, #{<<"uri">> := Uri, <<"users">> := Users}) ->
-    Usernames = [maps:get(<<"username">>, U) || U <- Users],
-    _ = lager:debug("Adding users; realm=~p, users=~p", [Uri, Usernames]),
     _ = [
         ok = maybe_error(bondy_security_user:add_or_update(Uri, User))
         || User <- Users

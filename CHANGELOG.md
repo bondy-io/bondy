@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## 0.9.0
+### Added
+
+* `bondy.subscription.list` procedure
+* First verstion of Retained messages
+* Added a non-standard WAMP Authentication method `oauth2` based on OAuth2 JWT Tokens
+    - Is equivalent to WAMP-Ticket authentication method but expects the secret to be a JWT produced by Bondy OAuth2
+    - `authid` property value needs to be present and needs to match the JWT’s `sub` property value
+* Added Bondy specific load balancing strategies through the standard  `REGISTER.Options.invoke` option:
+    - queue_least_loaded
+    - quede_least_loaded_sample
+    - jump_consistent_hash (MUST not be used as this is experimental and the implementation will change with upcoming definitions from WAMP Specification)
+* Aded support for WS compression
+    - now supports permessage-deflate websocket extension and enabled by default
+    - added configuration option `wamp.websocket.compression_enabled`
+    - added configuration option `wamp.websocket.deflate.level`
+    - added configuration option `wamp.websocket.deflate.mem_level`
+    - added configuration option `wamp.websocket.deflate.strategy`
+    - added configuration option `wamp.websocket.deflate.server_context_takeover`
+    - added configuration option `wamp.websocket.deflate.client_max_window_bits`
+    - added configuration option `wamp.websocket.idle_timeout`
+    - added configuration option `bondy.wamp_websocket.max_frame_size`
+    - Not working with Mozilla as it seems to be sending a corrupted PING message
+
+### Fixed
+
+* Minor WAMP protocol fixes
+* Several bug fixes during removal of an API Specification
+    - Removal did not rebuilt the web server dispatch tables and thus the API removed was still active until reboot.
+* Cleanup of session data when web server processes crash abnormally
+
+### Changed
+* Upgraded to Erlang 23
+
 ## 0.8.8
 ### Added
 
@@ -10,7 +44,7 @@
 
 ### Fixed
 
-* API Gateway 
+* API Gateway
     * Minor fixes to enhance error handling and logging
     * Fixed a case where an invalid API Specification can crash the gateway process during startup
 * Configuration

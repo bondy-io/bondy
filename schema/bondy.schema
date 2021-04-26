@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.schema - Bondy configuration schema for Cuttlefish
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -78,8 +78,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.config_file", "bondy.security.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/security_config.json"}
+  {datatype, file}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -236,7 +235,7 @@
 %% @doc http.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
-  {default, "{{admin_api_http_port}}" },
+  {default, 18081},
   {datatype, integer},
   hidden
 ]}.
@@ -312,7 +311,7 @@
 %% @doc https.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
-  {default, "{{admin_api_https_port}}" },
+  {default, 18083},
   {datatype, integer},
   hidden
 ]}.
@@ -357,19 +356,19 @@
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "api_gateway.https.buffer", "bondy.api_gateway_https.socket_opts.buffer", [
+{mapping, "admin_api.https.buffer", "bondy.admin_api_https.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
+{mapping, "admin_api.https.nodelay", "bondy.admin_api_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.socket_opts.backlog", [
+{mapping, "admin_api.https.backlog", "bondy.admin_api_https.socket_opts.backlog", [
   {datatype, integer},
   {default, 1024}
 ]}.
@@ -403,10 +402,15 @@
 %% =============================================================================
 
 
+{mapping, "api_gateway.http.enabled", "bondy.api_gateway_http.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
 %% @doc api_gateway.http.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
-  {default, "{{api_gateway_http_port}}"},
+  {default, 18080},
   {datatype, integer},
   hidden
 ]}.
@@ -426,12 +430,6 @@
 ]}.
 
 
-
-
-%% =============================================================================
-%% API GATEWAY
-%% =============================================================================
-
 %% -----------------------------------------------------------------------------
 %% @doc The filename of a the API Gatyeway JSON configuration file, which
 %% allows you to statically configure the API GAteway with a list of API
@@ -439,8 +437,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/api_gateway_config.json"}
+  {datatype, file}
 ]}.
 
 
@@ -497,10 +494,15 @@
 %% =============================================================================
 
 
+{mapping, "api_gateway.https.enabled", "bondy.api_gateway_https.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
-  {default, "{{api_gateway_https_port}}" },
+  {default, 18083},
   {datatype, integer},
   hidden
 ]}.
@@ -787,6 +789,53 @@
 
 
 
+%% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
+%% ("erl") and BERT ("bert") serializations.
+%%
+%% The WAMP v2 Raw Socket protocol defines a code (integer from 1..15) for each
+%% serializer, and specifies json and msgpack to be assigned to slots 1 and 2
+%% respectively, leaving the remaining 13 slots for future assignment.
+%%
+%% Because some clients might be harcoded to expect certain serializers in
+%% certain slots, we need to make the slots asigned to "erl" and "bert"
+%% configurable.
+%%
+%% For example, in order to assign the erl serializer to a slot 15 and bert
+%% to slot 4 we write the following configuration line:
+%%
+%% wamp.rawsocket.serializers.erl = 15
+%% wamp.rawsocket.serializers.bert = 4
+{mapping,
+  "wamp.rawsocket.serializers.erl", "bondy.wamp_rawsocket.serializers", [
+  {datatype, integer},
+  {default, 15}
+]}.
+
+{mapping,
+  "wamp.rawsocket.serializers.bert", "bondy.wamp_rawsocket.serializers", [
+  {datatype, integer},
+  {default, 4}
+]}.
+
+{translation,
+"bondy.wamp_rawsocket.serializers",
+fun(Conf0) ->
+    Conf1 = cuttlefish_variable:filter_by_prefix(
+      "wamp.tcp.serializers", Conf0),
+    Fun = fun ({[_, _, _, Key], Value}, Acc) ->
+      case lists:member(Key, ["erl", "bert"]) of
+        true when is_integer(Value) andalso (Value >= 3 orelse Value =< 15) ->
+          [{Value, list_to_atom(Key)} | Acc];
+        true ->
+          cuttlefish:invalid("value should be an integer between 3 and 15");
+        false ->
+          cuttlefish:invalid("key should be one of 'erl' or 'bert'")
+      end
+    end,
+    lists:foldl(Fun, [], Conf1)
+end}.
+
+
 {mapping, "wamp.tcp.enabled", "bondy.wamp_tcp.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
@@ -795,7 +844,7 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tcp.port", "bondy.wamp_tcp.port", [
-  {default, "{{wamp_tcp_port}}"},
+  {default, 18082},
   {datatype, integer}
 ]}.
 
@@ -857,49 +906,6 @@
 ]}.
 
 
-%% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
-%% ("erl") and BERT ("bert") serializations.
-%%
-%% The WAMP v2 Raw Socket protocol defines a code (integer from 1..15) for each
-%% serializer, and specifies json and msgpack to be assigned to slots 1 and 2
-%% respectively, leaving the remaining 13 slots for future assignment.
-%%
-%% Because some clients might be harcoded to expect certain serializers in
-%% certain slots, we need to make the slots asigned to "erl" and "bert"
-%% configurable.
-%%
-%% For example, in order to assign the erl serializer to a slot 15 and bert
-%% to slot 4 we write the following configuration line:
-%%
-%% wamp.tcp.serializers.erl = 15
-%% wamp.tcp.serializers.bert = 4
-{mapping, "wamp.tcp.serializers.erl", "bondy.wamp_tcp.serializers", [
-  {datatype, integer},
-  {default, 15}
-]}.
-
-{mapping, "wamp.tcp.serializers.bert", "bondy.wamp_tcp.serializers", [
-  {datatype, integer},
-  {default, 4}
-]}.
-
-{translation,
-"bondy.wamp_tcp.serializers",
-fun(Conf0) ->
-    Conf1 = cuttlefish_variable:filter_by_prefix(
-      "wamp.tcp.serializers", Conf0),
-    Fun = fun ({[_, _, _, Key], Value}, Acc) ->
-      case lists:member(Key, ["erl", "bert"]) of
-        true when is_integer(Value) andalso (Value >= 3 orelse Value =< 15) ->
-          [{Value, list_to_atom(Key)} | Acc];
-        true ->
-          cuttlefish:invalid("value should be an integer between 3 and 15");
-        false ->
-          cuttlefish:invalid("key should be one of 'erl' or 'bert'")
-      end
-    end,
-    lists:foldl(Fun, [], Conf1)
-end}.
 
 
 
@@ -920,7 +926,7 @@ end}.
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tls.port", "bondy.wamp_tls.port", [
-  {default, "{{wamp_tls_port}}"},
+  {default, 18085},
   {datatype, integer}
 ]}.
 
@@ -1019,7 +1025,7 @@ end}.
 
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
-  {default, "{{peer_port}}"},
+  {default, 18086},
   {datatype, integer}
 ]}.
 
@@ -1129,7 +1135,7 @@ end}.
 %% @doc Platform-specific installation paths (substituted by rebar)
 {mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
   {datatype, directory},
-  {default, "{{platform_bin_dir}}"},
+  {default, "./bin"},
   hidden
 ]}.
 
@@ -1137,7 +1143,7 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
   {datatype, directory},
-  {default, "{{platform_lib_dir}}"},
+  {default, "./lib"},
   hidden
 ]}.
 
@@ -1145,25 +1151,25 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_data_dir", "bondy.platform_data_dir", [
   {datatype, directory},
-  {default, "{{platform_data_dir}}"}
+  {default, "./data"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_tmp_dir", "bondy.platform_tmp_dir", [
   {datatype, directory},
-  {default, "{{platform_tmp_dir}}"}
+  {default, "./tmp"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
   {datatype, directory},
-  {default, "{{platform_etc_dir}}"}
+  {default, "./etc"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_log_dir", "bondy.platform_log_dir", [
   {datatype, directory},
-  {default, "{{platform_log_dir}}"}
+  {default, "./log"}
 ]}.
 
 

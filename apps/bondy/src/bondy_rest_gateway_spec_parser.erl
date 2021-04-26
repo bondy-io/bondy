@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_rest_gateway_spec_parser.erl - parses the Bondy API Specification file
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -977,21 +977,21 @@ end).
 %% @end
 %% -----------------------------------------------------------------------------
 -spec from_file(file:filename()) -> {ok, any()} | {error, any()}.
+
 from_file(Filename) ->
-    try jsx:consult(Filename, [return_maps]) of
-        [Spec] when is_map(Spec) ->
+    case bondy_utils:json_consult(Filename) of
+        {ok, Spec} when is_map(Spec) ->
             {ok, parse(Spec, get_context_proxy())};
-        _ ->
-            {error, invalid_specification_format}
-    catch
-        ?EXCEPTION(error, badarg, _) ->
+        {ok, _} ->
+            {error, invalid_specification_format};
+        {error, {badarg, _}} ->
+            {error, invalid_specification_format};
+        {error, Reason} ->
             _ = lager:error(
                 "Error processing API Gateway Specification file; "
-                "reason=~p, file_name=~p",
-                [invalid_specification_format, Filename]
+                "reason=~p, filename=~p",
+                [Reason, Filename]
             ),
-            {error, invalid_specification_format};
-        ?EXCEPTION(error, Reason, _) ->
             {error, Reason}
     end.
 

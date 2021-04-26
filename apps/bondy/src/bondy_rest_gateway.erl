@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_rest_gateway.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -533,49 +533,51 @@ do_stop_listeners(admin) ->
 -spec do_apply_config() -> ok | no_return().
 
 do_apply_config() ->
-    case bondy_config:get([api_gateway, config_file]) of
-        undefined ->
-            ok;
-        FName ->
-            try
-                case jsx:consult(FName, [return_maps]) of
-                    [Spec] when is_map(Spec) ->
-                        ok = load_spec(Spec),
-                        rebuild_dispatch_tables();
-                    [[]] ->
-                        ok;
-                    [Specs] ->
-                        _ = lager:info(
-                            "Loading configuration file; filename=~p", [FName]
-                        ),
-                        _ = [load_spec(Spec) || Spec <- Specs],
-                        rebuild_dispatch_tables()
-                end
-            catch
-                ?EXCEPTION(error, badarg, _) ->
-                    case filelib:is_file(FName) of
-                        true ->
-                            %% _ = lager:error(
-                            %%     "Error while loading API specification; "
-                            %%     "path=~p, class=~p, reason=~p, stacktrace=~p",
-                            %%     [FName, Class, Reason, Stacktrace]
-                            %% ),
-                            error(invalid_specification_format);
-                        false ->
-                            _ = lager:info(
-                                "No configuration file found; path=~p",
-                                [FName]
-                            ),
-                            ok
-                    end;
-                ?EXCEPTION(Class, Reason, Stacktrace) ->
-                    _ = lager:error(
-                        "Error while loading API specification; "
-                        "filename=~p, class=~p, reason=~p, stacktrace=~p",
-                        [FName, Class, Reason, Stacktrace]
-                    ),
-                    ok
-            end
+    case bondy_config:get([api_gateway, config_file], undefined) of
+        undefined -> ok;
+        FName -> do_apply_config(FName)
+    end.
+
+
+%% @private
+do_apply_config(FName) ->
+    try
+        case bondy_utils:json_consult(FName) of
+            {ok, Spec} when is_map(Spec) ->
+                ok = load_spec(Spec),
+                rebuild_dispatch_tables();
+            {ok, []} ->
+                ok;
+            {ok, Specs} when is_list(Specs) ->
+                _ = lager:info(
+                    "Loading configuration file; filename=~p", [FName]
+                ),
+                _ = [load_spec(Spec) || Spec <- Specs],
+                rebuild_dispatch_tables();
+            {error, enoent} ->
+                _ = lager:warning(
+                    "No configuration file found; path=~p",
+                    [FName]
+                ),
+                ok;
+            {error, {badarg, Reason}} ->
+                error({invalid_specification_format, Reason});
+            {error, Reason} ->
+                _ = lager:error(
+                    "Error while loading API specification; "
+                    "filename=~p, reason=~p",
+                    [FName, Reason]
+                ),
+                ok
+        end
+    catch
+        Class:EReason:Stacktrace ->
+            _ = lager:error(
+                "Error while loading API specification; "
+                "filename=~p, class=~p, reason=~p, stacktrace=~p",
+                [FName, Class, EReason, Stacktrace]
+            ),
+            ok
     end.
 
 
@@ -597,16 +599,27 @@ load_spec(Map) when is_map(Map) ->
     end;
 
 load_spec(FName) ->
-    try jsx:consult(FName, [return_maps]) of
-        [Spec] ->
-            load_spec(Spec)
-    catch
-        ?EXCEPTION(error, badarg, _) ->
+    case bondy_utils:json_consult(FName) of
+        {ok, Spec} when is_map(Spec) ->
+            ok = load_spec(Spec),
+            rebuild_dispatch_tables();
+        {ok, []} ->
+            ok;
+        {error, {badarg, Reason}} ->
             _ = lager:error(
-                "Error while loading API specification; reason=~p, filename=~p", [invalid_specification_format, FName]
+                "Error while loading API specification; reason=~p, filename=~p",
+                [Reason, FName]
+            ),
+            throw(invalid_specification_format);
+        {error, Reason} ->
+            _ = lager:error(
+                "Error while loading API specification; reason=~p, filename=~p",
+                [Reason, FName]
             ),
             throw(invalid_specification_format)
     end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -628,11 +641,11 @@ add(Id, Spec) when is_binary(Id), is_map(Spec) ->
 -spec start_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_listener({<<"http">>, Routes}) ->
-    {ok, _} = start_http(Routes, ?HTTP),
+    ok = maybe_start_http(Routes, ?HTTP),
     ok;
 
 start_listener({<<"https">>, Routes}) ->
-    {ok, _} = start_https(Routes, ?HTTPS),
+    ok = maybe_start_https(Routes, ?HTTPS),
     ok.
 
 
@@ -643,22 +656,31 @@ start_listener({<<"https">>, Routes}) ->
 -spec start_admin_listener({Scheme :: binary(), [tuple()]}) -> ok.
 
 start_admin_listener({<<"http">>, Routes}) ->
-    {ok, _} = start_http(Routes, ?ADMIN_HTTP),
+    ok = maybe_start_http(Routes, ?ADMIN_HTTP),
     ok;
 
 start_admin_listener({<<"https">>, Routes}) ->
-    {ok, _} = start_https(Routes, ?ADMIN_HTTPS),
+    ok = maybe_start_https(Routes, ?ADMIN_HTTPS),
     ok.
+
+
+maybe_start_http(Routes, Name) ->
+    case bondy_config:get([Name, enabled], true) of
+        true ->
+            start_http(Routes, Name);
+        false ->
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_http(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
+-spec start_http(list(), atom()) -> ok | {error, any()}.
 
 start_http(Routes, Name) ->
-    TranspOpts = transport_opts(Name),
+    {TransportOpts, _OtherTransportOpts}  = transport_opts(Name),
     ProtoOpts = #{
         env => #{
             bondy => #{
@@ -677,17 +699,36 @@ start_http(Routes, Name) ->
             cowboy_router, cowboy_handler
         ]
     },
-    cowboy:start_clear(Name, TranspOpts, ProtoOpts).
+    case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
+        {ok, _} ->
+            ok;
+        {error, eaddrinuse} ->
+            _ = lager:error(
+                "Cannot start HTTP listener, address is in use; name=~p,reason=eaddrinuse, transport_opts=~p",
+                [Name, TransportOpts]
+            ),
+            {error, eaddrinuse};
+        {error, _} = Error ->
+            Error
+    end.
 
+
+maybe_start_https(Routes, Name) ->
+    case bondy_config:get([Name, enabled], true) of
+        true ->
+            start_https(Routes, Name);
+        false ->
+            ok
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec start_https(list(), atom()) -> {ok, Pid :: pid()} | {error, any()}.
+-spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
-    TranspOpts = transport_opts(Name),
+    {TransportOpts, _OtherTransportOpts} = transport_opts(Name),
     ProtoOpts = #{
         env => #{
             bondy => #{
@@ -705,7 +746,18 @@ start_https(Routes, Name) ->
             cowboy_handler
         ]
     },
-    cowboy:start_tls(Name, TranspOpts, ProtoOpts).
+    case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
+        {ok, _} ->
+            ok;
+        {error, eaddrinuse} ->
+            _ = lager:error(
+                "Cannot start HTTPS listener, address is in use; name=~p, reason=eaddrinuse, transport_opts=~p",
+                [Name, TransportOpts]
+            ),
+            {error, eaddrinuse};
+        {error, _} = Error ->
+            Error
+    end.
 
 
 validate_spec(Map) ->
@@ -717,7 +769,7 @@ validate_spec(Map) ->
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+        _:Reason:_ ->
             {error, Reason}
     end.
 
@@ -746,7 +798,7 @@ load_dispatch_tables() ->
                 ),
                 {K, Ts, Parsed}
             catch
-                ?EXCEPTION(_, _, _) ->
+                _:_:_ ->
                     _ = delete(K),
                     _ = lager:warning(
                         "Removed invalid API Gateway specification from store"
@@ -847,16 +899,23 @@ admin_base_routes() ->
 admin_spec() ->
     Base = bondy_config:get(priv_dir),
     File = filename:join(Base, "specs/bondy_admin_api.json"),
-    try jsx:consult(File, [return_maps]) of
-        [Spec] ->
-            Spec
-    catch
-        ?EXCEPTION(error, badarg, _) ->
+    case bondy_utils:json_consult(File) of
+        {ok, Spec} ->
+            Spec;
+        {error, {badarg, Reason}} ->
             _ = lager:error(
                 "Error processing API Gateway Specification file. "
                 "File not found or invalid specification format, "
-                "type=error, reason=badarg, file_name=~p",
-                [File]),
+                "reason=~p, filename=~p",
+                [Reason, File]
+            ),
+            exit(badarg);
+        {error, Reason} ->
+            _ = lager:error(
+                "Error processing API Gateway Specification file. "
+                "reason=~p, filename=~p",
+                [Reason, File]
+            ),
             exit(badarg)
     end.
 
@@ -913,16 +972,18 @@ transport_opts(Name) ->
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
 
     %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
+    {SocketOpts, OtherSocketOpts} = case lists:keyfind(socket_opts, 1, Opts) of
         {socket_opts, L} -> normalise(L);
         false -> []
     end,
 
-    [
-        {port, Port},
-        {num_acceptors, PoolSize},
-        {max_connections, MaxConnections} | SocketOpts
-    ].
+    TransportOpts = #{
+        num_acceptors => PoolSize,
+        max_connections =>  MaxConnections,
+        socket_opts => [{port, Port}, SocketOpts]
+    },
+    {TransportOpts, OtherSocketOpts}.
+
 
     %% #{
     %%     port => Port,
@@ -937,17 +998,28 @@ transport_opts(Name) ->
     %% }.
 
 
-normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
+normalise(Opts0) ->
+    Sndbuf = lists:keyfind(sndbuf, 1, Opts0),
+    Recbuf = lists:keyfind(recbuf, 1, Opts0),
+
+    Opts1 = case Sndbuf =/= false andalso Recbuf =/= false of
         true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
+            Buffer0 = lists:keyfind(buffer, 1, Opts0),
             Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
+            lists:keystore(buffer, 1, Opts0, {buffer, Buffer1});
         false ->
-            Opts
-    end.
+            Opts0
+    end,
+
+    lists:splitwith(
+        fun
+            ({backlog, _}) -> false;
+            ({nodelay, _}) -> false;
+            ({keepalive, _}) -> false;
+            ({_, _}) -> true
+        end,
+        Opts1
+    ).
 
 
 

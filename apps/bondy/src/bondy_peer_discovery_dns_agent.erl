@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_peer_discovery_dns_agent.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 %%
 %% It is enabled by using the following options in the bondy.conf file
 %%
-%% ```shell
+%% ```bash
 %% cluster.peer_discovery_agent.type = bondy_peer_discovery_dns_agent
 %% cluster.peer_discovery_agent.config.service_name = my-service-name
 %% '''
