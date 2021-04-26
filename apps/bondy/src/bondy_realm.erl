@@ -270,7 +270,9 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Loads a security config file if defined and applies its definitions.
+%% @doc Loads a security config file from
+%% `bondy_config:get([security, config_file])` if defined and applies its
+%% definitions.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_config() -> ok | no_return().
@@ -283,7 +285,8 @@ apply_config() ->
             case bondy_utils:json_consult(FName) of
                 {ok, Realms} ->
                     _ = lager:info(
-                        "Loading configuration file; path=~p", [FName]),
+                        "Loading configuration file; path=~p", [FName]
+                    ),
                     %% We add the realm and allow an update if it already
                     %% exists in the database, by setting IsStrict
                     %% argument to false
