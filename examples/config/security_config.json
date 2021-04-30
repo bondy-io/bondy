@@ -194,7 +194,7 @@
             "resource_owners" : [
                 {
                     "username" : "user3@example.com",
-                    "password" : "1234",
+                    "password" : "123456",
                     "groups" : ["account_admin"],
                     "meta" : {
                         "account_id" : "1",

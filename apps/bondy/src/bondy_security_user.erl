@@ -32,18 +32,22 @@
 -export([add/2]).
 -export([add_or_update/2]).
 -export([add_source/5]).
+-export([authorized_keys/1]).
 -export([change_password/3]).
 -export([change_password/4]).
 -export([fetch/2]).
 -export([groups/1]).
+-export([has_authorized_keys/1]).
 -export([has_password/1]).
 -export([has_users/1]).
+-export([has_group/2]).
 -export([list/1]).
 -export([lookup/2]).
 -export([password/2]).
 -export([remove/2]).
 -export([remove_source/3]).
 -export([update/3]).
+-export([username/1]).
 
 
 
@@ -127,6 +131,13 @@ update(RealmUri, Username, User0) when is_binary(Username) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+username(#{<<"username">> := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 groups(#{<<"groups">> := Val}) -> Val.
 
 
@@ -134,7 +145,38 @@ groups(#{<<"groups">> := Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+has_group(Group, #{<<"groups">> := Val}) ->
+    lists:member(Group, Val).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 has_password(#{<<"has_password">> := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+has_authorized_keys(#{<<"authorized_keys">> := Val}) ->
+    length(Val) > 0;
+
+has_authorized_keys(_) ->
+    false.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+authorized_keys(#{<<"authorized_keys">> := Val}) ->
+    Val;
+
+authorized_keys(_) ->
+    [].
 
 
 %% -----------------------------------------------------------------------------
@@ -240,7 +282,7 @@ has_users(RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec password(uri(), t() | id()) -> bondy_security_pw:t() | no_return().
+-spec password(uri(), t() | id()) -> bondy_password:t() | no_return().
 
 password(RealmUri, #{<<"username">> := Username}) ->
     password(RealmUri, Username);
@@ -259,7 +301,7 @@ password(RealmUri, Username) ->
                     %% a password version upgrade. Upgrades will be forced
                     %% during authentication or can be done by batch migration
                     %% process.
-                    bondy_security_pw:to_map(PW)
+                    bondy_password:to_map(PW)
             end
     end.
 
@@ -289,7 +331,7 @@ change_password(RealmUri, Username, New, Old) ->
         {'EXIT', {Reason, _}} ->
             {error, Reason};
         PW ->
-            case bondy_security_pw:check_password(Old, PW) of
+            case bondy_password:check_password(Old, PW) of
                 true ->
                     change_password(RealmUri, Username, New);
                 false ->

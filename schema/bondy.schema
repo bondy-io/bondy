@@ -101,6 +101,211 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc Defines the default password protocol to be used for new user password
+%% creation. Notice the user API allows a caller to define the protocol to be
+%% used. This default is used when the caller does not specify a protocol.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.password.protocol", "bondy.security.password.protocol", [
+  {default, cra},
+  {datatype, {enum, [cra, scram]}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether a password protocol upgrade is performed during
+%% password migrations. A password migration occurs when Bondy changes the
+%% internal representation of the password object to accommodate new protocols,
+%% features or bug fixes. Normally some of this changes can be done without
+%% user input, but when these changes include a re-calculation of the salted
+%% hash they can only happend during authentication or when the user changes
+%% the password.
+%% If this option is set to 'on', then Bondy will try to upgrade the password
+%% protocol of an existing password to the protocol defined by the
+%% 'security.password.protocol' option using the defaul parameters defined in
+%% the 'security.password.{SelectedProtocol}.{Option}' options.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.protocol.upgrade.enabled",
+  "bondy.security.password.protocol_upgrade_enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the minimum length for newly created passwords. The value
+%% should be at least 6 and at most 254.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.password.min_length", "bondy.security.password.min_length", [
+  {default, 6},
+  {datatype, integer}
+]}.
+
+
+{translation, "bondy.security.password.min_length",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.min_length", Conf) of
+        Value when is_integer(Value), Value >= 6, Value =< 254 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 6..254"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the maximum length for newly created passwords. The value
+%% should be at least 6 and at most 254.
+%% @end
+%% -----------------------------------------------------------------------------
+
+{mapping, "security.password.max_length", "bondy.security.password.max_length", [
+  {default, 254},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.security.password.max_length",
+  fun(Conf) ->
+    Min = cuttlefish:conf_get("security.password.min_length", Conf),
+    case cuttlefish:conf_get("security.password.max_length", Conf) of
+        Value when is_integer(Value), Value >= Min, Value =< 254 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range {Min}..254"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default key derivation function (KDF) to be used with SCRAM.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.scram.kdf",
+  "bondy.security.password.scram.kdf", [
+  {default, pbkdf2},
+  {datatype, {enum, [pbkdf2, argon2id13]}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default key derivation function (KDF) to be used with CRA. The only option is pbkdf2.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.cra.kdf",
+  "bondy.security.password.cra.kdf", [
+  {default, pbkdf2},
+  {datatype, {enum, [pbkdf2]}},
+  hidden
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default number of iterations to be used with the pbkdf2 key
+%% derivation function. It should be an integer in the range 4096..65536.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.pbkdf2.iterations",
+  "bondy.security.password.pbkdf2.iterations", [
+  {default, "10000"},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.security.password.pbkdf2.iterations",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.pbkdf2.iterations", Conf) of
+        Value when is_integer(Value), Value >= 4096, Value =< 65536 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 4096..65536"
+            )
+    end
+  end
+}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default iterations to be used with the argon2id13 key
+%% derivation function. It should be an integer in the range 4096..4294967295
+%% or a named configuration:
+%% - interactive (integer 2)
+%% - moderate (integer 3)
+%% - sensitive (integer 4)
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.argon2id13.iterations",
+  "bondy.security.password.argon2id13.iterations", [
+  {default, moderate},
+  {datatype, [
+    integer, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+  ]}
+]}.
+
+{translation, "bondy.security.password.argon2id13.iterations",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.argon2id13.iterations", Conf) of
+        Value when is_integer(Value), Value >= 1, Value =< 4294967295 ->
+          Value;
+        Value when Value == interactive; Value == moderate; Value == sensitive ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 1..4294967295"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default memory to be used with the argon2id13 key
+%% derivation function. It should be an integer in the range 8192..1073741824
+%% or a named configuration:
+%% - interactive (integer 64MB)
+%% - moderate (integer 256MB)
+%% - sensitive (integer 1GB)
+%%
+%% (Notice that the underlying library allows up to 4398046510080 (3.9 TB)
+%% but we have restricted this value to avoid a configuration error to enable a
+%% DoS attack).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.argon2id13.memory",
+  "bondy.security.password.argon2id13.memory", [
+  {default, interactive},
+  {datatype, [
+    bytesize, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+  ]}
+]}.
+
+{translation, "bondy.security.password.argon2id13.memory",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.argon2id13.memory", Conf) of
+        Value when is_integer(Value), Value >= 8192, Value =< 1073741824 ->
+          Value;
+        Value when Value == interactive; Value == moderate; Value == sensitive ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 1..4294967295"
+            )
+    end
+  end
+}.
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Not currently working, leave the value as 'session'
 %% @end
 %% -----------------------------------------------------------------------------

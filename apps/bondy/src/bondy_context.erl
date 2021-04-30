@@ -48,7 +48,6 @@
     authid => binary(),
     is_anonymous => boolean(),
     roles => map(),
-    challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),

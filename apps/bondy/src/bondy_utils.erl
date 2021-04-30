@@ -31,8 +31,10 @@
 -export([generate_fragment/1]).
 -export([get_id/1]).
 -export([get_nonce/0]).
+-export([get_nonce/1]).
 -export([get_random_string/2]).
 -export([is_uuid/1]).
+-export([iso8601/1]).
 -export([json_consult/1]).
 -export([json_consult/2]).
 -export([log/5]).
@@ -48,6 +50,8 @@
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -330,11 +334,15 @@ merge_fun(K, V, Acc) ->
 %% @end
 %% -----------------------------------------------------------------------------
 get_nonce() ->
-    base64:encode(
-        get_random_string(
-            32,
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
+    get_nonce(32).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a base64 encoded random string
+%% @end
+%% -----------------------------------------------------------------------------
+get_nonce(Len) ->
+    base64:encode(enacl:randombytes(Len)).
 
 
 %% -----------------------------------------------------------------------------
@@ -383,3 +391,34 @@ json_consult(File, Opts) when is_list(Opts) ->
         {error, _} = Error ->
             Error
     end.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Convert a `util:timestamp()' or a calendar-style `{date(), time()}'
+%% tuple to an ISO 8601 formatted string. Note that this function always
+%% returns a string with no offset (i.e., ending in "Z").
+%% Borrowed from
+%% https://github.com/inaka/erlang_iso8601/blob/master/src/iso8601.erl
+%% @end
+%% -----------------------------------------------------------------------------
+-spec iso8601(integer()) -> binary().
+
+iso8601(SystemTime) when is_integer(SystemTime) ->
+    %% SystemTime is in microsecs
+    MegaSecs = SystemTime div 1000000000000,
+    Secs = SystemTime div 1000000 - MegaSecs * 1000000,
+    MicroSecs = SystemTime rem 1000000,
+    Timestamp = {MegaSecs, Secs, MicroSecs},
+    iso8601(calendar:now_to_datetime(Timestamp));
+
+iso8601({{Y, Mo, D}, {H, Mn, S}}) when is_float(S) ->
+    FmtStr = "~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~9.6.0fZ",
+    IsoStr = io_lib:format(FmtStr, [Y, Mo, D, H, Mn, S]),
+    list_to_binary(IsoStr);
+
+iso8601({{Y, Mo, D}, {H, Mn, S}}) ->
+    FmtStr = "~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0BZ",
+    IsoStr = io_lib:format(FmtStr, [Y, Mo, D, H, Mn, S]),
+    list_to_binary(IsoStr).

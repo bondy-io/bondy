@@ -302,7 +302,7 @@ stop_router_services() ->
     ok = bondy_wamp_tcp:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
-    _ = lager:info("Shutting down all WAMP sessions."),
+    _ = lager:info("Shutting down all existing WAMP sessions."),
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully

@@ -722,7 +722,7 @@ do_add(#{<<"uri">> := Uri} = Map) ->
 
     User0 = #{
         <<"username">> => <<"admin">>,
-        <<"password">> => <<"bondy">>
+        <<"password">> => <<"bondy-admin">>
     },
     {ok, _User} = bondy_security_user:add(Uri, User0),
 

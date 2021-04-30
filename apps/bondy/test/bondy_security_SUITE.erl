@@ -18,6 +18,9 @@
 
 -module(bondy_security_SUITE).
 -include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
+
+
 -compile([nowarn_export_all, export_all]).
 
 all() ->
@@ -207,16 +210,28 @@ api_client_delete(Config) ->
 
 
 resource_owner_add(Config) ->
-    R = #{
-        <<"username">> => <<"AlE">>,
+    Username = <<"AlE">>,
+    R0 = #{
+        <<"username">> => Username,
         <<"password">> => <<"ale">>,
         <<"meta">> => #{<<"foo">> => <<"bar">>},
         <<"groups">> => []
     },
-    {ok, #{
-        <<"username">> := Username
-    }} = bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R),
-    {save_config, [{username, Username}, {password, <<"ale">>} | Config]}.
+
+    ?assertMatch(
+        {error, #{code := invalid_value, key := <<"password">>}},
+        bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R0),
+        "password is too small"
+    ),
+    Password = <<"ale123456">>,
+    R1 = maps:put(<<"password">>, Password, R0),
+
+    ?assertMatch(
+        {ok, #{<<"username">> := Username}},
+        bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R1)
+    ),
+
+    {save_config, [{username, Username}, {password, Password} | Config]}.
 
 resource_owner_auth1(Config) ->
     {resource_owner_add, Prev} = ?config(saved_config, Config),
@@ -297,7 +312,7 @@ resource_owner_delete(Config) ->
 user_add(Config) ->
     In = #{
         <<"username">> => <<"AlE2">>,
-        <<"password">> => <<"ale">>,
+        <<"password">> => <<"ale123456">>,
         <<"meta">> => #{<<"foo">> => <<"bar">>},
         <<"groups">> => []
     },
@@ -309,7 +324,7 @@ user_add(Config) ->
         <<"username">> => <<"AlE2">>
     },
     {ok, Out} = bondy_security_user:add(?config(realm_uri, Config), In),
-    {save_config, [{username, <<"AlE2">>}, {password, <<"ale">>} | Config]}.
+    {save_config, [{username, <<"AlE2">>}, {password, <<"ale123456">>} | Config]}.
 
 user_auth1(Config) ->
     {user_add, Prev} = ?config(saved_config, Config),
@@ -385,7 +400,7 @@ password_token_crud_1(Config) ->
     U = <<"ale">>,
     R = #{
         <<"username">> => U,
-        <<"password">> => <<"1234">>,
+        <<"password">> => <<"123456">>,
         <<"meta">> => #{},
         <<"groups">> => []
     },

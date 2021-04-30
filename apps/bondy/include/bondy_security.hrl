@@ -18,7 +18,7 @@
 
 
 
-
+-define(BONDY_AUTH_PROVIDER, <<"com.leapsight.bondy.rbac">>).
 
 %% =============================================================================
 %% SCHEMAS
@@ -56,6 +56,8 @@
 -define(TICKET_AUTH, <<"ticket">>).
 -define(TLS_AUTH, <<"tls">>).
 -define(WAMPCRA_AUTH, <<"wampcra">>).
+-define(WAMPSCRAM_AUTH, <<"wamp-scram">>).
+-define(WAMP_CRYPTOSIGN_AUTH, <<"cryptosign">>).
 
 -define(BONDY_WAMP_AUTH_METHODS, [
     ?ANON_AUTH,
@@ -63,7 +65,9 @@
     ?COOKIE_AUTH,
     ?TICKET_AUTH,
     ?TLS_AUTH,
-    ?WAMPCRA_AUTH
+    ?WAMPCRA_AUTH,
+    ?WAMPSCRAM_AUTH,
+    ?WAMP_CRYPTOSIGN_AUTH
 ]).
 
 
@@ -87,14 +91,23 @@
         allow_null => false,
         allow_undefined => false,
         datatype => binary,
-        validator => ?VALIDATE_USERNAME
+        validator => fun bondy_data_validators:validate_username/1
     },
     <<"password">> => #{
         alias => password,
         key => <<"password">>,
         required => true,
         allow_null => false,
-        datatype => binary
+        datatype => binary,
+        validator => fun bondy_data_validators:validate_password/1
+    },
+    <<"authorized_keys">> => #{
+        alias => authorized_keys,
+        key => <<"authorized_keys">>,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary}
     },
     <<"groups">> => #{
         alias => groups,
@@ -124,6 +137,14 @@
         allow_null => false,
         allow_undefined => false,
         datatype => binary
+    },
+    <<"authorized_keys">> => #{
+        alias => authorized_keys,
+        key => <<"authorized_keys">>,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary}
     },
     <<"groups">> => #{
         alias => groups,

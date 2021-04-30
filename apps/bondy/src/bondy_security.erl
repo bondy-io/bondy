@@ -17,7 +17,6 @@
 %% under the License.
 %%
 %% -------------------------------------------------------------------
-% -module(bondy_security).
 -module(bondy_security).
 -include("bondy.hrl").
 -include("bondy_security.hrl").
@@ -484,9 +483,8 @@ auth_with_source(password, UserData, M) ->
     try lookup(?PASSWORD, UserData) of
         undefined ->
             _ = lager:warning(
-                "User '~s' is configured for password authentication, "
-                "but has no password.",
-                [maps:get(username, M)]
+                "User is configured for password authentication, "
+                "but has no password defined."
             ),
             {error, missing_password};
 
@@ -495,7 +493,7 @@ auth_with_source(password, UserData, M) ->
             %% if required.
             PW1 = maybe_upgrade_password(PW0, M),
             String = maps:get(password, M),
-            Result = bondy_security_pw:check_password(String, PW1),
+            Result = bondy_password:check_password(String, PW1),
             case Result of
                 true ->
                     {ok, get_context(M)};
@@ -1188,11 +1186,10 @@ status(RealmUri) ->
 
 maybe_upgrade_password(PW0, M) ->
     String = maps:get(password, M),
-    case bondy_security_pw:upgrade(String, PW0) of
-        PW0 ->
-            %% No upgrade performed
+    case bondy_password:upgrade(String, PW0) of
+        false ->
             PW0;
-        PW1 ->
+        {true, PW1} ->
             %% The password was upgraded, we store it
             RealmUri = maps:get(realm_uri, M),
             Username = maps:get(username, M),
@@ -1962,7 +1959,7 @@ validate_password_option(Pass, Options) when is_list(Pass) ->
     validate_password_option(list_to_binary(Pass), Options);
 
 validate_password_option(Pass, Options) when is_binary(Pass) ->
-    PW = bondy_security_pw:new(Pass),
+    PW = bondy_password:new(Pass),
     NewOptions = stash(?PASSWORD, {?PASSWORD, PW}, Options),
     {ok, NewOptions};
 
