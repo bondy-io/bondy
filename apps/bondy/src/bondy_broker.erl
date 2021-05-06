@@ -304,7 +304,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% authrole is in this list [TODO]
     %% 6. if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list [TODO]
 
-    %% Subscriber Blacklisting: we only support sessionIds for now
+    %% Subscriber Exclusion: we only support sessionIds for now
     %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
     %% and exclude_authrole, We need to add authid and authrole to the registry
     %% entries so that we can match
@@ -321,7 +321,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     end,
     MatchOpts0 = #{exclude => Exclusions},
 
-    %% Subscriber Whitelisting: we only support sessionIds for now
+    %% Subscriber Eligibility: we only support sessionIds for now
     MatchOpts = case maps:find(eligible, Opts) of
         error ->
             MatchOpts0;
