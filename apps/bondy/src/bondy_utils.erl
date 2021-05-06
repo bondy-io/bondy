@@ -202,7 +202,7 @@ maybe_encode(msgpack, Term) ->
      msgpack:pack(Term, Opts);
 
 maybe_encode(Enc, Term) when is_binary(Enc) ->
-    maybe_encode(list_to_atom(binary_to_list(Enc)), Term).
+    maybe_encode(binary_to_atom(Enc, utf8), Term).
 
 
 
