@@ -1168,7 +1168,7 @@ coerce_strategy(Strategy, CallOpts) ->
 
 %% @private
 coerce_routing_key(#{rkey := Value} = CallOpts) ->
-    maps:put('_routing_key', Value, CallOpts);
+    maps:put('x_routing_key', Value, CallOpts);
 
 coerce_routing_key(CallOpts) ->
     CallOpts.

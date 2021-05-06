@@ -29,21 +29,21 @@
 -define(PRIVATE_CONFIG, "private.config").
 -define(WAMP_EXT_OPTIONS, [
     {call, [
-        '_auth_claims',
-        '_routing_key'
+        'x_auth_claims',
+        'x_routing_key'
     ]},
     {cancel, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {interrupt, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {register, [
-        '_auth_claims',
-        '_force_locality',
+        'x_auth_claims',
+        'x_force_locality',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
-        '_concurrency',
+        'x_concurrency',
         {invoke, [
             <<"jump_consistent_hash">>,
             <<"queue_least_loaded">>,
@@ -51,39 +51,43 @@
         ]}
     ]},
     {publish, [
-        '_auth_claims',
+        'x_auth_claims',
         %% The ttl for retained events
         '_retained_ttl',
-        '_routing_key'
+        'x_routing_key'
     ]},
     {subscribe, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {yield, [
-        '_auth_claims'
+        'x_auth_claims'
     ]}
 ]).
 -define(WAMP_EXT_DETAILS, [
     {abort, [
-        '_auth_claims'
+        'x_auth_claims'
+    ]},
+    {hello, [
+        'x_authroles'
     ]},
     {welcome, [
-        '_auth_claims'
+        'x_auth_claims',
+        'x_authroles'
     ]},
     {goodbye, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {error, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {event, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {invocation, [
-        '_auth_claims'
+        'x_auth_claims'
     ]},
     {result, [
-        '_auth_claims'
+        'x_auth_claims'
     ]}
 ]).
 
