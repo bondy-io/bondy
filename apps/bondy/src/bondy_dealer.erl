@@ -310,7 +310,7 @@ handle_message(M, Ctxt) ->
     catch
         _:{not_authorized, Reason} ->
             Reply = wamp_message:error_from(
-                M
+                M,
                 #{},
                 ?WAMP_NOT_AUTHORIZED,
                 [Reason],
