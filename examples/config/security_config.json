@@ -20,7 +20,7 @@
                 "authmethod" : "password",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {
-                "description" : "Allows all users from any network authenticate using password credentials."
+                "description" : "Allows all clients from any network to authenticate using password credentials."
                 }
             },
             {
@@ -28,7 +28,7 @@
                 "authmethod" : "anonymous",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {
-                "description" : "Allows all users from any network authenticate as anonymous."
+                "description" : "Allows all clients from any network to authenticate as anonymous."
                 }
             }
         ],
@@ -64,7 +64,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["wampcra", "ticket", "anonymous", "oauth2"],
+        "authmethods" : ["wampcra", "ticket", "anonymous", "oauth2", "wamp-scram", "trust", "oauth2", "password"],
         "security_enabled" : true,
         "private_keys": [
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",

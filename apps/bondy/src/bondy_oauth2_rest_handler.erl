@@ -338,7 +338,7 @@ do_is_authorized(Req0, St0) ->
             AuthCtxt0 = bondy_auth:init(
                 St0#state.realm_uri, ClientId, undefined, Peer
             ),
-            case bondy_auth:authenticate(?BASIC_AUTH, Password, AuthCtxt0) of
+            case bondy_auth:authenticate(?PASSWORD_AUTH, Password, AuthCtxt0) of
                 {ok, _, AuthCtxt1} ->
                     St1 = St0#state{
                         client_id = bondy_auth:user_id(AuthCtxt1),
@@ -391,7 +391,7 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     SessionId = bondy_utils:get_id(global),
     AuthCtxt0 = bondy_auth:init(SessionId, RealmUri, Username, all, Peer),
 
-    case bondy_auth:authenticate(?BASIC_AUTH, Password, AuthCtxt0) of
+    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, AuthCtxt0) of
         {ok, _, AuthCtxt1} ->
             %% Username in right case
             issue_token(password, AuthCtxt1, Req0, St1);

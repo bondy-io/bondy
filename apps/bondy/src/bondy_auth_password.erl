@@ -21,7 +21,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_auth_basic).
+-module(bondy_auth_password).
 -behaviour(bondy_auth).
 
 -define(VALID_PROTOCOLS, [cra, scram]).

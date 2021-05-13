@@ -21,7 +21,7 @@
 -define(BONDY_AUTH_PROVIDER, <<"com.leapsight.bondy.rbac">>).
 
 -define(WAMP_ANON_AUTH,         <<"anonymous">>).
--define(BASIC_AUTH,             <<"password">>).
+-define(PASSWORD_AUTH,             <<"password">>).
 -define(OAUTH2_AUTH,            <<"oauth2">>).
 -define(TRUST_AUTH,             <<"trust">>).
 -define(WAMP_COOKIE_AUTH,       <<"cookie">>).
@@ -34,13 +34,16 @@
 
 -define(BONDY_AUTHMETHODS_INFO, #{
     ?WAMP_ANON_AUTH => #{
-        callback_mod => bondy_auth_anonymous
+        callback_mod => bondy_auth_anonymous,
+        description => <<"Allows access to clients which connect without credentials assigning them the 'anonymous' group. You can configure the allowed sources for the anonymous user and the permissions assigned to the anonymous group - but you cannot make the anonymous group a member of another group.">>
     },
     ?TRUST_AUTH => #{
-        callback_mod => bondy_auth_trust
+        callback_mod => bondy_auth_trust,
+        description => <<"Allows access to clients which connect with an existing username (WAMP authid field) but does not request them to provide the password and or performing the authentication challenge. This is to be used in conjunction with source definition e.g. trust only clients within the same network (CIDR).">>
     },
-    ?BASIC_AUTH => #{
-        callback_mod => bondy_auth_basic
+    ?PASSWORD_AUTH => #{
+        callback_mod => bondy_auth_password,
+        description => <<"Allows access to clients which connect with an existing username (WAMP authid field) and password, where the password is send in clear-text and is therefore vulnerable to password \"sniffing\" attacks, unless the connection is protected by SSL encryption. It should be avoided if possible and use \"wamp-cra\" or \"wamp-scram\" challenge-response methods.">>
     },
     ?OAUTH2_AUTH => #{
         callback_mod => bondy_auth_oauth2

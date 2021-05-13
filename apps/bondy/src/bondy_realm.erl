@@ -784,7 +784,7 @@ do_add(#{<<"uri">> := Uri} = Map) ->
     %TODO remove this once we have the APIs to add sources
     Source = bondy_rbac_source:new(#{
         cidr => {{0, 0, 0, 0}, 0},
-        authmethod => ?BASIC_AUTH
+        authmethod => ?PASSWORD_AUTH
     }),
     _ = bondy_rbac_source:add(Uri, all, Source),
 
