@@ -18,7 +18,9 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This module implements the {@link bondy_auth} behaviour to allow access
+%% to clients which connect without credentials assigning them the 'anonymous'
+%% group.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth_anonymous).
@@ -49,6 +51,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% @throws invalid_context
 %% @end
 %% -----------------------------------------------------------------------------
 -spec init(bondy_auth:context()) ->

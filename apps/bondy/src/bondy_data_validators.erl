@@ -27,13 +27,13 @@
 -export([password/1]).
 -export([permission/1]).
 -export([policy_resource/1]).
+-export([realm_uri/1]).
 -export([rolename/1]).
 -export([rolenames/1]).
--export([strict_username/1]).
 -export([strict_groupname/1]).
+-export([strict_username/1]).
 -export([username/1]).
 -export([usernames/1]).
--export([realm_uri/1]).
 
 
 

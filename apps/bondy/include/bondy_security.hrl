@@ -43,7 +43,7 @@
     },
     ?PASSWORD_AUTH => #{
         callback_mod => bondy_auth_password,
-        description => <<"Allows access to clients which connect with an existing username (WAMP authid field) and password, where the password is send in clear-text and is therefore vulnerable to password \"sniffing\" attacks, unless the connection is protected by SSL encryption. It should be avoided if possible and use \"wamp-cra\" or \"wamp-scram\" challenge-response methods.">>
+        description => <<"Allows access to clients which connect with an existing username (WAMP authid field) and password, where the password is send in clear-text and is therefore vulnerable to password \"sniffing\" attacks, unless the connection is protected by SSL encryption. It should be avoided and replaced by the use of \"wamp-cra\" or \"wamp-scram\" challenge-response methods if possible.">>
     },
     ?OAUTH2_AUTH => #{
         callback_mod => bondy_auth_oauth2
