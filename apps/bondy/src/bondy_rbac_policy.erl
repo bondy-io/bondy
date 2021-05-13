@@ -38,7 +38,7 @@
 		key => uri,
         required => true,
         allow_null => false,
-        datatype => binary,
+        datatype => [binary, {in, [any]}],
         validator => fun bondy_data_validators:policy_resource/1
     },
     <<"match">> => #{

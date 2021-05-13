@@ -18,6 +18,10 @@
 
 -module(bondy_password_cra).
 
+-type data()        ::  #{
+    salt := binary(),
+    salted_password := binary()
+}.
 -type params()    ::  #{
     kdf := kdf(),
     iterations := non_neg_integer(),
@@ -28,17 +32,20 @@
 -type kdf()             ::  pbkdf2.
 -type hash_fun()        ::  sha256.
 
+-export_type([data/0]).
 -export_type([params/0]).
 
 -export([compare/2]).
 -export([hash_function/0]).
 -export([hash_length/0]).
+-export([new/3]).
 -export([nonce/0]).
 -export([nonce_length/0]).
 -export([salt/0]).
 -export([salt_length/0]).
 -export([salted_password/3]).
 -export([validate_params/1]).
+-export([verify_string/3]).
 
 
 
@@ -46,6 +53,40 @@
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(binary(), params(), fun((data(), params()) -> bondy_password:t())) ->
+    bondy_password:t() | no_return().
+
+new(Password, Params0, Builder) ->
+    Params = validate_params(Params0),
+    Salt = salt(),
+    SPassword = salted_password(Password, Salt, Params),
+    Data = #{
+        salt => Salt,
+        salted_password => SPassword
+    },
+    Builder(Data, Params).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec verify_string(binary(), data(), params()) -> boolean().
+
+verify_string(String, Data, Params) ->
+    #{
+        salt := Salt,
+        salted_password := SPassword
+    } = Data,
+
+    compare(salted_password(String, Salt, Params), SPassword).
+
 
 
 
@@ -180,7 +221,7 @@ when N >= 4096 andalso N =< 65536 ->
     Params;
 
 validate_iterations(#{iterations := _}) ->
-    exit({invalid_argument, iterations});
+    error({invalid_argument, iterations});
 
 validate_iterations(Params) ->
     Default = bondy_config:get([security, password, pbkdf2, iterations]),

@@ -550,6 +550,10 @@ abort({authentication_failed, invalid_scheme}, St) ->
     Reason = <<"Unsupported authentication scheme.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
+abort({authentication_failed, invalid_authmethod}, St) ->
+    Reason = <<"Unsupported authentication method.">>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
 abort({authentication_failed, no_such_realm}, St) ->
     Uri = bondy_context:realm_uri(St#wamp_state.context),
     Reason = <<"Realm '", Uri/binary, "' does not exist.">>,

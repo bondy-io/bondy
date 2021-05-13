@@ -61,7 +61,7 @@ init(Ctxt) ->
             andalso lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS)
         orelse throw(invalid_context),
 
-        {ok, undefined}
+        {ok, #{password => PWD}}
 
     catch
         throw:Reason ->
@@ -88,12 +88,12 @@ requirements() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(
-    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, DataOut :: map(), CBState :: term()}
-    | {error, Reason :: any(), CBState :: term()}.
+    DataIn :: map(), Ctxt :: bondy_auth:context(), State :: state()) ->
+    {ok, DataOut :: map(), State :: term()}
+    | {error, Reason :: any(), State :: term()}.
 
-challenge(_, _, undefined) ->
-    {ok, #{}, undefined}.
+challenge(_, _, State) ->
+    {ok, #{}, State}.
 
 
 %% -----------------------------------------------------------------------------
@@ -104,20 +104,16 @@ challenge(_, _, undefined) ->
     String :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
-    CBState :: state()) ->
-    {ok, map(), CBState :: state()}
-    | {error, Reason :: any(), CBState :: state()}.
+    State :: state()) ->
+    {ok, map(), NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
 
-authenticate(String, _, Ctxt, State) ->
-    RealmUri = bondy_auth:real_uri(Ctxt),
-    UserId = bondy_auth:user_id(Ctxt),
-    IPAddr = bondy_auth:conn_ip(Ctxt),
-
+authenticate(String, _, _, #{password := PWD} = State) ->
     %% TODO this is wrong now, we need to call bondy_password check directly
-    case bondy_security:authenticate(RealmUri, UserId, String, IPAddr) of
-        {ok, _AuthCtxt} ->
+    case bondy_password:verify_string(String, PWD) of
+        true ->
             {ok, maps:new(), State};
-        {error, Reason} ->
-            {error, Reason, State}
+        false ->
+            {error, authentication_failed, State}
     end.
 

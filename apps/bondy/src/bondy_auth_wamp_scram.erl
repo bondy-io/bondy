@@ -100,10 +100,10 @@ challenge(Details, Ctxt, State0) ->
 
         case bondy_auth:user(Ctxt) of
             undefined ->
-                %% This is the case were there was no user for the provided authid
-                %% (username) and to avoid disclosing that information to an attacker we
-                %% will continue with the challenge.
-                error(not_implemented);
+                %% This is the case were there was no user for the provided
+                %% authid (username) and to avoid disclosing that information
+                %% to an attacker we will continue with the challenge.
+                error(authentication_failed);
             _ ->
                 User = bondy_auth:user(Ctxt),
                 PWD = bondy_rbac_user:password(User),

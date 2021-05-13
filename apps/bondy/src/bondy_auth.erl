@@ -409,13 +409,20 @@ challenge(Method, DataIn, #{method := Method} = Ctxt) ->
     end;
 
 challenge(_, _, #{method := _}) ->
-    error(badarg);
+    %% This might happen when you init and call challenge twice with a
+    %% different Method. The first call sets the context 'method',
+    %% the second call in principle should never happen. We allow IFF the value
+    %% for Method matches the context 'method'.
+    error(invalid_method);
 
-challenge(Method, DataIn, Ctxt) ->
+challenge(Method, DataIn, Ctxt0) ->
     try
-        %% No method defined yet as challenge was never called (not every
-        %% method operates with challenge-response)
-        challenge(Method, DataIn, maybe_set_method(Method, Ctxt))
+        %% We check Method is one of the available methods and set it as the
+        %% selected one for the authentication process.
+        %% This can fail with an exception in case the requested method was not
+        %% in the 'available_methods' set.
+        Ctxt = maybe_set_method(Method, Ctxt0),
+        challenge(Method, DataIn, Ctxt)
     catch
         throw:Reason ->
             {error, Reason}
@@ -453,16 +460,17 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt) ->
     end;
 
 authenticate(_, _, _, #{method := _}) ->
-    error(badarg);
+    %% This might happen when you init and call challenge and authenticate with
+    %% different Method values (or called authenticate twice).
+    error(invalid_method);
 
 authenticate(Method, Signature, DataIn, Ctxt) ->
     try
-        %% No method defined yet as challenge was never called (not every
-        %% method operates with challenge-response)
+        %% No context 'method' defined yet as challenge was never called (not
+        %% every method operates with challenge-response) so we try to set it.
         authenticate(
             Method, Signature, DataIn, maybe_set_method(Method, Ctxt)
         )
-
     catch
         throw:Reason ->
             {error, Reason}
@@ -501,8 +509,7 @@ compute_available_methods(Realm, Ctxt) ->
     #{
         realm_uri := RealmUri,
         user_id := UserId,
-        conn_ip := IPAddress,
-        user := User
+        conn_ip := IPAddress
     } = Ctxt,
 
     %% The allowed methods for the Realm
@@ -532,8 +539,12 @@ compute_available_methods(Realm, Ctxt) ->
         )
     ),
 
-    Filter = fun({_Order, Method}) ->
-        matches_requirements(Method, User)
+    Filter = fun
+        ({_, ?WAMP_ANON_AUTH = Method}) ->
+            true =:= bondy_config:get([security, allow_anonymous_user], true)
+                andalso matches_requirements(Method, Ctxt);
+        ({_Order, Method}) ->
+            matches_requirements(Method, Ctxt)
     end,
 
     Available = lists:usort(lists:filtermap(Filter, Allowed)),
@@ -544,26 +555,31 @@ compute_available_methods(Realm, Ctxt) ->
 
 
 %% @private
-matches_requirements(Method, User) ->
+matches_requirements(Method, #{user_id := UserId, user := User}) ->
     Password = bondy_rbac_user:password(User),
     HasAuthKeys = bondy_rbac_user:has_authorized_keys(User),
 
-    L = maps:to_list((callback_mod(Method)):requirements()),
+    Requirements = maps:to_list((callback_mod(Method)):requirements()),
 
-    not lists:any(
+    lists:all(
         fun
+            ({identification, false}) ->
+                %% The special case. If the client provided an auth_id /=
+                %% anonymous then the anonymous method is not allowed.
+                UserId == anonymous;
             ({_, false}) ->
-                false;
+                true;
             ({identification, true}) ->
-                bondy_rbac_user:username(User) == anonymous;
+                UserId =/= anonymous;
             ({authorized_keys, true}) ->
-                HasAuthKeys == false;
+                HasAuthKeys;
             ({password, true}) ->
-                Password == undefined;
-            ({password, #{protocols := Ps}}) ->
-                not lists:member(bondy_password:protocol(Password), Ps)
+                Password =/= undefined;
+            ({password, {true, #{protocols := Ps}}}) ->
+                Password =/= undefined
+                andalso lists:member(bondy_password:protocol(Password), Ps)
         end,
-        L
+        Requirements
     ).
 
 
@@ -585,9 +601,13 @@ maybe_set_method(Method, #{method := Method} = Ctxt) ->
     Ctxt;
 
 maybe_set_method(_, #{method := _}) ->
-    error(badarg);
+    %% Method was already set and does not match the one requested
+    error(invalid_method);
 
 maybe_set_method(Method, Ctxt) ->
+    [Method] =:= available_methods([Method], Ctxt) orelse
+        error({not_authorized, <<"Method not available or not allowed.">>}),
+
     Mod = callback_mod(Method),
 
     case Mod:init(Ctxt) of

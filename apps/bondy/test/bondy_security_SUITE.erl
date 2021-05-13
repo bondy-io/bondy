@@ -41,7 +41,6 @@ groups() ->
             api_client_auth1,
             api_client_update,
             api_client_auth2,
-            api_client_auth3,
             api_client_delete
         ]},
         {resource_owner, [sequence], [
@@ -159,7 +158,8 @@ api_client_auth1(Config) ->
     Uri = ?config(realm_uri, Prev),
     Id = ?config(client_id, Prev),
     Secret = ?config(client_secret, Prev),
-    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
+    ok = authenticate(Uri, Id, Secret),
+
     {save_config, Prev}.
 
 api_client_update(Config) ->
@@ -191,16 +191,11 @@ api_client_auth2(Config) ->
     Uri = ?config(realm_uri, Prev),
     Id = ?config(client_id, Prev),
     Secret = ?config(client_secret, Prev),
-    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
+    ok = authenticate(Uri, Id, Secret),
+
     {save_config, Prev}.
 
-api_client_auth3(Config) ->
-    {api_client_auth2, Prev} = ?config(saved_config, Config),
-    Uri = ?config(realm_uri, Prev),
-    Id = string:uppercase(?config(client_id, Prev)),
-    Secret = ?config(client_secret, Prev),
-    {ok, _} = bondy_security:authenticate(Uri, Id, Secret, [{ip, {127,0,0,1}}]),
-    {save_config, Prev}.
+
 
 api_client_delete(Config) ->
     {api_client_auth3, Prev} = ?config(saved_config, Config),
@@ -246,8 +241,8 @@ resource_owner_auth1(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 resource_owner_update(Config) ->
@@ -289,8 +284,7 @@ resource_owner_auth2(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 resource_owner_auth3(Config) ->
@@ -298,8 +292,8 @@ resource_owner_auth3(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = string:uppercase(?config(username, Prev)),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 resource_owner_delete(Config) ->
@@ -355,8 +349,7 @@ user_auth1(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 user_update(Config) ->
@@ -385,8 +378,7 @@ user_auth2(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 user_auth3(Config) ->
@@ -394,8 +386,8 @@ user_auth3(Config) ->
     Uri = ?config(realm_uri, Prev),
     Username = string:uppercase(?config(username, Prev)),
     Pass = ?config(password, Prev),
-    {ok, _} = bondy_security:authenticate(
-        Uri, Username, Pass, [{ip, {127,0,0,1}}]),
+
+    ok = authenticate(Uri, Username, Pass),
     {save_config, Prev}.
 
 user_delete(Config) ->
@@ -482,3 +474,22 @@ password_token_crud_1(Config) ->
         {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken0),
         ok = bondy_oauth2:revoke_token(refresh_token, Uri, C, U, D),
         {error, not_found} = bondy_oauth2:lookup_token(Uri, C, RToken1).
+
+
+
+    authenticate(Uri, Username, Secret) ->
+        SessionId = 1,
+        Roles = [],
+        Peer = {{127,0,0,1}, 1111},
+        Ctxt = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),
+
+        ?assertEqual(
+            true,
+            lists:member(<<"password">>, bondy_auth:available_methods(Ctxt))
+        ),
+
+        ?assertMatch(
+            {ok, _, _},
+            bondy_auth:authenticate(<<"password">>, Secret, #{}, Ctxt)
+        ),
+        ok.

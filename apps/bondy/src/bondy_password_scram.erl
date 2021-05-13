@@ -21,6 +21,12 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_password_scram).
 
+
+-type data()      ::  #{
+    salt := binary(),
+    stored_key := binary(),
+    server_key := binary()
+}.
 -type params()    ::  #{
     kdf := kdf(),
     iterations := non_neg_integer(),
@@ -32,6 +38,7 @@
 -type kdf()             ::  pbkdf2 | argon2id13.
 -type hash_fun()        ::  sha256.
 
+-export_type([data/0]).
 -export_type([params/0]).
 
 -export([auth_message/5]).
@@ -42,6 +49,7 @@
 -export([client_signature/2]).
 -export([hash_function/0]).
 -export([hash_length/0]).
+-export([new/3]).
 -export([recovered_client_key/2]).
 -export([recovered_stored_key/1]).
 -export([salt/0]).
@@ -52,7 +60,7 @@
 -export([server_signature/2]).
 -export([stored_key/1]).
 -export([validate_params/1]).
-
+-export([verify_string/3]).
 
 
 
@@ -61,6 +69,70 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(binary(), params(), fun((data(), params()) -> bondy_password:t())) ->
+    bondy_password:t() | no_return().
+
+new(String, Params0, Builder) when is_function(Builder, 2) ->
+    Params = validate_params(Params0),
+    Salt = salt(),
+    SPassword = salted_password(String, Salt, Params),
+    ServerKey = server_key(SPassword),
+    ClientKey = client_key(SPassword),
+    StoredKey = stored_key(ClientKey),
+    Data = #{
+        salt => Salt,
+        stored_key => StoredKey,
+        server_key => ServerKey
+    },
+
+    Builder(Data, Params).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec verify_string(binary(), data(), params()) -> boolean().
+
+verify_string(Password, Data, Params) ->
+    #{
+        salt := Salt,
+        stored_key := StoredKey,
+        server_key := ServerKey
+    } = Data,
+
+    #{iterations := Iterations} = Params,
+
+
+    %% We simulate a client performing the challenge-response here as we have
+    %% been provided with the Password string via the Password authentication
+    %% message.
+    ClientNonce = enacl:randombytes(16),
+    ServerNonce = server_nonce(ClientNonce),
+    AuthMessage = auth_message(
+        <<"bondy">>, ClientNonce, ServerNonce, Salt, Iterations
+    ),
+
+    SPassword = salted_password(Password, Salt, Params),
+    ClientKey = client_key(SPassword),
+    CStoredKey =  stored_key(ClientKey),
+    ClientSignature = client_signature(CStoredKey, AuthMessage),
+    ClientProof = client_proof(ClientKey, ClientSignature),
+
+    %% Server side
+    SClientSignature = client_signature(
+        ServerKey, AuthMessage
+    ),
+    RecClientKey = recovered_client_key(
+        SClientSignature, ClientProof
+    ),
+
+    StoredKey =:= recovered_stored_key(RecClientKey).
 
 
 %% -----------------------------------------------------------------------------
@@ -101,7 +173,6 @@ hash_function() ->
 
 hash_length() ->
     32.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -233,8 +304,6 @@ recovered_stored_key(RecoveredClientKey) when is_binary(RecoveredClientKey) ->
     crypto:hash(hash_function(), RecoveredClientKey).
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -291,7 +360,7 @@ auth_message(
     AuthId, ClientNonce, RouterNonce, Salt, Iterations, CBindName, CBindData) ->
 
     iolist_to_binary([
-        client_first_bare(AuthId, ClientNonce)/binary, ",",
+        client_first_bare(AuthId, ClientNonce), ",",
         server_first(RouterNonce, Salt, Iterations), ",",
         client_final_no_proof(CBindName, CBindData, RouterNonce)
     ]).
@@ -340,14 +409,14 @@ validate_memory(#{kdf := KDF, memory := Value} = Params) ->
 validate_memory(#{kdf := KDF} = Params) ->
     Default = memory_to_integer(
         KDF,
-        bondy_config:get([security, password, KDF, memory])
+        bondy_config:get([security, password, KDF, memory], undefined)
     ),
     maps:put(memory, Default, Params).
 
 
 %% @private
 iterations_to_integer(pbkdf2, N) when is_integer(N) ->
-    N >= 4096 andalso N =< 65536 orelse exit({invalid_argument, iterations}),
+    N >= 4096 andalso N =< 65536 orelse error({invalid_argument, iterations}),
     N;
 
 iterations_to_integer(argon2id13, Name) when is_atom(Name) ->
@@ -361,16 +430,19 @@ iterations_to_integer(argon2id13, Name) when is_atom(Name) ->
     end;
 
 iterations_to_integer(argon2id13, N) when is_integer(N) ->
-    N >= 1 andalso N =< 4294967295 orelse exit({invalid_argument, iterations}),
+    N >= 1 andalso N =< 4294967295 orelse error({invalid_argument, iterations}),
     N;
 
 iterations_to_integer(_, _) ->
-    exit({invalid_argument, iterations}).
+    error({invalid_argument, iterations}).
 
 
 %% @private
 memory_to_integer(pbkdf2, _) ->
     undefined;
+
+memory_to_integer(argon2id13, undefined) ->
+    memory_to_integer(argon2id13, interactive);
 
 memory_to_integer(argon2id13, Name) when is_atom(Name) ->
     %% We convert names to their values according to
@@ -390,14 +462,14 @@ memory_to_integer(argon2id13, N) when is_integer(N) ->
     N;
 
 memory_to_integer(_, _) ->
-    exit({invalid_argument, memory}).
+    error({invalid_argument, memory}).
 
 
 
 %% @private
 client_first_bare(AuthId, Nonce) ->
     [
-        "n=", stringprep:resource(escape(AuthId)), ",",
+        "n=", stringprep:resourceprep(escape(AuthId)), ",",
         "r=", base64:encode(Nonce)
     ].
 
