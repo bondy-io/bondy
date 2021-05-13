@@ -509,7 +509,7 @@ get(Uri, Opts) ->
             %% We always create the Bondy admin realm if not found
             add(?BONDY_REALM#{<<"uri">> => Uri}, false);
         {error, not_found} ->
-            case bondy_config:get(automatically_create_realms) of
+            case bondy_config:get([security, automatically_create_realms]) of
                 true ->
                     add(Opts#{<<"uri">> => Uri}, false);
                 false ->

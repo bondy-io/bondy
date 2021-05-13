@@ -121,8 +121,8 @@
            {enabled,true}]},
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
-      {security,
-          [{password,
+      {security,[
+          {password,
                [{cra,[{kdf,pbkdf2}]},
                 {scram,[{kdf,pbkdf2}]},
                 {protocol_upgrade_enabled,false},
@@ -131,9 +131,10 @@
                 {max_length,254},
                 {pbkdf2,[{iterations,10000}]},
                 {argon2id13,[{iterations,moderate},{memory,interactive}]}]},
-           {config_file,"./etc/security_config.json"}]},
-      {allow_anonymous_user,true},
-      {automatically_create_realms,false},
+            {config_file,"./etc/security_config.json"},
+            {allow_anonymous_user,true},
+            {automatically_create_realms,false}
+        ]},
       {shutdown_grace_period,5},
       {wamp_rawsocket,[{serializers,[]}]}
 ]).

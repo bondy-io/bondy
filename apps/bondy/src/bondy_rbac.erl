@@ -128,7 +128,7 @@ get_context(Ctxt) ->
 -spec get_anonymous_context(Ctxt :: bondy_context:t()) -> context().
 
 get_anonymous_context(Ctxt) ->
-    case bondy_config:get(allow_anonymous_user, true) of
+    case bondy_config:get([security, allow_anonymous_user], true) of
         true ->
             AuthId = bondy_context:authid(Ctxt),
             RealmUri = bondy_context:realm_uri(Ctxt),

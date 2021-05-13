@@ -86,7 +86,7 @@
 %% to connect a non existing realm.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.automatically_create_realms", "bondy.automatically_create_realms", [
+{mapping, "security.automatically_create_realms", "bondy.security.automatically_create_realms", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -95,7 +95,7 @@
 %% @doc Defines whether Bondy allows the "anonymous" user
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.allow_anonymous_user", "bondy.allow_anonymous_user", [
+{mapping, "security.allow_anonymous_user", "bondy.security.allow_anonymous_user", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
