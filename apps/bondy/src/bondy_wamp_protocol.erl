@@ -34,7 +34,7 @@
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
     challenge               ::  binary() | undefined,
-    auth_challenge_state    ::  map() | undefined,
+    auth_context    ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
     context                 ::  bondy_context:t() | undefined
@@ -391,25 +391,23 @@ handle_inbound_messages(
     );
 
 handle_inbound_messages(
-    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
+    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St0, _) ->
     %% Client is responding to a challenge
-    Ctxt = St#wamp_state.context,
-    ok = bondy_event_manager:notify({wamp, M, Ctxt}),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
 
-    AuthMethod = St#wamp_state.authmethod,
+    AuthMethod = St0#wamp_state.authmethod,
+    AuthCtxt0 = St0#wamp_state.auth_context,
     Signature = M#authenticate.signature,
     Extra = M#authenticate.extra,
-    ChallengeState = St#wamp_state.auth_challenge_state,
 
-    Result = bondy_auth_method:authenticate(
-        AuthMethod, Signature, Extra, ChallengeState, Ctxt
-    ),
+    Result = bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0),
 
     case Result of
-        {ok, _AuthCtxt} ->
-            open_session(St);
+        {ok, Extra, AuthCtxt1} ->
+            St1 = St0#wamp_state{auth_context = AuthCtxt1},
+            open_session(Extra, St1);
         {error, Reason} ->
-            abort({authentication_failed, Reason}, St)
+            abort({authentication_failed, Reason}, St0)
     end;
 
 handle_inbound_messages(
@@ -464,7 +462,8 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     {reply, Bin, St1};
 
 maybe_open_session({ok, St}) ->
-    open_session(St);
+    %% No need for a challenge, security disabled or anonymous enabled
+    open_session(undefined, St);
 
 maybe_open_session({error, Reason, St}) ->
     abort(Reason, St).
@@ -476,15 +475,15 @@ maybe_open_session({error, Reason, St}) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec open_session(state()) ->
+-spec open_session(map() | undefined, state()) ->
     {reply, binary(), state()}
     | {stop, binary(), state()}.
 
-open_session(St0) ->
+open_session(Extra, St0) ->
     try
         Ctxt0 = St0#wamp_state.context,
+        AuthCtxt = St0#wamp_state.auth_context,
         Id = bondy_context:id(Ctxt0),
-        AuthId = bondy_context:authid(Ctxt0),
         Realm = bondy_context:realm_uri(Ctxt0),
         Details = bondy_context:request_details(Ctxt0),
 
@@ -501,9 +500,14 @@ open_session(St0) ->
         Welcome = wamp_message:welcome(
             Id,
             #{
-                authid => AuthId,
                 agent => bondy_router:agent(),
-                roles => bondy_router:roles()
+                roles => bondy_router:roles(),
+                authprovider => bondy_auth:provider(AuthCtxt),
+                authmethod => bondy_auth:method(AuthCtxt),
+                authrole => bondy_auth:role(AuthCtxt),
+                'x_authroles' => bondy_auth:roles(AuthCtxt),
+                authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
+                authextra => Extra
             }
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
@@ -513,6 +517,14 @@ open_session(St0) ->
         ?EXCEPTION(error, {invalid_options, missing_client_role} = Reason, _) ->
             abort(Reason, St0)
     end.
+
+
+%% @private
+maybe_gen_authid(anonymous) ->
+    bondy_utils:uuid();
+
+maybe_gen_authid(UserId) ->
+    UserId.
 
 
 %% @private
@@ -539,7 +551,9 @@ abort({authentication_failed, invalid_scheme}, St) ->
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, no_such_realm}, St) ->
-    Reason = <<"The provided realm does not exist.">>,
+    Uri = bondy_context:realm_uri(St#wamp_state.context),
+    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
+    %% REVIEW shouldn't his be a ?WAMP_NO_SUCH_REALM error?
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, bad_password}, St) ->
@@ -565,16 +579,17 @@ abort({authentication_failed, oauth2_invalid_grant}, St) ->
     >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
-abort({no_such_realm, Realm}, St) ->
-    Reason = <<"Realm '", Realm/binary, "' does not exist.">>,
+abort(no_such_realm, St) ->
+    Uri = bondy_context:realm_uri(St#wamp_state.context),
+    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
     abort(?WAMP_NO_SUCH_REALM, Reason, #{}, St);
 
 abort({missing_param, Param}, St) ->
     Reason = <<"Missing value for required parameter '", Param/binary, "'.">>,
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
 
-abort({no_such_role, AuthId}, St) ->
-    Reason = <<"User '", AuthId/binary, "' does not exist.">>,
+abort(no_such_role, St) ->
+    Reason = <<"User does not exist.">>,
     abort(?WAMP_NO_SUCH_ROLE, Reason, #{}, St);
 
 abort({unsupported_authmethod, Param}, St) ->
@@ -617,8 +632,7 @@ abort_message(Type, Reason, Details0, _) ->
 
 %% @private
 maybe_auth_challenge(_, {error, not_found}, St) ->
-    RealmUri = bondy_context:realm_uri(St#wamp_state.context),
-    {error, {no_such_realm, RealmUri}, St};
+    {error, no_such_realm, St};
 
 maybe_auth_challenge(Details, Realm, St) ->
     Status = bondy_realm:security_status(Realm),
@@ -626,54 +640,42 @@ maybe_auth_challenge(Details, Realm, St) ->
 
 
 %% @private
-maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0) ->
+maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0)
+when UserId =/= <<"anonymous">> ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
-    Ctxt2 = bondy_context:set_authid(Ctxt1, UserId),
-    St1 = update_context(Ctxt2, St0),
+    Ctxt = bondy_context:set_authid(Ctxt1, UserId),
+    St1 = update_context(Ctxt, St0),
 
-    case bondy_security_user:lookup(bondy_realm:uri(Realm), UserId) of
-        {error, not_found} ->
-            {error, {no_such_role, UserId}, St1};
-        User ->
-            auth_challenge(User, Realm, St1)
-    end;
+    SessionId = bondy_context:id(Ctxt),
+    Roles = authroles(Details),
+    Peer = bondy_context:peer(Ctxt),
+
+    %% We initialise the auth context
+    AuthCtxt = bondy_auth:init(SessionId, Realm, UserId, Roles, Peer),
+    St2 = St1#wamp_state{auth_context = AuthCtxt},
+
+    ReqMethods = maps:get(authmethods, Details, []),
+    Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
+    auth_challenge(Methods, St2);
+
 
 maybe_auth_challenge(enabled, Details, Realm, St0) ->
-    %% Default to anonymous in case authmethods is empty
-    AuthMethods = maps:get(authmethods, Details, [?ANON_AUTH]),
+    %% authid is <<"anonymous">> or missing
+    Ctxt0 = St0#wamp_state.context,
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+    Ctxt = bondy_context:set_authid(Ctxt1, anonymous),
+    St1 = update_context(Ctxt, St0),
 
-    case lists:member(?ANON_AUTH, AuthMethods) of
-        true ->
-            case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
-                true ->
-                    Ctxt0 = St0#wamp_state.context,
-                    Uri = bondy_realm:uri(Realm),
-                    Peer = Peer = maps:get(peer, Ctxt0),
-                    Result = bondy_security_utils:authenticate_anonymous(
-                        Uri, Peer
-                    ),
-                    case Result of
-                        {ok, _Ctxt} ->
-                            TempId = bondy_utils:uuid(),
-                            Ctxt1 = Ctxt0#{
-                                request_details => Details,
-                                is_anonymous => true
-                            },
-                            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-                            St1 = update_context(Ctxt2, St0),
-                            {ok, St1};
+    SessionId = bondy_context:id(Ctxt),
+    Roles = [<<"anonymous">>],
+    Peer = bondy_context:peer(Ctxt),
 
-                        {error, Reason} ->
-                            {error, {authentication_failed, Reason}, St0}
-                    end;
-                false ->
-                    {error, {missing_param, <<"authid">>}, St0}
-            end;
-        false ->
-            {error, {missing_param, <<"authid">>}, St0}
-    end;
+    %% We initialise the auth context with anon id and role
+    AuthCtxt = bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer),
+    St2 = St1#wamp_state{auth_context = AuthCtxt},
 
+    auth_challenge([?WAMP_ANON_AUTH], St2);
 
 maybe_auth_challenge(disabled, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
@@ -684,65 +686,60 @@ maybe_auth_challenge(disabled, #{authid := UserId} = Details, _, St0) ->
 
 maybe_auth_challenge(disabled, Details0, _, St) ->
     %% We set a temporary authid
-    Details = Details0#{authid =>  bondy_utils:uuid()},
+    Details = Details0#{authid => bondy_utils:uuid()},
     maybe_auth_challenge(disabled, Details, St).
 
 
 %% @private
-auth_challenge(User, Realm, St) ->
-    Ctxt = St#wamp_state.context,
-    Details = bondy_context:request_details(Ctxt),
-    Requested = maps:get(authmethods, Details, []),
-    case bondy_auth_method:valid_methods(Requested, User, Ctxt) of
-        [] ->
-            {error, no_authmethod, St};
-        ValidMethods ->
-            auth_challenge(ValidMethods, User, Realm, St)
+authroles(Details) ->
+    case maps:get('x_authroles', Details, undefined) of
+        undefined ->
+            case maps:get(authrole, Details, undefined) of
+                undefined ->
+                    undefined;
+                Role ->
+                    [Role]
+            end;
+        List when is_list(List) ->
+            List;
+        _ ->
+            %% TODO Should we abort?
+            []
     end.
 
 
 %% @private
-auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
+auth_challenge([?WAMP_ANON_AUTH|T], St0) ->
     %% An authid was provided so we discard this method
-    auth_challenge(T, User, Realm, St0);
+    auth_challenge(T,St0);
 
-auth_challenge([H|T], User, Realm, St0) ->
-    case bondy_auth_method:challenge(H, User, St0#wamp_state.context) of
-        {ok, ChallengeExtra, ChallengeState} ->
+auth_challenge([H|T], St0) ->
+    Ctxt = St0#wamp_state.context,
+    AuthCtxt0 = St0#wamp_state.auth_context,
+
+    Details = bondy_context:request_details(Ctxt),
+
+    case bondy_auth:challenge(H, Details, AuthCtxt0) of
+        {ok, ChallengeExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
-                auth_challenge_state = ChallengeState,
+                auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
             {challenge, H, ChallengeExtra, St1};
-        {error, no_password} ->
-            auth_challenge(T, User, Realm, St0);
-        {error, unsupported_method} ->
-            auth_challenge(T, User, Realm, St0);
-        {error, invalid_authmethod} ->
+        {error, _Reason} ->
             %% TODO LOG
-            auth_challenge(T, User, Realm, St0)
+            auth_challenge(T, St0)
     end;
 
-auth_challenge([], _, _, St) ->
-    %% TODO This is wrong because we are giving away information to a hacker
-    %% We should pick the first
-    %% We need to make the hacker work so pick wamp-scram with random data and
-    %% do the challenge
+auth_challenge([], St) ->
     {error, no_authmethod, St}.
 
 
 %% @private
-get_realm(St) ->
-    Uri = bondy_context:realm_uri(St#wamp_state.context),
-    case bondy_config:get(automatically_create_realms) of
-        true ->
-            %% We force the creation of a new realm if it does not exist
-            bondy_realm:get(Uri);
-        false ->
-            %% Will throw an exception if it does not exist
-            bondy_realm:lookup(Uri)
-    end.
+-spec get_realm(state()) -> bondy_realm:t() | {error, not_found}.
 
+get_realm(St) ->
+    bondy_realm:get(bondy_context:realm_uri(St#wamp_state.context)).
 
 
 %% =============================================================================

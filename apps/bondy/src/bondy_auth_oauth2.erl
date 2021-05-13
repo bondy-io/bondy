@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_auth_wamp_ticket.erl -
+%%  bondy_auth_wamp_oauth2.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -21,20 +21,19 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_auth_wamp_ticket).
+-module(bondy_auth_oauth2).
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
 
--define(VALID_PROTOCOLS, [cra, scram]).
-
--type state()   ::  undefined.
+-type state() :: map().
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
 -export([requirements/0]).
 -export([challenge/3]).
 -export([authenticate/4]).
+
 
 
 
@@ -57,7 +56,11 @@ init(Ctxt) ->
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 
-        {ok, undefined}
+        PWD = bondy_rbac_user:password(User),
+        User =/= undefined andalso bondy_password:protocol(PWD) == scram
+        orelse throw(invalid_context),
+
+        {ok, maps:new()}
 
     catch
         throw:Reason ->
@@ -69,14 +72,15 @@ init(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec requirements() -> bondy_auth:requirements().
+-spec requirements() -> map().
 
 requirements() ->
     #{
         identification => true,
-        password => {true, #{protocols => ?VALID_PROTOCOLS}},
+        password => {true, #{protocols => [cra, scram]}},
         authorized_keys => false
     }.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -84,12 +88,12 @@ requirements() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(
-    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, DataOut :: map(), CBState :: term()}
-    | {error, Reason :: any(), CBState :: term()}.
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    {ok, Extra :: map(), NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
 
-challenge(_, _, undefined) ->
-    {ok, #{}, undefined}.
+challenge(_, _, State) ->
+    {ok, #{}, State}.
 
 
 %% -----------------------------------------------------------------------------
@@ -97,22 +101,24 @@ challenge(_, _, undefined) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authenticate(
-    String :: binary(),
+    JWT :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
     CBState :: state()) ->
-    {ok, map(), CBState :: state()}
+    {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(String, _, Ctxt, State) ->
-    RealmUri = bondy_auth:real_uri(Ctxt),
+authenticate(JWT, _, Ctxt, State) ->
+    RealmUri = bondy_auth:realm_uri(Ctxt),
     UserId = bondy_auth:user_id(Ctxt),
-    IPAddr = bondy_auth:conn_ip(Ctxt),
 
-    %% TODO this is wrong now, we need to call bondy_password check directly
-    case bondy_security:authenticate(RealmUri, UserId, String, IPAddr) of
-        {ok, _AuthCtxt} ->
-            {ok, maps:new(), State};
+    case bondy_oauth2:verify_jwt(RealmUri, JWT) of
+        {ok, #{<<"sub">> := UserId} = Claims} ->
+            {ok, Claims, State};
+        {ok, _} ->
+            %% The JWT is valid but UserId does not match the token's sub!
+            %% TODO Flag as potential threat and limit future attempts
+            {error, oauth2_invalid_grant, State};
         {error, Reason} ->
             {error, Reason, State}
     end.

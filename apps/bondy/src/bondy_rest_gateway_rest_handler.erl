@@ -37,9 +37,10 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_rest_gateway_rest_handler).
 -include_lib("wamp/include/wamp.hrl").
--include("http_api.hrl").
--include("bondy_rest_gateway.hrl").
 -include("bondy.hrl").
+-include("bondy_security.hrl").
+-include("bondy_rest_gateway.hrl").
+-include("http_api.hrl").
 
 -type state() :: #{
     api_spec => map(),
@@ -50,7 +51,7 @@
     deprecated => boolean(),
     security => map(),
     is_anonymous => boolean(),
-    auth_id => binary() | undefined,
+    authid => binary() | undefined,
     encoding => binary() | json | msgpack
 }.
 
@@ -87,13 +88,14 @@
 %% TODO The value for 'body' is not a of type '[map,binary,tuple]' (return body)
 
 init(Req, St0) ->
+    %% TODO Set session will now be required by bondy_auth:init
     Session = undefined, %TODO
     % SessionId = 1,
     % Ctxt0 = bondy_context:set_peer(
     %     bondy_context:new(), cowboy_req:peer(Req)),
     % Ctxt1 = bondy_context:set_session_id(SessionId, Ctxt0),
     St1 = St0#{
-        auth_id => undefined,
+        authid => undefined,
         body_evaluated => false,
         api_context => init_context(Req),
         session => Session,
@@ -267,23 +269,28 @@ is_authorized(
     _, Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    Val = cowboy_req:parse_header(<<"authorization">>, Req0),
-    Peer = cowboy_req:peer(Req0),
-    Realm = maps:get(realm_uri, St0),
+    Token = cowboy_req:parse_header(<<"authorization">>, Req0),
 
-    case bondy_security_utils:authenticate(bearer, Val, Realm, Peer) of
-        {ok, Claims} when is_map(Claims) ->
+    RealmUri = maps:get(realm_uri, St0),
+    Peer = cowboy_req:peer(Req0),
+    %% This is ID will bot be used as the ID is already defined in the JWT
+    SessionId = bondy_utils:get_id(global),
+    AuthCtxt0 = bondy_auth:init(SessionId, RealmUri, Token, all, Peer),
+
+    case bondy_auth:authenticate(?OAUTH2_AUTH, Token, #{}, AuthCtxt0) of
+        {ok, Claims, _AuthCtxt1} when is_map(Claims) ->
             %% The token claims
             Ctxt = update_context(
-                {security, Claims}, maps:get(api_context, St0)),
+                {security, Claims}, maps:get(api_context, St0)
+            ),
             St1 = maps:update(api_context, Ctxt, St0),
             St2 = maps:put(authid, maps:get(<<"sub">>, Claims), St1),
             {true, Req0, St2};
-        {ok, AuthCtxt} ->
+        {ok, _, AuthCtxt1} ->
             %% TODO Here we need the token or the session with the
-            %% token grants and not the AuthCtxt
+            %% token grants and not the Claim
             St1 = St0#{
-                authid => ?CHARS2BIN(bondy_security:get_username(AuthCtxt))
+                authid => bondy_auth:user_id(AuthCtxt1)
             },
             %% TODO update context
             {true, Req0, St1};
@@ -298,7 +305,8 @@ is_authorized(
         {error, Reason} ->
             Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
             Req2 = reply_auth_error(
-                Reason, <<"Bearer">>, Realm, json, Req1),
+                Reason, <<"Bearer">>, RealmUri, json, Req1
+            ),
             {stop, Req2, St0}
     end;
 

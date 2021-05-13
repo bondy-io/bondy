@@ -955,9 +955,9 @@ maybe_init_groups(RealmUri) ->
         }
     ],
     _ = [begin
-        case bondy_security_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
+        case bondy_rbac_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
             {error, not_found} ->
-                bondy_security_group:add(RealmUri, G);
+                bondy_rbac_group:add(RealmUri, bondy_rbac_group:new(G));
             _ ->
                 ok
         end

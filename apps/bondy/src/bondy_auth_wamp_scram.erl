@@ -22,21 +22,23 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_scram).
--behaviour(bondy_auth_method).
+-behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
 
+-type state() :: map().
 
-%% bondy_auth_method CALLBACKS
+%% BONDY_AUTH CALLBACKS
+-export([init/1]).
+-export([requirements/0]).
 -export([challenge/3]).
 -export([authenticate/4]).
 
 
 
 %% =============================================================================
-%% bondy_auth_method CALLBACKS
+%% BONDY_AUTH CALLBACKS
 %% =============================================================================
-
 
 
 
@@ -44,28 +46,76 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec challenge(
-    bondy_security_user:t() | undefined,
-    ReqDetails :: map(),
-    bondy_context:t()) ->
-    {ok, ChallengeExtra :: map(), ChallengeState :: map()}
-    | {error, Reason :: any()}.
+-spec init(bondy_auth:context()) ->
+    {ok, State :: state()} | {error, Reason :: any()}.
 
-challenge(User, ReqDetails, _Ctxt) ->
+init(Ctxt) ->
     try
-        case User of
+
+        User = bondy_auth:user(Ctxt),
+        User =/= undefined orelse throw(invalid_context),
+
+        PWD = bondy_rbac_user:password(User),
+        User =/= undefined andalso bondy_password:protocol(PWD) == scram
+        orelse throw(invalid_context),
+
+        {ok, maps:new()}
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec requirements() -> map().
+
+requirements() ->
+    #{
+        identification => true,
+        password => {true, #{protocols => [scram]}},
+        authorized_keys => false
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec challenge(
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    {ok, Extra :: map(), NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
+
+challenge(Details, Ctxt, State0) ->
+    try
+        {EncodedNonce, CBindType} = parse_details(Details),
+        State1 = State0#{
+            client_nonce => base64_decode(EncodedNonce),
+            channel_binding => CBindType
+        },
+
+        case bondy_auth:user(Ctxt) of
             undefined ->
                 %% This is the case were there was no user for the provided authid
                 %% (username) and to avoid disclosing that information to an attacker we
                 %% will continue with the challenge.
-                challenge(undefined, ReqDetails, undefined);
+                error(not_implemented);
             _ ->
-                PWD = bondy_security_user:password(User),
-                do_challenge(User, ReqDetails, PWD)
+                User = bondy_auth:user(Ctxt),
+                PWD = bondy_rbac_user:password(User),
+                State2 = State1#{
+                    user => User,
+                    password => PWD
+                },
+                do_challenge(State2)
         end
     catch
         throw:Reason ->
-            {error, Reason}
+            {error, Reason, State0}
     end.
 
 
@@ -75,13 +125,14 @@ challenge(User, ReqDetails, _Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authenticate(
-    EncodedSignature :: binary(),
-    Extra :: any(),
-    ChallengeState :: map(),
-    Ctxt :: bondy_context:t()) ->
-    {ok, Extra :: map()} | {error, Reason :: any()}.
+    Signature :: binary(),
+    DataIn :: map(),
+    Ctxt :: bondy_auth:context(),
+    CBState :: state()) ->
+    {ok, DataOut :: map(), CBState :: state()}
+    | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(EncSignature, Extra, ChallengeState, Ctxt) ->
+authenticate(EncSignature, Extra, Ctxt, State) ->
     try
         %% Signature: The base64-encoded ClientProof
         %% nonce: The concatenated client-server nonce from the previous
@@ -99,8 +150,8 @@ authenticate(EncSignature, Extra, ChallengeState, Ctxt) ->
         %% - The channel_binding matches the one sent in the HELLO message.
         %% - The cbind_data sent by the client matches the channel binding data
         %% that the server sees on its side of the channel.
-        ServerNonce = maps:get(server_nonce, ChallengeState),
-        CBindType = maps:get(channel_binding, ChallengeState),
+        ServerNonce = maps:get(server_nonce, State),
+        CBindType = maps:get(channel_binding, State),
         CBindData = undefined, % We do not support channel binding yet
 
         RNonce = base64_decode(maps:get(<<"nonce">>, Extra, undefined)),
@@ -117,8 +168,8 @@ authenticate(EncSignature, Extra, ChallengeState, Ctxt) ->
         %% stored in the User's password object
         do_authenticate(
             base64_decode(EncSignature),
-            ChallengeState,
-            Ctxt
+            Ctxt,
+            State
         )
     catch
         throw:Reason ->
@@ -146,47 +197,30 @@ base64_decode(Nonce) ->
 %% @private
 parse_details(#{authextra := Map}) ->
     Nonce = maps:get(<<"nonce">>, Map, undefined),
+    Nonce =/= undefined orelse throw(missing_nonce),
+
     CBindType = maps:get(<<"channel_binding">>, Map, undefined),
-    {Nonce, CBindType};
-
-parse_details(_) ->
-    {undefined, undefined}.
+    {Nonce, CBindType}.
 
 
 %% @private
-do_challenge(undefined, _, undefined) ->
-    error(not_implemented);
+do_challenge(#{channel_binding := undefined} = State) ->
+    #{client_nonce := Nonce, password := PWD} = State,
 
-do_challenge(_, _, undefined) ->
-    {error, missing_password};
+    #{
+        data := #{
+            salt := Salt
+        },
+        params := #{
+            kdf := KDF,
+            iterations := Iterations
+        } = Params
+    } = PWD,
 
-do_challenge(User, Details, #{protocol := scram} = Password) ->
-    {EncodedNonce, CBindType} = parse_details(Details),
-    ClientNonce = base64_decode(EncodedNonce),
-    gen_challenge(User, Details, Password, ClientNonce, CBindType);
-
-do_challenge(_, _, #{protocol := _}) ->
-    {error, unsupported_password_protocol}.
-
-
-%% @private
-gen_challenge(_, _, _, undefined, _) ->
-    {error, missing_nonce};
-
-gen_challenge(_, _, _, _, CBindType) when CBindType =/= undefined ->
-    {error, unsupported_channel_binding_type};
-
-gen_challenge(User, Details, Password, ClientNonce, undefined = CBindType) ->
-    %% Throws invalid_authrole
-    Role = bondy_auth_method:valid_authrole(
-        maps:get(authrole, Details, <<"user">>),
-        User
-    ),
-
-    ServerNonce = bondy_password_scram:server_nonce(ClientNonce),
-    Params = maps:get(params, Password),
-    #{kdf := KDF, iterations := Iterations, salt := Salt} = Params,
+    %% Only in case KDF == argon2id13
     Memory = maps:get(memory, Params, null),
+
+    ServerNonce = bondy_password_scram:server_nonce(Nonce),
 
     ChallengeExtra = #{
         nonce => base64:encode(ServerNonce),
@@ -196,29 +230,23 @@ gen_challenge(User, Details, Password, ClientNonce, undefined = CBindType) ->
         memory => Memory
     },
 
-    ChallengeState =  #{
-        authprovider => ?BONDY_AUTH_PROVIDER,
-        authmethod => ?WAMPCRA_AUTH,
-        authrole => Role,
-        '_authroles' => bondy_security_user:groups(User),
-        password => Password,
-        client_nonce => ClientNonce,
-        server_nonce => ServerNonce,
-        channel_binding => CBindType
-    },
+    NewState = State#{server_nonce => ServerNonce},
 
-    {ok, ChallengeExtra, ChallengeState}.
+    {ok, ChallengeExtra, NewState};
+
+do_challenge(#{channel_binding := _} = State) ->
+    {error, unsupported_channel_binding_type, State}.
 
 
 %% @private
-do_authenticate(RProof, ChallengeState, Ctxt) ->
+do_authenticate(RProof, Ctxt, State) ->
 
     #{
         password := Password,
         client_nonce := ClientNonce,
         server_nonce := ServerNonce,
         channel_binding := CBindType
-    } = ChallengeState,
+    } = State,
 
 
     #{
@@ -232,12 +260,7 @@ do_authenticate(RProof, ChallengeState, Ctxt) ->
         }
     } = Password,
 
-    _Realm = bondy_context:realm_uri(Ctxt),
-    AuthId = bondy_context:authid(Ctxt),
-    {_IP, _} = bondy_context:peer(Ctxt),
-
-    %% TODO Validate source with IP
-
+    AuthId = bondy_auth:user_id(Ctxt),
     CBindData = undefined, % We do not support channel binding yet
 
     AuthMessage = bondy_password_scram:auth_message(
@@ -249,6 +272,8 @@ do_authenticate(RProof, ChallengeState, Ctxt) ->
     RecClientKey = bondy_password_scram:recovered_client_key(
         ClientSignature, RProof
     ),
+
+    %% We finally compare the values
     case bondy_password_scram:recovered_stored_key(RecClientKey) of
         StoredKey ->
             ServerSignature = bondy_password_scram:server_signature(
@@ -257,15 +282,16 @@ do_authenticate(RProof, ChallengeState, Ctxt) ->
             AuthExtra = #{
                 verifier => base64:encode(ServerSignature)
             },
-            {ok, AuthExtra};
+            {ok, AuthExtra, State};
         _ ->
-            {error, bad_password}
+            {error, authentication_failed, State}
     end.
 
 
 validate_cbind_data(undefined, undefined) ->
     %% Not implemented yet
     ok.
+
 
 
 %% TODO

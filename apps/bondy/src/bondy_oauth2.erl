@@ -62,7 +62,6 @@
 %     algorithm               ::  binary() %% HS256 RS256 ES256
 % }).
 -define(FOLD_OPTS, [{resolver, lww}]).
--define(TOMBSTONE, '$deleted').
 
 -define(ENV, bondy_config:get(oauth2)).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
@@ -241,7 +240,7 @@ refresh_token(RealmUri, Issuer, Token) ->
             {error, oauth2_invalid_grant};
         #bondy_oauth2_token{username = Username} = Data0 ->
             %% We double check the user still exists
-            case bondy_security_user:lookup(RealmUri, Username) of
+            case bondy_rbac_user:lookup(RealmUri, Username) of
                 {error, not_found} ->
                     _ = lager:warning(
                         "Removing dangling refresh_token; "
@@ -451,7 +450,7 @@ revoke_dangling_tokens(RealmUri, Issuer) ->
             ok;
         ({Token, #bondy_oauth2_token{} = Data}) ->
             Username = Data#bondy_oauth2_token.username,
-            case bondy_security_user:lookup(RealmUri, Username) of
+            case bondy_rbac_user:lookup(RealmUri, Username) of
                 {error, not_found} ->
                     do_revoke_refresh_token(RealmUri, Token, Data);
                 _ ->

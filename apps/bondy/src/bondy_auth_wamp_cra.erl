@@ -22,11 +22,15 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_cra).
--behaviour(bondy_auth_method).
+-behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
 
-%% bondy_auth_method CALLBACKS
+-type state() :: map().
+
+%% BONDY_AUTH CALLBACKS
+-export([init/1]).
+-export([requirements/0]).
 -export([challenge/3]).
 -export([authenticate/4]).
 
@@ -34,8 +38,9 @@
 
 
 
+
 %% =============================================================================
-%% bondy_auth_method CALLBACKS
+%% BONDY_AUTH CALLBACKS
 %% =============================================================================
 
 
@@ -45,15 +50,98 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec challenge(
-    bondy_security_user:t(), ReqDetails :: map(), bondy_context:t()) ->
-    {ok, ChallengeExtra :: map(), ChallengeState :: map()}
-    | {error, Reason :: any()}.
+-spec init(bondy_auth:context()) ->
+    {ok, State :: state()} | {error, Reason :: any()}.
 
-challenge(User, ReqDetails, Ctxt) ->
+init(Ctxt) ->
     try
-        HasPWD = bondy_security_user:has_password(User),
-        challenge(User, ReqDetails, Ctxt, HasPWD)
+
+        User = bondy_auth:user(Ctxt),
+        User =/= undefined orelse throw(invalid_context),
+
+        PWD = bondy_rbac_user:password(User),
+        User =/= undefined andalso bondy_password:protocol(PWD) == cra
+        orelse throw(invalid_context),
+
+        {ok, #{password => PWD}}
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec requirements() -> map().
+
+requirements() ->
+    #{
+        identification => true,
+        password => {true, #{protocols => [cra]}},
+        authorized_keys => false
+    }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec challenge(
+    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
+    {ok, DataOut :: map(), CBState :: term()}
+    | {error, Reason :: any(), CBState :: term()}.
+
+challenge(_, Ctxt, #{password := PWD} = State) ->
+    try
+        UserId = bondy_auth:user_id(Ctxt),
+        Role = bondy_auth:role(Ctxt),
+
+        #{
+            data := #{
+                salt := Salt,
+                salted_password := SPassword
+            },
+            params := #{
+                kdf := cra,
+                iterations := Iterations
+            }
+        } = PWD,
+
+        %% The CHALLENGE.Details.challenge|string is a string
+        %% the client needs to create a signature for.
+        Microsecs = erlang:system_time(microsecond),
+        Challenge = jsone:encode(#{
+            authid => UserId,
+            authrole => Role,
+            authmethod => ?WAMP_CRA_AUTH,
+            authprovider => ?BONDY_AUTH_PROVIDER,
+            nonce => bondy_password_cra:nonce(),
+            timestamp => bondy_utils:iso8601(Microsecs),
+            session => bondy_auth:session_id(Ctxt)
+        }),
+        ExpectedSignature = base64:encode(
+            crypto:mac(hmac, sha256, SPassword, Challenge)
+        ),
+
+        KeyLen = bondy_password:hash_length(PWD),
+
+        ChallengeExtra = #{
+            challenge => Challenge,
+            salt => Salt,
+            keylen => KeyLen,
+            iterations => Iterations
+        },
+
+        NewState = State#{
+            signature => ExpectedSignature
+        },
+
+        {ok, ChallengeExtra, NewState}
+
     catch
         throw:Reason ->
             {error, Reason}
@@ -67,98 +155,14 @@ challenge(User, ReqDetails, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec authenticate(
     Signature :: binary(),
-    Extra :: map(),
-    ChallengeState :: map(),
-    Ctxt :: bondy_context:t()) ->
-    {ok, AuthExtra :: map()} | {error, Reason :: any()}.
+    DataIn :: map(),
+    Ctxt :: bondy_auth:context(),
+    CBState :: state()) ->
+    {ok, DataOut :: map(), CBState :: state()}
+    | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(Signature, _Extra, #{signature := Signature}, Ctxt) ->
-    Realm = bondy_context:realm_uri(Ctxt),
-    AuthId = bondy_context:authid(Ctxt),
-    PW = bondy_security_user:password(Realm, AuthId),
-    HashedPass = maps:get(hash_pass, PW),
-    {IP, _} = bondy_context:peer(Ctxt),
+authenticate(Signature, _, _, #{signature := Signature} = State) ->
+    {ok, #{}, State};
 
-    %% TODO Review this as we have already validated the signatures are correct
-    %% we just need to check source allows Peer.
-    Result = bondy_security:authenticate(
-        Realm, AuthId, {hash, HashedPass}, [{ip, IP}]
-    ),
-    case Result of
-        {ok, _AuthCtxt} ->
-            {ok, #{}};
-        Error ->
-            Error
-    end;
-
-authenticate(_, _, _, _) ->
-    %% Signatures do not match
-    {error, bad_password}.
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-
-challenge(_, _, _, false) ->
-    {error, no_password};
-
-challenge(User, Details, Ctxt, true) ->
-    Role = bondy_auth_method:valid_authrole(
-        maps:get(authrole, Details, <<"user">>),
-        User
-    ),
-    AuthId = bondy_security_user:username(User),
-    Pass = bondy_security_user:password(bondy_context:realm_uri(Ctxt), User),
-
-    #{
-        auth_name := pbkdf2,
-        hash_pass := SPassword,
-        salt := Salt,
-        iterations := Iterations
-    } = Pass,
-
-    %% The CHALLENGE.Details.challenge|string is a string the client needs to
-    %% create a signature for.
-    Microsecs = erlang:system_time(microsecond),
-    Challenge = jsone:encode(#{
-        session => bondy_context:session_id(Ctxt),
-        authprovider => ?BONDY_AUTH_PROVIDER,
-        authmethod => ?WAMPCRA_AUTH,
-        authid => AuthId,
-        authrole => Role,
-        nonce => bondy_password_cra:nonce(),
-        timestamp => bondy_utils:iso8601(Microsecs)
-    }),
-    Signature = base64:encode(crypto:mac(hmac, sha256, SPassword, Challenge)),
-
-    KeyLen = bondy_password:hash_length(Pass),
-
-    ChallengeExtra = #{
-        challenge => Challenge,
-        salt => Salt,
-        keylen => KeyLen,
-        iterations => Iterations
-    },
-
-    ChallengeState = #{
-        authprovider => ?BONDY_AUTH_PROVIDER,
-        authmethod => ?WAMPCRA_AUTH,
-        authid => bondy_security_user:username(User),
-        authrole => Role,
-        '_authroles' => bondy_security_user:groups(User),
-        signature => Signature
-    },
-
-    {ok, ChallengeExtra, ChallengeState}.
-
-
-
-
-
-
-
+authenticate(_, _, _, State) ->
+    {error, authentication_failed, State}.

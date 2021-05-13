@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_admin_ready_http_handler).
+-include("http_api.hrl").
 
 -export([init/2]).
 
@@ -46,8 +47,7 @@ ready(<<"GET">>, Req) ->
     cowboy_req:reply(Status, Req);
 
 ready(_, Req) ->
-    %% Method not allowed.
-    cowboy_req:reply(405, Req).
+    cowboy_req:reply(?HTTP_METHOD_NOT_ALLOWED, Req).
 
 
 
@@ -57,5 +57,5 @@ ready(_, Req) ->
 %% =============================================================================
 
 
-status_code(ready) -> 204;
-status_code(_) -> 503.
+status_code(ready) -> ?HTTP_NO_CONTENT;
+status_code(_) -> ?HTTP_SERVICE_UNAVAILABLE.

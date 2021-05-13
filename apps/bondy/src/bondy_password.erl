@@ -2,6 +2,7 @@
 %%  bondy_password_scram.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2013 Basho Technologies, Inc.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -38,7 +39,7 @@
         required => true,
         default => bondy_config:get([security, password, protocol]),
         datatype => {in, [cra, <<"cra">>, scram, <<"scram">>]},
-        validator => fun bondy_data_validators:validate_existing_atom/1
+        validator => fun bondy_data_validators:existing_atom/1
     },
     params => #{
         alias => <<"params">>,
@@ -56,7 +57,7 @@
         required => true,
         default => bondy_config:get([security, password, scram, kdf]),
         datatype => {in, [pbkdf2, <<"pbkdf2">>, argon2id13, <<"argon2id13">>]},
-        validator => fun bondy_data_validators:validate_existing_atom/1
+        validator => fun bondy_data_validators:existing_atom/1
     },
     iterations => #{
         alias => <<"iterations">>,
@@ -75,6 +76,7 @@
 
 
 -type t()               ::  #{
+                                type := password,
                                 version := binary(),
                                 protocol := protocol(),
                                 params := params(),
@@ -100,15 +102,15 @@
 -export_type([opts/0]).
 
 -export([check_password/2]).
+-export([data/1]).
+-export([hash_length/1]).
 -export([new/1]).
 -export([new/2]).
-
--export([to_map/1]).
--export([upgrade/2]).
--export([hash_length/1]).
-
--export([data/1]).
 -export([params/1]).
+-export([protocol/1]).
+-export([from_term/1]).
+-export([upgrade/2]).
+-export([is_type/1]).
 
 
 
@@ -141,7 +143,7 @@ new(Password) ->
 %% -----------------------------------------------------------------------------
 -spec new(binary() | fun(() -> binary()), opts()) -> t() | no_return().
 
-new(Fun, Opts0) when is_function(Fun, 1) ->
+new(Fun, Opts0) when is_function(Fun, 0) ->
     new(Fun(), Opts0);
 
 new(Password, Opts0) ->
@@ -154,6 +156,35 @@ new(Password, Opts0) ->
         scram ->
             new_scram(Password, Params)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_type(t()) -> boolean().
+
+is_type(#{type := password}) ->
+    true;
+
+is_type(_) ->
+    false.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec protocol(t()) -> protocol() | undefined.
+
+protocol(#{version := <<"1.2">>, protocol := Value}) ->
+    Value;
+
+protocol(#{version := <<"1.1">>}) ->
+    cra;
+
+protocol(_) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -201,12 +232,12 @@ hash_length(#{} = PW) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_map(Term :: proplist:proplist() | map()) -> t().
+-spec from_term(Term :: proplist:proplist() | map()) -> t().
 
-to_map(Term) when is_list(Term) ->
+from_term(Term) when is_list(Term) ->
     maybe_add_version(maps:from_list(Term));
 
-to_map(Term) when is_map(Term) ->
+from_term(Term) when is_map(Term) ->
     maybe_add_version(Term).
 
 
@@ -222,6 +253,18 @@ when is_binary(Hash) ->
     SPassword = maps_utils:get([data, salted_password], PW),
     pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(SPassword));
 
+check_password({hash, Hash}, #{version := <<"1.1">>} = PW)
+when is_binary(Hash) ->
+    #{hash_pass := StoredHash} = PW,
+    %% StoredHash is base64 encoded
+    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(StoredHash));
+
+check_password({hash, Hash}, #{version := <<"1.0">>} = PW)
+when is_binary(Hash) ->
+    #{hash_pass := StoredHash} = PW,
+    %% StoredHash is hex value
+    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), StoredHash);
+
 check_password(String, #{version := <<"1.2">>, protocol := cra} = PW)
 when is_binary(String) ->
     #{
@@ -234,12 +277,6 @@ when is_binary(String) ->
 
     Hash = bondy_password_cra:salted_password(String, Salt, Params),
     bondy_password_cra:compare(Hash, SPassword);
-
-check_password({hash, Hash}, #{version := <<"1.1">>} = PW)
-when is_binary(Hash) ->
-    #{hash_pass := StoredHash} = PW,
-    %% StoredHash is base64 encoded
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(StoredHash));
 
 check_password(String, #{version := <<"1.1">>} = PW) when is_binary(String) ->
     #{
@@ -255,12 +292,6 @@ check_password(String, #{version := <<"1.1">>} = PW) when is_binary(String) ->
     %% StoredHash is base64 encoded
     Hash1 = base64:encode(Hash0),
     pbkdf2:compare_secure(pbkdf2:to_hex(Hash1), pbkdf2:to_hex(StoredHash));
-
-check_password({hash, Hash}, #{version := <<"1.0">>} = PW)
-when is_binary(Hash) ->
-    #{hash_pass := StoredHash} = PW,
-    %% StoredHash is hex value
-    pbkdf2:compare_secure(pbkdf2:to_hex(Hash), StoredHash);
 
 check_password(String, #{version := <<"1.0">>} = PW) when is_binary(String) ->
     #{
@@ -287,7 +318,7 @@ check_password(Term, #{} = PW) ->
     {true, T1 :: t()} | false.
 
 upgrade(Term, BP) when is_list(BP) ->
-    upgrade(Term, to_map(BP));
+    upgrade(Term, from_term(BP));
 
 upgrade(_, #{version := ?VERSION}) ->
     false;
@@ -315,6 +346,7 @@ maybe_add_version(#{version := _} = Pass) ->
 
 maybe_add_version(#{} = Pass) ->
     add_version(Pass).
+
 
 %% @private
 add_version(#{} = Pass) ->
@@ -360,6 +392,9 @@ do_upgrade({hash, SPassword}, #{version := <<"1.1">>} = Pass0) ->
     do_upgrade({hash, SPassword}, Pass1);
 
 do_upgrade(String, #{version := Version} = Pass0) when is_binary(String) ->
+    %% TODO check password here and fail with error(bad_password).
+    %% We should be doing this on authentication to avoid checking twice
+    %% maybe check_password with Opts {upgrade, true}
     UpgradeProtocol = bondy_config:get(
         [security, password, protocol_upgrade_enabled]
     ),
@@ -402,6 +437,7 @@ new_cra(Password, Params0) ->
     Salt = bondy_password_cra:salt(),
     SPassword = bondy_password_cra:salted_password(Password, Salt, Params),
     #{
+        type => password,
         version => ?VERSION,
         protocol => cra,
         params => Params,
@@ -424,6 +460,7 @@ new_scram(Password, Params0) ->
     StoredKey = bondy_password_scram:stored_key(ClientKey),
 
     #{
+        type => password,
         version => ?VERSION,
         protocol => scram,
         params => Params,

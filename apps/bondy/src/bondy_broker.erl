@@ -518,7 +518,7 @@ unsubscribe(SubsId, Ctxt) ->
 %% -----------------------------------------------------------------------------
 maybe_subscribe(M, Ctxt) ->
     TopicUri = M#subscribe.topic_uri,
-    try bondy_security_utils:authorize(<<"wamp.subscribe">>, TopicUri, Ctxt) of
+    try bondy_rbac:authorize(<<"wamp.subscribe">>, TopicUri, Ctxt) of
         ok ->
             subscribe(M, Ctxt)
     catch
@@ -553,7 +553,7 @@ maybe_unsubscribe(M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 maybe_unsubscribe(Topic, M, Ctxt) ->
     try
-        _ = bondy_security_utils:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
+        _ = bondy_rbac:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
         SubsId = M#unsubscribe.subscription_id,
         unsubscribe(SubsId, Ctxt)
     catch
@@ -572,7 +572,7 @@ maybe_publish(M, Ctxt) ->
 
     try
         Topic = M#publish.topic_uri,
-        ok = bondy_security_utils:authorize(<<"wamp.publish">>, Topic, Ctxt),
+        ok = bondy_rbac:authorize(<<"wamp.publish">>, Topic, Ctxt),
         %% (RFC) Asynchronously notifies all subscribers of the published event.
         %% Note that the _Publisher_ of an event will never receive the
         %% published event even if the _Publisher_ is also a _Subscriber_ of the

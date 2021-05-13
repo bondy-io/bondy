@@ -24,6 +24,7 @@
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_rest_gateway.hrl").
+-include("bondy_security.hrl").
 
 
 
@@ -192,6 +193,7 @@
 
 -record(state, {
     realm_uri           ::  binary(),
+    client_auth_ctxt    ::  bondy_auth:context() | undefined,
     client_id           ::  binary() | undefined,
     device_id           ::  binary() | undefined,
     token_path          ::  binary(),
@@ -290,15 +292,21 @@ accept(Req0, St) ->
     try
         {ok, PList, Req1} = cowboy_req:read_urlencoded_body(Req0),
         Data = maps:from_list(PList),
+
         Token = St#state.token_path,
         TokenSize = byte_size(Token),
+
         Revoke = St#state.revoke_path,
         RevokeSize = byte_size(Revoke),
+
+
         case cowboy_req:path(Req1) of
             <<Token:TokenSize/binary, _/binary>> ->
                 token_flow(Data, Req1, St);
             <<Revoke:RevokeSize/binary, _/binary>> ->
-                revoke_token_flow(Data, Req1, St)
+                revoke_token_flow(Data, Req1, St);
+            <<"jwks">> ->
+                jwks(Req1, St)
         end
     catch
         ?EXCEPTION(error, Reason, Stacktrace) ->
@@ -322,15 +330,21 @@ do_is_authorized(Req0, St0) ->
     ClientIP = bondy_http_utils:client_ip(Req0),
 
     try cowboy_req:parse_header(<<"authorization">>, Req0) of
-        Val ->
-            Result = bondy_security_utils:authenticate(
-                basic, Val, St0#state.realm_uri, Peer),
-
-            case Result of
-                {ok, AuthCtxt} ->
-                    ClientId = ?CHARS2BIN(
-                    bondy_security:get_username(AuthCtxt)),
-                    {true, Req0, St0#state{client_id = ClientId}};
+        {basic, ClientId, Password} ->
+            %% TODO Here we should check this principal belongs to
+            %% "api_clients" group, to check the client_credentials flow can be
+            %% used. Otherwise we should differentiate between the flows on the
+            %% auth method and RBAC source
+            AuthCtxt0 = bondy_auth:init(
+                St0#state.realm_uri, ClientId, undefined, Peer
+            ),
+            case bondy_auth:authenticate(?BASIC_AUTH, Password, AuthCtxt0) of
+                {ok, _, AuthCtxt1} ->
+                    St1 = St0#state{
+                        client_id = bondy_auth:user_id(AuthCtxt1),
+                        client_auth_ctxt = AuthCtxt1
+                    },
+                    {true, Req0, St1};
                 {error, Reason} ->
                     _ = lager:info(
                         "API Client login failed due to invalid client ID; "
@@ -353,32 +367,39 @@ do_is_authorized(Req0, St0) ->
 
 
 %% @private
-token_flow(#{?GRANT_TYPE := <<"client_credentials">>}, Req, St) ->
-    issue_token(client_credentials, St#state.client_id, Req, St);
+token_flow(
+    #{?GRANT_TYPE := <<"client_credentials">>},
+    Req,
+    #state{client_auth_ctxt = Ctxt} = St) when Ctxt =/= undefined ->
+    %% The context was set during the is_authorized callback
+    issue_token(client_credentials, St#state.client_auth_ctxt, Req, St);
 
 token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     %% Resource Owner Password Credentials Flow
     #{
-        <<"username">> := U,
-        <<"password">> := P,
+        <<"username">> := Username,
+        <<"password">> := Password,
         <<"scope">> := _Scope,
         <<"client_device_id">> := DeviceId
     } = maps_utils:validate(Map, ?RESOURCE_OWNER_SPEC),
 
     RealmUri = St0#state.realm_uri,
-    {IP, _Port} = cowboy_req:peer(Req0),
+    {IP, _Port} = Peer = cowboy_req:peer(Req0),
     St1 = St0#state{device_id = DeviceId},
 
-    case bondy_security:authenticate(RealmUri, U, P, [{ip, IP}]) of
-        {ok, AuthCtxt} ->
+    %% This is ID will bot be used as the ID is already defined in the JWT
+    SessionId = bondy_utils:get_id(global),
+    AuthCtxt0 = bondy_auth:init(SessionId, RealmUri, Username, all, Peer),
+
+    case bondy_auth:authenticate(?BASIC_AUTH, Password, AuthCtxt0) of
+        {ok, _, AuthCtxt1} ->
             %% Username in right case
-            Username = bondy_security:get_username(AuthCtxt),
-            issue_token(password, Username, Req0, St1);
+            issue_token(password, AuthCtxt1, Req0, St1);
         {error, Error} ->
             BinIP = inet_utils:ip_address_to_binary(IP),
             _ = lager:info(
-                "Resource Owner login failed, error=invalid_grant, reason=~p, username=~s, client_device_id=~s, realm_uri=~s, ip=~s",
-                [Error, U, DeviceId, RealmUri, BinIP]
+                "Resource Owner login failed, error=invalid_grant, reason=~p, client_device_id=~s, realm_uri=~s, ip=~s",
+                [Error, DeviceId, RealmUri, BinIP]
             ),
             {stop, reply(oauth2_invalid_grant, Req0), St1}
     end;
@@ -429,17 +450,19 @@ refresh_token(RefreshToken, Req0, St) ->
 
 
 %% @private
-issue_token(Type, Username, Req0, St0) ->
+issue_token(Type, AuthCtxt, Req0, St0) ->
     RealmUri = St0#state.realm_uri,
     Issuer = St0#state.client_id,
-    User = bondy_security_user:fetch(RealmUri, Username),
-    Gs = bondy_security_user:groups(User),
+
+    User = bondy_auth:user(AuthCtxt),
+    Authid = bondy_auth:user_id(AuthCtxt),
+    Gs = bondy_auth:roles(AuthCtxt),
     Meta = prepare_meta(Type, maps:get(<<"meta">>, User, #{}), St0),
 
-    case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Username, Gs, Meta) of
+    case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Authid, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
             Req1 = token_response(JWT, RefreshToken, Claims, Req0),
-            ok = on_login(RealmUri, Username, Meta),
+            ok = on_login(RealmUri, Authid, Meta),
             {true, Req1, St0};
         {error, Reason} ->
             Req1 = reply(Reason, Req0),
@@ -473,6 +496,28 @@ revoke_token_flow(Data0, Req0, St) ->
     end.
 
 
+jwks(Req0, St) ->
+    RealmUri = St#state.realm_uri,
+
+    case bondy_realm:lookup(RealmUri) of
+        {error, not_found} ->
+            ErrorMap = maps:without(
+                [<<"status_code">>],
+                bondy_error:map({no_such_realm, RealmUri})
+            ),
+            Req1 = cowboy_req:reply(
+                ?HTTP_NOT_FOUND,
+                prepare_request(ErrorMap, #{}, Req0)
+            ),
+            {stop, Req1, St};
+        Realm ->
+            #{public_keys := Keys} = bondy_realm:to_external(Realm),
+            KeySet = #{keys => Keys},
+            Req1 = prepare_request(KeySet, #{}, Req0),
+            {true, Req1, St}
+    end.
+
+
 %% @private
 prepare_meta(password, Meta, #state{device_id = DeviceId})
 when DeviceId =/= undefined ->
@@ -488,7 +533,7 @@ prepare_meta(_, Meta, _) ->
 reply(no_such_realm, Req) ->
     reply(oauth2_invalid_client, Req);
 
-reply({unknown_user, _}, Req) ->
+reply(unknown_user, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply(missing_password, Req) ->

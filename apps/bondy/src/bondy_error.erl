@@ -168,12 +168,36 @@ map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
     maps:put(<<"message">>, Msg, map(oauth2_invalid_client));
 
+map({missing_required_value, Key}) ->
+    #{
+        code => missing_required_value,
+        message => <<"The operation failed due to a missing required value.">>,
+        description => <<"A value for ", $', Key/binary, $', " is required.">>,
+        key => Key
+    };
+
+
+map({inconsistency_error, Keys}) when is_list(Keys) ->
+    #{
+        code => inconsistency_error,
+        message => <<"The operation failed due to inconsistent values.">>,
+        description => iolist_to_binary([
+            <<"The values provided for the keys [">>,
+            binary_utils:join(Keys, <<", ">>),
+            <<"] are inconsistent.">>
+        ]),
+        keys => Keys
+    };
+
+map({inconsistency_error, Key}) ->
+    map({inconsistency_error, [Key]});
+
 map({no_such_realm, Uri}) ->
 
     #{
         <<"code">> => ?WAMP_NO_SUCH_REALM,
-        <<"message">> => <<"There is no realm named ", $', Uri/binary, $'>>,
-        <<"description">> => <<"The request cannot be executed because the realm provided does not exist.">>
+        <<"message">> => <<"The request failed because the realm provided does not exist.">>,
+        <<"description">> => <<"A realm named ", $', Uri/binary, $', "could not be found.">>
     };
 
 map({badarg, {decoding, json}}) ->

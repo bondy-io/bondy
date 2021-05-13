@@ -26,7 +26,7 @@
 -define(ADD_SPEC, #{
     <<"client_id">> => #{
         alias => client_id,
-        %% We rename the key to comply with bondy_security_user:t()
+        %% We rename the key to comply with bondy_rbac_user:t()
         key => <<"username">>,
         required => true,
         allow_null => true,
@@ -36,7 +36,7 @@
     },
     <<"client_secret">> => #{
         alias => client_secret,
-        %% We rename the key to comply with bondy_security_user:t()
+        %% We rename the key to comply with bondy_rbac_user:t()
         key => <<"password">>,
         required => true,
         allow_null => false,
@@ -59,7 +59,7 @@
 -define(UPDATE_SPEC, #{
     <<"client_secret">> => #{
         alias => client_secret,
-        %% We rename the key to comply with bondy_security_user:t()
+        %% We rename the key to comply with bondy_rbac_user:t()
         key => <<"password">>,
         required => false,
         allow_null => false,
@@ -76,9 +76,12 @@
     }
 }).
 
+-type t()       ::  bondy_rbac_user:t().
+
 -export([add/2]).
 -export([remove/2]).
 -export([update/3]).
+-export([to_external/1]).
 
 
 
@@ -99,36 +102,41 @@
 %% -----------------------------------------------------------------------------
 -spec add(uri(), map()) -> {ok, map()} | {error, atom() | map()}.
 
-add(RealmUri, Info0) ->
-    case bondy_security_user:add(RealmUri, validate(Info0, ?ADD_SPEC)) of
-        {ok, Info1} ->
-            {ok, to_client(Info1)};
-        {error, _} = Error ->
-            Error
-    end.
+add(RealmUri, Data) ->
+    User = bondy_rbac_user:new(validate(Data, ?ADD_SPEC)),
+    bondy_rbac_user:add(RealmUri, User).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), binary(), map()) -> ok| {error, term()} | no_return().
+-spec update(uri(), binary(), map()) ->
+    {ok , t()} | {error, term()} | no_return().
 
-update(RealmUri, ClientId, Info0) ->
-    bondy_security_user:update(
-        RealmUri, ClientId, validate(Info0, ?UPDATE_SPEC)).
+update(RealmUri, ClientId, Data0) ->
+    Data = validate(Data0, ?UPDATE_SPEC),
+    bondy_rbac_user:update(RealmUri, ClientId, Data).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec remove(uri(), list() | binary()) -> ok.
+-spec remove(uri(), binary()) -> ok.
 
-remove(RealmUri, Id) ->
-    bondy_security_user:remove(RealmUri, Id).
+remove(RealmUri, ClientId) ->
+    bondy_rbac_user:remove(RealmUri, ClientId).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_external(t()) -> map().
+
+to_external(Map) ->
+    Map.
 
 
 %% =============================================================================
@@ -137,13 +145,11 @@ remove(RealmUri, Id) ->
 
 
 %% @private
-validate(Info0, Spec) ->
+validate(Data0, Spec) ->
     %% We do this since maps_utils:validate will remove keys that have no spec
     %% So we only validate groups the following list here
-    With = [<<"groups">>, <<"client_id">>, <<"client_secret">>],
-    {ToValidate, Rest} = maps_utils:split(With, Info0),
-    Info1 = maps:merge(Rest, maps_utils:validate(ToValidate, Spec)),
-    maybe_add_groups(Info1).
+    Data = maps_utils:validate(Data0, Spec, #{keep_unknown => true}),
+    maybe_add_groups(Data).
 
 
 %% @private
@@ -154,8 +160,3 @@ maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
 maybe_add_groups(#{} = M) ->
     %% For update op
     M.
-
-to_client(Map) ->
-    {L, R} = maps_utils:split([<<"username">>], Map),
-    #{<<"username">> := Username} = L,
-    maps:put(<<"client_id">>, Username, R).

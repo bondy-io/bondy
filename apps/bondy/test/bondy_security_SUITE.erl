@@ -35,10 +35,7 @@ groups() ->
     [
         {api_client, [sequence], [
             create_realm,
-            enable_security,
-            security_enabled,
-            disable_security,
-            security_disabled,
+            security_toggle,
             create_groups,
             api_client_add,
             api_client_auth1,
@@ -84,32 +81,24 @@ create_realm(Config) ->
     Realm = bondy_realm:add(?config(realm_uri, Config)),
     {save_config, [{realm, Realm} | Config]}.
 
-enable_security(Config) ->
+security_toggle(Config) ->
     {create_realm, Prev} = ?config(saved_config, Config),
-    ok = bondy_realm:enable_security(?config(realm, Prev)),
-    {save_config, Prev}.
 
-security_enabled(Config) ->
-    {enable_security, Prev} = ?config(saved_config, Config),
     R = ?config(realm, Prev),
-    enabled = bondy_realm:security_status(R),
-    true = bondy_realm:is_security_enabled(R),
+
+    ok = bondy_realm:enable_security(R),
+
+    ?assertEqual(enabled, bondy_realm:security_status(R)),
+    ?assertEqual(true, bondy_realm:is_security_enabled(R)),
+
+    ok = bondy_realm:disable_security(R),
+
+    ?assertEqual(disabled, bondy_realm:security_status(R)),
+    ?assertEqual(false, bondy_realm:is_security_enabled(R)),
+
+    ok = bondy_realm:enable_security(R),
+
     {save_config, Prev}.
-
-disable_security(Config) ->
-    {security_enabled, Prev} = ?config(saved_config, Config),
-    ok = bondy_realm:disable_security(?config(realm, Prev)),
-    {save_config, Prev}.
-
-security_disabled(Config) ->
-    {disable_security, Prev} = ?config(saved_config, Config),
-    R = ?config(realm, Prev),
-    disabled = bondy_realm:security_status(R),
-    false = bondy_realm:is_security_enabled(R),
-    {save_config, Prev}.
-
-
-
 
 
 
@@ -118,20 +107,36 @@ security_disabled(Config) ->
 %% =============================================================================
 
 create_groups(Config) ->
-    {security_disabled, Prev} = ?config(saved_config, Config),
+    {security_toggle, Prev} = ?config(saved_config, Config),
     Uri = ?config(realm_uri, Config),
     Name = <<"group_a">>,
-    N = length(bondy_security_group:list(Uri)),
-    ok = bondy_security_group:add(Uri, #{<<"name">> => Name}),
-    #{
-        <<"name">> := Name,
-        <<"groups">> := [],
-        <<"meta">> := #{}
-    } = bondy_security_group:lookup(Uri, Name),
-    true = length(bondy_security_group:list(Uri)) =:= N + 1,
+    N = length(bondy_rbac_group:list(Uri)),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_rbac_group:add(Uri, bondy_rbac_group:new(#{<<"name">> => Name}))
+    ),
+
+    ?assertMatch(
+        #{type := group, name := Name, groups := [], meta := #{}}, bondy_rbac_group:lookup(Uri, Name)
+    ),
+    ?assertEqual(N + 1, length(bondy_rbac_group:list(Uri))),
+
     %% Create required groups for the tests
-    ok = bondy_security_group:add(Uri, #{<<"name">> => <<"api_clients">>}),
-    ok = bondy_security_group:add(Uri, #{<<"name">> => <<"resource_owners">>}),
+    ?assertMatch(
+        {ok, _},
+        bondy_rbac_group:add(
+            Uri, bondy_rbac_group:new(#{<<"name">> => <<"api_clients">>})
+        )
+    ),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_rbac_group:add(
+            Uri, bondy_rbac_group:new(#{<<"name">> => <<"resource_owners">>})
+        )
+    ),
+
     {save_config, Prev}.
 
 api_client_add(Config) ->
@@ -142,8 +147,11 @@ api_client_add(Config) ->
         <<"client_id">> => ClientId,
         <<"client_secret">> => Secret
     },
-    {ok, #{<<"client_id">> := ClientId}} = bondy_oauth2_client:add(
-        ?config(realm_uri, Prev), In),
+    ?assertMatch(
+        {ok, #{type := user}},
+        bondy_oauth2_client:add(?config(realm_uri, Prev), In)
+    ),
+
     {save_config, [{client_id, ClientId}, {client_secret, Secret} | Prev]}.
 
 api_client_auth1(Config) ->
@@ -218,8 +226,8 @@ resource_owner_add(Config) ->
         <<"groups">> => []
     },
 
-    ?assertMatch(
-        {error, #{code := invalid_value, key := <<"password">>}},
+    ?assertError(
+        #{code := invalid_value, key := <<"password">>},
         bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R0),
         "password is too small"
     ),
@@ -227,7 +235,7 @@ resource_owner_add(Config) ->
     R1 = maps:put(<<"password">>, Password, R0),
 
     ?assertMatch(
-        {ok, #{<<"username">> := Username}},
+        {ok, #{username := <<"ale">>}},
         bondy_oauth2_resource_owner:add(?config(realm_uri, Config), R1)
     ),
 
@@ -247,7 +255,7 @@ resource_owner_update(Config) ->
     RealmUri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     Pass = <<"New-Password">>,
-    #{<<"groups">> := Gs} = bondy_security_user:lookup(RealmUri, Username),
+    #{<<"groups">> := Gs} = bondy_rbac_user:lookup(RealmUri, Username),
     {ok, _} = bondy_oauth2_resource_owner:update(
         RealmUri,
         Username,
@@ -256,7 +264,7 @@ resource_owner_update(Config) ->
             <<"meta">> => #{<<"foo">> => <<"bar">>}
         }
     ),
-    #{<<"groups">> := Gs} = bondy_security_user:lookup(RealmUri, Username),
+    #{<<"groups">> := Gs} = bondy_rbac_user:lookup(RealmUri, Username),
     {save_config,
         lists:keyreplace(password, 1, Prev, {password, Pass})}.
 
@@ -265,12 +273,12 @@ resource_owner_change_password(Config) ->
     RealmUri = ?config(realm_uri, Prev),
     Username = ?config(username, Prev),
     OldPass = ?config(password, Prev),
-    User1 = bondy_security_user:lookup(RealmUri, Username),
+    User1 = bondy_rbac_user:lookup(RealmUri, Username),
     NewPass = <<"New-Password2">>,
-    ok = bondy_security_user:change_password(
+    ok = bondy_rbac_user:change_password(
         RealmUri, Username, NewPass, OldPass),
     %% Validate that we have only changed the password
-    User2 = bondy_security_user:lookup(RealmUri, Username),
+    User2 = bondy_rbac_user:lookup(RealmUri, Username),
     %% error([User1, User2]),
     true = User1 =:= User2,
     {save_config,
@@ -316,15 +324,31 @@ user_add(Config) ->
         <<"meta">> => #{<<"foo">> => <<"bar">>},
         <<"groups">> => []
     },
-    Out = #{
-        <<"groups">> => [],
-        <<"has_password">> => true,
-        <<"meta">> => #{<<"foo">> => <<"bar">>},
-        <<"sources">> => [],
-        <<"username">> => <<"AlE2">>
-    },
-    {ok, Out} = bondy_security_user:add(?config(realm_uri, Config), In),
-    {save_config, [{username, <<"AlE2">>}, {password, <<"ale123456">>} | Config]}.
+
+    User = bondy_rbac_user:new(In),
+
+    ?assertEqual(
+        {ok, User},
+        bondy_rbac_user:add(?config(realm_uri, Config), User)
+    ),
+
+    ?assertEqual(
+        #{
+            groups => [],
+            has_authorized_keys => false,
+            has_password => true,
+            meta => #{<<"foo">> => <<"bar">>},
+            type => user,
+            username => <<"ale2">>,
+            version => <<"1.1">>
+        },
+        bondy_rbac_user:to_external(User)
+    ),
+
+    {save_config, [
+        {username, <<"AlE2">>}, {password, <<"ale123456">>}
+        | Config
+    ]}.
 
 user_auth1(Config) ->
     {user_add, Prev} = ?config(saved_config, Config),
@@ -345,7 +369,7 @@ user_update(Config) ->
         <<"sources">> => [],
         <<"username">> => <<"AlE2">>
     },
-    {ok, Out} = bondy_security_user:update(
+    {ok, Out} = bondy_rbac_user:update(
         ?config(realm_uri, Prev),
         ?config(username, Prev),
         #{
@@ -376,11 +400,9 @@ user_auth3(Config) ->
 
 user_delete(Config) ->
     {user_auth3, Prev} = ?config(saved_config, Config),
-    ok = bondy_security_user:remove(
+    ok = bondy_rbac_user:remove(
         ?config(realm_uri, Config), ?config(username, Prev)),
     {save_config, Prev}.
-
-
 
 
 

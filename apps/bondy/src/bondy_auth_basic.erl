@@ -21,10 +21,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_auth_wamp_ticket).
+-module(bondy_auth_basic).
 -behaviour(bondy_auth).
-
--include("bondy_security.hrl").
 
 -define(VALID_PROTOCOLS, [cra, scram]).
 
@@ -32,8 +30,8 @@
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
--export([requirements/0]).
 -export([challenge/3]).
+-export([requirements/0]).
 -export([authenticate/4]).
 
 
@@ -41,6 +39,7 @@
 %% =============================================================================
 %% BONDY_AUTH CALLBACKS
 %% =============================================================================
+
 
 
 
@@ -56,6 +55,11 @@ init(Ctxt) ->
 
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
+
+        PWD = bondy_rbac_user:password(User),
+        User =/= undefined
+            andalso lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS)
+        orelse throw(invalid_context),
 
         {ok, undefined}
 

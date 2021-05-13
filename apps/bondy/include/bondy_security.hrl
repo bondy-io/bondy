@@ -20,345 +20,72 @@
 
 -define(BONDY_AUTH_PROVIDER, <<"com.leapsight.bondy.rbac">>).
 
-%% =============================================================================
-%% SCHEMAS
-%% =============================================================================
+-define(WAMP_ANON_AUTH,         <<"anonymous">>).
+-define(BASIC_AUTH,             <<"password">>).
+-define(OAUTH2_AUTH,            <<"oauth2">>).
+-define(TRUST_AUTH,             <<"trust">>).
+-define(WAMP_COOKIE_AUTH,       <<"cookie">>).
+-define(WAMP_CRA_AUTH,          <<"wampcra">>).
+-define(WAMP_CRYPTOSIGN_AUTH,   <<"cryptosign">>).
+-define(WAMP_OAUTH2_AUTH,       <<"oauth2">>).
+-define(WAMP_SCRAM_AUTH,        <<"wamp-scram">>).
+-define(WAMP_TICKET_AUTH,       <<"ticket">>).
+-define(WAMP_TLS_AUTH,          <<"tls">>).
+
+-define(BONDY_AUTHMETHODS_INFO, #{
+    ?WAMP_ANON_AUTH => #{
+        callback_mod => bondy_auth_anonymous
+    },
+    ?TRUST_AUTH => #{
+        callback_mod => bondy_auth_trust
+    },
+    ?BASIC_AUTH => #{
+        callback_mod => bondy_auth_basic
+    },
+    ?OAUTH2_AUTH => #{
+        callback_mod => bondy_auth_oauth2
+    },
+    ?WAMP_COOKIE_AUTH => #{
+        callback_mod => undefined
+    },
+    ?WAMP_CRA_AUTH => #{
+        callback_mod => bondy_auth_wamp_cra
+    },
+    ?WAMP_SCRAM_AUTH => #{
+        callback_mod => bondy_auth_wamp_scram
+    },
+    ?WAMP_CRYPTOSIGN_AUTH => #{
+        callback_mod => bondy_auth_wamp_crytosign
+    },
+    ?WAMP_TICKET_AUTH => #{
+        callback_mod => bondy_auth_wamp_ticket
+    },
+    ?WAMP_TLS_AUTH => #{
+        callback_mod => undefined
+    }
+}).
 
 
--define(TRUST_AUTH, <<"trust">>).
--define(PASSWORD_AUTH, <<"password">>).
--define(CERTIFICATE_AUTH, <<"certificate">>).
--define(LDAP_AUTH, <<"ldap">>).
-
-
--define(AUTH_METHODS, [
-    ?TRUST_AUTH,
-    ?PASSWORD_AUTH,
-    ?CERTIFICATE_AUTH,
-    ?LDAP_AUTH
-    | ?BONDY_WAMP_AUTH_METHODS
-]).
-
--define(AUTH_METHODS_ATOM,
-    case persistent_term:get({bondy, auth_methods_atom}, undefined) of
+-define(BONDY_AUTH_METHOD_NAMES,
+    case persistent_term:get({bondy, '_auth_method_names'}, undefined) of
         undefined ->
-            Val = [binary_to_atom(B, utf8) || B <- ?AUTH_METHODS],
-            ok = persistent_term:put({bondy, wamp_auth_methods_atom}, Val),
-            Val;
-        Val ->
-            Val
+            Names = maps:keys(?BONDY_AUTHMETHODS_INFO),
+            ok = persistent_term:put({bondy, '_auth_method_names'}, Names),
+            Names;
+        Names ->
+            Names
     end
 ).
 
--define(OAUTH2_AUTH, <<"oauth2">>).
--define(ANON_AUTH, <<"anonymous">>).
--define(COOKIE_AUTH, <<"cookie">>).
--define(TICKET_AUTH, <<"ticket">>).
--define(TLS_AUTH, <<"tls">>).
--define(WAMPCRA_AUTH, <<"wampcra">>).
--define(WAMPSCRAM_AUTH, <<"wamp-scram">>).
--define(WAMP_CRYPTOSIGN_AUTH, <<"cryptosign">>).
-
--define(BONDY_WAMP_AUTH_METHODS, [
-    ?ANON_AUTH,
-    ?OAUTH2_AUTH,
-    ?COOKIE_AUTH,
-    ?TICKET_AUTH,
-    ?TLS_AUTH,
-    ?WAMPCRA_AUTH,
-    ?WAMPSCRAM_AUTH,
-    ?WAMP_CRYPTOSIGN_AUTH
+-define(WAMP_PERMISSIONS, [
+    <<"wamp.register">>,
+    <<"wamp.unregister">>,
+    <<"wamp.call">>,
+    <<"wamp.cancel">>,
+    <<"wamp.subscribe">>,
+    <<"wamp.unsubscribe">>,
+    <<"wamp.publish">>,
+    <<"wamp.disclose_caller">>,
+    <<"wamp.disclose_publisher">>
 ]).
-
-
--define(VALIDATE_USERNAME, fun
-        (<<"all">>) ->
-            false;
-        ("all") ->
-            false;
-        (all) ->
-            false;
-        (_) ->
-            true
-    end
-).
-
--define(USER_SPEC, #{
-    <<"username">> => #{
-        alias => username,
-        key => <<"username">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary,
-        validator => fun bondy_data_validators:validate_username/1
-    },
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => true,
-        allow_null => false,
-        datatype => binary,
-        validator => fun bondy_data_validators:validate_password/1
-    },
-    <<"authorized_keys">> => #{
-        alias => authorized_keys,
-        key => <<"authorized_keys">>,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary}
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        default => [],
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
-    }
-}).
-
--define(USER_UPDATE_SPEC, #{
-    <<"password">> => #{
-        alias => password,
-        key => <<"password">>,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary
-    },
-    <<"authorized_keys">> => #{
-        alias => authorized_keys,
-        key => <<"authorized_keys">>,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary}
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => map
-    }
-}).
-
--define(GROUP_SPEC, ?GROUP_UPDATE_SPEC#{
-    <<"name">> => #{
-        alias => name,
-        key => <<"name">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => binary
-    },
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => {list, binary},
-        default => []
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
-    }
-}).
-
--define(GROUP_UPDATE_SPEC, #{
-    <<"groups">> => #{
-        alias => groups,
-        key => <<"groups">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => {list, binary}
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => map
-    }
-}).
-
--define(ROLES_DATATYPE, [
-    {in, [<<"all">>, all]},
-    {list, binary}
-]).
-
--define(ROLES_VALIDATOR, fun
-    (<<"all">>) ->
-        {ok, all};
-    (all) ->
-        true;
-    (List) when is_list(List) ->
-        A = sets:from_list(List),
-        B = sets:from_list([<<"all">>, all]),
-        case sets:is_disjoint(A, B) of
-            true ->
-                L = lists:map(
-                    fun(<<"anonymous">>) -> anonymous; (X) -> X end,
-                    List
-                ),
-                {ok, L};
-            false ->
-                %% Error, "all" is not a role so it cannot
-                %% be mixed in a roles list
-                false
-        end
-end).
-
--define(SOURCE_SPEC, #{
-    <<"usernames">> => #{
-        alias => usernames,
-        key => <<"usernames">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        %% datatype => ?ROLES_DATATYPE,
-        validator => ?ROLES_VALIDATOR
-    },
-    <<"authmethod">> => #{
-        alias => authmethod,
-        key => <<"authmethod">>,
-        required => true,
-        allow_null => false,
-        datatype => [{in, ?AUTH_METHODS}, {in, ?AUTH_METHODS_ATOM}],
-        validator => fun
-            (Bin) when is_binary(Bin) ->
-                try
-                    %% We turn auth method binary to atom format
-                    {ok, list_to_existing_atom(binary_to_list(Bin))}
-                catch
-                    ?EXCEPTION(_, _, _) ->
-                        false
-                end;
-            (_) ->
-                true
-        end
-    },
-    <<"cidr">> => #{
-        alias => cidr,
-        key => <<"cidr">>, %% bondy_security requirement
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        default => [],
-        datatype => [binary, tuple],
-        validator => fun
-            (Bin) when is_binary(Bin) ->
-                case re:split(Bin, "/", [{return, list}, {parts, 2}]) of
-                    [Prefix, LenStr] ->
-                        {ok, Addr} = inet:parse_address(Prefix),
-                        {PrefixLen, _} = string:to_integer(LenStr),
-                        {ok, {Addr, PrefixLen}};
-                    _ ->
-                        false
-                end;
-            ({IP, PrefixLen}) when PrefixLen >= 0 ->
-                case inet:ntoa(IP) of
-                    {error, einval} -> false;
-                    _ -> true
-                end;
-            (_) ->
-                false
-        end
-    },
-    <<"meta">> => #{
-        alias => meta,
-        key => <<"meta">>,
-        allow_null => false,
-        allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
-    }
-}).
-
-
-
--define(GRANT_SPEC, #{
-    <<"permissions">> => #{
-        alias => permissions,
-        key => <<"permissions">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list,
-            {in, [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.call">>,
-                <<"wamp.cancel">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
-                <<"wamp.publish">>
-            ]}
-        }
-    },
-    <<"uri">> => #{
-        alias => uri,
-        key => <<"uri">>,
-        required => true,
-        allow_null => false,
-        datatype => [binary, {in, [any, all]}],
-        validator => fun
-            (<<"*">>) ->
-                {ok, any};
-            (<<"all">>) ->
-                {ok, all};
-            (any) ->
-                true;
-            (all) ->
-                true;
-            (Uri) when is_binary(Uri) ->
-                Len = byte_size(Uri) - 1,
-                case binary:matches(Uri, [<<$*>>]) of
-                    [] -> true;
-                    [{Len, 1}] -> true; % a prefix match
-                    [_|_] -> false % illegal
-                end
-        end
-    },
-    <<"roles">> => #{
-        alias => roles,
-        key => <<"roles">>,
-        required => true,
-        allow_null => false,
-        allow_undefined => false,
-        %% datatype => ?ROLES_DATATYPE,
-        validator => ?ROLES_VALIDATOR
-    }
-}).
 

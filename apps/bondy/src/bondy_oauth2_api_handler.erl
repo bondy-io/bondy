@@ -37,42 +37,51 @@
 %% =============================================================================
 
 
-handle_call(#call{procedure_uri = ?LOOKUP_TOKEN} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
-        {ok, [Uri, Issuer, Token]} ->
-            Res = bondy_oauth2:lookup_token(Uri, Issuer, Token),
-            bondy_wamp_utils:maybe_error(Res, M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
 
-handle_call(#call{procedure_uri = ?REVOKE_TOKEN} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4) of
-        {ok, [Uri, Issuer, Token]} ->
-            Res = bondy_oauth2:revoke_token(
-                refresh_token, Uri, Issuer, Token),
-            bondy_wamp_utils:maybe_error(Res, M);
-        {ok, [Uri, Issuer, Username, DeviceId]} ->
-            Res = bondy_oauth2:revoke_token(
-                refresh_token, Uri, Issuer, Username, DeviceId),
-            bondy_wamp_utils:maybe_error(Res, M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_call(M, Ctxt) ->
+    PeerId = bondy_context:peer_id(Ctxt),
 
-handle_call(#call{procedure_uri = ?REVOKE_TOKENS} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
-        {ok, [Uri, Issuer, Username]} ->
-            Res = bondy_oauth2:revoke_token(
-                refresh_token, Uri, Issuer, Username),
-            bondy_wamp_utils:maybe_error(Res, M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    try
+        Reply = do_handle(M, Ctxt),
+        bondy:send(PeerId, Reply)
+    catch
+        _:Reason ->
+            %% We catch any exception from do_handle and turn it
+            %% into a WAMP Error
+            Error = bondy_wamp_utils:maybe_error(Reason, M),
+            bondy:send(PeerId, Error)
+    end.
 
-handle_call(#call{} = M, Ctxt) ->
-    Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+-spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+    wamp_messsage:result() | wamp_message:error().
+
+do_handle(#call{procedure_uri = ?LOOKUP_TOKEN} = M, Ctxt) ->
+    [Uri, Issuer, Token] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    Result = bondy_oauth2:lookup_token(Uri, Issuer, Token),
+    bondy_wamp_utils:maybe_error(Result, M);
+
+do_handle(#call{procedure_uri = ?REVOKE_TOKEN} = M, Ctxt) ->
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
+    Result = erlang:apply(bondy_oauth2, revoke_token, L),
+    bondy_wamp_utils:maybe_error(Result, M);
+
+do_handle(#call{procedure_uri = ?REVOKE_TOKENS} = M, Ctxt) ->
+    [Uri, Issuer, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    Result = bondy_oauth2:revoke_token(refresh_token, Uri, Issuer, Username),
+    bondy_wamp_utils:maybe_error(Result, M);
+
+do_handle(#call{} = M, _) ->
+    bondy_wamp_utils:no_such_procedure_error(M).

@@ -1,6 +1,5 @@
-
 %% =============================================================================
-%%  bondy_admin_ping_http_handler.erl -
+%%  bondy_auth_password_SUITE.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -17,19 +16,23 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--module(bondy_admin_ping_http_handler).
--include("http_api.hrl").
-
--export([init/2]).
+-module(bondy_auth_password_SUITE).
+-include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 
+-compile([nowarn_export_all, export_all]).
 
-init(Req0, State) ->
-    Req1 = bondy_http_utils:set_meta_headers(Req0),
-    Req2 = cowboy_req:reply(?HTTP_NO_CONTENT, Req1),
-    {ok, Req2, State}.
+all() ->
+    [
+
+    ].
+
+
+init_per_suite(Config) ->
+    common:start_bondy(),
+    [{realm_uri, <<"com.myrealm">>}|Config].
+
+end_per_suite(Config) ->
+    % common:stop_bondy(),
+    {save_config, Config}.

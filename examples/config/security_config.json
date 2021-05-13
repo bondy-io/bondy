@@ -25,7 +25,7 @@
             },
             {
                 "usernames" : ["anonymous"],
-                "authmethod" : "trust",
+                "authmethod" : "anonymous",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {
                 "description" : "Allows all users from any network authenticate as anonymous."
@@ -132,13 +132,13 @@
             },
             {
                 "usernames" : ["anonymous"],
-                "authmethod" : "trust",
+                "authmethod" : "anonymous",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             },
             {
                 "usernames" : ["peer1", "peer2", "app1"],
-                "authmethod" : "trust",
+                "authmethod" : "anonymous",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             }

@@ -19,22 +19,68 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% ## References
+%% * [BrowserAuth](http://www.browserauth.net)
+%% * [Binding Security Tokens to TLS Channels](https://www.ietf.org/proceedings/90/slides/slides-90-uta-0.pdf)
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_cryptosign).
--behaviour(bondy_auth_method).
+-behaviour(bondy_auth).
+
+-include("bondy_security.hrl").
 
 
-%% bondy_auth_method CALLBACKS
+-type state() :: map().
+
+%% BONDY_AUTH CALLBACKS
+-export([init/1]).
+-export([requirements/0]).
 -export([challenge/3]).
 -export([authenticate/4]).
 
 
 
 %% =============================================================================
-%% bondy_auth_method CALLBACKS
+%% BONDY_AUTH CALLBACKS
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec init(bondy_auth:context()) ->
+    {ok, State :: state()} | {error, Reason :: any()}.
+
+init(Ctxt) ->
+    try
+
+        User = bondy_auth:user(Ctxt),
+        User =/= undefined orelse throw(invalid_context),
+
+        true == bondy_rbac_user:has_authorized_keys(User)
+        orelse throw(invalid_context),
+
+        {ok, maps:new()}
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec requirements() -> map().
+
+requirements() ->
+    #{
+        identification => true,
+        password => false,
+        authorized_keys => true
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -42,16 +88,36 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(
-    User :: bondy_security_user:t(),
-    ReqDetails :: map(),
-    Ctxt :: bondy_context:t()) ->
-    {ok, ChallengeExtra :: map(), ChallengeState :: map()}
-    | {error, Reason :: any()}.
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    {ok, Extra :: map(), NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
 
-challenge(User, ReqDetails, Ctxt) ->
-    challenge(
-        User, ReqDetails, Ctxt, bondy_security_user:authorized_keys(User)
-    ).
+challenge(Details, Ctxt, State) ->
+    try
+        Key = maps_utils:get([authextra, <<"pubkey">>], Details, undefined),
+        Key =/= undefined orelse throw(missing_pubkey),
+
+        Keys = bondy_rbac_user:authorized_keys(bondy_auth:user(Ctxt)),
+
+        case lists:member(Key, Keys) of
+            true ->
+                Message = enacl:randombytes(32),
+                Extra = #{
+                    challenge =>  hex_utils:bin_to_hexstr(Message),
+                    channel_binding => undefined %% TODO
+                },
+                NewState = State#{
+                    pubkey => Key,
+                    expected_message => Message
+                },
+                {ok, Extra, NewState};
+            false ->
+                {error, no_matching_pubkey, State}
+        end
+    catch
+        throw:Reason ->
+            {error, Reason, State}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -59,14 +125,37 @@ challenge(User, ReqDetails, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authenticate(
-    AuthId :: binary(),
-    ChallengeResponse :: any(),
-    ChallengeState :: map(),
-    Ctxt :: bondy_context:t()) ->
-    {ok, AuthCtxt :: map()} | {error, Reason :: any()}.
+    Signature :: binary(),
+    DataIn :: map(),
+    Ctxt :: bondy_auth:context(),
+    CBState :: state()) ->
+    {ok, DataOut :: map(), CBState :: state()}
+    | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(_AuthId, _ChallengeResponse, _ChallengeState, _Ctxt) ->
-    {error, unsupported_authmethod}.
+authenticate(EncMessage, _, _, #{pubkey := PK} = State)
+when is_binary(EncMessage) ->
+    try
+        SignedMessage = decode_hex(EncMessage),
+        ExpectedMessage = maps:get(expected_message, State),
+
+        %% Verify that the message was signed using the Ed25519 key
+        case enacl:sign_open(SignedMessage, PK) of
+            {ok, ExpectedMessage} ->
+                {ok, #{}, State};
+
+            {ok, _} ->
+                %% Message does not match the expected
+                {error, authentication_failed, State};
+
+            {error, failed_verification} ->
+                {error, invalid_signature, State}
+        end
+    catch
+        throw:invalid_hex_encoding ->
+            {error, invalid_signature, State}
+    end.
+
+
 
 
 
@@ -76,25 +165,21 @@ authenticate(_AuthId, _ChallengeResponse, _ChallengeState, _Ctxt) ->
 
 
 
-challenge(_, _, _, []) ->
-    {error, no_authorized_keys};
-
-challenge(User, ReqDetails, Ctxt, Keys) ->
-    Key = maps_utils:get([authextra, <<"pubkey">>], ReqDetails, undefined),
-    challenge(User, ReqDetails, Ctxt, Keys, Key).
-
-
-challenge(_, _, _, _, undefined) ->
-    {error, no_authextra_pubkey};
-
-challenge(_, _, _, Keys, Key) ->
-    case lists:member(Key, Keys) of
-        true ->
-            Challenge = hex_utils:bin_to_hexstr(enacl:randombytes(32)),
-            {ok, #{challenge => Challenge}, #{}};
-        false ->
-            {error, no_matching_pubkey}
+%% @private
+decode_hex(HexString) ->
+    try hex_utils:hexstr_to_bin(HexString) of
+        Bin when byte_size(Bin) == 96 ->
+            Bin;
+        _ ->
+            throw(invalid_siognature_length)
+    catch
+        throw:Reason ->
+            throw(Reason);
+        error:_ ->
+            throw(invalid_hex_encoding)
     end.
+
+
 
 
 

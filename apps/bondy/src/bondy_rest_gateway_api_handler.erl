@@ -94,109 +94,36 @@
 -export([handle_event/2]).
 
 
+%% =============================================================================
+%% API
+%% =============================================================================
 
 
-handle_call(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
-        {ok, [Spec]} ->
-            bondy_wamp_utils:maybe_error(catch bondy_rest_gateway:load(Spec), M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
 
-handle_call(#call{procedure_uri = ?LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0) of
-        {ok, []} ->
-            bondy_wamp_utils:maybe_error(catch bondy_rest_gateway:list(), M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+handle_call(M, Ctxt) ->
+    PeerId = bondy_context:peer_id(Ctxt),
 
-handle_call(#call{procedure_uri = ?LOOKUP} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1) of
-        {ok, [Id]} ->
-            bondy_wamp_utils:maybe_error(catch bondy_rest_gateway:lookup(Id), M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [Uri, Info]} ->
-            bondy_wamp_utils:maybe_error(bondy_oauth2_client:add(Uri, Info), M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
-        {ok, [Uri, Username, Info]} ->
-            bondy_wamp_utils:maybe_error(
-                bondy_oauth2_client:update(Uri, Username, Info),
-                M
-            );
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [Uri, Username]} ->
-            bondy_wamp_utils:maybe_error(
-                bondy_oauth2_client:remove(Uri, Username),
-                M
-            );
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [Uri, Info]} ->
-            bondy_wamp_utils:maybe_error(
-                bondy_oauth2_resource_owner:add(Uri, Info), M);
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
+    try
+        Reply = do_handle(M, Ctxt),
+        bondy:send(PeerId, Reply)
+    catch
+        _:Reason ->
+            %% We catch any exception from do_handle and turn it
+            %% into a WAMP Error
+            Error = bondy_wamp_utils:maybe_error(Reason, M),
+            bondy:send(PeerId, Error)
+    end.
 
 
-handle_call(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 3) of
-        {ok, [Uri, Username, Info]} ->
-            bondy_wamp_utils:maybe_error(
-                bondy_oauth2_resource_owner:update(Uri, Username, Info),
-                M
-            );
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{procedure_uri = ?DELETE_RESOURCE_OWNER} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [Uri, Username]} ->
-            bondy_wamp_utils:maybe_error(
-                bondy_oauth2_resource_owner:remove(Uri, Username),
-                M
-            );
-        {error, WampError} ->
-            WampError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), R);
-
-handle_call(#call{} = M, Ctxt) ->
-    Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
-
-
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 handle_event(?USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
     ok;
 
@@ -208,3 +135,103 @@ handle_event(?USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
 
 handle_event(?PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username).
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+-spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+    wamp_messsage:result() | wamp_message:error().
+
+do_handle(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
+    [Spec] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    case bondy_rest_gateway:load(Spec) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?LIST} = M, Ctxt) ->
+    [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
+    Result = bondy_rest_gateway:list(),
+    wamp_message:result(M#call.request_id, #{}, [Result]);
+
+do_handle(#call{procedure_uri = ?LOOKUP} = M, Ctxt) ->
+    [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    case bondy_rest_gateway:lookup(Id) of
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M);
+        Spec ->
+            wamp_message:result(M#call.request_id, #{}, [Spec])
+    end;
+
+do_handle(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
+    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
+    case bondy_oauth2_client:add(Uri, Data) of
+        {ok, Client} ->
+            Ext = bondy_oauth2_client:to_external(Client),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
+    [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    case bondy_oauth2_client:update(Uri, Username, Info) of
+        {ok, Client} ->
+            Ext = bondy_oauth2_client:to_external(Client),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case bondy_oauth2_client:remove(Uri, Username) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
+    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
+    case bondy_oauth2_resource_owner:add(Uri, Data) of
+        {ok, User} ->
+            Ext = bondy_oauth2_resource_owner:to_external(User),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
+    [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    case bondy_oauth2_resource_owner:update(Uri, Username, Info) of
+        {ok, User} ->
+            Ext = bondy_oauth2_resource_owner:to_external(User),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?DELETE_RESOURCE_OWNER} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case bondy_oauth2_resource_owner:remove(Uri, Username) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{} = M, _) ->
+    bondy_wamp_utils:no_such_procedure_error(M).
+
+
+

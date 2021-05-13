@@ -1547,7 +1547,9 @@ security_scheme_rules(
     [
         {S, Host, Realm, <<BasePath/binary, Token/binary>>, Mod, St},
         %% Revoke is secured
-        {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St}
+        {S, Host, Realm, <<BasePath/binary, Revoke/binary>>, Mod, St},
+        %% Json Web Key Set path, in which we publish the public
+        {S, Host, Realm, <<BasePath/binary, "/oauth/jwks">>, Mod, St}
     ];
 
 security_scheme_rules(_, _, _, _, _) ->

@@ -21,14 +21,17 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_auth_wamp_ticket).
+-module(bondy_auth_anonymous).
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
 
--define(VALID_PROTOCOLS, [cra, scram]).
-
--type state()   ::  undefined.
+-type state() :: #{
+    user_id := binary() | undefined,
+    role := binary(),
+    roles := [binary()],
+    conn_ip := [{ip, inet:ip_address()}]
+}.
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -53,11 +56,16 @@
 
 init(Ctxt) ->
     try
+        UserId = bondy_auth:user_id(Ctxt),
+        anonymous =:= UserId orelse throw(invalid_context),
 
-        User = bondy_auth:user(Ctxt),
-        User =/= undefined orelse throw(invalid_context),
-
-        {ok, undefined}
+        State = #{
+            user_id => UserId,
+            role => bondy_auth:role(Ctxt),
+            roles => bondy_auth:roles(Ctxt),
+            conn_ip => bondy_auth:conn_ip(Ctxt)
+        },
+        {ok, State}
 
     catch
         throw:Reason ->
@@ -69,14 +77,15 @@ init(Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec requirements() -> bondy_auth:requirements().
+-spec requirements() -> map().
 
 requirements() ->
     #{
-        identification => true,
-        password => {true, #{protocols => ?VALID_PROTOCOLS}},
+        identification => false,
+        password => false,
         authorized_keys => false
     }.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -84,12 +93,13 @@ requirements() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(
-    DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, DataOut :: map(), CBState :: term()}
-    | {error, Reason :: any(), CBState :: term()}.
+    Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
+    {ok, Extra :: map(), NewState :: state()}
+    | {error, Reason :: any(), NewState :: state()}.
 
-challenge(_, _, undefined) ->
-    {ok, #{}, undefined}.
+challenge(_, _, State) ->
+    {ok, #{}, State}.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -97,23 +107,32 @@ challenge(_, _, undefined) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authenticate(
-    String :: binary(),
+    Signature :: binary(),
     DataIn :: map(),
     Ctxt :: bondy_auth:context(),
     CBState :: state()) ->
-    {ok, map(), CBState :: state()}
+    {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(String, _, Ctxt, State) ->
-    RealmUri = bondy_auth:real_uri(Ctxt),
-    UserId = bondy_auth:user_id(Ctxt),
-    IPAddr = bondy_auth:conn_ip(Ctxt),
+authenticate(_, _, Ctxt, State) ->
+    %% We validate the ctxt has not changed between init and authenticate calls
+    Data = #{
+        conn_ip => bondy_auth:conn_ip(Ctxt),
+        role => bondy_auth:role(Ctxt),
+        roles => bondy_auth:roles(Ctxt),
+        user_id => bondy_auth:user_id(Ctxt)
+    },
 
-    %% TODO this is wrong now, we need to call bondy_password check directly
-    case bondy_security:authenticate(RealmUri, UserId, String, IPAddr) of
-        {ok, _AuthCtxt} ->
-            {ok, maps:new(), State};
-        {error, Reason} ->
-            {error, Reason, State}
+    case Data == State of
+        true ->
+            {ok, #{}, State};
+        false ->
+            {error, invalid_context, State}
     end.
+
+
+
+
+
+
 
