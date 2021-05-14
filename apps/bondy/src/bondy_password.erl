@@ -274,7 +274,6 @@ verify_string(String, #{version := ?VERSION, protocol := scram} = PW) ->
 
     bondy_password_scram:verify_string(String, Data, Params);
 
-
 verify_string(String, #{version := ?VERSION, protocol := cra} = PW) ->
     #{
         data := Data,

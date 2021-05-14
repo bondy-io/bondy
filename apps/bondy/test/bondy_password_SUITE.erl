@@ -168,6 +168,8 @@ new_scram_too_high_iterations(_) ->
 
 
 new_scram_options_pbkdf2(_) ->
+    % dbg:tracer(), dbg:p(all,c),
+    % dbg:tpl(bondy_password_scram, '_', x),
 
     Opts = #{
         protocol => scram,
@@ -182,7 +184,7 @@ new_scram_options_pbkdf2(_) ->
         A
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)),
+    ?assertEqual(false, bondy_password:verify_string(?P2, A)),
 
     B = bondy_password:new(fun() -> ?P1 end, Opts),
 
@@ -191,7 +193,9 @@ new_scram_options_pbkdf2(_) ->
         B
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)),
+    ?assertEqual(false, bondy_password:verify_string(?P2, B)),
+
+    dbg:stop(),
 
     ok.
 
@@ -211,7 +215,7 @@ new_scram_options_argon2id13(_) ->
         A
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)),
+    ?assertEqual(false, bondy_password:verify_string(?P2, A)),
 
     B = bondy_password:new(fun() -> ?P1 end, Opts),
 
@@ -220,6 +224,6 @@ new_scram_options_argon2id13(_) ->
         B
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)),
+    ?assertEqual(false, bondy_password:verify_string(?P2, B)),
 
     ok.

@@ -99,40 +99,16 @@ new(String, Params0, Builder) when is_function(Builder, 2) ->
 %% -----------------------------------------------------------------------------
 -spec verify_string(binary(), data(), params()) -> boolean().
 
-verify_string(Password, Data, Params) ->
+verify_string(String, Data, Params) ->
     #{
         salt := Salt,
-        stored_key := StoredKey,
-        server_key := ServerKey
+        stored_key := StoredKey
     } = Data,
 
-    #{iterations := Iterations} = Params,
-
-
-    %% We simulate a client performing the challenge-response here as we have
-    %% been provided with the Password string via the Password authentication
-    %% message.
-    ClientNonce = enacl:randombytes(16),
-    ServerNonce = server_nonce(ClientNonce),
-    AuthMessage = auth_message(
-        <<"bondy">>, ClientNonce, ServerNonce, Salt, Iterations
-    ),
-
-    SPassword = salted_password(Password, Salt, Params),
+    SPassword = salted_password(String, Salt, Params),
     ClientKey = client_key(SPassword),
-    CStoredKey =  stored_key(ClientKey),
-    ClientSignature = client_signature(CStoredKey, AuthMessage),
-    ClientProof = client_proof(ClientKey, ClientSignature),
-
-    %% Server side
-    SClientSignature = client_signature(
-        ServerKey, AuthMessage
-    ),
-    RecClientKey = recovered_client_key(
-        SClientSignature, ClientProof
-    ),
-
-    StoredKey =:= recovered_stored_key(RecClientKey).
+    CStoredKey = stored_key(ClientKey),
+    CStoredKey =:= StoredKey.
 
 
 %% -----------------------------------------------------------------------------
@@ -285,12 +261,12 @@ when is_binary(ClientKey), is_binary(ClientSignature) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec recovered_client_key(
-    ClientSignature :: binary(), ReceivedClientProof :: binary()) ->
+    ReceivedClientProof :: binary(), ClientSignature :: binary()) ->
     RecoveredClientKey :: binary().
 
-recovered_client_key(ClientSignature, ReceivedClientProof)
-when is_binary(ClientSignature), is_binary(ReceivedClientProof) ->
-    crypto:exor(ClientSignature, ReceivedClientProof).
+recovered_client_key(ReceivedClientProof, ClientSignature)
+when is_binary(ReceivedClientProof) andalso is_binary(ClientSignature) ->
+    crypto:exor(ReceivedClientProof, ClientSignature).
 
 
 %% -----------------------------------------------------------------------------
