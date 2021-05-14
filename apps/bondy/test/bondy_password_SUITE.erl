@@ -168,9 +168,6 @@ new_scram_too_high_iterations(_) ->
 
 
 new_scram_options_pbkdf2(_) ->
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(bondy_password_scram, '_', x),
-
     Opts = #{
         protocol => scram,
         params => #{kdf => pbkdf2, iterations => 5000}
