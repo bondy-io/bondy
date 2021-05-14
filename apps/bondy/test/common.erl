@@ -215,8 +215,6 @@ is_a_test(Function) ->
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
-            % dbg:tracer(), dbg:p(all,c),
-            % dbg:tpl(application, '_', []),
             _ = [
                 begin
                     application:unload(App),

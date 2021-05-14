@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_auth_scram_SUITE.erl -
+%%  bondy_auth_wamp_cra_SUITE.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_auth_scram_SUITE).
+-module(bondy_auth_wamp_cra_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
@@ -25,7 +25,7 @@
 
 all() ->
     [
-        auth_init
+
     ].
 
 
@@ -36,7 +36,3 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
     % common:stop_bondy(),
     {save_config, Config}.
-
-
-auth_init(_) ->
-    ok.

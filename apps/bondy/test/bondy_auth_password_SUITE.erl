@@ -180,15 +180,15 @@ test_2(Config) ->
         bondy_auth:authenticate(<<"foo">>, ?P1, undefined, Ctxt2)
     ),
 
-    %% user 1 is not granted access from Peer (see test_1)
+    %% user 1 is granted access from any net (see test_1)
     Ctxt1 = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(
-        false,
+        true,
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt1))
     ),
 
     ?assertMatch(
-        {error, method_not_allowed},
+        {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ).

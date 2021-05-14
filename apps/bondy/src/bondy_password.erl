@@ -97,6 +97,7 @@
 -export([is_type/1]).
 -export([new/1]).
 -export([new/2]).
+-export([replace/2]).
 -export([params/1]).
 -export([protocol/1]).
 -export([upgrade/2]).
@@ -144,6 +145,21 @@ new(Password, Opts0) ->
         scram ->
             new_scram(Password, Params)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a new password object from `String' applying the same protocol
+%% and params found in password `PWD'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec replace(String :: binary() | fun(() -> binary()), PW :: t()) ->
+    t() | no_return().
+
+replace(String, PWD) ->
+    Protocol = protocol(PWD),
+    Params = params(PWD),
+    new(String, #{protocol => Protocol, params => Params}).
+
 
 
 %% -----------------------------------------------------------------------------

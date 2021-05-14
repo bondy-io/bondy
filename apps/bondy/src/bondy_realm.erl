@@ -54,12 +54,13 @@
     persistent_term:put({Uri, security_status}, disabled)
 ).
 -define(ERASE_SECURITY_STATUS(Uri),
-    _ = persistent_term:erase({Uri, security_status}),
-    ok
+    begin
+        _ = persistent_term:erase({Uri, security_status}),
+        ok
+    end
 ).
 
 
--define(DEFAULT_AUTH_METHOD, ?WAMP_TICKET_AUTH).
 -define(PDB_PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
     %% single class A network 10.0.0.0 – 10.255.255.255
@@ -92,7 +93,12 @@
         key => <<"authmethods">>,
         required => true,
         datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}},
-        default => ?BONDY_AUTH_METHOD_NAMES
+        default => [
+            ?WAMP_ANON_AUTH,
+            ?PASSWORD_AUTH,
+            ?OAUTH2_AUTH,
+            ?WAMP_CRA_AUTH
+        ]
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
@@ -160,38 +166,64 @@
     uri => ?BONDY_REALM_URI,
     description => <<"The Bondy administrative realm">>,
     authmethods => [
-        ?WAMP_SCRAM_AUTH, ?WAMP_CRA_AUTH, ?PASSWORD_AUTH,
+        ?WAMP_CRA_AUTH, ?PASSWORD_AUTH,
         ?WAMP_ANON_AUTH
     ],
     security_enabled => true, % but we allow anonymous access
+    users => [
+        #{
+            username => <<"admin">>,
+            password => <<"bondy-admin">>,
+            groups => [<<"bondy.administrators">>],
+            meta => #{
+                description => <<"The default Bondy administrator user.">>
+            }
+        }
+    ],
+    groups => [
+        #{
+            name => <<"bondy.administrators">>,
+            groups => [
+
+            ],
+            meta => #{
+                description => <<"The Bondy administrators group">>
+            }
+        }
+    ],
     grants => [
         #{
             permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
-                <<"wamp.publish">>
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.disclose_publisher">>,
+                <<"wamp.disclose_publisher_authroles">>,
+                <<"wamp.disclose_publisher_session">>
             ],
-            uri => <<"any">>,
-            roles => <<"all">>
+            uri => <<"">>,
+            match => <<"prefix">>,
+            roles => [<<"bondy.administrators">>],
+            meta => #{
+                description => <<"Allows the administrators users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
+            }
         },
         #{
             permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
-                <<"wamp.publish">>
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.disclose_publisher">>,
+                <<"wamp.disclose_publisher_authroles">>,
+                <<"wamp.disclose_publisher_session">>
             ],
-            uri => <<"any">>,
+            uri => <<"">>,
+            match => <<"prefix">>,
             roles => [<<"anonymous">>],
             meta => #{
-                description => <<"Allows anonymous users to do all WAMP operations. This is too liberal and should be restricted.">>
+                description => <<"Allows anonymous users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
             }
         }
     ],
@@ -205,11 +237,35 @@
             }
         },
         #{
-            usernames => [<<"anonymous">>],
-            authmethod => ?WAMP_ANON_AUTH,
+            usernames => <<"all">>,
+            authmethod => ?WAMP_CRA_AUTH,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
-                description => <<"Allows all users from any network authenticate as anonymous. This should ideally be restricted to your local administrative or DMZ network.">>
+                description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+            }
+        },
+        % #{
+        %     usernames => <<"all">>,
+        %     authmethod => ?WAMP_SCRAM_AUTH,
+        %     cidr => <<"0.0.0.0/0">>,
+        %     meta => #{
+        %         description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+        %     }
+        % },
+        #{
+            usernames => [<<"admin">>],
+            authmethod => ?TRUST_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
+                description => <<"Allows the admin user to connect over the loopback interface (i.e. localhost) without presenting credentials .">>
+            }
+        },
+        #{
+            usernames => [<<"anonymous">>, <<"admin">>],
+            authmethod => ?WAMP_ANON_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
+                description => <<"Allows the anonymous user to connect over the loopback interface (i.e. localhost) only.">>
             }
         }
     ]
@@ -762,12 +818,12 @@ do_add(#{<<"uri">> := Uri} = Map) ->
 
     ok = bondy_event_manager:notify({realm_added, Realm1#realm.uri}),
 
-    Data = #{
-        <<"username">> => <<"admin">>,
-        <<"password">> => <<"bondy-admin">>
-    },
-    User = bondy_rbac_user:new(Data),
-    {ok, _} = bondy_rbac_user:add(Uri, User),
+    % Data = #{
+    %     <<"username">> => <<"admin">>,
+    %     <<"password">> => <<"bondy-admin">>
+    % },
+    % User = bondy_rbac_user:new(Data),
+    % {ok, _} = bondy_rbac_user:add(Uri, User),
 
     % Opts = [],
     % _ = [
@@ -775,11 +831,11 @@ do_add(#{<<"uri">> := Uri} = Map) ->
     %     || CIDR <- ?LOCAL_CIDRS
     % ],
     %TODO remove this once we have the APIs to add sources
-    Source = bondy_rbac_source:new(#{
-        cidr => {{0, 0, 0, 0}, 0},
-        authmethod => ?PASSWORD_AUTH
-    }),
-    _ = bondy_rbac_source:add(Uri, all, Source),
+    % Source = bondy_rbac_source:new(#{
+    %     cidr => {{0, 0, 0, 0}, 0},
+    %     authmethod => ?PASSWORD_AUTH
+    % }),
+    % _ = bondy_rbac_source:add(Uri, all, Source),
 
     Realm1.
 
