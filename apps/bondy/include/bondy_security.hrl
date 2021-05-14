@@ -89,6 +89,10 @@
     <<"wamp.unsubscribe">>,
     <<"wamp.publish">>,
     <<"wamp.disclose_caller">>,
-    <<"wamp.disclose_publisher">>
+    <<"wamp.disclose_publisher">>,
+    <<"wamp.disclose_caller_authroles">>,
+    <<"wamp.disclose_publisher_authroles">>,
+    <<"wamp.disclose_caller_session">>,
+    <<"wamp.disclose_publisher_session">>,
 ]).
 
