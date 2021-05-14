@@ -58,7 +58,7 @@
         callback_mod => bondy_auth_wamp_scram
     },
     ?WAMP_CRYPTOSIGN_AUTH => #{
-        callback_mod => bondy_auth_wamp_crytosign
+        callback_mod => bondy_auth_wamp_cryptosign
     },
     ?WAMP_TICKET_AUTH => #{
         callback_mod => bondy_auth_wamp_ticket
