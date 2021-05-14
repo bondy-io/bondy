@@ -33,6 +33,8 @@
 
 ### Changed
 * Upgraded to Erlang 23
+* Security data structures
+* Security methods (more methods added and a clear distinction between 'anontmous' and 'trust')
 
 ## 0.8.8
 ### Added
