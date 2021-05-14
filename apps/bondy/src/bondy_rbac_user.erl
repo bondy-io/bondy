@@ -214,7 +214,8 @@ new(Data, Opts) ->
 
     case maps:find(password, User) of
         {ok, Value} ->
-            PWD = bondy_password:new(Value, Opts),
+            PWOpts = maps:get(password_opts, Opts, #{}),
+            PWD = bondy_password:new(Value, PWOpts),
             maps:put(password, PWD, User);
         error ->
             User
@@ -514,7 +515,7 @@ change_password(RealmUri, Username, New, Old) ->
         {error, not_found} = Error ->
             Error;
         #{password := PW} ->
-            case bondy_password:check_password(Old, PW) of
+            case bondy_password:verify_string(Old, PW) of
                 true ->
                     change_password(RealmUri, Username, New);
                 false ->
