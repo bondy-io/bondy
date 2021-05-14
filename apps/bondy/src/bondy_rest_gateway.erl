@@ -456,8 +456,9 @@ subscribe(State) ->
         subscription_id => bondy_utils:get_id(global),
         match => <<"exact">>
     },
+
     {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?REALM_DELETED),
-    Subs = maps:put(Id, ?BONDY_PRIV_REALM_URI, State#state.subscriptions),
+    Subs = maps:put(Id, ?REALM_DELETED, State#state.subscriptions),
 
     State#state{subscriptions = Subs}.
 
