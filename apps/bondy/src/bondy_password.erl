@@ -243,7 +243,7 @@ verify_hash(_Hash, #{version := ?VERSION, protocol := scram} = _PW) ->
     error(not_implemented);
 
 verify_hash(Hash, #{version := ?VERSION, protocol := cra} = PW) ->
-    SPassword = maps_utils:get([data, salted_password], PW),
+    SPassword = maps_utils:get_path([data, salted_password], PW),
     pbkdf2:compare_secure(pbkdf2:to_hex(Hash), pbkdf2:to_hex(SPassword));
 
 verify_hash(Hash, #{version := <<"1.1">>} = PW) ->
