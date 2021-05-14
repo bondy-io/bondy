@@ -260,7 +260,6 @@
 -export([lookup/1]).
 -export([public_keys/1]).
 -export([security_status/1]).
--export([select_authmethod/2]).
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
@@ -589,32 +588,6 @@ list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PDB_PREFIX), V =/= '$deleted'].
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec select_authmethod(t(), [binary()]) -> any().
-
-select_authmethod(Realm, []) ->
-    select_authmethod(Realm, [?DEFAULT_AUTH_METHOD]);
-
-select_authmethod(#realm{authmethods = Allowed}, Requested) ->
-    A = sets:from_list(Allowed),
-    R = sets:from_list(Requested),
-    I = sets:intersection([A, R]),
-    case sets:size(I) > 0 of
-        true ->
-            select_first_available(Requested, I);
-        false ->
-            case sets:is_element(?DEFAULT_AUTH_METHOD, A) of
-                true ->
-                    ?DEFAULT_AUTH_METHOD;
-                false ->
-                    %% We get the first from the list to respect client's
-                    %% preference order
-                    hd(Allowed)
-            end
-    end.
 
 
 %% -----------------------------------------------------------------------------
