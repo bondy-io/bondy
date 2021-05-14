@@ -44,8 +44,9 @@
     <<"password">> => #{
         alias => password,
 		key => password,
-        required => true,
+        required => false,
         allow_null => false,
+        allow_undefined => false,
         datatype => [binary, {function, 0}, map],
         validator => fun bondy_data_validators:password/1
     },
