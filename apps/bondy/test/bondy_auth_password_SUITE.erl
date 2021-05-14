@@ -118,6 +118,10 @@ test_1(Config) ->
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ),
+    ?assertMatch(
+        {error, _, _},
+        bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt1)
+    ),
 
     ?assertMatch(
         {error, method_not_allowed},
@@ -160,6 +164,10 @@ test_2(Config) ->
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt2)
+    ),
+    ?assertMatch(
+        {error, _, _},
+        bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt2)
     ),
 
     ?assertMatch(
