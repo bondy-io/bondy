@@ -119,7 +119,7 @@ test_1(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ),
     ?assertMatch(
-        {error, _, _},
+        {error, authentication_failed},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt1)
     ),
 
