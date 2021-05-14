@@ -25,6 +25,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth_wamp_cryptosign).
+
 -behaviour(bondy_auth).
 
 -include("bondy_security.hrl").
@@ -94,7 +95,9 @@ requirements() ->
 
 challenge(Details, Ctxt, State) ->
     try
-        Key = maps_utils:get([authextra, <<"pubkey">>], Details, undefined),
+        Key = maps_utils:get_path(
+            [authextra, <<"pubkey">>], Details, undefined
+        ),
         Key =/= undefined orelse throw(missing_pubkey),
 
         Keys = bondy_rbac_user:authorized_keys(bondy_auth:user(Ctxt)),
@@ -103,7 +106,7 @@ challenge(Details, Ctxt, State) ->
             true ->
                 Message = enacl:randombytes(32),
                 Extra = #{
-                    challenge =>  hex_utils:bin_to_hexstr(Message),
+                    challenge => hex_utils:bin_to_hexstr(Message),
                     channel_binding => undefined %% TODO
                 },
                 NewState = State#{
