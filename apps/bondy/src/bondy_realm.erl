@@ -246,6 +246,7 @@
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
+-export([exists/1]).
 -export([fetch/1]).
 -export([get/1]).
 -export([get/2]).
@@ -256,12 +257,12 @@
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
+-export([password_opts/1]).
 -export([public_keys/1]).
 -export([security_status/1]).
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
--export([exists/1]).
 
 
 
@@ -594,6 +595,19 @@ list() ->
     [V || {_K, [V]} <- plum_db:to_list(?PDB_PREFIX), V =/= '$deleted'].
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+
+password_opts(#realm{password_opts = undefined}) ->
+    #{};
+
+password_opts(#realm{password_opts = Opts}) ->
+    Opts;
+
+password_opts(RealmUri) ->
+    password_opts(fetch(RealmUri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -661,14 +675,6 @@ validate_rbac_config(Realm, Map) ->
 
 
 %% @private
-password_opts(#realm{password_opts = undefined}) ->
-    #{};
-
-password_opts(#realm{password_opts = Opts}) ->
-    Opts.
-
-
-%% @private
 get_password_opts([]) ->
     undefined;
 
@@ -684,7 +690,7 @@ get_password_opts(Methods) when is_list(Methods) ->
 
 
 %% @private
-apply_rbac_config(Uri, Map) ->
+apply_rbac_config(#realm{uri = Uri}, Map) ->
     #{
         groups := Groups,
         users := Users,
@@ -693,12 +699,16 @@ apply_rbac_config(Uri, Map) ->
     } = Map,
 
     _ = [
-            ok = maybe_error(bondy_rbac_group:add_or_update(Uri, Group))
+            ok = maybe_error(
+                bondy_rbac_group:add_or_update(Uri, Group)
+            )
         || Group <- Groups
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_user:add_or_update(Uri, User))
+        ok = maybe_error(
+            bondy_rbac_user:add_or_update(Uri, User)
+        )
         || User <- Users
     ],
 
@@ -809,7 +819,7 @@ add_or_update(Realm0, Map) ->
     Uri = NewRealm#realm.uri,
     ok = plum_db:put(?PDB_PREFIX, Uri, NewRealm),
     ok = maybe_enable_security(SecurityEnabled, NewRealm),
-    ok = apply_rbac_config(Uri, RBACData),
+    ok = apply_rbac_config(NewRealm, RBACData),
 
     NewRealm.
 
