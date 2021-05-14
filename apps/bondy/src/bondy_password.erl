@@ -102,6 +102,8 @@
 -export([upgrade/2]).
 -export([verify_hash/2]).
 -export([verify_string/2]).
+-export([default_opts/0]).
+-export([default_opts/1]).
 
 
 
@@ -119,12 +121,7 @@
 -spec new(binary() | fun(() -> binary())) -> t() | no_return().
 
 new(Password) ->
-    Protocol = bondy_config:get([security, password, protocol]),
-    KDF = bondy_config:get([security, password, Protocol, kdf]),
-    KDFOpts = maps:from_list(bondy_config:get([security, password, KDF])),
-    Params = maps:put(kdf, KDF, KDFOpts),
-    Opts = #{protocol => Protocol, params => Params},
-    new(Password, Opts).
+    new(Password, default_opts()).
 
 
 %% -----------------------------------------------------------------------------
@@ -147,6 +144,30 @@ new(Password, Opts0) ->
         scram ->
             new_scram(Password, Params)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec default_opts() -> opts().
+
+default_opts() ->
+    Protocol = bondy_config:get([security, password, protocol]),
+    default_opts(Protocol).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec default_opts(protocol()) -> opts().
+
+default_opts(Protocol) ->
+KDF = bondy_config:get([security, password, Protocol, kdf]),
+    KDFOpts = maps:from_list(bondy_config:get([security, password, KDF])),
+    Params = maps:put(kdf, KDF, KDFOpts),
+    #{protocol => Protocol, params => Params}.
 
 
 %% -----------------------------------------------------------------------------

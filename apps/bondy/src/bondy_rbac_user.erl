@@ -175,6 +175,7 @@
 -export([lookup/2]).
 -export([meta/1]).
 -export([new/1]).
+-export([new/2]).
 -export([password/1]).
 -export([remove/2]).
 -export([remove_group/2]).
