@@ -824,14 +824,6 @@ set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
 
 
 %% @private
-select_first_available([H|T], I) ->
-    case sets:is_element(H, I) of
-        true -> H;
-        false -> select_first_available(T, I)
-    end.
-
-
-%% @private
 -spec do_lookup(uri()) -> t() | {error, not_found}.
 do_lookup(Uri) ->
     case plum_db:get(?PDB_PREFIX, Uri) of
