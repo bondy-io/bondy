@@ -159,7 +159,8 @@
 -define(BONDY_REALM, #{
     description => <<"The Bondy administrative realm">>,
     authmethods => [
-        ?WAMP_CRA_AUTH, ?WAMP_TICKET_AUTH, ?WAMP_TLS_AUTH, ?WAMP_ANON_AUTH
+        ?WAMP_SCRAM_AUTH, ?WAMP_CRA_AUTH, ?PASSWORD_AUTH,
+        ?WAMP_ANON_AUTH
     ],
     security_enabled => true, % but we allow anonymous access
     grants => [
@@ -196,7 +197,7 @@
     sources => [
         #{
             usernames => <<"all">>,
-            authmethod => <<"password">>,
+            authmethod => ?PASSWORD_AUTH,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
                 description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>

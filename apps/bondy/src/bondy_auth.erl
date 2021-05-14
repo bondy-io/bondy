@@ -413,7 +413,7 @@ challenge(_, _, #{method := _}) ->
     %% different Method. The first call sets the context 'method',
     %% the second call in principle should never happen. We allow IFF the value
     %% for Method matches the context 'method'.
-    error(invalid_method);
+    {error, invalid_method};
 
 challenge(Method, DataIn, Ctxt0) ->
     try
@@ -462,7 +462,7 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt) ->
 authenticate(_, _, _, #{method := _}) ->
     %% This might happen when you init and call challenge and authenticate with
     %% different Method values (or called authenticate twice).
-    error(invalid_method);
+    {error, invalid_method};
 
 authenticate(Method, Signature, DataIn, Ctxt) ->
     try
@@ -494,13 +494,16 @@ casefold(Bin) when is_binary(Bin) ->
 
 %% @private
 callback_mod(Method) ->
+    callback_mod(Method, fun(X) -> X end).
+
+callback_mod(Method, Fun) when is_function(Fun, 1) ->
     case maps:get(Method, ?BONDY_AUTHMETHODS_INFO, undefined) of
         undefined ->
             throw(invalid_method);
         #{callback_mod := undefined} ->
             throw(unsupported_method);
         #{callback_mod := Mod} ->
-            Mod
+            Fun(Mod)
     end.
 
 
@@ -602,13 +605,17 @@ maybe_set_method(Method, #{method := Method} = Ctxt) ->
 
 maybe_set_method(_, #{method := _}) ->
     %% Method was already set and does not match the one requested
-    error(invalid_method);
+    throw(invalid_method);
 
 maybe_set_method(Method, Ctxt) ->
-    [Method] =:= available_methods([Method], Ctxt) orelse
-        error({not_authorized, <<"Method not available or not allowed.">>}),
+    Allowed = [Method] =:= available_methods([Method], Ctxt),
 
-    Mod = callback_mod(Method),
+    Mod = callback_mod(Method,
+        fun
+            (Mod) when Allowed -> Mod;
+            (_Mod) -> throw(method_not_allowed)
+        end
+    ),
 
     case Mod:init(Ctxt) of
         {ok, CBState} ->
@@ -621,7 +628,6 @@ maybe_set_method(Method, Ctxt) ->
         {error, Reason} ->
             throw(Reason)
     end.
-
 
 
 %% TODO
