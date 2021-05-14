@@ -31,7 +31,7 @@ all() ->
 
 init_per_suite(Config) ->
     common:start_bondy(),
-    RealmUri = <<"com.example.test">>,
+    RealmUri = <<"com.example.test.auth_anonymous">>,
     ok = add_realm(RealmUri),
     [{realm_uri, RealmUri}|Config].
 
