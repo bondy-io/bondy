@@ -386,8 +386,20 @@ user_add(Config) ->
     User = bondy_rbac_user:new(In),
 
     ?assertEqual(
-        {ok, User},
-        bondy_rbac_user:add(?config(realm_uri, Config), User)
+        false,
+        bondy_password:is_type(bondy_rbac_user:password(User))
+    ),
+
+    ?assertEqual(
+        true,
+        is_function(bondy_rbac_user:password(User), 1)
+    ),
+
+    {ok, NewUser} = bondy_rbac_user:add(?config(realm_uri, Config), User),
+
+    ?assertEqual(
+        true,
+        bondy_password:is_type(bondy_rbac_user:password(NewUser))
     ),
 
     ?assertEqual(

@@ -20,13 +20,14 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
--define(P1, <<"aWe11KeptSecret">>).
+-define(P1, <<"woBXiR2zFbDKu6Nrd_97UkG4Exo-e3j.nJWVW@24_J4zadU3uUiCrcs6Ea!m">>).
 -define(P2, <<"An0therWe11KeptSecret">>).
 
 -compile([nowarn_export_all, export_all]).
 
 all() ->
     [
+        future_apply_default,
         new_default,
         new_cra_too_low_iterations,
         new_cra_too_high_iterations,
@@ -49,23 +50,25 @@ end_per_suite(Config) ->
     {save_config, Config}.
 
 
-new_default(_) ->
+future_apply_default(_) ->
     Protocol = bondy_config:get([security, password, protocol]),
 
-    A = bondy_password:new(?P1),
-
-    ?assertMatch(#{protocol := Protocol}, A),
-    ?assertEqual(true, bondy_password:verify_string(?P1, A)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)),
-
-    B = bondy_password:new(fun() -> ?P1 end),
+    F = bondy_password:future(?P1),
+    B = bondy_password:new(F, bondy_password:default_opts()),
 
     ?assertMatch(#{protocol := Protocol}, B),
     ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)),
+    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)).
 
-    ok.
 
+new_default(_) ->
+    Protocol = bondy_config:get([security, password, protocol]),
+
+    A = bondy_password:new(?P1, bondy_password:default_opts()),
+
+    ?assertMatch(#{protocol := Protocol}, A),
+    ?assertEqual(true, bondy_password:verify_string(?P1, A)),
+    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)).
 
 
 new_cra_too_low_iterations(_) ->
@@ -116,15 +119,6 @@ new_cra_options(_) ->
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
     ?assertEqual(false, bondy_password:verify_string(<<"foo">>, A)),
-
-    B = bondy_password:new(fun() -> ?P1 end, Opts),
-
-    ?assertMatch(
-        #{protocol := cra, params := #{kdf := pbkdf2, iterations := 5000}},
-        B
-    ),
-    ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(<<"foo">>, B)),
 
     ok.
 
@@ -183,16 +177,6 @@ new_scram_options_pbkdf2(_) ->
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
     ?assertEqual(false, bondy_password:verify_string(?P2, A)),
 
-    B = bondy_password:new(fun() -> ?P1 end, Opts),
-
-    ?assertMatch(
-        #{protocol := scram, params := #{kdf := pbkdf2, iterations := 5000}},
-        B
-    ),
-    ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(?P2, B)),
-
-    dbg:stop(),
 
     ok.
 
@@ -213,14 +197,5 @@ new_scram_options_argon2id13(_) ->
     ),
     ?assertEqual(true, bondy_password:verify_string(?P1, A)),
     ?assertEqual(false, bondy_password:verify_string(?P2, A)),
-
-    B = bondy_password:new(fun() -> ?P1 end, Opts),
-
-    ?assertMatch(
-        #{protocol := scram, params := #{kdf := argon2id13}},
-        B
-    ),
-    ?assertEqual(true, bondy_password:verify_string(?P1, B)),
-    ?assertEqual(false, bondy_password:verify_string(?P2, B)),
 
     ok.

@@ -134,7 +134,7 @@
     version             :=  binary(),
     username            :=  username(),
     groups              :=  [binary()],
-    password            =>  bondy_password:t(),
+    password            =>  bondy_password:future() | bondy_password:t(),
     authorized_keys     =>  [binary()],
     meta                =>  #{binary() => any()}
 }.
@@ -211,7 +211,7 @@ new(Data) ->
 
 new(Data, Opts) ->
     User = type_and_version(maps_utils:validate(Data, ?VALIDATOR)),
-    maybe_process_password(User, Opts).
+    maybe_apply_password(User, Opts).
 
 
 
@@ -256,7 +256,11 @@ has_password(User) ->
 %% password. See {@link bondy_password}.
 %% @end
 %% -----------------------------------------------------------------------------
--spec password(User :: t()) -> bondy_password:t() | undefined.
+-spec password(User :: t()) ->
+    bondy_password:future() | bondy_password:t() |  undefined.
+
+password(#{type := ?TYPE, password := Future}) when is_function(Future, 1) ->
+    Future;
 
 password(#{type := ?TYPE, password := PW}) ->
     %% In previous versions we stored a proplists,
@@ -363,7 +367,7 @@ update(RealmUri, Username0, Data0) when is_binary(Username0) ->
                 User = from_term({Username, Value}),
                 %% If we have a password string in Data we convert it to a
                 %% bondy_password:t()
-                NewUser = merge(User, Data),
+                NewUser = merge(RealmUri, User, Data),
                 ok = no_unknown_groups(RealmUri, maps:get(groups, NewUser)),
                 ok = plum_db:put(Prefix, Username, NewUser),
                 ok = on_update(RealmUri, Username),
@@ -645,34 +649,66 @@ normalise_username(_) ->
 
 
 
-merge(U1, U2) ->
-    P0 = maps:get(password, U1, undefined),
-    S = maps:get(password, U2, undefined),
-    case {P0, S} of
-        {undefined, S} when is_binary(S) orelse is_function(S, 0) ->
-            maybe_process_password(maps:merge(U1, U2), #{});
-        {_, undefined} ->
-            maps:merge(U1, U2);
-        {P0, S} ->
-            P1 = bondy_password:replace(S, P0),
-            maps:put(password, P1, maps:merge(U1, U2))
-    end.
+password_opts(RealmUri) ->
+    password_opts(RealmUri, #{}).
+
+password_opts(_, #{password_opts := Opts}) ->
+    Opts;
+
+password_opts(RealmUri, _) ->
+    bondy_realm:password_opts(RealmUri).
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-maybe_process_password(User, Opts) ->
-    case maps:find(password, User) of
-        {ok, Value} ->
-            PWOpts = maps:get(password_opts, Opts, #{}),
-            PWD = bondy_password:new(Value, PWOpts),
-            maps:put(password, PWD, User);
-        error ->
-            User
+merge(RealmUri, U1, U2) ->
+    User = maps:merge(U1, U2),
+    P0 = maps:get(password, U1, undefined),
+    Future = maps:get(password, U2, undefined),
+
+    case {P0, Future} of
+        {undefined, undefined} ->
+            User;
+
+        {undefined, _}  ->
+            apply_password(User, password_opts(RealmUri));
+
+        {P0, undefined} ->
+            bondy_password:is_type(P0) orelse error(badarg),
+            User;
+
+        {P0, Future} when is_function(Future, 1) ->
+            %% If a password existed we keep the same protocol and params
+            P1 = bondy_password:replace(Future, P0),
+            maps:put(password, P1, User);
+
+        {_, P1} ->
+            bondy_password:is_type(P1) orelse error(badarg),
+            maps:put(password, P1, User)
+
     end.
+
+
+%% @private
+maybe_apply_password(User, #{password_opts := POpts}) when is_map(POpts) ->
+    apply_password(User, POpts);
+
+maybe_apply_password(User, _) ->
+    User.
+
+
+%% @private
+apply_password(#{password := Future} = User, POpts)
+when is_function(Future, 1) ->
+    PWD = bondy_password:new(Future, POpts),
+    maps:put(password, PWD, User);
+
+apply_password(#{password := P} = User, _) ->
+    bondy_password:is_type(P) orelse error(badarg),
+    User;
+
+apply_password(User, _) ->
+    User.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -682,7 +718,7 @@ maybe_process_password(User, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec do_add(RealmUri :: binary(), User :: t()) -> ok | no_return().
 
-do_add(RealmUri, #{type := ?TYPE, username := Username} = User) ->
+do_add(RealmUri, #{type := ?TYPE, username := Username} = User0) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     %% This should have been validated before but just to avoid any issues
@@ -690,7 +726,9 @@ do_add(RealmUri, #{type := ?TYPE, username := Username} = User) ->
     %% We asume the username is normalised
     ok = not_reserved_name_check(Username),
     ok = not_exists_check(Prefix, Username),
-    ok = no_unknown_groups(RealmUri, maps:get(groups, User)),
+    ok = no_unknown_groups(RealmUri, maps:get(groups, User0)),
+
+    User = apply_password(User0, password_opts(RealmUri)),
 
     case plum_db:put(Prefix, Username, User) of
         ok ->

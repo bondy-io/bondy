@@ -289,20 +289,21 @@ rolenames(_) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(Term :: binary() | fun(() -> binary()) | map()) ->
-    {ok, function()} | boolean().
+    {ok, bondy_password:future()} | boolean().
+
+password(Bin) when is_binary(Bin) ->
+    try
+        {ok, bondy_password:future(Bin)}
+    catch
+        error:_ ->
+            false
+    end;
 
 password(Term) when is_map(Term) ->
     bondy_password:is_type(Term);
 
-password(Fun) when is_function(Fun, 1) ->
-    password(Fun());
-
-password(Term) when is_binary(Term) ->
-    Size = byte_size(Term),
-    case Size >= 6 andalso Size =< 256 of
-        true -> {ok, fun() -> Term end};
-        false -> false
-    end;
+password(Future) when is_function(Future, 1) ->
+    Future;
 
 password(_) ->
     false.

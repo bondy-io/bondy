@@ -73,6 +73,7 @@
 
 
 -define(VERSION, <<"1.2">>).
+-type future()          ::  fun((opts()) -> t()).
 -type t()               ::  #{
                                 type := password,
                                 version := binary(),
@@ -89,22 +90,24 @@
 
 
 -export_type([t/0]).
+-export_type([future/0]).
 -export_type([opts/0]).
 
+
 -export([data/1]).
+-export([default_opts/0]).
+-export([default_opts/1]).
 -export([from_term/1]).
+-export([future/1]).
 -export([hash_length/1]).
 -export([is_type/1]).
--export([new/1]).
 -export([new/2]).
--export([replace/2]).
 -export([params/1]).
 -export([protocol/1]).
+-export([replace/2]).
 -export([upgrade/2]).
 -export([verify_hash/2]).
 -export([verify_string/2]).
--export([default_opts/0]).
--export([default_opts/1]).
 
 
 
@@ -115,28 +118,55 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Creates a password object based on a plaintext password using the
-%% default password protocol and params, returning `t()'.
+%% @doc Creates a functional object that takes a single argument
+%% `Opts :: opts()' that when applied calls `new(Password, Opts)'.
+%%
+%% This is used for two reasons:
+%% 1. to encapsulate the string value of the password avoiding exposure i.e.
+%% via logs; and
+%% 2. To delay the processing of the password until the value for `Opts' is
+%% known.
+%%
+%% `Password' must be a binary with a minimum size of 6 bytes and a maximum
+%% size of 256 bytes, otherwise fails with error `invalid_password'.
+%%
+%% @throws invalid_password
+%%
+%% Example:
+%%
+%% ```erlang
+%% > F = bondy_password:future(<<"MyBestKeptSecret">>).
+%% > bondy_password:new(F, Opts).
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(binary() | fun(() -> binary())) -> t() | no_return().
+-spec future(binary()) -> future().
 
-new(Password) ->
-    new(Password, default_opts()).
+future(Password) when is_binary(Password) ->
+    ok = validate_string(Password),
+    fun(Opts) -> new(Password, Opts) end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Hash a plaintext password `Password' and the protocol and protocol
 %% params defined in options `Opts', returning t().
+%%
+%% `Password' must be a binary with a minimum size of 6 bytes and a maximum
+%% size of 256 bytes, otherwise fails with error `invalid_password'.
+%%
+%% @throws invalid_password
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(binary() | fun(() -> binary()), opts()) -> t() | no_return().
+-spec new(binary() | future(), opts()) -> t() | no_return().
 
-new(Fun, Opts0) when is_function(Fun, 0) ->
-    new(Fun(), Opts0);
+new(Future, Opts) when is_function(Future, 1), is_map(Opts) ->
+    Future(Opts);
 
-new(Password, Opts0) ->
+new(Password, Opts0) when is_binary(Password), is_map(Opts0) ->
+    ok = validate_string(Password),
+
     Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
+
     Params = maps:get(params, Opts, #{}),
 
     case maps:get(protocol, Opts) of
@@ -152,13 +182,14 @@ new(Password, Opts0) ->
 %% and params found in password `PWD'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec replace(String :: binary() | fun(() -> binary()), PW :: t()) ->
+-spec replace(Password :: binary() | future(), PW :: t()) ->
     t() | no_return().
 
-replace(String, PWD) ->
+replace(Password, PWD) ->
     Protocol = protocol(PWD),
     Params = params(PWD),
-    new(String, #{protocol => Protocol, params => Params}).
+
+    new(Password, #{protocol => Protocol, params => Params}).
 
 
 
@@ -442,7 +473,7 @@ do_upgrade(String, #{version := Version} = Pass0) when is_binary(String) ->
     ),
     case UpgradeProtocol of
         true ->
-            do_upgrade(String, new(String));
+            do_upgrade(String, new(String, default_opts()));
 
         false when Version =:= <<"1.0">> ->
             do_upgrade(String, new(String, #{protocol => cra}));
@@ -502,3 +533,31 @@ new_scram(Password, Params) ->
         }
     end,
     bondy_password_scram:new(Password, Params, Builder).
+
+
+validate_string(Password) ->
+    Size = byte_size(Password),
+
+    Size >= 6 andalso Size =< 256
+    andalso nomatch =:= re:run(Password, regex())
+    orelse error(invalid_password),
+
+    ok.
+
+
+regex() ->
+    Key = {?MODULE, regex},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            %% Avoid whitespace, control characters, comma, semi-colon,
+            %% non-standard Windows-only characters, other misc
+            %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
+            %% [Bin] =/= string:tokens(Bin, Illegal).
+            {ok, Regex} = re:compile(
+                "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
+            ),
+            ok = persistent_term:put(Key, Regex),
+            Regex;
+        Regex ->
+            Regex
+    end.
