@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_security_api_handler.erl -
+%%  bondy_rbac_api_handler.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -20,10 +20,10 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_security_api_handler).
+-module(bondy_rbac_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_meta_api.hrl").
+-include("bondy_uris.hrl").
 
 -export([handle_call/2]).
 
@@ -67,51 +67,51 @@ handle_call(M, Ctxt) ->
 
 %% REALMS ----------------------------------------------------------------------
 
-do_handle(#call{procedure_uri = ?CREATE_REALM} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?D_BONDY_CREATE_REALM} = M, Ctxt) ->
     [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Realm = bondy_realm:add(Data),
     Ext = bondy_realm:to_external(Realm),
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?UPDATE_REALM} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_UPDATE_REALM} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2),
 
     Realm = bondy_realm:update(Uri, Data),
     Ext = bondy_realm:to_external(Realm),
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?LIST_REALMS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?D_BONDY_LIST_REALMS} = M, Ctxt) ->
     [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0, 0),
 
     Ext = [bondy_realm:to_external(X) || X <- bondy_realm:list()],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?ENABLE_SECURITY} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SECURITY_ENABLE} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     ok = bondy_realm:enable_security(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{});
 
-do_handle(#call{procedure_uri = ?DISABLE_SECURITY} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SECURITY_DISABLE} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     ok = bondy_realm:disable_security(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{});
 
-do_handle(#call{procedure_uri = ?SECURITY_STATUS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SECURITY_STATUS} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Status = bondy_realm:security_status(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{}, [Status]);
 
-do_handle(#call{procedure_uri = ?IS_SECURITY_ENABLED} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SECURITY_IS_ENABLED} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Boolean = bondy_realm:is_security_enabled(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{}, [Boolean]);
 
-do_handle(#call{procedure_uri = ?DELETE_REALM} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?D_BONDY_DELETE_REALM} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     case bondy_realm:delete(Uri) of
@@ -123,7 +123,7 @@ do_handle(#call{procedure_uri = ?DELETE_REALM} = M, Ctxt) ->
 
 %% USERS -----------------------------------------------------------------------
 
-do_handle(#call{procedure_uri = ?ADD_USER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_ADD_USER} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:add(Uri, bondy_rbac_user:new(Data)) of
@@ -135,7 +135,7 @@ do_handle(#call{procedure_uri = ?ADD_USER} = M, Ctxt) ->
     end;
 
 
-do_handle(#call{procedure_uri = ?UPDATE_USER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_UPDATE_USER} = M, Ctxt) ->
     [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_user:update(Uri, Username, Info) of
@@ -146,7 +146,7 @@ do_handle(#call{procedure_uri = ?UPDATE_USER} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?DELETE_USER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_DELETE_USER} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:remove(Uri, Username) of
@@ -156,13 +156,13 @@ do_handle(#call{procedure_uri = ?DELETE_USER} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?LIST_USERS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_LIST_USERS} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
 
     Ext = [bondy_rbac_user:to_external(X) || X <- bondy_rbac_user:list(Uri)],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?FIND_USER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_FIND_USER} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:lookup(Uri, Username) of
@@ -173,7 +173,7 @@ do_handle(#call{procedure_uri = ?FIND_USER} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
-do_handle(#call{procedure_uri = ?CHANGE_PASSWORD} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_CHANGE_PASSWORD} = M, Ctxt) ->
     %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
 
@@ -186,7 +186,7 @@ do_handle(#call{procedure_uri = ?CHANGE_PASSWORD} = M, Ctxt) ->
 
 %% GROUPS ----------------------------------------------------------------------
 
-do_handle(#call{procedure_uri = ?ADD_GROUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_ADD_GROUP} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:add(Uri, bondy_rbac_group:new(Data)) of
@@ -197,7 +197,7 @@ do_handle(#call{procedure_uri = ?ADD_GROUP} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?DELETE_GROUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_DELETE_GROUP} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:remove(Uri, Name) of
@@ -207,12 +207,12 @@ do_handle(#call{procedure_uri = ?DELETE_GROUP} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?LIST_GROUPS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_LIST_GROUPS} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     Ext = [bondy_rbac_group:to_external(X) || X <- bondy_rbac_group:list(Uri)],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?FIND_GROUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_FIND_GROUP} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:lookup(Uri, Name) of
@@ -223,7 +223,7 @@ do_handle(#call{procedure_uri = ?FIND_GROUP} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
-do_handle(#call{procedure_uri = ?UPDATE_GROUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_UPDATE_GROUP} = M, Ctxt) ->
     [Uri, Name, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_group:update(Uri, Name, Info) of
@@ -236,7 +236,7 @@ do_handle(#call{procedure_uri = ?UPDATE_GROUP} = M, Ctxt) ->
 
 %% SOURCES ---------------------------------------------------------------------
 
-do_handle(#call{procedure_uri = ?ADD_SOURCE} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_ADD_SOURCE} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_source:add(Uri, bondy_rbac_source:new_assignment(Data)) of
@@ -247,7 +247,7 @@ do_handle(#call{procedure_uri = ?ADD_SOURCE} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?DELETE_SOURCE} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_DELETE_SOURCE} = M, Ctxt) ->
     [Uri, Username, CIDR] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_group:remove(Uri, Username, CIDR) of
@@ -257,11 +257,11 @@ do_handle(#call{procedure_uri = ?DELETE_SOURCE} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?LIST_SOURCES} = M, _) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_LIST_SOURCES} = M, _) ->
     %% @TODO
     bondy_wamp_utils:no_such_procedure_error(M);
 
-do_handle(#call{procedure_uri = ?FIND_SOURCE} = M, _) ->
+do_handle(#call{procedure_uri = ?BONDY_SEC_FIND_SOURCE} = M, _) ->
     %% @TODO
     bondy_wamp_utils:no_such_procedure_error(M);
 

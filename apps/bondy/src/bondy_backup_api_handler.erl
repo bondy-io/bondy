@@ -24,7 +24,7 @@
 -module(bondy_backup_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_backup.hrl").
+-include("bondy_uris.hrl").
 
 -export([handle_call/2]).
 
@@ -68,15 +68,15 @@ handle_call(M, Ctxt) ->
     wamp_messsage:result() | wamp_message:error().
 
 do_handle(
-    #call{procedure_uri = ?CREATE_BACKUP} = M, Ctxt) ->
+    #call{procedure_uri = ?BONDY_BACKUP_CREATE} = M, Ctxt) ->
     [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     bondy_wamp_utils:maybe_error(bondy_backup:backup(Info), M);
 
-do_handle(#call{procedure_uri = ?BACKUP_STATUS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_BACKUP_STATUS} = M, Ctxt) ->
     [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     bondy_wamp_utils:maybe_error(bondy_backup:status(Info), M);
 
-do_handle(#call{procedure_uri = ?RESTORE_BACKUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_BACKUP_RESTORE} = M, Ctxt) ->
     [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     bondy_wamp_utils:maybe_error(bondy_backup:restore(Info), M);
 

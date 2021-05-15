@@ -21,7 +21,7 @@
 -define(BONDY_AUTH_PROVIDER, <<"com.leapsight.bondy.rbac">>).
 
 -define(WAMP_ANON_AUTH,         <<"anonymous">>).
--define(PASSWORD_AUTH,             <<"password">>).
+-define(PASSWORD_AUTH,          <<"password">>).
 -define(OAUTH2_AUTH,            <<"oauth2">>).
 -define(TRUST_AUTH,             <<"trust">>).
 -define(WAMP_COOKIE_AUTH,       <<"cookie">>).

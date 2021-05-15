@@ -24,71 +24,9 @@
 -module(bondy_rest_gateway_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_meta_api.hrl").
+-include("bondy_uris.hrl").
 
 
-
-%% -----------------------------------------------------------------------------
-%% bondy.api_gateway
-%% -----------------------------------------------------------------------------
--define(LOAD_API,
-    <<"bondy.api_gateway.load">>
-).
--define(LIST,
-    <<"bondy.api_gateway.list">>
-).
--define(LOOKUP,
-    <<"bondy.api_gateway.lookup">>
-).
--define(CLIENT_LIST,
-    <<"bondy.api_gateway.list_clients">>
-).
--define(CLIENT_LOOKUP,
-    <<"bondy.api_gateway.fetch_client">>
-).
--define(ADD_CLIENT,
-    <<"bondy.api_gateway.add_client">>
-).
--define(CLIENT_ADDED,
-    <<"bondy.api_gateway.client_added">>
-).
--define(DELETE_CLIENT,
-    <<"bondy.api_gateway.delete_client">>
-).
--define(CLIENT_DELETED,
-    <<"bondy.api_gateway.client_deleted">>
-).
--define(UPDATE_CLIENT,
-    <<"bondy.api_gateway.update_client">>
-).
--define(CLIENT_UPDATED,
-    <<"bondy.api_gateway.client_updated">>
-).
--define(LIST_RESOURCE_OWNERS,
-    <<"bondy.api_gateway.list_resource_owners">>
-).
--define(FETCH_RESOURCE_OWNER,
-    <<"bondy.api_gateway.fetch_resource_owner">>
-).
--define(ADD_RESOURCE_OWNER,
-    <<"bondy.api_gateway.add_resource_owner">>
-).
--define(DELETE_RESOURCE_OWNER,
-    <<"bondy.api_gateway.delete_resource_owner">>
-).
--define(UPDATE_RESOURCE_OWNER,
-    <<"bondy.api_gateway.update_resource_owner">>
-).
-
--define(RESOURCE_OWNER_ADDED,
-    <<"bondy.api_gateway.resource_owner_added">>
-).
--define(RESOURCE_OWNER_DELETED,
-    <<"bondy.api_gateway.resource_owner_deleted">>
-).
--define(RESOURCE_OWNER_UPDATED,
-    <<"bondy.api_gateway.resource_owner_updated">>
-).
 
 -export([handle_call/2]).
 -export([handle_event/2]).
@@ -124,16 +62,16 @@ handle_call(M, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-handle_event(?USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
+handle_event(?BONDY_SEC_USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
     ok;
 
-handle_event(?USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
+handle_event(?BONDY_SEC_USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
-handle_event(?USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
+handle_event(?BONDY_SEC_USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
-handle_event(?PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
+handle_event(?BONDY_SEC_PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username).
 
 
@@ -147,7 +85,7 @@ handle_event(?PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
 -spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     wamp_messsage:result() | wamp_message:error().
 
-do_handle(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LOAD} = M, Ctxt) ->
     [Spec] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
     case bondy_rest_gateway:load(Spec) of
         ok ->
@@ -156,12 +94,12 @@ do_handle(#call{procedure_uri = ?LOAD_API} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LIST} = M, Ctxt) ->
     [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
     Result = bondy_rest_gateway:list(),
     wamp_message:result(M#call.request_id, #{}, [Result]);
 
-do_handle(#call{procedure_uri = ?LOOKUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LOOKUP} = M, Ctxt) ->
     [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
     case bondy_rest_gateway:lookup(Id) of
         {error, Reason} ->
@@ -170,7 +108,7 @@ do_handle(#call{procedure_uri = ?LOOKUP} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Spec])
     end;
 
-do_handle(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_ADD_CLIENT} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_oauth2_client:add(Uri, Data) of
@@ -181,7 +119,7 @@ do_handle(#call{procedure_uri = ?ADD_CLIENT} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_UPDATE_CLIENT} = M, Ctxt) ->
     [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
     case bondy_oauth2_client:update(Uri, Username, Info) of
         {ok, Client} ->
@@ -191,7 +129,7 @@ do_handle(#call{procedure_uri = ?UPDATE_CLIENT} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_DELETE_CLIENT} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
     case bondy_oauth2_client:remove(Uri, Username) of
         ok ->
@@ -200,7 +138,7 @@ do_handle(#call{procedure_uri = ?DELETE_CLIENT} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_ADD_RES_OWNER} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_oauth2_resource_owner:add(Uri, Data) of
@@ -211,7 +149,8 @@ do_handle(#call{procedure_uri = ?ADD_RESOURCE_OWNER} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
+do_handle(
+    #call{procedure_uri = ?BONDY_API_GATEWAY_UPDATE_RES_OWNER} = M, Ctxt) ->
     [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
     case bondy_oauth2_resource_owner:update(Uri, Username, Info) of
         {ok, User} ->
@@ -221,7 +160,7 @@ do_handle(#call{procedure_uri = ?UPDATE_RESOURCE_OWNER} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?DELETE_RESOURCE_OWNER} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_DELETE_RES_OWNER} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
     case bondy_oauth2_resource_owner:remove(Uri, Username) of
         ok ->

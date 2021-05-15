@@ -23,6 +23,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy).
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -type wamp_error_map() :: #{

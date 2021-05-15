@@ -23,10 +23,7 @@
 -module(bondy_oauth2_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
-
--define(LOOKUP_TOKEN, <<"bondy.oauth2.lookup_token">>).
--define(REVOKE_TOKEN, <<"bondy.oauth2.revoke_token">>).
--define(REVOKE_TOKENS, <<"bondy.oauth2.revoke_tokens">>).
+-include("bondy_uris.hrl").
 
 -export([handle_call/2]).
 

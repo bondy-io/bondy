@@ -23,26 +23,9 @@
 -module(bondy_wamp_meta_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
-%% DEALER
--define(BONDY_REG_LIST, <<"bondy.registration.list">>).
--define(BONDY_CALLEE_LIST, <<"bondy.callee.list">>).
--define(BONDY_CALLEE_GET, <<"bondy.callee.get">>).
--define(WAMP_REG_LIST, <<"wamp.registration.list">>).
--define(WAMP_REG_LOOKUP, <<"wamp.registration.lookup">>).
--define(WAMP_REG_MATCH, <<"wamp.registration.match">>).
--define(WAMP_REG_GET, <<"wamp.registration.get">>).
--define(WAMP_LIST_CALLEES, <<"wamp.registration.list_callees">>).
--define(WAMP_COUNT_CALLEES, <<"wamp.registration.count_callees">>).
 
-%% BROKER
--define(BONDY_SUBS_LIST, <<"bondy.subscription.list">>).
--define(WAMP_SUBS_LIST, <<"wamp.subscription.list">>).
--define(WAMP_SUBS_LOOKUP, <<"wamp.subscription.lookup">>).
--define(WAMP_SUBS_MATCH, <<"wamp.subscription.match">>).
--define(WAMP_SUBS_GET, <<"wamp.subscription.get">>).
--define(WAMP_SUBS_LIST_SUBS, <<"wamp.subscription.list_subscribers">>).
--define(WAMP_SUBS_COUNT_SUBS, <<"wamp.subscription.count_subscribers">>).
 
 
 -export([handle_call/2]).
@@ -151,7 +134,7 @@ do_handle(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
     end;
 
 
-do_handle(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_REGISTRY_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     case list(registration, RealmUri) of
         {ok, Result} ->
@@ -188,7 +171,7 @@ do_handle(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 
-do_handle(#call{procedure_uri = ?WAMP_SUBS_LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     case summary(subscription, RealmUri) of
         {ok, Result} ->
@@ -206,7 +189,7 @@ do_handle(#call{procedure_uri = ?BONDY_SUBS_LIST} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?WAMP_SUBS_LOOKUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L0 = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
     L = [subscription] ++ L0,
@@ -220,7 +203,7 @@ do_handle(#call{procedure_uri = ?WAMP_SUBS_LOOKUP} = M, Ctxt) ->
     end;
 
 
-do_handle(#call{procedure_uri = ?WAMP_SUBS_MATCH} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -232,7 +215,7 @@ do_handle(#call{procedure_uri = ?WAMP_SUBS_MATCH} = M, Ctxt) ->
     end;
 
 
-do_handle(#call{procedure_uri = ?WAMP_SUBS_GET} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
     %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
 
@@ -245,7 +228,7 @@ do_handle(#call{procedure_uri = ?WAMP_SUBS_GET} = M, Ctxt) ->
 
 
 do_handle(
-    #call{procedure_uri = ?WAMP_SUBS_LIST_SUBS} = M, Ctxt) ->
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST_SUBSCRIBERS} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
     case list_subscription_subscribers(RealmUri, RegId) of
         {ok, Result} ->
@@ -255,7 +238,7 @@ do_handle(
     end;
 
 do_handle(
-    #call{procedure_uri = ?WAMP_SUBS_COUNT_SUBS} = M, Ctxt) ->
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_COUNT_SUBSCRIBERS} = M, Ctxt) ->
     [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
     case count_subscribers(RealmUri, RegId) of
         {ok, Result} ->

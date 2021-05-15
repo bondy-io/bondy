@@ -177,3 +177,12 @@
 %% The 511 status code indicates that the client needs to authenticate to gain network access.
 -define(HTTP_NETWORK_AUTHENTICATION_REQUIRED, 511).
 
+
+
+-define(CORS_HEADERS, #{
+    <<"access-control-allow-origin">> => <<"*">>,
+    <<"access-control-allow-credentials">> => <<"true">>,
+    <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
+    <<"access-control-max-age">> => <<"86400">>
+}).

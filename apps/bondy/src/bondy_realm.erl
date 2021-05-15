@@ -29,8 +29,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_security.hrl").
 
 %% We use persistent_term to cache the security status to avoid
@@ -45,11 +45,11 @@
             Status
     end
 ).
--define(ENABLE_SECURITY(Uri),
+-define(BONDY_SECURITY_ENABLE(Uri),
     bondy_security:enable(Uri),
     persistent_term:put({Uri, security_status}, enabled)
 ).
--define(DISABLE_SECURITY(Uri),
+-define(BONDY_SECURITY_DISABLE(Uri),
     bondy_security:disable(Uri),
     persistent_term:put({Uri, security_status}, disabled)
 ).
@@ -428,7 +428,7 @@ security_status(Uri) when is_binary(Uri) ->
 -spec enable_security(t()) -> ok.
 
 enable_security(#realm{uri = Uri}) ->
-    ?ENABLE_SECURITY(Uri).
+    ?BONDY_SECURITY_ENABLE(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -441,7 +441,7 @@ disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, forbidden};
 
 disable_security(#realm{uri = Uri}) ->
-    ?DISABLE_SECURITY(Uri).
+    ?BONDY_SECURITY_DISABLE(Uri).
 
 
 %% -----------------------------------------------------------------------------

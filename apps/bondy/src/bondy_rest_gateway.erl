@@ -24,7 +24,7 @@
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_meta_api.hrl").
+-include("bondy_uris.hrl").
 
 
 
@@ -322,7 +322,7 @@ handle_cast(#event{} = Event, State) ->
     NewState = case {Topic, Event#event.arguments} of
         {undefined, _} ->
             State;
-        {?REALM_DELETED, [Uri]} ->
+        {?D_BONDY_REALM_DELETED, [Uri]} ->
             on_realm_deleted(Uri, State)
     end,
     {noreply, NewState};
@@ -457,8 +457,8 @@ subscribe(State) ->
         match => <<"exact">>
     },
 
-    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?REALM_DELETED),
-    Subs = maps:put(Id, ?REALM_DELETED, State#state.subscriptions),
+    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?D_BONDY_REALM_DELETED),
+    Subs = maps:put(Id, ?D_BONDY_REALM_DELETED, State#state.subscriptions),
 
     State#state{subscriptions = Subs}.
 

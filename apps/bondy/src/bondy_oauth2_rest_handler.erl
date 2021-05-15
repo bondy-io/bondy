@@ -23,7 +23,7 @@
 -module(bondy_oauth2_rest_handler).
 -include("http_api.hrl").
 -include("bondy.hrl").
--include("bondy_rest_gateway.hrl").
+-include("bondy_uris.hrl").
 -include("bondy_security.hrl").
 
 

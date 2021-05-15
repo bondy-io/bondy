@@ -638,7 +638,7 @@ handle_call(
 handle_call(
     #call{procedure_uri = <<"bondy.security.", _/binary>>} = M,
     Ctxt) ->
-    bondy_security_api_handler:handle_call(M, Ctxt);
+    bondy_rbac_api_handler:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.oauth2.", _/binary>>} = M,

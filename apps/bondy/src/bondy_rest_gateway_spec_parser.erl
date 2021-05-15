@@ -47,7 +47,7 @@
 -module(bondy_rest_gateway_spec_parser).
 -include("http_api.hrl").
 -include("bondy.hrl").
--include("bondy_rest_gateway.hrl").
+-include("bondy_uris.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(VARS_KEY, <<"variables">>).
