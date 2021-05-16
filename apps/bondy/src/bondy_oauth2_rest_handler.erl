@@ -336,7 +336,8 @@ do_is_authorized(Req0, St0) ->
         ),
 
         RealmUri = St0#state.realm_uri,
-        case bondy_auth:init(RealmUri, ClientId, undefined, Peer) of
+        SessionId = bondy_utils:get_id(global),
+        case bondy_auth:init(SessionId, RealmUri, ClientId, all, Peer) of
             {ok, AuthCtxt} ->
                 St1 = St0#state{
                     client_id = bondy_auth:user_id(AuthCtxt),
@@ -392,7 +393,7 @@ authenticate(
 
 %% @private
 do_authenticate(Password, Ctxt, St) ->
-    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, Ctxt) of
+    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, undefined, Ctxt) of
         {ok, _, NewCtxt} ->
             St#state{
                 client_id = bondy_auth:user_id(NewCtxt),
