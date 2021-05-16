@@ -57,11 +57,14 @@ init(Ctxt) ->
     try
 
         User = bondy_auth:user(Ctxt),
-        User =/= undefined orelse throw(invalid_context),
+        User =/= undefined orelse throw(no_such_role),
 
         PWD = bondy_rbac_user:password(User),
-        User =/= undefined andalso bondy_password:protocol(PWD) == cra
-        orelse throw(invalid_context),
+        PWD =/= undefined orelse throw(invalid_context),
+
+        cra =:= bondy_password:protocol(PWD)
+        andalso pbkdf2 =:= maps:get(kdf, bondy_password:params(PWD))
+        orelse throw(invalid_password_protocol),
 
         {ok, #{password => PWD}}
 
@@ -106,7 +109,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
                 salted_password := SPassword
             },
             params := #{
-                kdf := cra,
+                kdf := pbkdf2,
                 iterations := Iterations
             }
         } = PWD,
@@ -131,7 +134,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
 
         ChallengeExtra = #{
             challenge => Challenge,
-            salt => Salt,
+            salt => base64:encode(Salt),
             keylen => KeyLen,
             iterations => Iterations
         },

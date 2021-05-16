@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 -include("bondy_security.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -149,8 +150,12 @@ context(#wamp_state{context = Ctxt}) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(state()) -> ok.
 
-terminate(St) ->
-    bondy_context:close(St#wamp_state.context).
+
+terminate(#wamp_state{context = undefined}) ->
+    ok;
+
+terminate(#wamp_state{context = Ctxt}) ->
+    bondy_context:close(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -205,11 +210,11 @@ handle_inbound(Data, St) ->
         {Messages, <<>>} ->
             handle_inbound_messages(Messages, St)
     catch
-        ?EXCEPTION(_, {unsupported_encoding, _} = Reason, _) ->
+        _:{unsupported_encoding, _} = Reason ->
             abort(Reason, St);
-        ?EXCEPTION(_, badarg, _) ->
+        _:badarg ->
             abort(decoding, St);
-        ?EXCEPTION(_, function_clause, _) ->
+        _:function_clause ->
             abort(incompatible_message, St)
     end.
 
@@ -275,8 +280,16 @@ handle_outbound(M, St) ->
     | {reply, [binary()], state()}.
 
 handle_inbound_messages(Messages, St) ->
-    handle_inbound_messages(Messages, St, []).
-
+    try
+        handle_inbound_messages(Messages, St, [])
+    catch
+        Class:Reason:Stacktrace when Class /= throw ->
+            _ = lager:info(
+                "Unexpected error; class=~p reason=~s, state_name=~p, stacktrace=~p",
+                [Class, Reason, St#wamp_state.state_name, Stacktrace]
+            ),
+            error(Reason)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -462,7 +475,7 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     {reply, Bin, St1};
 
 maybe_open_session({ok, St}) ->
-    %% No need for a challenge, security disabled or anonymous enabled
+    %% No need for a challenge, anonymous|trust or security disabled
     open_session(undefined, St);
 
 maybe_open_session({error, Reason, St}) ->
@@ -504,8 +517,8 @@ open_session(Extra, St0) ->
                 roles => bondy_router:roles(),
                 authprovider => bondy_auth:provider(AuthCtxt),
                 authmethod => bondy_auth:method(AuthCtxt),
-                authrole => bondy_auth:role(AuthCtxt),
-                'x_authroles' => bondy_auth:roles(AuthCtxt),
+                authrole => to_bin(bondy_auth:role(AuthCtxt)),
+                'x_authroles' => [to_bin(R) || R <- bondy_auth:roles(AuthCtxt)],
                 authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
                 authextra => Extra
             }
@@ -514,9 +527,17 @@ open_session(Extra, St0) ->
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
-        ?EXCEPTION(error, {invalid_options, missing_client_role} = Reason, _) ->
+        error:{invalid_options, missing_client_role} = Reason ->
             abort(Reason, St0)
     end.
+
+
+%% @private
+to_bin(Term) when is_atom(Term) ->
+    atom_to_binary(Term, utf8);
+
+to_bin(Term) when is_binary(Term) ->
+    Term.
 
 
 %% @private
@@ -528,9 +549,14 @@ maybe_gen_authid(UserId) ->
 
 
 %% @private
+
 abort({unsupported_encoding, Format}, St) ->
     Reason = <<"Unsupported message encoding">>,
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{encoding => Format}, St);
+
+abort(system_failure, St) ->
+    Reason = <<"Internal system error">>,
+    abort(?BONDY_SYSTEM_FAILURE_ERROR, Reason, #{}, St);
 
 abort(decoding, St) ->
     Reason = <<"Error during message decoding">>,
@@ -656,12 +682,15 @@ when UserId =/= <<"anonymous">> ->
     Peer = bondy_context:peer(Ctxt),
 
     %% We initialise the auth context
-    AuthCtxt = bondy_auth:init(SessionId, Realm, UserId, Roles, Peer),
-    St2 = St1#wamp_state{auth_context = AuthCtxt},
-
-    ReqMethods = maps:get(authmethods, Details, []),
-    Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
-    auth_challenge(Methods, St2);
+    case bondy_auth:init(SessionId, Realm, UserId, Roles, Peer) of
+        {ok, AuthCtxt} ->
+            St2 = St1#wamp_state{auth_context = AuthCtxt},
+            ReqMethods = maps:get(authmethods, Details, []),
+            Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
+            auth_challenge(Methods, St2);
+        {error, Reason} ->
+            {error, Reason, St1}
+    end;
 
 
 maybe_auth_challenge(enabled, Details, Realm, St0) ->
@@ -676,10 +705,13 @@ maybe_auth_challenge(enabled, Details, Realm, St0) ->
     Peer = bondy_context:peer(Ctxt),
 
     %% We initialise the auth context with anon id and role
-    AuthCtxt = bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer),
-    St2 = St1#wamp_state{auth_context = AuthCtxt},
-
-    auth_challenge([?WAMP_ANON_AUTH], St2);
+    case bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer) of
+        {ok, AuthCtxt} ->
+            St2 = St1#wamp_state{auth_context = AuthCtxt},
+            auth_challenge([?WAMP_ANON_AUTH], St2);
+        {error, Reason} ->
+            {error, Reason, St1}
+    end;
 
 maybe_auth_challenge(disabled, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
@@ -713,10 +745,6 @@ authroles(Details) ->
 
 
 %% @private
-auth_challenge([?WAMP_ANON_AUTH|T], St0) ->
-    %% An authid was provided so we discard this method
-    auth_challenge(T,St0);
-
 auth_challenge([H|T], St0) ->
     Ctxt = St0#wamp_state.context,
     AuthCtxt0 = St0#wamp_state.auth_context,
@@ -724,14 +752,24 @@ auth_challenge([H|T], St0) ->
     Details = bondy_context:request_details(Ctxt),
 
     case bondy_auth:challenge(H, Details, AuthCtxt0) of
+        {ok, AuthCtxt1} ->
+            St1 = St0#wamp_state{
+                auth_context = AuthCtxt1,
+                auth_timestamp = erlang:system_time(millisecond)
+            },
+            {ok, St1};
         {ok, ChallengeExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
             {challenge, H, ChallengeExtra, St1};
-        {error, _Reason} ->
-            %% TODO LOG
+        {error, Reason} ->
+            _ = lager:debug(
+                "Authentication challenge step preparation failed; "
+                "reason=~s, authmethod=~p",
+                [Reason, H]
+            ),
             auth_challenge(T, St0)
     end;
 

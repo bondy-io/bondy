@@ -99,7 +99,8 @@
 
 
 -callback challenge(DataIn :: map(), Ctxt :: context(), CBState :: term()) ->
-    {ok, DataOut :: map(), CBState :: term()}
+    {ok, CBState :: term()}
+    | {ok, ChallengeData :: map(), CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
 
 
@@ -158,7 +159,7 @@ init(SessionId, Realm, UserId0, Roles0, {IPAddress, _}) ->
             conn_ip => IPAddress
         },
         Methods = compute_available_methods(Realm, Ctxt),
-        maps:put(available_methods, Methods, Ctxt)
+        {ok, maps:put(available_methods, Methods, Ctxt)}
 
     catch
         throw:Reason ->
@@ -389,18 +390,23 @@ conn_ip(#{conn_ip := Value}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(Method :: binary(), DataIn :: map(), Ctxt :: context()) ->
-    {ok, DataOut :: map(), NewCtxt :: context()}
+    {ok, ChallengeData :: map(), NewCtxt :: context()}
+    | {ok, NewCtxt :: context()}
     | {error, Reason :: any()}.
 
-challenge(Method, DataIn, #{method := Method} = Ctxt) ->
+challenge(Method, DataIn, #{method := Method} = Ctxt0) ->
     #{
         callback_mod := CBMod,
         callback_mod_state := CBModState0
-    } = Ctxt,
+    } = Ctxt0,
 
-    try CBMod:challenge(DataIn, Ctxt, CBModState0) of
-        {ok, DataOut, CBModState1} ->
-            {ok, DataOut, maps:put(callback_mod_state, CBModState1, Ctxt)};
+    try CBMod:challenge(DataIn, Ctxt0, CBModState0) of
+        {ok, CBModState1} ->
+            Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
+            {ok, Ctxt};
+        {ok, ChallengeData, CBModState1} ->
+            Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
+            {ok, ChallengeData, Ctxt};
         {error, Reason, _} ->
             {error, Reason}
     catch
@@ -560,7 +566,6 @@ compute_available_methods(Realm, Ctxt) ->
 %% @private
 matches_requirements(Method, #{user_id := UserId, user := User}) ->
     Password = bondy_rbac_user:password(User),
-    HasAuthKeys = bondy_rbac_user:has_authorized_keys(User),
 
     Requirements = maps:to_list((callback_mod(Method)):requirements()),
 
@@ -575,7 +580,7 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
             ({identification, true}) ->
                 UserId =/= anonymous;
             ({authorized_keys, true}) ->
-                HasAuthKeys;
+                bondy_rbac_user:has_authorized_keys(User);
             ({password, true}) ->
                 Password =/= undefined;
             ({password, {true, #{protocols := Ps}}}) ->

@@ -75,6 +75,7 @@
 -export([get_context/1]).
 -export([get_context/2]).
 -export([is_reserved_name/1]).
+-export([normalize_name/1]).
 
 
 
@@ -146,13 +147,13 @@ get_anonymous_context(Ctxt) ->
 %% -----------------------------------------------------------------------------
 
 get_context(RealmUri, Username)
-when is_binary(Username) ->
+when is_binary(Username) orelse Username == anonymous ->
     #bondy_rbac_context{
         realm_uri = RealmUri,
         username = Username,
         permissions = bondy_rbac_policy:permissions(RealmUri, Username, user),
         epoch = erlang:timestamp(),
-        is_anonymous = false
+        is_anonymous = Username == anonymous
     }.
 
 
@@ -217,6 +218,19 @@ is_reserved_name(Term) when is_atom(Term) ->
 
 is_reserved_name(_) ->
     error(invalid_name).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Normalizes the utf8 binary `Bin' into a Normalized Form of compatibly
+%% equivalent Decomposed characters according to the Unicode standard and
+%% converts it to a case-agnostic comparable string.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec normalize_name(Term :: binary() | atom()) -> boolean() | no_return().
+
+normalize_name(Bin) when is_binary(Bin) ->
+    string:casefold(unicode:characters_to_nfkd_binary(Bin)).
 
 
 

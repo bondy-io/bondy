@@ -46,7 +46,7 @@ test(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
 
-    Ctxt = bondy_auth:init(1, RealmUri, anonymous, Roles, Peer),
+    {ok, Ctxt} = bondy_auth:init(1, RealmUri, anonymous, Roles, Peer),
 
     ?assertEqual(
         true,
@@ -73,7 +73,7 @@ test(Config) ->
 authenticate(Method, Uri, Roles, Peer) ->
     SessionId = 1,
     Roles = [],
-    Ctxt = bondy_auth:init(SessionId, Uri, anonymous, Roles, Peer),
+    {ok, Ctxt} = bondy_auth:init(SessionId, Uri, anonymous, Roles, Peer),
     bondy_auth:authenticate(Method, undefined, undefined, Ctxt).
 
 

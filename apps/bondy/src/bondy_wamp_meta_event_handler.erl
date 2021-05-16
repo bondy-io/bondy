@@ -50,7 +50,7 @@ init([]) ->
     {ok, State}.
 
 handle_event({realm_added, Uri}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_REALM_ADDED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 handle_event({realm_deleted, Uri}, State) ->

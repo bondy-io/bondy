@@ -53,8 +53,7 @@ init(Ctxt) ->
     try
 
         User = bondy_auth:user(Ctxt),
-        User =:= undefined orelse throw(invalid_context),
-
+        User =/= undefined orelse throw(no_such_role),
         {ok, undefined}
 
     catch
@@ -84,11 +83,11 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
-    {ok, Extra :: map(), NewState :: state()}
+    {ok, NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
-    {ok, #{}, State}.
+    {ok, State}.
 
 
 

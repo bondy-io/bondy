@@ -112,7 +112,7 @@ test_1(Config) ->
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 
-    Ctxt1 = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
 
     ?assertEqual(
@@ -175,7 +175,7 @@ test_1(Config) ->
     ),
 
     %% user 2 is not granted access from Peer (see test_2)
-    Ctxt2 = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
+    {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
 
     ?assertEqual(
         false,

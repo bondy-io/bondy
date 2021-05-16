@@ -194,13 +194,14 @@
 -record(state, {
     realm_uri           ::  binary(),
     client_auth_ctxt    ::  bondy_auth:context() | undefined,
+    owner_auth_ctxt     ::  bondy_auth:context() | undefined,
     client_id           ::  binary() | undefined,
     device_id           ::  binary() | undefined,
     token_path          ::  binary(),
     revoke_path         ::  binary()
 }).
 
-
+-type state()           ::  #state{}.
 
 -export([accept/2]).
 -export([allowed_methods/2]).
@@ -329,33 +330,39 @@ do_is_authorized(Req0, St0) ->
     Peer = cowboy_req:peer(Req0),
     ClientIP = bondy_http_utils:client_ip(Req0),
 
-    try cowboy_req:parse_header(<<"authorization">>, Req0) of
-        {basic, ClientId, Password} ->
-            %% TODO Here we should check this principal belongs to
-            %% "api_clients" group, to check the client_credentials flow can be
-            %% used. Otherwise we should differentiate between the flows on the
-            %% auth method and RBAC source
-            AuthCtxt0 = bondy_auth:init(
-                St0#state.realm_uri, ClientId, undefined, Peer
-            ),
-            case bondy_auth:authenticate(?PASSWORD_AUTH, Password, AuthCtxt0) of
-                {ok, _, AuthCtxt1} ->
-                    St1 = St0#state{
-                        client_id = bondy_auth:user_id(AuthCtxt1),
-                        client_auth_ctxt = AuthCtxt1
-                    },
-                    {true, Req0, St1};
-                {error, Reason} ->
-                    _ = lager:info(
-                        "API Client login failed due to invalid client ID; "
-                        "reason=~p, realm=~p, client_ip=~s",
-                        [Reason, St0#state.realm_uri, ClientIP]
-                    ),
-                    Req1 = reply(oauth2_invalid_client, Req0),
-                    {stop, Req1, St0}
-            end
+    try
+        {basic, ClientId, Password} = cowboy_req:parse_header(
+            <<"authorization">>, Req0
+        ),
+
+        RealmUri = St0#state.realm_uri,
+        case bondy_auth:init(RealmUri, ClientId, undefined, Peer) of
+            {ok, AuthCtxt} ->
+                St1 = St0#state{
+                    client_id = bondy_auth:user_id(AuthCtxt),
+                    client_auth_ctxt = AuthCtxt
+                },
+                St2 = authenticate(client, Password, St1),
+                %% TODO Here we should check this principal belongs to
+                %% "api_clients" group, to check the client_credentials flow
+                %% can be used. Otherwise we should differentiate between the
+                %% flows on the auth method and RBAC source
+                {true, Req0, St2};
+            {error, Reason} ->
+                throw(Reason)
+        end
+
     catch
-        ?EXCEPTION(_, {request_error, {header, H}, Desc}, _) ->
+        throw:EReason ->
+            _ = lager:info(
+                "API Client login failed due to invalid client ID; "
+                "reason=~p, realm=~p, client_ip=~s",
+                [EReason, St0#state.realm_uri, ClientIP]
+            ),
+            Req1 = reply(oauth2_invalid_client, Req0),
+            {stop, Req1, St0};
+
+        _:{request_error, {header, H}, Desc} ->
             _ = lager:info(
                 "API Client login failed due to bad request; "
                 "reason=badheader, header=~p, realm=~p, client_ip=~s ",
@@ -367,12 +374,42 @@ do_is_authorized(Req0, St0) ->
 
 
 %% @private
+authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
+    NewCtxt = do_authenticate(Password, Ctxt, St),
+    St#state{
+        client_id = bondy_auth:user_id(NewCtxt),
+        client_auth_ctxt = NewCtxt
+    };
+
+authenticate(
+    resource_onwer, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
+    NewCtxt = do_authenticate(Password, Ctxt, St),
+    St#state{
+        client_id = bondy_auth:user_id(NewCtxt),
+        owner_auth_ctxt = NewCtxt
+    }.
+
+
+%% @private
+do_authenticate(Password, Ctxt, St) ->
+    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, Ctxt) of
+        {ok, _, NewCtxt} ->
+            St#state{
+                client_id = bondy_auth:user_id(NewCtxt),
+                client_auth_ctxt = NewCtxt
+            };
+        {error, Reason} ->
+            throw(Reason)
+    end.
+
+
+%% @private
 token_flow(
     #{?GRANT_TYPE := <<"client_credentials">>},
     Req,
     #state{client_auth_ctxt = Ctxt} = St) when Ctxt =/= undefined ->
     %% The context was set during the is_authorized callback
-    issue_token(client_credentials, St#state.client_auth_ctxt, Req, St);
+    issue_token(client_credentials, Req, St);
 
 token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     %% Resource Owner Password Credentials Flow
@@ -385,23 +422,30 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
 
     RealmUri = St0#state.realm_uri,
     {IP, _Port} = Peer = cowboy_req:peer(Req0),
-    St1 = St0#state{device_id = DeviceId},
 
     %% This is ID will bot be used as the ID is already defined in the JWT
     SessionId = bondy_utils:get_id(global),
-    AuthCtxt0 = bondy_auth:init(SessionId, RealmUri, Username, all, Peer),
-
-    case bondy_auth:authenticate(?PASSWORD_AUTH, Password, AuthCtxt0) of
-        {ok, _, AuthCtxt1} ->
-            %% Username in right case
-            issue_token(password, AuthCtxt1, Req0, St1);
-        {error, Error} ->
+    try
+        case bondy_auth:init(SessionId, RealmUri, Username, all, Peer) of
+            {ok, Ctxt} ->
+                St1 = St0#state{
+                    device_id = DeviceId,
+                    client_id = bondy_auth:user_id(Ctxt),
+                    owner_auth_ctxt = Ctxt
+                },
+                St2 = authenticate(resource_owner, Password, St1),
+                issue_token(password, Req0, St2);
+            {error, Reason} ->
+                throw(Reason)
+        end
+    catch
+        throw:EReason ->
             BinIP = inet_utils:ip_address_to_binary(IP),
             _ = lager:info(
                 "Resource Owner login failed, error=invalid_grant, reason=~p, client_device_id=~s, realm_uri=~s, ip=~s",
-                [Error, DeviceId, RealmUri, BinIP]
+                [EReason, DeviceId, RealmUri, BinIP]
             ),
-            {stop, reply(oauth2_invalid_grant, Req0), St1}
+            {stop, reply(oauth2_invalid_grant, Req0), St0}
     end;
 
 token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
@@ -449,10 +493,20 @@ refresh_token(RefreshToken, Req0, St) ->
     end.
 
 
+- spec auth_context(TokenType :: client_credentials | password, state()) ->
+    bondy_auth:context().
+
+auth_context(client_credentials, #state{client_auth_ctxt = Val}) ->
+    Val;
+auth_context(password, #state{owner_auth_ctxt = Val}) ->
+    Val.
+
+
 %% @private
-issue_token(Type, AuthCtxt, Req0, St0) ->
+issue_token(Type, Req0, St0) ->
     RealmUri = St0#state.realm_uri,
     Issuer = St0#state.client_id,
+    AuthCtxt = auth_context(Type, St0),
 
     User = bondy_auth:user(AuthCtxt),
     Authid = bondy_auth:user_id(AuthCtxt),

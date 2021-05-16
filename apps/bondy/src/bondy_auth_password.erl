@@ -109,11 +109,10 @@ challenge(_, _, State) ->
     | {error, Reason :: any(), NewState :: state()}.
 
 authenticate(String, _, _, #{password := PWD} = State) ->
-    %% TODO this is wrong now, we need to call bondy_password check directly
     case bondy_password:verify_string(String, PWD) of
         true ->
             {ok, maps:new(), State};
         false ->
-            {error, authentication_failed, State}
+            {error, bad_password, State}
     end.
 

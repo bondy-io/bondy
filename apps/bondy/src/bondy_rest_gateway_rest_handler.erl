@@ -275,33 +275,9 @@ is_authorized(
     Peer = cowboy_req:peer(Req0),
     %% This is ID will bot be used as the ID is already defined in the JWT
     SessionId = bondy_utils:get_id(global),
-    AuthCtxt0 = bondy_auth:init(SessionId, RealmUri, Token, all, Peer),
-
-    case bondy_auth:authenticate(?OAUTH2_AUTH, Token, #{}, AuthCtxt0) of
-        {ok, Claims, _AuthCtxt1} when is_map(Claims) ->
-            %% The token claims
-            Ctxt = update_context(
-                {security, Claims}, maps:get(api_context, St0)
-            ),
-            St1 = maps:update(api_context, Ctxt, St0),
-            St2 = maps:put(authid, maps:get(<<"sub">>, Claims), St1),
-            {true, Req0, St2};
-        {ok, _, AuthCtxt1} ->
-            %% TODO Here we need the token or the session with the
-            %% token grants and not the Claim
-            St1 = St0#{
-                authid => bondy_auth:user_id(AuthCtxt1)
-            },
-            %% TODO update context
-            {true, Req0, St1};
-        {error, no_such_realm} ->
-            {_, ErrorMap} = take_status_code(bondy_error:map(no_such_realm)),
-            Response = #{
-                <<"body">> => ErrorMap,
-                <<"headers">> => eval_headers(Req0, St0)
-            },
-            Req2 = reply(?HTTP_UNAUTHORIZED, json, Response, Req0),
-            {stop, Req2, St0};
+    case bondy_auth:init(SessionId, RealmUri, Token, all, Peer) of
+        {ok, Ctxt} ->
+            authenticate(Token, Ctxt, Req0, St0);
         {error, Reason} ->
             Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
             Req2 = reply_auth_error(
@@ -322,6 +298,43 @@ is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
 is_authorized(_, Req, #{security := _} = St0)  ->
     St1 = St0#{is_anonymous => true},
     {true, Req, St1}.
+
+
+
+authenticate(Token, Ctxt0, Req0, St0) ->
+    case bondy_auth:authenticate(?OAUTH2_AUTH, Token, #{}, Ctxt0) of
+        {ok, Claims, _Ctxt1} when is_map(Claims) ->
+            %% The token claims
+            Ctxt = update_context(
+                {security, Claims}, maps:get(api_context, St0)
+            ),
+            St1 = maps:update(api_context, Ctxt, St0),
+            St2 = maps:put(authid, maps:get(<<"sub">>, Claims), St1),
+            {true, Req0, St2};
+        {ok, _, Ctxt1} ->
+            %% TODO Here we need the token or the session with the
+            %% token grants and not the Claim
+            St1 = St0#{
+                authid => bondy_auth:user_id(Ctxt1)
+            },
+            %% TODO update context
+            {true, Req0, St1};
+        {error, no_such_realm} ->
+            {_, ErrorMap} = take_status_code(bondy_error:map(no_such_realm)),
+            Response = #{
+                <<"body">> => ErrorMap,
+                <<"headers">> => eval_headers(Req0, St0)
+            },
+            Req1 = reply(?HTTP_UNAUTHORIZED, json, Response, Req0),
+            {stop, Req1, St0};
+        {error, Reason} ->
+            RealmUri = maps:get(realm_uri, St0),
+            Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
+            Req2 = reply_auth_error(
+                Reason, <<"Bearer">>, RealmUri, json, Req1
+            ),
+            {stop, Req2, St0}
+    end.
 
 
 %% -----------------------------------------------------------------------------

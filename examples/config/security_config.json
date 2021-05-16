@@ -2,7 +2,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["wampcra", "ticket", "anonymous", "oauth2", "wamp-scram", "trust", "oauth2", "password"],
+        "authmethods" : ["wampcra", "anonymous", "oauth2", "password", "trust"],
         "security_enabled" : true,
         "private_keys": [
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
@@ -69,14 +69,20 @@
                 "meta" : {}
             },
             {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
                 "usernames" : ["anonymous"],
                 "authmethod" : "anonymous",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             },
             {
-                "usernames" : ["peer1", "peer2", "app1"],
-                "authmethod" : "anonymous",
+                "usernames" : ["peer2"],
+                "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             }

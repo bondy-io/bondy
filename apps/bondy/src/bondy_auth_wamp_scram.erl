@@ -132,7 +132,7 @@ challenge(Details, Ctxt, State0) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(EncSignature, Extra, Ctxt, State) ->
+authenticate(Signature, _Extra, Ctxt, State) ->
     try
         %% Signature: The base64-encoded ClientProof
         %% nonce: The concatenated client-server nonce from the previous
@@ -150,27 +150,25 @@ authenticate(EncSignature, Extra, Ctxt, State) ->
         %% - The channel_binding matches the one sent in the HELLO message.
         %% - The cbind_data sent by the client matches the channel binding data
         %% that the server sees on its side of the channel.
-        ServerNonce = maps:get(server_nonce, State),
-        CBindType = maps:get(channel_binding, State),
-        CBindData = undefined, % We do not support channel binding yet
+        ClientProof = base64_decode(Signature),
+        % ClientNonce = base64:encode(maps:get(client_nonce, State)),
+        % ServerNonce = base64:encode(maps:get(server_nonce, State)),
+        % CBindType = maps:get(channel_binding, State),
+        % CBindData = undefined, % We do not support channel binding yet
+        %
+        % RNonce = base64_decode(maps:get(<<"nonce">>, Extra, undefined)),
+        % RNonce == ServerNonce orelse throw(invalid_nonce),
 
-        RNonce = base64_decode(maps:get(<<"nonce">>, Extra, undefined)),
-        RNonce == ServerNonce orelse throw(invalid_nonce),
+        % RCBindType = maps:get(<<"channel_binding">>, Extra, undefined),
+        % RCBindType == CBindType orelse throw(invalid_channel_binding_type),
 
-        RCBindType = maps:get(<<"channel_binding">>, Extra, undefined),
-        RCBindType == CBindType orelse throw(invalid_channel_binding_type),
-
-        RCBindData = validate_cbind_data(RCBindType, CBindData),
-        RCBindData =:= CBindData orelse throw(invalid_channel_binding_data),
+        % RCBindData = validate_cbind_data(RCBindType, CBindData),
+        % RCBindData =:= CBindData orelse throw(invalid_channel_binding_data),
 
 
         %% - The ClientProof is validated against the StoredKey and ServerKey
         %% stored in the User's password object
-        do_authenticate(
-            base64_decode(EncSignature),
-            Ctxt,
-            State
-        )
+        do_authenticate(ClientProof, Ctxt, State)
     catch
         throw:Reason ->
             {error, Reason}
@@ -200,12 +198,16 @@ parse_details(#{authextra := Map}) ->
     Nonce =/= undefined orelse throw(missing_nonce),
 
     CBindType = maps:get(<<"channel_binding">>, Map, undefined),
-    {Nonce, CBindType}.
+    {Nonce, CBindType};
+
+parse_details(_) ->
+    throw(missing_nonce).
+
 
 
 %% @private
 do_challenge(#{channel_binding := undefined} = State) ->
-    #{client_nonce := Nonce, password := PWD} = State,
+    #{client_nonce := ClientNonce, password := PWD} = State,
 
     #{
         data := #{
@@ -220,7 +222,7 @@ do_challenge(#{channel_binding := undefined} = State) ->
     %% Only in case KDF == argon2id13
     Memory = maps:get(memory, Params, null),
 
-    ServerNonce = bondy_password_scram:server_nonce(Nonce),
+    ServerNonce = bondy_password_scram:server_nonce(ClientNonce),
 
     ChallengeExtra = #{
         nonce => base64:encode(ServerNonce),
@@ -239,8 +241,7 @@ do_challenge(#{channel_binding := _} = State) ->
 
 
 %% @private
-do_authenticate(RProof, Ctxt, State) ->
-
+do_authenticate(ClientProof, Ctxt, State) ->
     #{
         password := Password,
         client_nonce := ClientNonce,
@@ -270,7 +271,7 @@ do_authenticate(RProof, Ctxt, State) ->
         ServerKey, AuthMessage
     ),
     RecClientKey = bondy_password_scram:recovered_client_key(
-        ClientSignature, RProof
+        ClientProof, ClientSignature
     ),
 
     %% We finally compare the values
@@ -288,9 +289,9 @@ do_authenticate(RProof, Ctxt, State) ->
     end.
 
 
-validate_cbind_data(undefined, undefined) ->
-    %% Not implemented yet
-    ok.
+% validate_cbind_data(undefined, undefined) ->
+%     %% Not implemented yet
+%     ok.
 
 
 

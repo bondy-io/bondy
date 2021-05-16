@@ -85,11 +85,11 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, DataOut :: map(), CBState :: term()}
+    {ok, CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
 
 challenge(_, _, undefined) ->
-    {ok, #{}, undefined}.
+    {ok, undefined}.
 
 
 %% -----------------------------------------------------------------------------

@@ -46,7 +46,8 @@
     start_time              ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     active_n = 100          ::  once | -32768..32767,
-    buffer = <<>>           ::  binary()
+    buffer = <<>>           ::  binary(),
+    shutdown_reason         ::  term() | undefined
 }).
 -type state() :: #state{}.
 
@@ -97,7 +98,11 @@ init({Ref, Socket, Transport, _Opts0}) ->
     ok = ranch:accept_ack(Ref),
 
     Opts = bondy_config:get([Ref, socket_opts], []),
-    Transport:setopts(Socket, [{active, active_n(St0)}, {packet, 0} | Opts]),
+    Res = Transport:setopts(
+        Socket, [{active, active_n(St0)}, {packet, 0} | Opts]
+    ),
+    ok = maybe_error(Res),
+
     {ok, Peername} = inet:peername(Socket),
 
     St1 = St0#state{
@@ -224,9 +229,29 @@ handle_cast(Msg, State) ->
     {noreply, State, ?TIMEOUT}.
 
 
-terminate(Reason, St) ->
-    ok = bondy_wamp_protocol:terminate(St#state.protocol_state),
-    close_socket(Reason, St).
+terminate(normal = Reason, State) ->
+    ok = terminate_protocol(State),
+    ok = close_socket(false, State),
+    _ = log(
+        info, <<"Connection closed by peer; reason=~p,">>, [Reason], State
+    ),
+    ok;
+
+terminate(shutdown, #state{shutdown_reason = Reason} = State) ->
+    ok = terminate_protocol(State),
+    ok = close_socket(false, State),
+    _ = log(
+        info, <<"Connection closed by router; reason=~p,">>, [Reason], State
+    ),
+    ok;
+
+terminate(Reason, State) ->
+    ok = terminate_protocol(State),
+    ok = close_socket(true, State),
+    _ = log(
+        error, <<"Connection closed due to error; reason=~p,">>, [Reason], State
+    ),
+    ok.
 
 
 code_change(_OldVsn, State, _Extra) ->
@@ -238,6 +263,24 @@ code_change(_OldVsn, State, _Extra) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+terminate_protocol(#state{protocol_state = undefined}) ->
+    ok;
+
+terminate_protocol(#state{protocol_state = ProtocolState}) ->
+    ok = bondy_wamp_protocol:terminate(ProtocolState),
+    ok.
+
+
+%% @private
+
+close_socket(_, #state{socket = undefined}) ->
+    ok;
+
+close_socket(IsSocketError, #state{} = St) ->
+    ok = (St#state.transport):close(St#state.socket),
+    socket_closed(IsSocketError, St).
 
 
 %% @private
@@ -279,10 +322,17 @@ when byte_size(Data) >= Len ->
             St1 = St#state{protocol_state = PSt},
             ok = send(L, St1),
             {stop, normal, St1};
-        {stop, Reason, L, PSt} ->
+        {stop, normal, L, PSt} ->
             St1 = St#state{protocol_state = PSt},
             ok = send(L, St1),
-            {stop, Reason, St1}
+            {stop, normal, St1};
+        {stop, Reason, L, PSt} ->
+            St1 = St#state{
+                protocol_state = PSt,
+                shutdown_reason = Reason
+            },
+            ok = send(L, St1),
+            {stop, shutdown, St1}
     end;
 
 handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
@@ -545,26 +595,13 @@ error_number(maximum_connection_count_reached) ->?RAW_ERROR(4).
 %% error_reason(4) -> maximum_connection_count_reached.
 
 
-%% @private
-close_socket(normal, St) ->
-    ok = (St#state.transport):close(St#state.socket),
-    _ = log(info, <<"Connection closed by peer; reason=~p,">>, [normal], St),
-    socket_closed(false, St);
-
-close_socket(shutdown, St)  ->
-    ok = (St#state.transport):close(St#state.socket),
-    _ = log(
-        info, <<"Connection closed by router; reason=~p,">>, [shutdown], St),
-    socket_closed(false, St);
-
-close_socket(Reason, St) ->
-    ok = (St#state.transport):close(St#state.socket),
-    _ = log(
-        error, <<"Connection closed due to error; reason=~p,">>, [Reason], St),
-    socket_closed(true, St).
 
 
 %% @private
+log(Level, Format, Args, #state{protocol_state = undefined})
+when is_binary(Format) orelse is_list(Format), is_list(Args) ->
+    lager:log(Level, self(), Format, Args);
+
 log(Level, Prefix, Head, St)
 when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
@@ -623,8 +660,10 @@ maybe_active_once(#state{active_n = once} = State) ->
     Socket = State#state.socket,
     Transport:setopts(Socket, [{active, once}]);
 
-maybe_active_once(_) ->
-    ok.
+maybe_active_once(#state{active_n = N} = State) ->
+    Transport = State#state.transport,
+    Socket = State#state.socket,
+    Transport:setopts(Socket, [{active, N}]).
 
 
 %% @private
@@ -633,3 +672,11 @@ reset_inet_opts(#state{} = State) ->
     Socket = State#state.socket,
     N = active_n(State),
     Transport:setopts(Socket, [{active, N}]).
+
+
+%% @private
+maybe_error({error, Reason}) ->
+    error(Reason);
+
+maybe_error(Term) ->
+    Term.

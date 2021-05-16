@@ -251,7 +251,7 @@ websocket_info({stop, shutdown = Reason}, St) ->
     {stop, St};
 
 websocket_info({stop, Reason}, St) ->
-    _ = log(error, "Connection closing; reason=~p", [Reason], St),
+    _ = log(info, "Connection closing; reason=~p", [Reason], St),
     {stop, St};
 
 websocket_info(_, St0) ->

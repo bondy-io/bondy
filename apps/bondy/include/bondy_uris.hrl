@@ -18,6 +18,7 @@
 
 
 -define(BONDY_ALREADY_EXISTS_ERROR, <<"bondy.error.already_exists">>).
+-define(BONDY_SYSTEM_FAILURE_ERROR, <<"bondy.error.system_failure">>).
 -define(BONDY_API_GATEWAY_ADD_CLIENT,      <<"bondy.api_gateway.add_client">>).
 -define(BONDY_API_GATEWAY_ADD_RES_OWNER,   <<"bondy.api_gateway.add_resource_owner">>).
 -define(BONDY_API_GATEWAY_CLIENT_ADDED,    <<"bondy.api_gateway.client_added">>).
@@ -58,7 +59,7 @@
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
 -define(BONDY_INCONSISTENCY_ERROR, <<"bondy.error.unknown_error">>).
 -define(BONDY_NOT_FOUND_ERROR, <<"bondy.error.not_found">>).
--define(BONDY_REALM_ADDED,              <<"bondy.realm.added">>).
+-define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
 -define(BONDY_REALM_CREATE,             <<"bondy.realm.create">>).
 -define(BONDY_REALM_DELETE,             <<"bondy.realm.delete">>).
 -define(BONDY_REALM_LIST,               <<"bondy.realm.list">>).
