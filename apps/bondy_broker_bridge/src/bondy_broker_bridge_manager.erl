@@ -501,7 +501,7 @@ init_bridges(State) ->
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
     Fun = fun(Bridge, _Config, Acc) ->
         ok = Bridge:terminate(Reason),
-        Acc#state{bridges = maps:delete(Bridge, Map)}
+        Acc#state{bridges = maps:remove(Bridge, Map)}
     end,
     maps:fold(Fun, State, Map).
 

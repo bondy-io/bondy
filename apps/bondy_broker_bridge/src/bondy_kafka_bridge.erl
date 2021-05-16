@@ -434,7 +434,7 @@ terminate(_Reason, _State) ->
 
 
 get_client() ->
-    case bondy_broker_bridge_manager:backend(?MODULE) of
+    case bondy_broker_bridge_manager:bridge(?MODULE) of
         undefined ->
             {error, not_found};
         PL ->
