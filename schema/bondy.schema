@@ -458,6 +458,13 @@
 ]}.
 
 
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "admin_api.http.backlog", "bondy.admin_api_http.backlog", [
+{datatype, integer},
+{default, 1024}
+]}.
+
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
@@ -494,12 +501,6 @@
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "admin_api.http.backlog", "bondy.admin_api_http.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
-
 
 
 
@@ -531,6 +532,12 @@
 {mapping, "admin_api.https.max_connections", "bondy.admin_api_https.max_connections", [
   {datatype, integer},
   {default, 250000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "admin_api.https.backlog", "bondy.admin_api_https.backlog", [
+  {datatype, integer},
+  {default, 1024}
 ]}.
 
 
@@ -570,12 +577,6 @@
 {mapping, "admin_api.https.nodelay", "bondy.admin_api_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "admin_api.https.backlog", "bondy.admin_api_https.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
 ]}.
 
 
@@ -634,6 +635,12 @@
   {default, 500000}
 ]}.
 
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.backlog", [
+  {datatype, integer},
+  {default, 4096}
+]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc The filename of a the API Gatyeway JSON configuration file, which
@@ -687,12 +694,6 @@
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 4096}
-]}.
-
 
 %% =============================================================================
 %% API GATEWAY TLS
@@ -723,6 +724,12 @@
 {mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
   {datatype, integer},
   {default, 500000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.backlog", [
+  {datatype, integer},
+  {default, 4096}
 ]}.
 
 % SOCKET OPTS
@@ -761,12 +768,6 @@
 {mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 4096}
 ]}.
 
 
@@ -1066,6 +1067,12 @@ end}.
   {default, 100000}
 ]}.
 
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "wamp.tcp.backlog", "bondy.wamp_tcp.backlog", [
+  {datatype, integer},
+  {default, 1024}
+]}.
+
 %% TCP SOCKET OPTS
 
 %% Enables/disables periodic transmission on a connected socket when no other
@@ -1104,12 +1111,6 @@ end}.
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tcp.backlog", "bondy.wamp_tcp.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
-
 
 
 
@@ -1145,6 +1146,12 @@ end}.
 {mapping, "wamp.tls.max_connections", "bondy.wamp_tls.max_connections", [
   {datatype, integer},
   {default, 100000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "wamp.tls.backlog", "bondy.wamp_tls.backlog", [
+  {datatype, integer},
+  {default, 1024}
 ]}.
 
 
@@ -1185,12 +1192,6 @@ end}.
 {mapping, "wamp.tls.nodelay", "bondy.wamp_tls.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tls.backlog", "bondy.wamp_tls.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
 ]}.
 
 %% @doc Default cert location for https can be overridden
