@@ -8,8 +8,11 @@
 -connect_all false
 -hidden
 
++sbwt none
+
+
 ## Time Correction
-+c
++c true
 +C multi_time_warp
 
 ## Max processes
@@ -24,6 +27,6 @@
 ## Increase distribution port buffer size.
 +zdbbl 32768
 
-+sbwt none
+
 
 -args_file releases/{{release_version}}/generated/vm.generated.args
