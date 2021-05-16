@@ -61,7 +61,7 @@
         callback_mod => bondy_auth_wamp_cryptosign
     },
     ?WAMP_TICKET_AUTH => #{
-        callback_mod => bondy_auth_wamp_ticket
+        callback_mod => undefined
     },
     ?WAMP_TLS_AUTH => #{
         callback_mod => undefined

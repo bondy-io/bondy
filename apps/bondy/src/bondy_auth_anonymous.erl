@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_auth_wamp_ticket.erl -
+%%  bondy_auth_anonymous.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
