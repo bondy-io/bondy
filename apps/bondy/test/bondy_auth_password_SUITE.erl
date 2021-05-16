@@ -31,7 +31,8 @@
 
 all() ->
     [
-        test_1
+        test_1,
+        test_2
     ].
 
 
@@ -93,7 +94,7 @@ add_realm(RealmUri) ->
             #{
                 usernames => [?U2],
                 authmethod => ?PASSWORD_AUTH,
-                cidr => <<"198.162.0.0/16">>
+                cidr => <<"192.168.0.0/16">>
             }
         ]
     },
@@ -119,7 +120,7 @@ test_1(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt1)
     ),
     ?assertMatch(
-        {error, authentication_failed},
+        {error, bad_password},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt1)
     ),
 
@@ -152,7 +153,7 @@ test_2(Config) ->
     RealmUri = ?config(realm_uri, Config),
     SessionId = 1,
     Roles = [],
-    Peer = {{192, 168, 0, 1}, 10000},
+    Peer = {{192, 168, 1, 45}, 10000},
 
     {ok, Ctxt2} = bondy_auth:init(SessionId, RealmUri, ?U2, Roles, Peer),
 
@@ -166,7 +167,7 @@ test_2(Config) ->
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P1, undefined, Ctxt2)
     ),
     ?assertMatch(
-        {error, _, _},
+        {error, bad_password},
         bondy_auth:authenticate(?PASSWORD_AUTH, ?P2, undefined, Ctxt2)
     ),
 
