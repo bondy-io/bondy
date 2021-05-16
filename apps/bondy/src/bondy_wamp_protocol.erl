@@ -586,6 +586,10 @@ abort({authentication_failed, no_such_realm}, St) ->
     %% REVIEW shouldn't his be a ?WAMP_NO_SUCH_REALM error?
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
+abort({authentication_failed, bad_signature}, St) ->
+    Reason = <<"The signature did not match.">>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
 abort({authentication_failed, bad_password}, St) ->
     Reason = <<"The password did not match.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);

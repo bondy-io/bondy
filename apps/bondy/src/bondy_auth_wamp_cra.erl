@@ -134,7 +134,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
 
         ChallengeExtra = #{
             challenge => Challenge,
-            salt => base64:encode(Salt),
+            salt => Salt,
             keylen => KeyLen,
             iterations => Iterations
         },
@@ -168,4 +168,4 @@ authenticate(Signature, _, _, #{signature := Signature} = State) ->
     {ok, #{}, State};
 
 authenticate(_, _, _, State) ->
-    {error, authentication_failed, State}.
+    {error, bad_signature, State}.

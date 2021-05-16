@@ -154,7 +154,7 @@ nonce_length() ->
 -spec salt() -> binary().
 
 salt() ->
-    enacl:randombytes(salt_length()).
+    base64:encode(enacl:randombytes(salt_length())).
 
 
 %% -----------------------------------------------------------------------------
@@ -168,7 +168,7 @@ nonce() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the 64 encoded salted password.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec salted_password(binary(), binary(), map()) -> binary().
@@ -183,7 +183,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
     {ok, SaltedPassword} = pbkdf2:pbkdf2(
         HashFun, Password, Salt, Iterations, HashLen
     ),
-    SaltedPassword.
+    base64:encode(SaltedPassword).
 
 
 %% -----------------------------------------------------------------------------
