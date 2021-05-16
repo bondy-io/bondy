@@ -388,8 +388,15 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     Ctxt1 = bondy_context:set_realm_uri(Ctxt0, Uri),
     St1 = update_context(Ctxt1, St0),
 
-    maybe_open_session(
-        maybe_auth_challenge(M#hello.details, get_realm(St1), St1));
+    %% Lookup or create realm
+    case bondy_realm:get(Uri) of
+        {error, not_found} ->
+            abort({authentication_failed, no_such_realm}, St1);
+        Realm ->
+            maybe_open_session(
+                maybe_auth_challenge(M#hello.details, Realm, St1)
+            )
+    end;
 
 handle_inbound_messages(
     [#authenticate{} = M|_],
@@ -780,12 +787,6 @@ auth_challenge([H|T], St0) ->
 auth_challenge([], St) ->
     {error, no_authmethod, St}.
 
-
-%% @private
--spec get_realm(state()) -> bondy_realm:t() | {error, not_found}.
-
-get_realm(St) ->
-    bondy_realm:get(bondy_context:realm_uri(St#wamp_state.context)).
 
 
 %% =============================================================================

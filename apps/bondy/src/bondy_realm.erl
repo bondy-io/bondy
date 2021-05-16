@@ -560,6 +560,7 @@ get(Uri) ->
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
 %% does not exist and automatic creation of realms is enabled, it will create a
 %% new one for Uri with configuration options `Opts'.
+%% @throws no_such_realm
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) ->  t() | {error, not_found}.
@@ -576,7 +577,7 @@ get(Uri, Opts) ->
                 true ->
                     add(Opts#{<<"uri">> => Uri}, false);
                 false ->
-                    error(auto_create_realms_disabled)
+                    {error, not_found}
             end
     end.
 
