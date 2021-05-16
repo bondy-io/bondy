@@ -52,6 +52,7 @@
 init(Ctxt) ->
     try
 
+        %% TODO Fix this we should carry on with the challenge
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 

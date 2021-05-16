@@ -16,7 +16,8 @@
 %%  limitations under the License.
 %% =============================================================================
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This module provides the functions and algorithms to operate with the
+%% Salted Challenge-Reponse Mechanism data structures.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_password_scram).
@@ -80,6 +81,7 @@
 new(String, Params0, Builder) when is_function(Builder, 2) ->
     Params = validate_params(Params0),
     Salt = salt(),
+
     SPassword = salted_password(String, Salt, Params),
     ServerKey = server_key(SPassword),
     ClientKey = client_key(SPassword),
@@ -196,6 +198,7 @@ salted_password(Password, Salt, #{kdf := argon2id13} = Params) ->
         iterations := Iterations,
         memory := Memory
     } = Params,
+    %% REVIEW encode SALT with base64?
     enacl:pwhash(Normalized, Salt, Iterations, Memory, KDF);
 
 salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
@@ -239,20 +242,22 @@ stored_key(ClientKey) ->
 -spec client_signature(StoredKey :: binary(), AuthMessage :: binary()) ->
     ClientSignature :: binary().
 
-client_signature(StoredKey, AuthMessage) ->
+client_signature(StoredKey, AuthMessage)
+when is_binary(StoredKey), is_binary(AuthMessage) ->
     crypto:mac(hmac, hash_function(), StoredKey, AuthMessage).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc computes the client proof out of the client key `Key' and the client
+%% signature `Signature'. See {@link client_key/2} and
+%% {@link client_signature/2} respectively.
 %% @end
 %% -----------------------------------------------------------------------------
--spec client_proof(ClientKey :: binary(), ClientSignature :: binary()) ->
+-spec client_proof(Key :: binary(), Signature :: binary()) ->
     ClientProof :: binary().
 
-client_proof(ClientKey, ClientSignature)
-when is_binary(ClientKey), is_binary(ClientSignature) ->
-    crypto:exor(ClientKey, ClientSignature).
+client_proof(Key, Signature) when is_binary(Key), is_binary(Signature) ->
+    crypto:exor(Key, Signature).
 
 
 %% -----------------------------------------------------------------------------
@@ -260,12 +265,12 @@ when is_binary(ClientKey), is_binary(ClientSignature) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec recovered_client_key(
-    ReceivedClientProof :: binary(), ClientSignature :: binary()) ->
+    ClientProof :: binary(), ClientSignature :: binary()) ->
     RecoveredClientKey :: binary().
 
-recovered_client_key(ReceivedClientProof, ClientSignature)
-when is_binary(ReceivedClientProof) andalso is_binary(ClientSignature) ->
-    crypto:exor(ReceivedClientProof, ClientSignature).
+recovered_client_key(ClientProof, ClientSignature)
+when is_binary(ClientProof) andalso is_binary(ClientSignature) ->
+    crypto:exor(ClientProof, ClientSignature).
 
 
 %% -----------------------------------------------------------------------------
@@ -323,8 +328,8 @@ check_proof(ProvidedProof, _, ClientSignature, StoredKey) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-auth_message(AuthId, ClientNonce, RouterNonce, Salt, Iterations) ->
-    auth_message(AuthId, ClientNonce, RouterNonce, Salt, Iterations, "", "").
+auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations) ->
+    auth_message(AuthId, ClientNonce, ServerNonce, Salt, Iterations, "", "").
 
 
 %% -----------------------------------------------------------------------------
@@ -332,12 +337,12 @@ auth_message(AuthId, ClientNonce, RouterNonce, Salt, Iterations) ->
 %% @end
 %% -----------------------------------------------------------------------------
 auth_message(
-    AuthId, ClientNonce, RouterNonce, Salt, Iterations, CBindName, CBindData) ->
+    AuthId, ClientNonce, ServerNonce, Salt, Iterations, CBindName, CBindData) ->
 
     iolist_to_binary([
         client_first_bare(AuthId, ClientNonce), ",",
-        server_first(RouterNonce, Salt, Iterations), ",",
-        client_final_no_proof(CBindName, CBindData, RouterNonce)
+        server_first(ServerNonce, Salt, Iterations), ",",
+        client_final_no_proof(CBindName, CBindData, ServerNonce)
     ]).
 
 
@@ -442,29 +447,29 @@ memory_to_integer(_, _) ->
 
 
 %% @private
-client_first_bare(AuthId, Nonce) ->
+client_first_bare(AuthId, ClientNonce) ->
     [
         "n=", stringprep:resourceprep(escape(AuthId)), ",",
-        "r=", base64:encode(Nonce)
+        "r=", base64:encode(ClientNonce)
     ].
 
 
 %% @private
-server_first(RouterNonce, Salt, Iterations) ->
+server_first(ServerNonce, Salt, Iterations) ->
     [
-        "r=", RouterNonce, ",",
+        "r=", base64:encode(ServerNonce), ",",
         "s=", base64:encode(Salt), ",",
         "i=", integer_to_binary(Iterations)
     ].
 
 
 %% @private
-client_final_no_proof(CBindName, CBindData, RouterNonce) ->
+client_final_no_proof(CBindName, CBindData, ServerNonce) ->
     CBindFlag = channel_binding_flag(CBindName),
     CBindInput = channel_binding_input(CBindFlag, CBindData),
     [
         "c=", CBindInput, ",",
-        "r=", base64:encode(RouterNonce)
+        "r=", base64:encode(ServerNonce)
     ].
 
 
