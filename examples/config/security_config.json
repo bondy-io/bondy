@@ -122,7 +122,8 @@
                 "permissions" : [
                     "wamp.call"
                 ],
-                "uri" : "com.leapsight.add",
+                "uri" : "com.example",
+                "match": "prefix",
                 "roles" : ["peer1", "peer2"]
             }
         ],
