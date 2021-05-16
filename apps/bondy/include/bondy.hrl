@@ -15,22 +15,11 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
-
 -define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
 -define(BONDY_PRIV_REALM_URI, <<"com.leapsight.bondy.private">>).
 
 -define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
-
--ifdef(OTP_RELEASE). %% => OTP is 21 or higher
--include_lib("kernel/include/logger.hrl").
--define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
--define(STACKTRACE(Stacktrace), Stacktrace).
--else.
--define(EXCEPTION(Class, Reason, _), Class:Reason).
--define(STACKTRACE(_), erlang:get_stacktrace()).
--endif.
-
 
 %% In msecs
 -define(SEND_TIMEOUT, 20000).
@@ -124,12 +113,6 @@
 %% =============================================================================
 
 
--define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
--define(BONDY_SESSION_ALREADY_EXISTS, <<"bondy.error.session_already_exists">>).
-
--define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
--define(BONDY_INCONSISTENCY_ERROR, <<"bondy.error.unknown_error">>).
-
 -type local_peer_id()   ::  {
     Realm       ::  binary(),
     Node        ::  atom(),
@@ -155,3 +138,11 @@
 -define(EOT, '$end_of_table').
 -define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
 -define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
+
+
+
+%% =============================================================================
+%% PLUM_DB
+%% =============================================================================
+
+-define(TOMBSTONE, '$deleted').

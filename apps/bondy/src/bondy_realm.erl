@@ -29,8 +29,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 -include("bondy_security.hrl").
 
 %% We use persistent_term to cache the security status to avoid
@@ -45,21 +45,22 @@
             Status
     end
 ).
--define(ENABLE_SECURITY(Uri),
+-define(BONDY_SECURITY_ENABLE(Uri),
     bondy_security:enable(Uri),
     persistent_term:put({Uri, security_status}, enabled)
 ).
--define(DISABLE_SECURITY(Uri),
+-define(BONDY_SECURITY_DISABLE(Uri),
     bondy_security:disable(Uri),
     persistent_term:put({Uri, security_status}, disabled)
 ).
 -define(ERASE_SECURITY_STATUS(Uri),
-    _ = persistent_term:erase({Uri, security_status}),
-    ok
+    begin
+        _ = persistent_term:erase({Uri, security_status}),
+        ok
+    end
 ).
 
 
--define(DEFAULT_AUTH_METHOD, ?TICKET_AUTH).
 -define(PDB_PREFIX, {security, realms}).
 -define(LOCAL_CIDRS, [
     %% single class A network 10.0.0.0 – 10.255.255.255
@@ -77,7 +78,8 @@
         alias => uri,
         key => <<"uri">>,
         required => true,
-        datatype => binary
+        datatype => binary,
+        validator => fun bondy_data_validators:realm_uri/1
     },
     <<"description">> => #{
         alias => description,
@@ -90,8 +92,13 @@
         alias => authmethods,
         key => <<"authmethods">>,
         required => true,
-        datatype => {list, {in, ?BONDY_WAMP_AUTH_METHODS}},
-        default => ?BONDY_WAMP_AUTH_METHODS
+        datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}},
+        default => [
+            ?WAMP_ANON_AUTH,
+            ?PASSWORD_AUTH,
+            ?OAUTH2_AUTH,
+            ?WAMP_CRA_AUTH
+        ]
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
@@ -100,44 +107,33 @@
         datatype => boolean,
         default => true
     },
-    %% <<"message_retention_enabled">> => #{
-    %%     alias => message_retention_enabled,
-    %%     key => <<"message_retention_enabled">>,
-    %%     required => true,
-    %%     datatype => boolean,
-    %%     default => true
-    %% },
     <<"users">> => #{
         alias => users,
         key => <<"users">>,
         required => true,
         default => [],
-        datatype => list,
-        validator => {list, ?USER_SPEC}
+        datatype => {list, map}
     },
     <<"groups">> => #{
         alias => groups,
         key => <<"groups">>,
         required => true,
         default => [],
-        datatype => list,
-        validator => {list, ?GROUP_SPEC}
+        datatype => {list, map}
     },
     <<"sources">> => #{
         alias => sources,
         key => <<"sources">>,
         required => true,
         default => [],
-        datatype => list,
-        validator => {list, ?SOURCE_SPEC}
+        datatype => {list, map}
     },
     <<"grants">> => #{
         alias => grants,
         key => <<"grants">>,
         required => true,
         default => [],
-        datatype => list,
-        validator => {list, ?GRANT_SPEC}
+        datatype => {list, map}
     },
     <<"private_keys">> => #{
         alias => private_keys,
@@ -167,52 +163,109 @@
 
 %% The default configuration for the admin realm
 -define(BONDY_REALM, #{
+    uri => ?BONDY_REALM_URI,
     description => <<"The Bondy administrative realm">>,
-    authmethods => [?WAMPCRA_AUTH, ?TICKET_AUTH, ?TLS_AUTH, ?ANON_AUTH],
+    authmethods => [
+        ?WAMP_CRA_AUTH, ?PASSWORD_AUTH,
+        ?WAMP_ANON_AUTH
+    ],
     security_enabled => true, % but we allow anonymous access
+    users => [
+        #{
+            username => <<"admin">>,
+            password => <<"bondy-admin">>,
+            groups => [<<"bondy.administrators">>],
+            meta => #{
+                description => <<"The default Bondy administrator user.">>
+            }
+        }
+    ],
+    groups => [
+        #{
+            name => <<"bondy.administrators">>,
+            groups => [
+
+            ],
+            meta => #{
+                description => <<"The Bondy administrators group">>
+            }
+        }
+    ],
     grants => [
         #{
             permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
-                <<"wamp.publish">>
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.disclose_publisher">>,
+                <<"wamp.disclose_publisher_authroles">>,
+                <<"wamp.disclose_publisher_session">>
             ],
-            uri => <<"*">>,
-            roles => <<"all">>
+            uri => <<"">>,
+            match => <<"prefix">>,
+            roles => [<<"bondy.administrators">>],
+            meta => #{
+                description => <<"Allows the administrators users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
+            }
         },
         #{
             permissions => [
-                <<"wamp.register">>,
-                <<"wamp.unregister">>,
-                <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
-                <<"wamp.publish">>
+                <<"wamp.subscribe">>,
+                <<"wamp.unsubscribe">>,
+                <<"wamp.disclose_publisher">>,
+                <<"wamp.disclose_publisher_authroles">>,
+                <<"wamp.disclose_publisher_session">>
             ],
-            uri => <<"*">>,
-            roles => [<<"anonymous">>]
+            uri => <<"">>,
+            match => <<"prefix">>,
+            roles => [<<"anonymous">>],
+            meta => #{
+                description => <<"Allows anonymous users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
+            }
         }
     ],
     sources => [
         #{
             usernames => <<"all">>,
-            authmethod => <<"password">>,
+            authmethod => ?PASSWORD_AUTH,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
-                <<"description">> => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+                description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
             }
         },
         #{
-            usernames => [<<"anonymous">>],
-            authmethod => <<"trust">>,
+            usernames => <<"all">>,
+            authmethod => ?WAMP_CRA_AUTH,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
-                <<"description">> => <<"Allows all users from any network authenticate as anonymous. This should ideally be restricted to your local administrative or DMZ network.">>
+                description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+            }
+        },
+        % #{
+        %     usernames => <<"all">>,
+        %     authmethod => ?WAMP_SCRAM_AUTH,
+        %     cidr => <<"0.0.0.0/0">>,
+        %     meta => #{
+        %         description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+        %     }
+        % },
+        #{
+            usernames => [<<"admin">>],
+            authmethod => ?TRUST_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
+                description => <<"Allows the admin user to connect over the loopback interface (i.e. localhost) without presenting credentials .">>
+            }
+        },
+        #{
+            usernames => [<<"anonymous">>, <<"admin">>],
+            authmethod => ?WAMP_ANON_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
+                description => <<"Allows the anonymous user to connect over the loopback interface (i.e. localhost) only.">>
             }
         }
     ]
@@ -224,40 +277,46 @@
     description                     ::  binary(),
     authmethods                     ::  [binary()], % a wamp property
     private_keys = #{}              ::  map(),
-    public_keys = #{}               ::  map()
-    %% TODO
-    %% version                      ::  binary(),
-    %% options = #{}                ::  map()
-    %%     uri_validation_policy = loose   ::  strict | loose
-    %%     meta_api_enabled = true      ::  boolean()
+    public_keys = #{}               ::  map(),
+    password_opts                   ::  bondy_password:opts() | undefined
 }).
--type t()                           ::  #realm{}.
 
+-type t()                           ::  #realm{}.
+-type external()                    ::  #{
+                                            uri := uri(),
+                                            description :=  binary(),
+                                            authmethods :=  [binary()],
+                                            public_keys :=  [term()],
+                                            security_status :=  enabled
+                                                                | disabled
+                                        }.
 
 -export_type([t/0]).
 -export_type([uri/0]).
+-export_type([external/0]).
 
 -export([add/1]).
 -export([add/2]).
 -export([apply_config/0]).
--export([auth_methods/1]).
--export([is_auth_method/2]).
+-export([authmethods/1]).
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
+-export([exists/1]).
 -export([fetch/1]).
 -export([get/1]).
 -export([get/2]).
 -export([get_private_key/2]).
 -export([get_public_key/2]).
 -export([get_random_kid/1]).
+-export([is_authmethod/2]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([lookup/1]).
+-export([password_opts/1]).
 -export([public_keys/1]).
 -export([security_status/1]).
--export([select_auth_method/2]).
--export([to_map/1]).
+-export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
 
@@ -285,12 +344,20 @@ apply_config() ->
             case bondy_utils:json_consult(FName) of
                 {ok, Realms} ->
                     _ = lager:info(
-                        "Loading configuration file; path=~p", [FName]
+                        "Loading configuration file; path=~p",
+                        [FName]
                     ),
-                    %% We add the realm and allow an update if it already
-                    %% exists in the database, by setting IsStrict
-                    %% argument to false
-                    _ = [apply_config(Realm) || Realm <- Realms],
+                    _ = [
+                        begin
+                            Valid = maps_utils:validate(
+                                Data, ?UPDATE_REALM_SPEC
+                            ),
+                            %% We add the realm and allow an update if it
+                            %% already exists by setting IsStrict argument
+                            %% to false
+                            maybe_add(Valid, false)
+                        end || Data <- Realms
+                    ],
                     ok;
                 {error, enoent} ->
                     _ = lager:warning(
@@ -311,9 +378,12 @@ apply_config() ->
 %% @doc Returns the list of supported authentication methods for Realm.
 %% @end
 %% -----------------------------------------------------------------------------
--spec auth_methods(Realm :: t()) -> [binary()].
+-spec authmethods(Realm :: t() | uri()) -> [binary()].
 
-auth_methods(#realm{authmethods = Val}) ->
+authmethods(Uri) when is_binary(Uri) ->
+    authmethods(fetch(Uri));
+
+authmethods(#realm{authmethods = Val}) ->
     Val.
 
 
@@ -322,9 +392,9 @@ auth_methods(#realm{authmethods = Val}) ->
 %% `Realm'. Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_auth_method(Realm :: t(), Method :: binary()) -> boolean().
+-spec is_authmethod(Realm :: t(), Method :: binary()) -> boolean().
 
-is_auth_method(#realm{authmethods = L}, Method) ->
+is_authmethod(#realm{authmethods = L}, Method) ->
     lists:member(Method, L).
 
 
@@ -358,20 +428,20 @@ security_status(Uri) when is_binary(Uri) ->
 -spec enable_security(t()) -> ok.
 
 enable_security(#realm{uri = Uri}) ->
-    ?ENABLE_SECURITY(Uri).
+    ?BONDY_SECURITY_ENABLE(Uri).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(t()) -> ok | {error, not_permitted}.
+-spec disable_security(t()) -> ok | {error, forbidden}.
 
 disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
-    {error, not_permitted};
+    {error, forbidden};
 
 disable_security(#realm{uri = Uri}) ->
-    ?DISABLE_SECURITY(Uri).
+    ?BONDY_SECURITY_DISABLE(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -381,7 +451,7 @@ disable_security(#realm{uri = Uri}) ->
 -spec public_keys(t()) -> [map()].
 
 public_keys(#realm{public_keys = Keys}) ->
-    [jose_jwk:to_map(K) || K <- Keys].
+    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)].
 
 
 %% -----------------------------------------------------------------------------
@@ -429,6 +499,15 @@ uri(#realm{uri = Uri}) ->
     Uri.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec exists(uri()) -> boolean().
+
+exists(Uri) ->
+    do_lookup(Uri) =/= {error, not_found}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -463,12 +542,14 @@ fetch(Uri) ->
             error({not_found, Uri})
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will add a new one for Uri with the default configuration.
+%% does not exist and automatic creation of realms is enabled, it will add a
+%% new one for Uri with the default configuration options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri()) -> t().
+-spec get(uri()) ->  t() | {error, not_found}.
 
 get(Uri) ->
     get(Uri, #{}).
@@ -477,19 +558,26 @@ get(Uri) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
-%% does not exist it will create a new one for Uri with configuration `Opts'.
+%% does not exist and automatic creation of realms is enabled, it will create a
+%% new one for Uri with configuration options `Opts'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(uri(), map()) -> t().
+-spec get(uri(), map()) ->  t() | {error, not_found}.
 
 get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Realm;
         {error, not_found} when Uri == ?BONDY_REALM_URI ->
-            add(?BONDY_REALM#{<<"uri">> => Uri}, false);
+            %% We always create the Bondy admin realm if not found
+            add(?BONDY_REALM, false);
         {error, not_found} ->
-            add(Opts#{<<"uri">> => Uri}, false)
+            case bondy_config:get([security, automatically_create_realms]) of
+                true ->
+                    add(Opts#{<<"uri">> => Uri}, false);
+                false ->
+                    error(auto_create_realms_disabled)
+            end
     end.
 
 
@@ -530,26 +618,26 @@ update(_Uri, Map) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(uri()) -> ok | {error, not_permitted | active_users}.
+-spec delete(uri()) -> ok | {error, forbidden | active_users}.
 
 delete(?BONDY_REALM_URI) ->
-    {error, not_permitted};
+    {error, forbidden};
 
 delete(?BONDY_PRIV_REALM_URI) ->
-    {error, not_permitted};
+    {error, forbidden};
 
 delete(Uri) ->
     %% If there are users in the realm, the caller will need to first
     %% explicitely delete the users first
-    case bondy_security_user:has_users(Uri) of
-        true ->
-            {error, active_users};
-        false ->
+    case bondy_rbac_user:list(Uri, #{limit => 1}) of
+        [] ->
             ok = ?ERASE_SECURITY_STATUS(Uri),
             plum_db:delete(?PDB_PREFIX, Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
-            ok
+            ok;
+        L when length(L) > 0 ->
+            {error, active_users}
     end.
 
 
@@ -567,49 +655,39 @@ list() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec select_auth_method(t(), [binary()]) -> any().
 
-select_auth_method(Realm, []) ->
-    select_auth_method(Realm, [?DEFAULT_AUTH_METHOD]);
+password_opts(#realm{password_opts = undefined}) ->
+    #{};
 
-select_auth_method(#realm{authmethods = Allowed}, Requested) ->
-    A = sets:from_list(Allowed),
-    R = sets:from_list(Requested),
-    I = sets:intersection([A, R]),
-    case sets:size(I) > 0 of
-        true ->
-            select_first_available(Requested, I);
-        false ->
-            case sets:is_element(?DEFAULT_AUTH_METHOD, A) of
-                true ->
-                    ?DEFAULT_AUTH_METHOD;
-                false ->
-                    %% We get the first from the list to respect client's
-                    %% preference order
-                    hd(Allowed)
-            end
-    end.
+password_opts(#realm{password_opts = Opts}) ->
+    Opts;
+
+password_opts(RealmUri) ->
+    password_opts(fetch(RealmUri)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-to_map(#realm{} = R) ->
+to_external(#realm{} = R) ->
     #{
-        <<"uri">> => R#realm.uri,
-        %% public_keys => R#realm.public_keys.
-        <<"description">> => R#realm.description,
-        <<"authmethods">> => R#realm.authmethods,
-        <<"security_enabled">> => is_security_enabled(R)
+        uri => R#realm.uri,
+        description => R#realm.description,
+        authmethods => R#realm.authmethods,
+        security_enabled => security_status(R),
+        public_keys => [
+            begin {_, Map} = jose_jwk:to_map(K), Map end
+            || {_, K} <- maps:to_list(R#realm.public_keys)
+        ]
     }.
-
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
 
 
 %% @private
@@ -627,70 +705,89 @@ maybe_enable_security(false, Realm) ->
 
 
 %% @private
-apply_config(Map0) ->
-    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?UPDATE_REALM_SPEC),
-    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
-
-    _ = case lookup(Uri) of
-        #realm{} = Realm ->
-            do_update(Realm, Map1);
-        {error, not_found} ->
-            add(Map1)
-    end,
-
-    ok = apply_config(groups, Map1),
-    ok = apply_config(users, Map1),
-    ok = apply_config(sources, Map1),
-    ok = apply_config(grants, Map1),
-    ok.
+validate_rbac_config(Realm, Map) ->
+    Groups = [
+        bondy_rbac_group:new(Data)
+        || Data <- maps:get(<<"groups">>, Map)
+    ],
+    Users = [
+        bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
+        || Data <- maps:get(<<"users">>, Map)
+    ],
+    SourceAssignments = [
+        bondy_rbac_source:new_assignment(Data)
+        || Data <- maps:get(<<"sources">>, Map)
+    ],
+    Grants = [
+        bondy_rbac_policy:new(Data)
+        || Data <- maps:get(<<"grants">>, Map)
+    ],
+    #{
+        groups => Groups,
+        users => Users,
+        sources => SourceAssignments,
+        grants => Grants
+    }.
 
 
 %% @private
-apply_config(groups, #{<<"uri">> := Uri, <<"groups">> := Groups}) ->
+get_password_opts([]) ->
+    undefined;
+
+get_password_opts(Methods) when is_list(Methods) ->
+    %% We do this to overide the config default protocol
+    case lists:member(?WAMP_SCRAM_AUTH, Methods) of
+        true -> bondy_password:default_opts(scram);
+        false -> bondy_password:default_opts()
+    end.
+
+
+
+
+
+%% @private
+apply_rbac_config(#realm{uri = Uri}, Map) ->
+    #{
+        groups := Groups,
+        users := Users,
+        sources := SourcesAssignments,
+        grants := Grants
+    } = Map,
+
     _ = [
-        ok = maybe_error(bondy_security_group:add_or_update(Uri, Group))
+            ok = maybe_error(
+                bondy_rbac_group:add_or_update(Uri, Group)
+            )
         || Group <- Groups
     ],
-    ok;
 
-apply_config(users, #{<<"uri">> := Uri, <<"users">> := Users}) ->
     _ = [
-        ok = maybe_error(bondy_security_user:add_or_update(Uri, User))
+        ok = maybe_error(
+            bondy_rbac_user:add_or_update(Uri, User)
+        )
         || User <- Users
     ],
-    ok;
 
-apply_config(sources, #{<<"uri">> := Uri, <<"sources">> := Sources}) ->
     _ = [
-        ok = maybe_error(bondy_security_source:add(Uri, Source))
-        || Source <- Sources
+        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment))
+        || Assignment <- SourcesAssignments
     ],
-    ok;
 
-apply_config(grants, #{<<"uri">> := RealmUri, <<"grants">> := Grants}) ->
     _ = [
-        begin
-            #{
-               <<"permissions">> := Permissions,
-               <<"uri">> := Uri,
-               <<"roles">> := Roles
-            } = Grant,
-            %% TODO add_or_update
-            ok = maybe_error(
-                bondy_security:add_grant(RealmUri, Roles, Uri, Permissions))
-        end || Grant <- Grants
+        ok = maybe_error(bondy_rbac_policy:grant(Uri, Grant))
+        || Grant <- Grants
     ],
-    ok;
 
-apply_config(_, _) ->
     ok.
 
 
 %% @private
 maybe_error({error, Reason}) ->
     error(Reason);
+
 maybe_error({ok, _}) ->
     ok;
+
 maybe_error(ok) ->
     ok.
 
@@ -718,21 +815,27 @@ maybe_add(#{<<"uri">> := Uri} = Map, IsStrict) ->
 do_add(#{<<"uri">> := Uri} = Map) ->
     Realm0 = #realm{uri = Uri},
     Realm1 = add_or_update(Realm0, Map),
+
     ok = bondy_event_manager:notify({realm_added, Realm1#realm.uri}),
 
-    User0 = #{
-        <<"username">> => <<"admin">>,
-        <<"password">> => <<"bondy">>
-    },
-    {ok, _User} = bondy_security_user:add(Uri, User0),
+    % Data = #{
+    %     <<"username">> => <<"admin">>,
+    %     <<"password">> => <<"bondy-admin">>
+    % },
+    % User = bondy_rbac_user:new(Data),
+    % {ok, _} = bondy_rbac_user:add(Uri, User),
 
     % Opts = [],
     % _ = [
-    %     bondy_security_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
+    %     bondy_rbac_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
     %     || CIDR <- ?LOCAL_CIDRS
     % ],
     %TODO remove this once we have the APIs to add sources
-    _ = bondy_security:add_source(Uri, all, {{0, 0, 0, 0}, 0}, password, []),
+    % Source = bondy_rbac_source:new(#{
+    %     cidr => {{0, 0, 0, 0}, 0},
+    %     authmethod => ?PASSWORD_AUTH
+    % }),
+    % _ = bondy_rbac_source:add(Uri, all, Source),
 
     Realm1.
 
@@ -749,26 +852,30 @@ do_update(Realm, Map) ->
 add_or_update(Realm0, Map) ->
     #{
         <<"description">> := Desc,
-        <<"authmethods">> := Method,
+        <<"authmethods">> := Methods,
         <<"security_enabled">> := SecurityEnabled
     } = Map,
 
+    KeyList = maps:get(<<"private_keys">>, Map, undefined),
+
     Realm1 = Realm0#realm{
         description = Desc,
-        authmethods = Method
+        authmethods = Methods,
+        %% TODO derive password options based on authmethods
+        password_opts = get_password_opts(Methods)
     },
 
-    KeyList = maps:get(<<"private_keys">>, Map, undefined),
+    %% We are going to call new on the respective modules so that we validate
+    %% the data. This way we avoid adding anything to the database until all
+    %% elements have been validated.
+    RBACData = validate_rbac_config(Realm1, Map),
+
     NewRealm = set_keys(Realm1, KeyList),
 
-    ok = plum_db:put(?PDB_PREFIX, NewRealm#realm.uri, NewRealm),
+    Uri = NewRealm#realm.uri,
+    ok = plum_db:put(?PDB_PREFIX, Uri, NewRealm),
     ok = maybe_enable_security(SecurityEnabled, NewRealm),
-
-    %% We update all RBAC entities defined in the Realm Spec map
-    ok = apply_config(groups, Map),
-    ok = apply_config(users, Map),
-    ok = apply_config(sources, Map),
-    ok = apply_config(grants, Map),
+    ok = apply_rbac_config(NewRealm, RBACData),
 
     NewRealm.
 
@@ -798,15 +905,8 @@ set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
 
 
 %% @private
-select_first_available([H|T], I) ->
-    case sets:is_element(H, I) of
-        true -> H;
-        false -> select_first_available(T, I)
-    end.
-
-
-%% @private
 -spec do_lookup(uri()) -> t() | {error, not_found}.
+
 do_lookup(Uri) ->
     case plum_db:get(?PDB_PREFIX, Uri) of
         #realm{} = Realm ->
@@ -839,7 +939,7 @@ validate_private_keys(Pems) ->
         ),
         {ok, Keys}
     catch
-        ?EXCEPTION(_, _, _) ->
+        _:_ ->
             false
     end.
 

@@ -102,10 +102,10 @@ close_context(Ctxt) ->
         ok = unsubscribe_all(Ctxt),
         Ctxt
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
         _ = lager:debug(
             "Error while closing context; class=~p, reason=~p, trace=~p",
-            [Class, Reason, ?STACKTRACE(Stacktrace)]
+            [Class, Reason, Stacktrace]
         ),
         Ctxt
     end.
@@ -245,7 +245,7 @@ when is_map(Ctxt) ->
     try
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error while publishing; reason=~p, "
                 "topic=~p, session_id=~p, stacktrace=~p",
@@ -253,7 +253,7 @@ when is_map(Ctxt) ->
                     Reason,
                     TopicUri,
                     bondy_context:session_id(Ctxt),
-                    ?STACKTRACE(Stacktrace)
+                    Stacktrace
                 ]
             ),
             {error, Reason}
@@ -304,7 +304,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% authrole is in this list [TODO]
     %% 6. if there is an exclude_authrole attribute present, the Subscriber's authrole is NOT in this list [TODO]
 
-    %% Subscriber Blacklisting: we only support sessionIds for now
+    %% Subscriber Exclusion: we only support sessionIds for now
     %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
     %% and exclude_authrole, We need to add authid and authrole to the registry
     %% entries so that we can match
@@ -321,7 +321,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     end,
     MatchOpts0 = #{exclude => Exclusions},
 
-    %% Subscriber Whitelisting: we only support sessionIds for now
+    %% Subscriber Eligibility: we only support sessionIds for now
     MatchOpts = case maps:find(eligible, Opts) of
         error ->
             MatchOpts0;
@@ -518,7 +518,7 @@ unsubscribe(SubsId, Ctxt) ->
 %% -----------------------------------------------------------------------------
 maybe_subscribe(M, Ctxt) ->
     TopicUri = M#subscribe.topic_uri,
-    try bondy_security_utils:authorize(<<"wamp.subscribe">>, TopicUri, Ctxt) of
+    try bondy_rbac:authorize(<<"wamp.subscribe">>, TopicUri, Ctxt) of
         ok ->
             subscribe(M, Ctxt)
     catch
@@ -553,7 +553,7 @@ maybe_unsubscribe(M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 maybe_unsubscribe(Topic, M, Ctxt) ->
     try
-        _ = bondy_security_utils:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
+        _ = bondy_rbac:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
         SubsId = M#unsubscribe.subscription_id,
         unsubscribe(SubsId, Ctxt)
     catch
@@ -572,7 +572,7 @@ maybe_publish(M, Ctxt) ->
 
     try
         Topic = M#publish.topic_uri,
-        ok = bondy_security_utils:authorize(<<"wamp.publish">>, Topic, Ctxt),
+        ok = bondy_rbac:authorize(<<"wamp.publish">>, Topic, Ctxt),
         %% (RFC) Asynchronously notifies all subscribers of the published event.
         %% Note that the _Publisher_ of an event will never receive the
         %% published event even if the _Publisher_ is also a _Subscriber_ of the

@@ -58,13 +58,16 @@
         datatype => {list, binary}
     }
 }).
+-define(TYPE, outh2_resource_owner).
+
+-type t()       ::  bondy_rbac_user:t().
 
 -export([add/2]).
 -export([remove/2]).
 -export([update/3]).
 -export([change_password/4]).
 -export([change_password/5]).
-
+-export([to_external/1]).
 
 
 %% =============================================================================
@@ -82,15 +85,11 @@
 -spec add(uri(), map()) ->
     {ok, map()} | {error, term()} | no_return().
 
-add(RealmUri, Info0) ->
+add(RealmUri, Data) ->
     %% We just validate we have a group, the rest will be validate by
-    %% bondy_security_user
-    case bondy_security_user:add(RealmUri, validate(Info0, ?ADD_SPEC)) of
-        {ok, _} = OK ->
-            OK;
-        {error, _} = Error ->
-            Error
-    end.
+    %% bondy_rbac_user
+    User = bondy_rbac_user:new(validate(Data, ?ADD_SPEC)),
+    bondy_rbac_user:add(RealmUri, User).
 
 
 %% -----------------------------------------------------------------------------
@@ -98,11 +97,11 @@ add(RealmUri, Info0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec update(uri(), binary(), map()) ->
-    {ok, map()} | {error, term()} | no_return().
+    {ok, t()} | {error, term()} | no_return().
 
-update(RealmUri, Username, Info0) ->
-    bondy_security_user:update(
-        RealmUri, Username, validate(Info0, ?UPDATE_SPEC)).
+update(RealmUri, ClientId, Data0) ->
+    Data = validate(Data0, ?UPDATE_SPEC),
+    bondy_rbac_user:update(RealmUri, ClientId, Data).
 
 
 %% -----------------------------------------------------------------------------
@@ -113,7 +112,7 @@ update(RealmUri, Username, Info0) ->
     ok | {error, any()}.
 
 change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
-    bondy_security_user:change_password(RealmUri, Username, New).
+    bondy_rbac_user:change_password(RealmUri, Username, New).
 
 
 %% -----------------------------------------------------------------------------
@@ -124,7 +123,7 @@ change_password(RealmUri, _Issuer, Username, New) when is_binary(New) ->
     ok | {error, any()}.
 
 change_password(RealmUri, _Issuer, Username, New, Old) ->
-    bondy_security_user:change_password(RealmUri, Username, New, Old).
+    bondy_rbac_user:change_password(RealmUri, Username, New, Old).
 
 
 
@@ -135,8 +134,17 @@ change_password(RealmUri, _Issuer, Username, New, Old) ->
 -spec remove(uri(), list() | binary()) -> ok.
 
 remove(RealmUri, Id) ->
-    bondy_security_user:remove(RealmUri, Id).
+    bondy_rbac_user:remove(RealmUri, Id).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_external(t()) -> map().
+
+to_external(Map) ->
+    Map.
 
 
 %% =============================================================================
@@ -146,12 +154,11 @@ remove(RealmUri, Id) ->
 
 
 %% @private
-validate(Info0, Spec) ->
+validate(Data0, Spec) ->
     %% We do this since maps_utils:validate will remove keys that have no spec
     %% So we only validate groups here
-    {ToValidate, Rest} = maps_utils:split([<<"groups">>], Info0),
-    Info1 = maps:merge(Rest, maps_utils:validate(ToValidate, Spec)),
-    maybe_add_groups(Info1).
+    Data = maps_utils:validate(Data0, Spec, #{keep_unknown => true}),
+    maybe_add_groups(Data).
 
 
 %% @private
@@ -162,4 +169,3 @@ maybe_add_groups(#{<<"groups">> := Groups0} = M) ->
 maybe_add_groups(#{} = M) ->
     %% For update op
     M.
-

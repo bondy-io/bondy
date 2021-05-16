@@ -19,8 +19,15 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 
 * [Erlang](https://www.erlang.org/) 23.3.1 or later
 * [Rebar3](https://rebar3.readme.io/)
+* openssl
+* libssl
 * [Libsodium](https://github.com/jedisct1/libsodium)
 
+#### On Linux
+```shell
+apt-get update -y
+apt-get -y install build-essential libssl-dev openssl libsodium-dev
+```
 
 ### Run a first node
 

@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 -include("bondy_security.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -33,7 +34,8 @@
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
-    auth_signature          ::  binary() | undefined,
+    challenge               ::  binary() | undefined,
+    auth_context    ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
     context                 ::  bondy_context:t() | undefined
@@ -148,8 +150,12 @@ context(#wamp_state{context = Ctxt}) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(state()) -> ok.
 
-terminate(St) ->
-    bondy_context:close(St#wamp_state.context).
+
+terminate(#wamp_state{context = undefined}) ->
+    ok;
+
+terminate(#wamp_state{context = Ctxt}) ->
+    bondy_context:close(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -204,11 +210,11 @@ handle_inbound(Data, St) ->
         {Messages, <<>>} ->
             handle_inbound_messages(Messages, St)
     catch
-        ?EXCEPTION(_, {unsupported_encoding, _} = Reason, _) ->
+        _:{unsupported_encoding, _} = Reason ->
             abort(Reason, St);
-        ?EXCEPTION(_, badarg, _) ->
+        _:badarg ->
             abort(decoding, St);
-        ?EXCEPTION(_, function_clause, _) ->
+        _:function_clause ->
             abort(incompatible_message, St)
     end.
 
@@ -274,8 +280,16 @@ handle_outbound(M, St) ->
     | {reply, [binary()], state()}.
 
 handle_inbound_messages(Messages, St) ->
-    handle_inbound_messages(Messages, St, []).
-
+    try
+        handle_inbound_messages(Messages, St, [])
+    catch
+        Class:Reason:Stacktrace when Class /= throw ->
+            _ = lager:info(
+                "Unexpected error; class=~p reason=~s, state_name=~p, stacktrace=~p",
+                [Class, Reason, St#wamp_state.state_name, Stacktrace]
+            ),
+            error(Reason)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -390,15 +404,24 @@ handle_inbound_messages(
     );
 
 handle_inbound_messages(
-    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
+    [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St0, _) ->
     %% Client is responding to a challenge
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
 
-    AuthMethod = St#wamp_state.authmethod,
-    AuthId = bondy_context:authid(St#wamp_state.context),
+    AuthMethod = St0#wamp_state.authmethod,
+    AuthCtxt0 = St0#wamp_state.auth_context,
     Signature = M#authenticate.signature,
+    Extra = M#authenticate.extra,
 
-    maybe_auth(AuthMethod, AuthId, Signature, St);
+    Result = bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0),
+
+    case Result of
+        {ok, Extra, AuthCtxt1} ->
+            St1 = St0#wamp_state{auth_context = AuthCtxt1},
+            open_session(Extra, St1);
+        {error, Reason} ->
+            abort({authentication_failed, Reason}, St0)
+    end;
 
 handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = Name} = St, _)
@@ -440,59 +463,6 @@ handle_inbound_messages(_, St, _) ->
 %% =============================================================================
 
 
-
-maybe_auth(?WAMPCRA_AUTH, AuthId, Signature, St) ->
-    ExpectedSignature = St#wamp_state.auth_signature,
-    Ctxt0 = St#wamp_state.context,
-    Realm = bondy_context:realm_uri(Ctxt0),
-    Peer = bondy_context:peer(Ctxt0),
-    AuthId = bondy_context:authid(Ctxt0),
-
-    Result = bondy_security_utils:authenticate(
-        hmac, {hmac, AuthId, Signature, ExpectedSignature}, Realm, Peer),
-
-    case Result of
-        {ok, _AuthCtxt} ->
-            open_session(St);
-        {error, Reason} ->
-            abort({authentication_failed, Reason}, St)
-    end;
-
-maybe_auth(?TICKET_AUTH, AuthId, Password, St) ->
-    Ctxt0 = St#wamp_state.context,
-    Realm = bondy_context:realm_uri(Ctxt0),
-    Peer = bondy_context:peer(Ctxt0),
-    AuthId = bondy_context:authid(Ctxt0),
-
-    Result = bondy_security_utils:authenticate(
-        basic, {basic, AuthId, Password}, Realm, Peer),
-
-    case Result of
-        {ok, _AuthCtxt} ->
-            open_session(St);
-        {error, Reason} ->
-            abort({authentication_failed, Reason}, St)
-    end;
-
-maybe_auth(?OAUTH2_AUTH, AuthId, Token, St0) ->
-    Ctxt0 = St0#wamp_state.context,
-    RealmUri = bondy_context:realm_uri(Ctxt0),
-    AuthId = bondy_context:authid(Ctxt0),
-
-    case bondy_oauth2:verify_jwt(RealmUri, Token) of
-        {ok, #{<<"sub">> := AuthId}} ->
-            open_session(St0);
-        {ok, _} ->
-            %% The authid does not match the token's sub!
-            %% TODO Flag as potential threat and limit attempts
-            abort({authentication_failed, oauth2_invalid_grant}, St0);
-        {error, Reason} when
-        Reason == oauth2_invalid_grant orelse
-        Reason == no_such_realm ->
-            abort({authentication_failed, Reason}, St0)
-    end.
-
-
 %% @private
 maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
@@ -505,7 +475,8 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     {reply, Bin, St1};
 
 maybe_open_session({ok, St}) ->
-    open_session(St);
+    %% No need for a challenge, anonymous|trust or security disabled
+    open_session(undefined, St);
 
 maybe_open_session({error, Reason, St}) ->
     abort(Reason, St).
@@ -517,15 +488,15 @@ maybe_open_session({error, Reason, St}) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec open_session(state()) ->
+-spec open_session(map() | undefined, state()) ->
     {reply, binary(), state()}
     | {stop, binary(), state()}.
 
-open_session(St0) ->
+open_session(Extra, St0) ->
     try
         Ctxt0 = St0#wamp_state.context,
+        AuthCtxt = St0#wamp_state.auth_context,
         Id = bondy_context:id(Ctxt0),
-        AuthId = bondy_context:authid(Ctxt0),
         Realm = bondy_context:realm_uri(Ctxt0),
         Details = bondy_context:request_details(Ctxt0),
 
@@ -542,24 +513,50 @@ open_session(St0) ->
         Welcome = wamp_message:welcome(
             Id,
             #{
-                authid => AuthId,
                 agent => bondy_router:agent(),
-                roles => bondy_router:roles()
+                roles => bondy_router:roles(),
+                authprovider => bondy_auth:provider(AuthCtxt),
+                authmethod => bondy_auth:method(AuthCtxt),
+                authrole => to_bin(bondy_auth:role(AuthCtxt)),
+                'x_authroles' => [to_bin(R) || R <- bondy_auth:roles(AuthCtxt)],
+                authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
+                authextra => Extra
             }
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
-        ?EXCEPTION(error, {invalid_options, missing_client_role} = Reason, _) ->
+        error:{invalid_options, missing_client_role} = Reason ->
             abort(Reason, St0)
     end.
 
 
 %% @private
+to_bin(Term) when is_atom(Term) ->
+    atom_to_binary(Term, utf8);
+
+to_bin(Term) when is_binary(Term) ->
+    Term.
+
+
+%% @private
+maybe_gen_authid(anonymous) ->
+    bondy_utils:uuid();
+
+maybe_gen_authid(UserId) ->
+    UserId.
+
+
+%% @private
+
 abort({unsupported_encoding, Format}, St) ->
     Reason = <<"Unsupported message encoding">>,
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{encoding => Format}, St);
+
+abort(system_failure, St) ->
+    Reason = <<"Internal system error">>,
+    abort(?BONDY_SYSTEM_FAILURE_ERROR, Reason, #{}, St);
 
 abort(decoding, St) ->
     Reason = <<"Error during message decoding">>,
@@ -579,8 +576,18 @@ abort({authentication_failed, invalid_scheme}, St) ->
     Reason = <<"Unsupported authentication scheme.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
+abort({authentication_failed, invalid_authmethod}, St) ->
+    Reason = <<"Unsupported authentication method.">>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
 abort({authentication_failed, no_such_realm}, St) ->
-    Reason = <<"The provided realm does not exist.">>,
+    Uri = bondy_context:realm_uri(St#wamp_state.context),
+    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
+    %% REVIEW shouldn't his be a ?WAMP_NO_SUCH_REALM error?
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort({authentication_failed, bad_signature}, St) ->
+    Reason = <<"The signature did not match.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, bad_password}, St) ->
@@ -606,16 +613,17 @@ abort({authentication_failed, oauth2_invalid_grant}, St) ->
     >>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
-abort({no_such_realm, Realm}, St) ->
-    Reason = <<"Realm '", Realm/binary, "' does not exist.">>,
+abort(no_such_realm, St) ->
+    Uri = bondy_context:realm_uri(St#wamp_state.context),
+    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
     abort(?WAMP_NO_SUCH_REALM, Reason, #{}, St);
 
 abort({missing_param, Param}, St) ->
     Reason = <<"Missing value for required parameter '", Param/binary, "'.">>,
     abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
 
-abort({no_such_role, AuthId}, St) ->
-    Reason = <<"User '", AuthId/binary, "' does not exist.">>,
+abort(no_such_role, St) ->
+    Reason = <<"User does not exist.">>,
     abort(?WAMP_NO_SUCH_ROLE, Reason, #{}, St);
 
 abort({unsupported_authmethod, Param}, St) ->
@@ -651,223 +659,133 @@ when is_binary(Type) andalso is_binary(Reason) ->
 abort_message(Type, Reason, Details0, _) ->
     Details = Details0#{
         message => Reason,
-        timestamp => iso8601(erlang:system_time(microsecond))
+        timestamp => bondy_utils:iso8601(erlang:system_time(microsecond))
     },
     wamp_message:abort(Details, Type).
 
 
 %% @private
 maybe_auth_challenge(_, {error, not_found}, St) ->
-    #{realm_uri := Uri} = St#wamp_state.context,
-    {error, {no_such_realm, Uri}, St};
+    {error, no_such_realm, St};
 
 maybe_auth_challenge(Details, Realm, St) ->
-    Enabled = bondy_realm:is_security_enabled(Realm),
-    maybe_auth_challenge(Enabled, Details, Realm, St).
+    Status = bondy_realm:security_status(Realm),
+    maybe_auth_challenge(Status, Details, Realm, St).
 
 
 %% @private
-maybe_auth_challenge(true, #{authid := UserId} = Details, Realm, St0) ->
+maybe_auth_challenge(enabled, #{authid := UserId} = Details, Realm, St0)
+when UserId =/= <<"anonymous">> ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
-    Ctxt2 = bondy_context:set_authid(Ctxt1, UserId),
-    St1 = update_context(Ctxt2, St0),
+    Ctxt = bondy_context:set_authid(Ctxt1, UserId),
+    St1 = update_context(Ctxt, St0),
 
-    case bondy_security_user:lookup(bondy_realm:uri(Realm), UserId) of
-        {error, not_found} ->
-            {error, {no_such_role, UserId}, St1};
-        User ->
-            do_auth_challenge(User, Realm, St1)
-    end;
+    SessionId = bondy_context:id(Ctxt),
+    Roles = authroles(Details),
+    Peer = bondy_context:peer(Ctxt),
 
-maybe_auth_challenge(true, Details, Realm, St0) ->
-    %% Default to anonymous in case authmethods is empty
-    AuthMethods = maps:get(authmethods, Details, [?ANON_AUTH]),
-
-    case lists:member(?ANON_AUTH, AuthMethods) of
-        true ->
-            case bondy_realm:is_auth_method(Realm, ?ANON_AUTH) of
-                true ->
-                    Ctxt0 = St0#wamp_state.context,
-                    Uri = bondy_realm:uri(Realm),
-                    Peer = Peer = maps:get(peer, Ctxt0),
-                    Result = bondy_security_utils:authenticate_anonymous(
-                        Uri, Peer
-                    ),
-                    case Result of
-                        {ok, _Ctxt} ->
-                            TempId = bondy_utils:uuid(),
-                            Ctxt1 = Ctxt0#{
-                                request_details => Details,
-                                is_anonymous => true
-                            },
-                            Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-                            St1 = update_context(Ctxt2, St0),
-                            {ok, St1};
-
-                        {error, Reason} ->
-                            {error, {authentication_failed, Reason}, St0}
-                    end;
-                false ->
-                    {error, {missing_param, <<"authid">>}, St0}
-            end;
-        false ->
-            {error, {missing_param, <<"authid">>}, St0}
+    %% We initialise the auth context
+    case bondy_auth:init(SessionId, Realm, UserId, Roles, Peer) of
+        {ok, AuthCtxt} ->
+            St2 = St1#wamp_state{auth_context = AuthCtxt},
+            ReqMethods = maps:get(authmethods, Details, []),
+            Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
+            auth_challenge(Methods, St2);
+        {error, Reason} ->
+            {error, Reason, St1}
     end;
 
 
-maybe_auth_challenge(false, #{authid := UserId} = Details, _, St0) ->
+maybe_auth_challenge(enabled, Details, Realm, St0) ->
+    %% authid is <<"anonymous">> or missing
+    Ctxt0 = St0#wamp_state.context,
+    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
+    Ctxt = bondy_context:set_authid(Ctxt1, anonymous),
+    St1 = update_context(Ctxt, St0),
+
+    SessionId = bondy_context:id(Ctxt),
+    Roles = [<<"anonymous">>],
+    Peer = bondy_context:peer(Ctxt),
+
+    %% We initialise the auth context with anon id and role
+    case bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer) of
+        {ok, AuthCtxt} ->
+            St2 = St1#wamp_state{auth_context = AuthCtxt},
+            auth_challenge([?WAMP_ANON_AUTH], St2);
+        {error, Reason} ->
+            {error, Reason, St1}
+    end;
+
+maybe_auth_challenge(disabled, #{authid := UserId} = Details, _, St0) ->
     Ctxt0 = St0#wamp_state.context,
     Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
     Ctxt2 = bondy_context:set_authid(Ctxt1, UserId),
     St1 = update_context(Ctxt2, St0),
     {ok, St1};
 
-maybe_auth_challenge(false, Details, _, St0) ->
-    TempId = bondy_utils:uuid(),
-    Ctxt0 = St0#wamp_state.context,
-    Ctxt1 = bondy_context:set_request_details(Ctxt0, Details),
-    Ctxt2 = bondy_context:set_authid(Ctxt1, TempId),
-    St1 = update_context(Ctxt2, St0),
-    {ok, St1}.
+maybe_auth_challenge(disabled, Details0, _, St) ->
+    %% We set a temporary authid
+    Details = Details0#{authid => bondy_utils:uuid()},
+    maybe_auth_challenge(disabled, Details, St).
 
 
 %% @private
-do_auth_challenge(User, Realm, St) ->
-    Details = bondy_context:request_details(St#wamp_state.context),
-    AuthMethods0 = maps:get(authmethods, Details, []),
-    AuthMethods1 = valid_authmethods(AuthMethods0, Realm),
-    do_auth_challenge(AuthMethods1, User, Realm, St).
+authroles(Details) ->
+    case maps:get('x_authroles', Details, undefined) of
+        undefined ->
+            case maps:get(authrole, Details, undefined) of
+                undefined ->
+                    undefined;
+                Role ->
+                    [Role]
+            end;
+        List when is_list(List) ->
+            List;
+        _ ->
+            %% TODO Should we abort?
+            []
+    end.
 
 
 %% @private
-valid_authmethods(List, Realm) ->
-    [
-        X || X <- List, bondy_realm:is_auth_method(Realm, X)
-    ].
+auth_challenge([H|T], St0) ->
+    Ctxt = St0#wamp_state.context,
+    AuthCtxt0 = St0#wamp_state.auth_context,
 
+    Details = bondy_context:request_details(Ctxt),
 
-%% @private
-do_auth_challenge([?ANON_AUTH|T], User, Realm, St0) ->
-    %% An authid was provided so we discard this method
-    do_auth_challenge(T, User, Realm, St0);
-
-do_auth_challenge([?COOKIE_AUTH|T], User, Realm, St) ->
-    %% Unsupported
-    do_auth_challenge(T, User, Realm, St);
-
-do_auth_challenge([?WAMPCRA_AUTH = H|T], User, Realm, St0) ->
-    case bondy_security_user:has_password(User) of
-        true ->
-            {ok, Extra, St1} = challenge_extra(H, User, St0),
-            {challenge, H, Extra, St1};
-        false ->
-            do_auth_challenge(T, User, Realm, St0)
+    case bondy_auth:challenge(H, Details, AuthCtxt0) of
+        {ok, AuthCtxt1} ->
+            St1 = St0#wamp_state{
+                auth_context = AuthCtxt1,
+                auth_timestamp = erlang:system_time(millisecond)
+            },
+            {ok, St1};
+        {ok, ChallengeExtra, AuthCtxt1} ->
+            St1 = St0#wamp_state{
+                auth_context = AuthCtxt1,
+                auth_timestamp = erlang:system_time(millisecond)
+            },
+            {challenge, H, ChallengeExtra, St1};
+        {error, Reason} ->
+            _ = lager:debug(
+                "Authentication challenge step preparation failed; "
+                "reason=~s, authmethod=~p",
+                [Reason, H]
+            ),
+            auth_challenge(T, St0)
     end;
 
-do_auth_challenge([?TICKET_AUTH = H|T], User, Realm, St0) ->
-    case bondy_security_user:has_password(User) of
-        true ->
-            {ok, Extra, St1} = challenge_extra(H, User, St0),
-            {challenge, H, Extra, St1};
-        false ->
-            do_auth_challenge(T, User, Realm, St0)
-    end;
-
-do_auth_challenge([?TLS_AUTH|T], User, Realm, St) ->
-    %% Unsupported
-    do_auth_challenge(T, User, Realm, St);
-
-do_auth_challenge([?OAUTH2_AUTH = H|T], User, Realm, St0) ->
-    case bondy_security_user:has_password(User) of
-        true ->
-            {ok, Extra, St1} = challenge_extra(H, User, St0),
-            {challenge, H, Extra, St1};
-        false ->
-            do_auth_challenge(T, User, Realm, St0)
-    end;
-
-do_auth_challenge([], _, _, St) ->
+auth_challenge([], St) ->
     {error, no_authmethod, St}.
 
 
-
 %% @private
--spec challenge_extra(binary(), bondy_security_user:t(), state()) ->
-    {ok, map(), state()}.
+-spec get_realm(state()) -> bondy_realm:t() | {error, not_found}.
 
-challenge_extra(?WAMPCRA_AUTH, User, St0) ->
-    %% id is the future session_id
-    #{id := Id} = Ctxt = St0#wamp_state.context,
-    Details = bondy_context:request_details(Ctxt),
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    #{<<"username">> := UserId} = User,
-
-    %% The CHALLENGE.Details.challenge|string is a string the client needs to
-    %% create a signature for.
-    Microsecs = erlang:system_time(microsecond),
-    Challenge = jsone:encode(#{
-        authmethod => ?WAMPCRA_AUTH,
-        authid => UserId,
-        authprovider => <<"com.leapsight.bondy">>,
-        authrole => maps:get(authrole, Details, <<"user">>), % @TODO
-        nonce => bondy_utils:get_nonce(),
-        session => Id,
-        timestamp => iso8601(Microsecs)
-    }),
-
-    %% From the Spec:
-    %% WAMP-CRA allows the use of salted passwords following the PBKDF2
-    %% key derivation scheme. With salted passwords, the password
-    %% itself is never stored, but only a key derived from the password
-    %% and a password salt. This derived key is then practically
-    %% working as the new shared secret.
-    Pass = bondy_security_user:password(RealmUri, User),
-
-    #{
-        auth_name := pbkdf2,
-        hash_pass := Hash,
-        salt := Salt,
-        iterations := Iterations
-    } = Pass,
-
-    KeyLen = bondy_security_pw:hash_len(Pass),
-
-    Extra = #{
-        challenge => Challenge,
-        salt => Salt,
-        keylen => KeyLen,
-        iterations => Iterations
-    },
-
-    Millis = erlang:convert_time_unit(Microsecs, microsecond, millisecond),
-    %% We compute the signature to compare it to what the client will send
-    %% will send on the AUTHENTICATE.signature which is base64-encoded.
-    Signature = base64:encode(crypto:mac(hmac, sha256, Hash, Challenge)),
-    St1 = St0#wamp_state{auth_timestamp = Millis, auth_signature = Signature},
-
-    {ok, Extra, St1};
-
-challenge_extra(Method, _UserId, St0)
-when Method == ?TICKET_AUTH; Method == ?OAUTH2_AUTH ->
-    Extra = #{},
-    Millis = erlang:system_time(millisecond),
-    St1 = St0#wamp_state{auth_timestamp = Millis},
-    {ok, Extra, St1}.
-
-
-%% @private
 get_realm(St) ->
-    Uri = bondy_context:realm_uri(St#wamp_state.context),
-    case bondy_config:get(automatically_create_realms) of
-        true ->
-            %% We force the creation of a new realm if it does not exist
-            bondy_realm:get(Uri);
-        false ->
-            %% Will throw an exception if it does not exist
-            bondy_realm:lookup(Uri)
-    end.
-
+    bondy_realm:get(bondy_context:realm_uri(St#wamp_state.context)).
 
 
 %% =============================================================================
@@ -910,31 +828,3 @@ do_init(Subprotocol, Peer, _Opts) ->
 update_context(Ctxt, St) ->
     St#wamp_state{context = Ctxt}.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc Convert a `util:timestamp()' or a calendar-style `{date(), time()}'
-%% tuple to an ISO 8601 formatted string. Note that this function always
-%% returns a string with no offset (i.e., ending in "Z").
-%% Borrowed from
-%% https://github.com/inaka/erlang_iso8601/blob/master/src/iso8601.erl
-%% @end
-%% -----------------------------------------------------------------------------
--spec iso8601(integer()) -> binary().
-
-iso8601(SystemTime) when is_integer(SystemTime) ->
-    %% SystemTime is in microsecs
-    MegaSecs = SystemTime div 1000000000000,
-    Secs = SystemTime div 1000000 - MegaSecs * 1000000,
-    MicroSecs = SystemTime rem 1000000,
-    Timestamp = {MegaSecs, Secs, MicroSecs},
-    iso8601(calendar:now_to_datetime(Timestamp));
-
-iso8601({{Y, Mo, D}, {H, Mn, S}}) when is_float(S) ->
-    FmtStr = "~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~9.6.0fZ",
-    IsoStr = io_lib:format(FmtStr, [Y, Mo, D, H, Mn, S]),
-    list_to_binary(IsoStr);
-
-iso8601({{Y, Mo, D}, {H, Mn, S}}) ->
-    FmtStr = "~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0BZ",
-    IsoStr = io_lib:format(FmtStr, [Y, Mo, D, H, Mn, S]),
-    list_to_binary(IsoStr).

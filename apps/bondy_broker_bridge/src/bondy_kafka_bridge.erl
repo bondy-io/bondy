@@ -1,7 +1,7 @@
 -module(bondy_kafka_bridge).
 -behaviour(bondy_broker_bridge).
--include("bondy_broker_bridge.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -define(PRODUCE_OPTIONS_SPEC, ?BROD_OPTIONS_SPEC#{
     %% The brod client to be used. This should have been configured through the
@@ -17,7 +17,7 @@
             (Val) when is_atom(Val) ->
                 {ok, Val};
             (Val) when is_binary(Val) ->
-                {ok, list_to_atom(binary_to_list(Val))}
+                {ok, binary_to_atom(Val, utf8)}
         end
     },
     %% Is this a sync or async produce
@@ -323,7 +323,7 @@ init(Config) ->
         Error ->
             Error
     catch
-        ?EXCEPTION(_, Reason, _) ->
+       _:Reason ->
             {error, Reason}
     end.
 
@@ -365,7 +365,7 @@ validate_action(Action0) ->
         Action1 ->
             {ok, Action1}
     catch
-        ?EXCEPTION(_, Reason, _)->
+       _:Reason->
             {error, Reason}
     end.
 
@@ -410,11 +410,11 @@ apply_action(Action) ->
                 {error, Reason}
         end
     catch
-        ?EXCEPTION(_, EReason, Stacktrace) ->
+        _:EReason:Stacktrace ->
             _ = lager:error(
                 "Error while evaluating action; reason=~p, "
                 "action=~p, stacktrace=~p",
-                [EReason, Action, ?STACKTRACE(Stacktrace)]
+                [EReason, Action, Stacktrace]
             ),
             {error, EReason}
     end.
@@ -462,7 +462,7 @@ partition(#{<<"partitioner">> := Map}) ->
         <<"hash">> ->
             hash;
         Other ->
-            Type = list_to_atom(binary_to_list(Other)),
+            Type = binary_to_atom(Other, utf8),
             PartValue = maps:get(<<"value">>, Map),
 
             fun(_Topic, PartCount, K, _V) ->

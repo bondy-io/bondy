@@ -23,26 +23,9 @@
 -module(bondy_wamp_meta_api_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_uris.hrl").
 
-%% DEALER
--define(BONDY_REG_LIST, <<"bondy.registration.list">>).
--define(BONDY_CALLEE_LIST, <<"bondy.callee.list">>).
--define(BONDY_CALLEE_GET, <<"bondy.callee.get">>).
--define(WAMP_REG_LIST, <<"wamp.registration.list">>).
--define(WAMP_REG_LOOKUP, <<"wamp.registration.lookup">>).
--define(WAMP_REG_MATCH, <<"wamp.registration.match">>).
--define(WAMP_REG_GET, <<"wamp.registration.get">>).
--define(WAMP_LIST_CALLEES, <<"wamp.registration.list_callees">>).
--define(WAMP_COUNT_CALLEES, <<"wamp.registration.count_callees">>).
 
-%% BROKER
--define(BONDY_SUBS_LIST, <<"bondy.subscription.list">>).
--define(WAMP_SUBS_LIST, <<"wamp.subscription.list">>).
--define(WAMP_SUBS_LOOKUP, <<"wamp.subscription.lookup">>).
--define(WAMP_SUBS_MATCH, <<"wamp.subscription.match">>).
--define(WAMP_SUBS_GET, <<"wamp.subscription.get">>).
--define(WAMP_SUBS_LIST_SUBS, <<"wamp.subscription.list_subscribers">>).
--define(WAMP_SUBS_COUNT_SUBS, <<"wamp.subscription.count_subscribers">>).
 
 
 -export([handle_call/2]).
@@ -55,96 +38,122 @@
 
 
 
--spec handle_call(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
+
+handle_call(M, Ctxt) ->
+    PeerId = bondy_context:peer_id(Ctxt),
+
+    try
+        Reply = do_handle(M, Ctxt),
+        bondy:send(PeerId, Reply)
+    catch
+        _:Reason ->
+            %% We catch any exception from do_handle and turn it
+            %% into a WAMP Error
+            Error = bondy_wamp_utils:maybe_error(Reason, M),
+            bondy:send(PeerId, Error)
+    end.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
 %% WAMP REGISTRATION META PROCEDURES
 %% -----------------------------------------------------------------------------
-handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
-        {ok, [RealmUri]} ->
-            summary(registration, RealmUri);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
+    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    case summary(registration, RealmUri) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt)  ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+
+    case lookup(registration, L) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+
+    case match(registration, L) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+
+    case get(registration, L) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(#call{procedure_uri = ?WAMP_REG_LOOKUP} = M, Ctxt)  ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, ProcUri]} ->
-            lookup(registration, RealmUri, ProcUri, #{});
-        {ok, [RealmUri, ProcUri, Opts]} ->
-            lookup(registration, RealmUri, ProcUri, Opts);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
-
-handle_call(#call{procedure_uri = ?WAMP_REG_MATCH} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, ProcUri]} ->
-            match(registration, RealmUri, ProcUri, #{});
-        {ok, [RealmUri, ProcUri, Opts]} ->
-            match(registration, RealmUri, ProcUri, Opts);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
-
-handle_call(#call{procedure_uri = ?WAMP_REG_GET} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, RegId]} ->
-            get(registration, RealmUri, RegId, #{});
-        {ok, [RealmUri, RegId, Details]} ->
-            get(registration, RealmUri, RegId, Details);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
+    [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case list_registration_callees(RealmUri, RegId) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(#call{procedure_uri = ?WAMP_LIST_CALLEES} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [RealmUri, RegId]} ->
-            list_registration_callees(RealmUri, RegId);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
+    [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case count_callees(RealmUri, RegId) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(#call{procedure_uri = ?WAMP_COUNT_CALLEES} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2) of
-        {ok, [RealmUri, RegId]} ->
-            count_callees(RealmUri, RegId);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
-
-handle_call(#call{procedure_uri = ?BONDY_REG_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
-        {ok, [RealmUri]} ->
-            list(registration, RealmUri);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?BONDY_REGISTRY_LIST} = M, Ctxt) ->
+    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    case list(registration, RealmUri) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
-        {ok, [RealmUri]} ->
-            list_callees(RealmUri);
-        {ok, [RealmUri, ProcedureUri]} ->
-            list_callees(RealmUri, ProcedureUri);
+do_handle(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
+        %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
 
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+    case list_callees(L) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 %% -----------------------------------------------------------------------------
 %% WAMP SUBSCRIPTION META PROCEDURES
@@ -161,78 +170,85 @@ handle_call(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
 %% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
 %% @end
 %% -----------------------------------------------------------------------------
-handle_call(#call{procedure_uri = ?BONDY_SUBS_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
-        {ok, [RealmUri]} ->
-            list(subscription, RealmUri);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
 
-handle_call(#call{procedure_uri = ?WAMP_SUBS_LIST} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 1) of
-        {ok, [RealmUri]} ->
-            summary(subscription, RealmUri);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
+    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    case summary(subscription, RealmUri) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
+do_handle(#call{procedure_uri = ?BONDY_SUBS_LIST} = M, Ctxt) ->
+    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    case list(subscription, RealmUri) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
-handle_call(#call{procedure_uri = ?WAMP_SUBS_LOOKUP} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, ProcUri]} ->
-            lookup(subscription, RealmUri, ProcUri, #{});
-        {ok, [RealmUri, ProcUri, Opts]} ->
-            lookup(subscription, RealmUri, ProcUri, Opts);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
-
-
-handle_call(#call{procedure_uri = ?WAMP_SUBS_MATCH} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, ProcUri]} ->
-            match(subscription, RealmUri, ProcUri, #{});
-        {ok, [RealmUri, ProcUri, Opts]} ->
-            match(subscription, RealmUri, ProcUri, Opts);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LOOKUP} = M, Ctxt) ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
+    L0 = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+    L = [subscription] ++ L0,
+    case lookup(subscription, L) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(#call{procedure_uri = ?WAMP_SUBS_GET} = M, Ctxt) ->
-    R = case bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3) of
-        {ok, [RealmUri, RegId]} ->
-            get(subscription, RealmUri, RegId, #{});
-        {ok, [RealmUri, RegId, Details]} ->
-            get(subscription, RealmUri, RegId, Details);
-        {error, WAMPError} ->
-            WAMPError
-    end,
-    bondy:send(bondy_context:peer_id(Ctxt), bondy_wamp_utils:maybe_error(R, M));
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_MATCH} = M, Ctxt) ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Opts]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+
+    case match(subscription, L) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
 
-handle_call(
-    #call{procedure_uri = ?WAMP_SUBS_LIST_SUBS} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
+do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_GET} = M, Ctxt) ->
+    %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
 
-handle_call(
-    #call{procedure_uri = ?WAMP_SUBS_COUNT_SUBS} = M,
-    Ctxt) ->
-    Res = #{},
-    M = wamp_message:result(M#call.request_id, #{}, [], Res),
-    bondy:send(bondy_context:peer_id(Ctxt), M);
+    case get(subscription, L) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
 
-handle_call(#call{} = M, Ctxt) ->
-    Error = bondy_wamp_utils:no_such_procedure_error(M),
-    bondy:send(bondy_context:peer_id(Ctxt), Error).
+
+do_handle(
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST_SUBSCRIBERS} = M, Ctxt) ->
+    [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case list_subscription_subscribers(RealmUri, RegId) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(
+    #call{procedure_uri = ?WAMP_SUBSCRIPTION_COUNT_SUBSCRIBERS} = M, Ctxt) ->
+    [RealmUri, RegId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case count_subscribers(RealmUri, RegId) of
+        {ok, Result} ->
+            wamp_message:result(M#call.request_id, #{}, [Result]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+do_handle(#call{} = M, _) ->
+    bondy_wamp_utils:no_such_procedure_error(M).
 
 
 
@@ -255,10 +271,10 @@ list(Type, RealmUri, Fun) ->
                 {ok, [Fun(E) || E <- Entries]}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
@@ -298,17 +314,20 @@ summary(Type, RealmUri) ->
                 {ok, Map}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
 
 
 %% @private
-get(Type, RealmUri, RegId, Details) ->
+get(Type, [_, _] = L) ->
+    get(Type, L ++ [#{}]);
+
+get(Type, [RealmUri, RegId, Details]) ->
     try
         case bondy_registry:lookup(Type, RegId, RealmUri, Details) of
             {error, not_found} ->
@@ -317,17 +336,20 @@ get(Type, RealmUri, RegId, Details) ->
                 {ok, bondy_registry_entry:to_details_map(Entry)}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
 
 
 %% @private
-lookup(Type, RealmUri, Uri, Opts) ->
+lookup(Type, [_, _] = L) ->
+    lookup(Type, L ++ [#{}]);
+
+lookup(Type, [RealmUri, Uri, Opts]) ->
     try
         case bondy_registry:match(Type, Uri, RealmUri, Opts) of
             {[], '$end_of_table'} ->
@@ -336,36 +358,39 @@ lookup(Type, RealmUri, Uri, Opts) ->
                 {ok, bondy_registry_entry:id(hd(Entries))}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
 
 
 %% @private
-match(Type, RealmUri, Uri, Opts) ->
+match(Type, [_, _] = L) ->
+    match(Type, L ++ [#{}]);
+
+match(Type, [RealmUri, Uri, Opts]) ->
     try
         case bondy_registry:match(Type, Uri, RealmUri, Opts) of
             {[], '$end_of_table'} ->
-                ok;
+                {ok, []};
             {Entries, '$end_of_table'} ->
                 {ok, [bondy_registry_entry:id(E) || E <- Entries]}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
 
 
 %% @private
-list_callees(RealmUri) ->
+list_callees([RealmUri]) ->
     try
         case bondy_dealer:callees(RealmUri) of
             [] ->
@@ -374,15 +399,15 @@ list_callees(RealmUri) ->
                 {ok, Callees}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
-    end.
+    end;
 
-list_callees(RealmUri, ProcedureUri) ->
+list_callees([RealmUri, ProcedureUri]) ->
     try
         case bondy_dealer:callees(RealmUri, ProcedureUri) of
             [] ->
@@ -391,10 +416,10 @@ list_callees(RealmUri, ProcedureUri) ->
                 {ok, Callees}
         end
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason=~p, trace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
@@ -429,4 +454,12 @@ count_callees(_RealmUri, _Uri) ->
     %%     _:Reason ->
     %%         {error, Reason}
     %% end.
+    {error, not_implemented}.
+
+
+list_subscription_subscribers(_RealmUri, _RegId) ->
+    {error, not_implemented}.
+
+
+count_subscribers(_RealmUri, _RegId) ->
     {error, not_implemented}.

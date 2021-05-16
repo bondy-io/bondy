@@ -48,7 +48,6 @@
     authid => binary(),
     is_anonymous => boolean(),
     roles => map(),
-    challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),
@@ -307,8 +306,10 @@ set_realm_uri(Ctxt, Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec agent(t()) -> binary() | undefined.
+
 agent(#{session := S}) ->
     bondy_session:agent(S);
+
 agent(#{}) ->
     undefined.
 
@@ -317,9 +318,13 @@ agent(#{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authid(t()) -> binary() | undefined.
-authid(#{authid := Val}) -> Val;
-authid(#{}) -> undefined.
+-spec authid(t()) -> binary() | anonymous | undefined.
+
+authid(#{authid := Val}) ->
+    Val;
+
+authid(#{}) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -329,7 +334,7 @@ authid(#{}) -> undefined.
 -spec set_authid(t(), binary()) -> t().
 
 set_authid(Ctxt, Val)
-when is_map(Ctxt) andalso (is_binary(Val) orelse Val == undefined) ->
+when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
     maps:put(authid, Val, Ctxt).
 
 

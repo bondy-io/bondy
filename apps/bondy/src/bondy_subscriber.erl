@@ -278,11 +278,11 @@ do_handle_event(Event, State) ->
         {error, Reason} ->
             {error, Reason, State}
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error while evaluating action; reason=~p, "
                 "stacktrace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason, State}
     end.

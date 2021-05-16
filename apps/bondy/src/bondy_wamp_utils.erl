@@ -26,12 +26,13 @@
 
 
 -export([maybe_error/2]).
+-export([error/2]).
+-export([no_such_procedure_error/1]).
+-export([no_such_registration_error/1]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
 -export([validate_call_args/4]).
--export([no_such_procedure_error/1]).
--export([no_such_registration_error/1]).
 
 
 
@@ -39,6 +40,88 @@
 %% API
 %% =============================================================================
 
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_call_args(Call, Ctxt, Min) ->
+    validate_call_args(Call, Ctxt, Min, Min).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_call_args(Call, Ctxt, Min, Max) ->
+    do_validate_call_args(Call, Ctxt, Min, Max, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_admin_call_args(Call, Ctxt, Min) ->
+    validate_admin_call_args(Call, Ctxt, Min, Min).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_admin_call_args(Call, Ctxt, Min, Max) ->
+    do_validate_call_args(Call, Ctxt, Min, Max, true).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a CALL RESULT or ERROR based on the first Argument
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_error(ok, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{}, [], #{});
+
+maybe_error({ok, Val}, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{}, [Val], #{});
+
+maybe_error({'EXIT', {Reason, _}}, M) ->
+    maybe_error({error, Reason}, M);
+
+maybe_error(#error{} = Error, _) ->
+    Error;
+maybe_error({error, #error{} = Error}, _) ->
+    Error;
+
+maybe_error({error, Reason}, #call{} = M) ->
+    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    Mssg = maps:get(<<"message">>, Map, <<>>),
+    wamp_message:error_from(
+        M,
+        #{},
+        bondy_error:code_to_uri(Code),
+        [Mssg],
+        Map
+    );
+
+maybe_error(Val, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{}, [Val], #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+error(Reason, #call{} = M) ->
+    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+
+    wamp_message:error_from(
+        M,
+        #{},
+        bondy_error:code_to_uri(Code),
+        [Map]
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -79,24 +162,14 @@ no_such_registration_error(RegId) when is_integer(RegId) ->
         }
     ).
 
-%% @private
-validate_call_args(Call, Ctxt, Min) ->
-    validate_call_args(Call, Ctxt, Min, Min).
 
 
-%% @private
-validate_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, false).
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
 
-%% @private
-validate_admin_call_args(Call, Ctxt, Min) ->
-    validate_admin_call_args(Call, Ctxt, Min, Min).
-
-
-%% @private
-validate_admin_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, true).
 
 
 %% -----------------------------------------------------------------------------
@@ -114,8 +187,7 @@ validate_admin_call_args(Call, Ctxt, Min, Max) ->
     bondy_context:t(),
     MinArity :: integer(),
     MaxArity :: integer(),
-    AdminOnly :: boolean()) ->
-        {ok, Args :: list()} | {error, wamp_error()}.
+    AdminOnly :: boolean()) -> Args :: list() | no_return().
 
 do_validate_call_args(#call{arguments = L} = M, _, Min, _, _)
 when length(L) + 1 < Min ->
@@ -132,7 +204,7 @@ when length(L) + 1 < Min ->
             " arguments.">>
         }
     ),
-    {error, E};
+    error(E);
 
 do_validate_call_args(#call{arguments = L} = M, _, _, Max, _)
 when length(L) > Max ->
@@ -149,19 +221,19 @@ when length(L) > Max ->
             " arguments.">>
         }
     ),
-    {error, E};
+    error(E);
 
 do_validate_call_args(#call{arguments = []} = M, Ctxt, Min, _, AdminOnly) ->
     %% We are missing the RealmUri argument, we default to the session's Realm
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            {ok, [Uri]};
+            [Uri];
         {true, ?BONDY_REALM_URI} when Min == 0 ->
-            {ok, []};
+            [];
         {true, ?BONDY_REALM_URI} ->
-            {ok, [?BONDY_REALM_URI]};
+            [?BONDY_REALM_URI];
         {_, _} ->
-            {error, unauthorized(M)}
+            error(unauthorized(M))
     end;
 
 do_validate_call_args(
@@ -173,12 +245,12 @@ do_validate_call_args(
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
             %% Matches arg URI
-            {ok, L};
+            L;
         {_, ?BONDY_REALM_URI} ->
             %% Users logged in root realm can operate on any realm
-            {ok, L};
+            L;
         {_, _} ->
-            {error, unauthorized(M)}
+            error(unauthorized(M))
     end;
 
 do_validate_call_args(
@@ -190,11 +262,11 @@ do_validate_call_args(
     %% case any Realm can be modified
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            {ok, [Uri|L]};
+            [Uri|L];
         {_, ?BONDY_REALM_URI} ->
-            {ok, [?BONDY_REALM_URI|L]};
+            [?BONDY_REALM_URI|L];
         {_, _} ->
-            {error, unauthorized(M)}
+            error(unauthorized(M))
     end.
 
 
@@ -232,35 +304,3 @@ unauthorized(Type, ReqId) ->
         #{description => Description}
     ).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns a CALL RESULT or ERROR based on the first Argument
-%% @end
-%% -----------------------------------------------------------------------------
-maybe_error(ok, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [], #{});
-
-maybe_error({ok, Val}, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{});
-
-maybe_error({'EXIT', {Reason, _}}, M) ->
-    maybe_error({error, Reason}, M);
-
-maybe_error(#error{} = Error, _) ->
-    Error;
-maybe_error({error, #error{} = Error}, _) ->
-    Error;
-
-maybe_error({error, Reason}, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
-    Mssg = maps:get(<<"message">>, Map, <<>>),
-    wamp_message:error_from(
-        M,
-        #{},
-        bondy_error:code_to_uri(Code),
-        [Mssg],
-        Map
-    );
-
-maybe_error(Val, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{}).

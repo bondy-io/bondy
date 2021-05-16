@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_admin_ping_http_handler).
+-include("http_api.hrl").
 
 -export([init/2]).
 
@@ -30,5 +31,5 @@
 
 init(Req0, State) ->
     Req1 = bondy_http_utils:set_meta_headers(Req0),
-    Req2 = cowboy_req:reply(204, Req1),
+    Req2 = cowboy_req:reply(?HTTP_NO_CONTENT, Req1),
     {ok, Req2, State}.

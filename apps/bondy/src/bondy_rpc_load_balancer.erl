@@ -89,14 +89,14 @@
                 true
         end
     },
-    '_force_locality' => #{
+    'x_force_locality' => #{
         required => true,
         allow_null => false,
         allow_undefined => false,
         default => true,
         datatype => boolean
     },
-    '_routing_key' => #{
+    'x_routing_key' => #{
         required => false,
         allow_null => false,
         allow_undefined => false,
@@ -122,8 +122,8 @@
                                 | queue_least_loaded_sample.
 -type opts()                ::  #{
     strategy := strategy(),
-    '_force_locality' => boolean(),
-    '_routing_key' => binary()
+    'x_force_locality' => boolean(),
+    'x_routing_key' => binary()
 }.
 -opaque iterator()          ::  #iterator{}.
 
@@ -206,12 +206,12 @@ iterate(#iterator{} = Iter) ->
 
 validate_options(Opts0) ->
     case maps_utils:validate(Opts0, ?OPTS_SPEC) of
-        #{strategy := jump_consistent_hash, '_routing_key' := _} = Opts ->
+        #{strategy := jump_consistent_hash, 'x_routing_key' := _} = Opts ->
             Opts;
         #{strategy := jump_consistent_hash} ->
             ErrorMap = bondy_error:map({
                 <<"missing_option">>,
-                <<"A value for option '_routing_key' or 'rkey' is required">>
+                <<"A value for option 'x_routing_key' or 'rkey' is required">>
             }),
             error(ErrorMap);
         Opts ->
@@ -386,7 +386,7 @@ next_consistent_hash(#iterator{entries = []}, _) ->
     '$end_of_table';
 
 next_consistent_hash(Iter, Algo) ->
-    Key = maps:get('_routing_key', Iter#iterator.options),
+    Key = maps:get('x_routing_key', Iter#iterator.options),
     Buckets = length(Iter#iterator.entries),
     Bucket = bondy_consistent_hashing:bucket(Key, Buckets, Algo),
     Entries = Iter#iterator.entries,

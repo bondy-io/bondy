@@ -23,10 +23,9 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_meta_event_handler).
 -behaviour(gen_event).
--include("bondy.hrl").
--include("bondy_meta_api.hrl").
--include("bondy_backup.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 -record(state, {}).
 
@@ -51,94 +50,94 @@ init([]) ->
     {ok, State}.
 
 handle_event({realm_added, Uri}, State) ->
-    _ = bondy:publish(#{}, ?REALM_ADDED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 handle_event({realm_deleted, Uri}, State) ->
-    _ = bondy:publish(#{}, ?REALM_DELETED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?D_BONDY_REALM_DELETED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 handle_event({security_group_added, RealmUri, Name}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?GROUP_ADDED, [RealmUri, Name], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_GROUP_ADDED, [RealmUri, Name], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
 handle_event({security_group_updated, RealmUri, Name}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?GROUP_UPDATED, [RealmUri, Name], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_GROUP_UPDATED, [RealmUri, Name], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
 handle_event({security_group_deleted, RealmUri, Name}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?GROUP_DELETED, [RealmUri, Name], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_GROUP_DELETED, [RealmUri, Name], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
 handle_event({security_user_added, RealmUri, Username}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?USER_ADDED, [RealmUri, Username], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_USER_ADDED, [RealmUri, Username], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
-handle_event({security_user_updated, RealmUri, Username}, State) ->
+handle_event({security_BONDY_SEC_USER_UPDATED, RealmUri, Username}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?USER_UPDATED, [RealmUri, Username], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_USER_UPDATED, [RealmUri, Username], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
 handle_event({security_user_deleted, RealmUri, Username}, State) ->
     _ = [
-        _ = bondy:publish(#{}, ?USER_DELETED, [RealmUri, Username], #{}, R)
+        _ = bondy:publish(#{}, ?BONDY_SEC_USER_DELETED, [RealmUri, Username], #{}, R)
         || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
     ],
     {ok, State};
 
 handle_event({security_password_changed, RealmUri, Username}, State) ->
     _ = bondy:publish(
-        #{}, ?PASSWORD_CHANGED, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_SEC_PASSWORD_CHANGED, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
     ),
     {ok, State};
 
 handle_event({security_user_logged_in, RealmUri, Username, Meta}, State) ->
-    Uri = <<"bondy.security.user_logged_in">>,
+    Uri = ?BONDY_SEC_USER_LOGGED_IN,
     _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
     {ok, State};
 
 handle_event({backup_started, File}, State) ->
     _ = bondy:publish(
-        #{}, ?BACKUP_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_finished, Args}, State) ->
-    _ = bondy:publish(#{}, ?BACKUP_FINISHED, Args, #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 handle_event({backup_error, Args}, State) ->
-    _ = bondy:publish(#{}, ?BACKUP_ERROR, Args, #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?BONDY_ERROR_BACKUP_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 handle_event({backup_restore_started, File}, State) ->
     _ = bondy:publish(
-        #{}, ?RESTORE_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_finished, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?RESTORE_FINISHED, [Args], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?BONDY_PRIV_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_error, Args}, State) ->
-    _ = bondy:publish(#{}, ?RESTORE_ERROR, Args, #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, ?BONDY_ERROR_BACKUP_RESTORE_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 %% REGISTRATION META API
@@ -146,7 +145,7 @@ handle_event({backup_restore_error, Args}, State) ->
 handle_event({registration_created, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.registration.on_create">>,
+            Uri = ?WAMP_REG_ON_CREATE,
             SessionId = bondy_context:session_id(Ctxt),
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
@@ -160,7 +159,7 @@ handle_event({registration_created, Entry, Ctxt}, State) ->
 handle_event({registration_added, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.registration.on_register">>,
+            Uri = ?WAMP_REG_ON_REGISTER,
             SessionId = bondy_context:session_id(Ctxt),
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
@@ -174,7 +173,7 @@ handle_event({registration_added, Entry, Ctxt}, State) ->
 handle_event({registration_deleted, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.registration.on_delete">>,
+            Uri = ?WAMP_REG_ON_DELETE,
             SessionId = bondy_context:session_id(Ctxt),
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
@@ -188,7 +187,7 @@ handle_event({registration_deleted, Entry, Ctxt}, State) ->
 handle_event({registration_removed, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.registration.on_unregister">>,
+            Uri = ?WAMP_REG_ON_UNREGISTER,
             SessionId = bondy_context:session_id(Ctxt),
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
@@ -204,7 +203,7 @@ handle_event({registration_removed, Entry, Ctxt}, State) ->
 handle_event({subscription_created, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.subscription.on_create">>,
+            Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
             Opts = #{},
             Args = [
                 bondy_registry_entry:session_id(Entry),
@@ -220,7 +219,7 @@ handle_event({subscription_created, Entry, Ctxt}, State) ->
 handle_event({subscription_added, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.subscription.on_subscribe">>,
+            Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
             Opts = #{},
             Args = [
                 bondy_registry_entry:session_id(Entry),
@@ -236,7 +235,7 @@ handle_event({subscription_added, Entry, Ctxt}, State) ->
 handle_event({subscription_removed, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.subscription.on_unsubscribe">>,
+            Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
             Opts = #{},
             Args = [
                 bondy_registry_entry:session_id(Entry),
@@ -255,7 +254,7 @@ handle_event({subscription_removed, Entry, Ctxt}, State) ->
 handle_event({subscription_deleted, Entry, Ctxt}, State) ->
     case bondy_context:has_session(Ctxt) of
         true ->
-            Uri = <<"wamp.subscription.on_delete">>,
+            Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
             Opts = #{},
             Args = [
                 bondy_registry_entry:session_id(Entry),

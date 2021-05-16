@@ -1,70 +1,8 @@
 [
     {
-        "uri" : "com.leapsight.bondy",
-        "authmethods" : ["wampcra", "ticket", "anonymous"],
-        "security_enabled" : true,
-        "users" : [
-        ],
-        "groups" : [
-            {
-                "name" : "administrators",
-                "groups" : [],
-                "meta" : {
-                    "description": "The administrators of Bondy."
-                }
-            }
-        ],
-        "sources" : [
-            {
-                "usernames" : "all",
-                "authmethod" : "password",
-                "cidr" : "0.0.0.0/0",
-                "meta" : {
-                "description" : "Allows all users from any network authenticate using password credentials."
-                }
-            },
-            {
-                "usernames" : ["anonymous"],
-                "authmethod" : "trust",
-                "cidr" : "0.0.0.0/0",
-                "meta" : {
-                "description" : "Allows all users from any network authenticate as anonymous."
-                }
-            }
-        ],
-        "grants" : [
-            {
-                "permissions" : [
-                    "wamp.register",
-                    "wamp.unregister",
-                    "wamp.subscribe",
-                    "wamp.unsubscribe",
-                    "wamp.call",
-                    "wamp.cancel",
-                    "wamp.publish"
-                ],
-                "uri" : "*",
-                "roles" : "all"
-            },
-            {
-                "permissions" : [
-                    "wamp.register",
-                    "wamp.unregister",
-                    "wamp.subscribe",
-                    "wamp.unsubscribe",
-                    "wamp.call",
-                    "wamp.cancel",
-                    "wamp.publish"
-                ],
-                "uri" : "*",
-                "roles" : ["anonymous"]
-            }
-        ]
-    },
-    {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["wampcra", "ticket", "anonymous", "oauth2"],
+        "authmethods" : ["wampcra", "anonymous", "oauth2", "password", "trust"],
         "security_enabled" : true,
         "private_keys": [
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
@@ -131,13 +69,19 @@
                 "meta" : {}
             },
             {
-                "usernames" : ["anonymous"],
-                "authmethod" : "trust",
+                "usernames" : "all",
+                "authmethod" : "wampcra",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             },
             {
-                "usernames" : ["peer1", "peer2", "app1"],
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["peer2"],
                 "authmethod" : "trust",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
@@ -178,7 +122,8 @@
                 "permissions" : [
                     "wamp.call"
                 ],
-                "uri" : "com.leapsight.add",
+                "uri" : "com.example",
+                "match": "prefix",
                 "roles" : ["peer1", "peer2"]
             }
         ],
@@ -194,7 +139,7 @@
             "resource_owners" : [
                 {
                     "username" : "user3@example.com",
-                    "password" : "1234",
+                    "password" : "123456",
                     "groups" : ["account_admin"],
                     "meta" : {
                         "account_id" : "1",

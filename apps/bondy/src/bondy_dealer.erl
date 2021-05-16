@@ -269,10 +269,10 @@ close_context(Ctxt) ->
         ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
         Ctxt
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = lager:error(
                 "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]
+                [Class, Reason, Stacktrace]
             ),
             Ctxt
     end.
@@ -310,7 +310,7 @@ handle_message(M, Ctxt) ->
     catch
         _:{not_authorized, Reason} ->
             Reply = wamp_message:error_from(
-                M
+                M,
                 #{},
                 ?WAMP_NOT_AUTHORIZED,
                 [Reason],
@@ -457,7 +457,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     %% the Procedure URI required for authrization
     Authorize = fun(Promise, Ctxt) ->
         Uri = bondy_rpc_promise:procedure_uri(Promise),
-        ok = bondy_security_utils:authorize(<<"wamp.cancel">>, Uri, Ctxt),
+        ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt),
         {ok, Ctxt}
     end,
     _ = peek_invocations(CallId, Authorize, Ctxt0),
@@ -616,7 +616,7 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
     %% ReqId = bondy_utils:get_id(global),
     %% spawn with pool -> bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
     %% {ok, ReqId, Ctxt}.
-    ok = bondy_security_utils:authorize(<<"wamp.call">>, Uri, Ctxt),
+    ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
     handle_call(M, Ctxt).
 
 
@@ -638,7 +638,7 @@ handle_call(
 handle_call(
     #call{procedure_uri = <<"bondy.security.", _/binary>>} = M,
     Ctxt) ->
-    bondy_security_api_handler:handle_call(M, Ctxt);
+    bondy_rbac_api_handler:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.oauth2.", _/binary>>} = M,
@@ -714,7 +714,7 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% -----------------------------------------------------------------------------
 handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
-    ok = bondy_security_utils:authorize(<<"wamp.register">>, Uri, Ctxt),
+    ok = bondy_rbac:authorize(<<"wamp.register">>, Uri, Ctxt),
 
     #register{options = Opts, request_id = ReqId} = M,
     PeerId = bondy_context:peer_id(Ctxt),
@@ -764,7 +764,7 @@ handle_unregister(#unregister{} = M, Ctxt) ->
         Entry ->
             Uri = bondy_registry_entry:uri(Entry),
             %% We authorize first
-            ok = bondy_security_utils:authorize(
+            ok = bondy_rbac:authorize(
                 <<"wamp.unregister">>, Uri, Ctxt),
             unregister(Uri, M, Ctxt)
     end.
@@ -774,7 +774,7 @@ handle_unregister(#unregister{} = M, Ctxt) ->
 unregister(Uri, M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
     RegId = M#unregister.request_id,
-    ok = bondy_security_utils:authorize(<<"wamp.unregister">>, Uri, Ctxt),
+    ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:peer_id(Ctxt), Reply).
@@ -1168,7 +1168,7 @@ coerce_strategy(Strategy, CallOpts) ->
 
 %% @private
 coerce_routing_key(#{rkey := Value} = CallOpts) ->
-    maps:put('_routing_key', Value, CallOpts);
+    maps:put('x_routing_key', Value, CallOpts);
 
 coerce_routing_key(CallOpts) ->
     CallOpts.

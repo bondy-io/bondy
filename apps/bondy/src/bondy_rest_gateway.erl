@@ -24,7 +24,7 @@
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_meta_api.hrl").
+-include("bondy_uris.hrl").
 
 
 
@@ -301,7 +301,7 @@ handle_call({load, Map}, _From, State) ->
         ok = rebuild_dispatch_tables(),
         {reply, Res, State}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+       _:Reason ->
             {reply, {error, Reason}, State}
     end;
 
@@ -322,7 +322,7 @@ handle_cast(#event{} = Event, State) ->
     NewState = case {Topic, Event#event.arguments} of
         {undefined, _} ->
             State;
-        {?REALM_DELETED, [Uri]} ->
+        {?D_BONDY_REALM_DELETED, [Uri]} ->
             on_realm_deleted(Uri, State)
     end,
     {noreply, NewState};
@@ -456,8 +456,9 @@ subscribe(State) ->
         subscription_id => bondy_utils:get_id(global),
         match => <<"exact">>
     },
-    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?REALM_DELETED),
-    Subs = maps:put(Id, ?BONDY_PRIV_REALM_URI, State#state.subscriptions),
+
+    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?D_BONDY_REALM_DELETED),
+    Subs = maps:put(Id, ?D_BONDY_REALM_DELETED, State#state.subscriptions),
 
     State#state{subscriptions = Subs}.
 
@@ -955,9 +956,9 @@ maybe_init_groups(RealmUri) ->
         }
     ],
     _ = [begin
-        case bondy_security_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
+        case bondy_rbac_group:lookup(RealmUri, maps:get(<<"name">>, G)) of
             {error, not_found} ->
-                bondy_security_group:add(RealmUri, G);
+                bondy_rbac_group:add(RealmUri, bondy_rbac_group:new(G));
             _ ->
                 ok
         end

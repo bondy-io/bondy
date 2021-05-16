@@ -24,7 +24,7 @@
 -behaviour(application).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_meta_api.hrl").
+-include("bondy_uris.hrl").
 
 
 -export([start/2]).
@@ -232,25 +232,25 @@ setup_wamp_subscriptions() ->
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?USER_ADDED,
+        ?BONDY_SEC_USER_ADDED,
         fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?USER_DELETED,
+        ?BONDY_SEC_USER_DELETED,
         fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?USER_UPDATED,
+        ?BONDY_SEC_USER_UPDATED,
         fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?PASSWORD_CHANGED,
+        ?BONDY_SEC_PASSWORD_CHANGED,
         fun bondy_rest_gateway_api_handler:handle_event/2
     ),
     ok.
@@ -302,7 +302,7 @@ stop_router_services() ->
     ok = bondy_wamp_tcp:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
-    _ = lager:info("Shutting down all WAMP sessions."),
+    _ = lager:info("Shutting down all existing WAMP sessions."),
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully
