@@ -817,26 +817,6 @@ do_add(#{<<"uri">> := Uri} = Map) ->
     Realm1 = add_or_update(Realm0, Map),
 
     ok = bondy_event_manager:notify({realm_added, Realm1#realm.uri}),
-
-    % Data = #{
-    %     <<"username">> => <<"admin">>,
-    %     <<"password">> => <<"bondy-admin">>
-    % },
-    % User = bondy_rbac_user:new(Data),
-    % {ok, _} = bondy_rbac_user:add(Uri, User),
-
-    % Opts = [],
-    % _ = [
-    %     bondy_rbac_user:add_source(Uri, <<"admin">>, CIDR, password, Opts)
-    %     || CIDR <- ?LOCAL_CIDRS
-    % ],
-    %TODO remove this once we have the APIs to add sources
-    % Source = bondy_rbac_source:new(#{
-    %     cidr => {{0, 0, 0, 0}, 0},
-    %     authmethod => ?PASSWORD_AUTH
-    % }),
-    % _ = bondy_rbac_source:add(Uri, all, Source),
-
     Realm1.
 
 

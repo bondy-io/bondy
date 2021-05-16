@@ -161,7 +161,6 @@
 
 -export([add/2]).
 -export([add_or_update/2]).
--export([add_source/5]).
 -export([authorized_keys/1]).
 -export([change_password/3]).
 -export([change_password/4]).
@@ -179,7 +178,6 @@
 -export([password/1]).
 -export([remove/2]).
 -export([remove_group/2]).
--export([remove_source/3]).
 -export([to_external/1]).
 -export([unknown/2]).
 -export([update/3]).
@@ -524,34 +522,6 @@ change_password(RealmUri, Username, New, Old) ->
                     {error, bad_password}
             end
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec add_source(
-    RealmUri :: uri(),
-    Username :: username(),
-    CIDR :: bondy_rbac_source:cidr(),
-    Source :: atom(),
-    Options :: list()) -> ok.
-
-add_source(RealmUri, Username, CIDR, Source, Opts) ->
-    bondy_rbac_source:add(RealmUri, [Username], CIDR, Source, Opts).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove_source(
-    RealmUri :: uri(),
-    Usernames :: [binary()] | all,
-    CIDR :: bondy_rbac_source:cidr()) -> ok.
-
-remove_source(RealmUri, Username, CIDR) ->
-    bondy_rbac_source:remove(RealmUri, [Username], CIDR).
 
 
 %% -----------------------------------------------------------------------------
