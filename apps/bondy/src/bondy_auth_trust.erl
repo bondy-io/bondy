@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_auth_wamp_ticket.erl -
+%%  bondy_auth_trust.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -103,17 +103,8 @@ challenge(_, _, State) ->
     {ok, DataOut :: map(), CBState :: state()}
     | {error, Reason :: any(), CBState :: state()}.
 
-authenticate(_, _, Ctxt, State) ->
-    RealmUri = bondy_auth:realm_uri(Ctxt),
-    IPAddress = bondy_auth:conn_ip(Ctxt),
-
-    case bondy_security:authenticate_anonymous(RealmUri, IPAddress) of
-        {ok, AuthCtxt} ->
-            UserId = bondy_auth:user_id(AuthCtxt),
-            {ok, #{authid => UserId}, State};
-        {error, Reason} ->
-            {error, Reason, State}
-    end.
+authenticate(_, _, _, State) ->
+    {ok, #{}, State}.
 
 
 
