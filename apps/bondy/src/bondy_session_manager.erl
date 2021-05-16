@@ -118,7 +118,7 @@ handle_cast(Event, State) ->
 
 handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, undefined}, State) ->
     %% The connection process has died or closed
-    _ = lager:info(
+    _ = lager:debug(
         "Connection process for session terminated, cleaning up; "
         "realm=~p, session_id=~p",
         [Uri, Id]
