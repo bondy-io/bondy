@@ -102,10 +102,10 @@ close_context(Ctxt) ->
         ok = unsubscribe_all(Ctxt),
         Ctxt
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
         _ = lager:debug(
             "Error while closing context; class=~p, reason=~p, trace=~p",
-            [Class, Reason, ?STACKTRACE(Stacktrace)]
+            [Class, Reason, Stacktrace]
         ),
         Ctxt
     end.
@@ -245,7 +245,7 @@ when is_map(Ctxt) ->
     try
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error while publishing; reason=~p, "
                 "topic=~p, session_id=~p, stacktrace=~p",
@@ -253,7 +253,7 @@ when is_map(Ctxt) ->
                     Reason,
                     TopicUri,
                     bondy_context:session_id(Ctxt),
-                    ?STACKTRACE(Stacktrace)
+                    Stacktrace
                 ]
             ),
             {error, Reason}

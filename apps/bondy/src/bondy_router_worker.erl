@@ -125,11 +125,11 @@ handle_cast(Fun, State) ->
         _ = Fun(),
         {noreply, State}
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             %% TODO publish metaevent
             _ = lager:error(
                 "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]),
+                [Class, Reason, Stacktrace]),
             {noreply, State}
     end.
 

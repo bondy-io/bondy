@@ -142,17 +142,17 @@ is_authorized(Req0, St0) ->
         is_authorized(cowboy_req:method(Req0), Req0, St0)
 
     catch
-        ?EXCEPTION(error, no_such_realm = Reason, _) ->
+        error:no_such_realm = Reason ->
             {StatusCode, Body} = take_status_code(
                 bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, json, Response, Req0),
             {stop, Req1, St0};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                [Class, Reason, Stacktrace],
                 St0
             ),
             {StatusCode, Body} = take_status_code(
@@ -368,16 +368,16 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St1}
     catch
-        ?EXCEPTION(throw, Reason, _) ->
+        throw:Reason ->
             {StatusCode, Body} = take_status_code(bondy_error:map(Reason), ?HTTP_INTERNAL_SERVER_ERROR),
             Response = #{<<"body">> => Body, <<"headers">> => #{}},
             Req1 = reply(StatusCode, error_encoding(Enc), Response, Req0),
             {stop, Req1, St0};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                [Class, Reason, Stacktrace],
                 St0
             ),
             {StatusCode, Body} = take_status_code(
@@ -419,17 +419,17 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
                 {stop, reply(HTTPCode, error_encoding(Enc), Response, Req1), St2}
         end
     catch
-        ?EXCEPTION(throw, Reason, _) ->
+        throw:Reason ->
             {StatusCode1, Body} = take_status_code(
                 bondy_error:map(Reason), ?HTTP_BAD_REQUEST),
             ErrResp = #{ <<"body">> => Body, <<"headers">> => #{}},
             Req = reply(StatusCode1, error_encoding(Enc), ErrResp, Req0),
             {stop, Req, St0};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = log(
                 error,
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                [Class, Reason, Stacktrace],
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
@@ -609,12 +609,12 @@ orelse Method =:= <<"put">> ->
         Body = bondy_utils:decode(Enc, Bin),
         maps:update(api_context, maps_utils:put_path(Path, Body, Ctxt), St)
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = log(
                 error,
                 "Error while decoding HTTP body, "
                 "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)],
+                [Class, Reason, Stacktrace],
                 St
             ),
             throw({badarg, {decoding, Enc}})
@@ -1055,7 +1055,7 @@ mops_eval(Expr, Ctxt) ->
     try
         mops:eval(Expr, Ctxt)
     catch
-        ?EXCEPTION(error, {invalid_expression, [Expr, Term]}, _) ->
+        error:{invalid_expression, [Expr, Term]} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => iolist_to_binary([
@@ -1067,13 +1067,13 @@ mops_eval(Expr, Ctxt) ->
                 ]),
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        ?EXCEPTION(error, {badkey, Key}, _) ->
+        error:{badkey, Key} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        ?EXCEPTION(error, {badkeypath, Path}, _) ->
+        error:{badkeypath, Path} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,

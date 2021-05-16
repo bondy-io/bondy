@@ -405,7 +405,7 @@ get_realm(Ctxt) ->
     try
         bondy_context:realm_uri(Ctxt)
     catch
-        ?EXCEPTION(_, _, _) ->
+        _:_ ->
             undefined
     end.
 

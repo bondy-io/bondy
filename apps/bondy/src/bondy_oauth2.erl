@@ -719,9 +719,9 @@ do_verify_jwt(RealmUri, JWT, Match) ->
     catch
         throw:Reason ->
             {error, Reason};
-        ?EXCEPTION(error, no_such_realm, _) ->
+        error:no_such_realm ->
             {error, no_such_realm};
-        ?EXCEPTION(error, _, _) ->
+        error:_ ->
             {error, oauth2_invalid_grant}
     end.
 

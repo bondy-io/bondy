@@ -269,10 +269,10 @@ close_context(Ctxt) ->
         ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
         Ctxt
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             _ = lager:error(
                 "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]
+                [Class, Reason, Stacktrace]
             ),
             Ctxt
     end.

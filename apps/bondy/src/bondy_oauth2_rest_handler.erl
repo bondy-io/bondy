@@ -310,10 +310,10 @@ accept(Req0, St) ->
                 jwks(Req1, St)
         end
     catch
-        ?EXCEPTION(error, Reason, Stacktrace) ->
+        error:Reason:Stacktrace->
             _ = lager:error(
                 "type=error, reason=~p, stacktrace:~p",
-                [Reason, ?STACKTRACE(Stacktrace)]),
+                [Reason, Stacktrace]),
             Req2 = reply(Reason, Req0),
             {false, Req2, St}
     end.
@@ -460,11 +460,11 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
     try maps_utils:validate(Map0, ?REFRESH_TOKEN_SPEC) of
         #{<<"refresh_token">> := Val} -> refresh_token(Val, Req0, St0)
     catch
-        ?EXCEPTION(error, Reason, Stacktrace) ->
+        error:Reason:Stacktrace->
             _ = lager:info(
                 "Error while refreshing OAuth2 token; "
                 "reason=~[], stacktrace:~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             error({oauth2_invalid_request, Map0})
     end;
@@ -541,11 +541,7 @@ revoke_token_flow(Data0, Req0, St) ->
         Req1 = prepare_request(<<"true">>, #{}, Req0),
         {true, Req1, St}
     catch
-        ?EXCEPTION(
-            error,
-            #{code := invalid_datatype, key := <<"token_type_hint">>},
-            _
-        ) ->
+        error:#{code := invalid_datatype, key := <<"token_type_hint">>} ->
             {stop, reply(unsupported_token_type, Req0), St}
     end.
 

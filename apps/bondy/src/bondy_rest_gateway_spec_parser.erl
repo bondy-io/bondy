@@ -1134,7 +1134,7 @@ parse_version(V0, Ctxt0) ->
         try
             parse_path(P, Ctxt3)
         catch
-            ?EXCEPTION(error, {badkey, Key}, _) ->
+            error:{badkey, Key} ->
                 error({
                     badarg,
                     <<"The key '", Key/binary, "' does not exist in path '", Uri/binary, "'.">>
@@ -1180,7 +1180,7 @@ parse_path(P0, Ctxt0) ->
             Sec2 = maps_utils:validate(Sec1, ?REQ_SPEC),
             maps:update(Method, Sec2, IPath)
         catch
-            ?EXCEPTION(error, {badkey, Key}, _) ->
+            error:{badkey, Key} ->
                 error({badarg, <<"The key '", Key/binary, "' does not exist in path method section '", Method/binary, $'>>})
         end
     end,
@@ -1698,7 +1698,7 @@ mops_eval(Expr, Ctxt) ->
     try
         mops:eval(Expr, Ctxt)
     catch
-        ?EXCEPTION(error, {invalid_expression, [Expr, Term]}, _) ->
+        error:{invalid_expression, [Expr, Term]} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => iolist_to_binary([
@@ -1710,13 +1710,13 @@ mops_eval(Expr, Ctxt) ->
                 ]),
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        ?EXCEPTION(error, {badkey, Key}, _) ->
+        error:{badkey, Key} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
-        ?EXCEPTION(error, {badkeypath, Path}, _) ->
+        error:{badkeypath, Path} ->
             throw(#{
                 <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,

@@ -301,7 +301,7 @@ handle_call({load, Map}, _From, State) ->
         ok = rebuild_dispatch_tables(),
         {reply, Res, State}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+       _:Reason ->
             {reply, {error, Reason}, State}
     end;
 

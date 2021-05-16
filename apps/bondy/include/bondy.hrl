@@ -21,16 +21,6 @@
 -define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
 
--ifdef(OTP_RELEASE). %% => OTP is 21 or higher
--include_lib("kernel/include/logger.hrl").
--define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
--define(STACKTRACE(Stacktrace), Stacktrace).
--else.
--define(EXCEPTION(Class, Reason, _), Class:Reason).
--define(STACKTRACE(_), erlang:get_stacktrace()).
--endif.
-
-
 %% In msecs
 -define(SEND_TIMEOUT, 20000).
 

@@ -939,7 +939,7 @@ validate_private_keys(Pems) ->
         ),
         {ok, Keys}
     catch
-        ?EXCEPTION(_, _, _) ->
+        _:_ ->
             false
     end.
 

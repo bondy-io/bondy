@@ -98,7 +98,6 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_broker_bridge_manager).
 -behaviour(gen_server).
--include("bondy_broker_bridge.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(TIMEOUT, 30000).
@@ -170,7 +169,7 @@
                             false -> {error, {unknown_bridge, Mod}}
                         end
                 catch
-                    ?EXCEPTION(_, _, _) -> false
+                    _:_ -> false
                 end;
             (Mod) when is_atom(Mod) ->
                 erlang:module_loaded(Mod)
@@ -344,7 +343,7 @@ validate_spec(Map) ->
         Val = maps_utils:validate(Map, ?SUBSCRIPTIONS_SPEC),
         {ok, Val}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+       _:Reason ->
             {error, Reason}
     end.
 
@@ -410,7 +409,7 @@ handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
         {ok, Id, _Pid} ->
             {reply, {ok, Id}, State}
     catch
-        ?EXCEPTION(_, Reason, _) ->
+       _:Reason ->
             {reply, {error, Reason}, State}
     end;
 
@@ -489,10 +488,10 @@ init_bridges(State) ->
         Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
         {ok, State#state{bridges = Bridges1}}
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error; reason ~p, stacktrace=~p",
-                [Reason, ?STACKTRACE(Stacktrace)]
+                [Reason, Stacktrace]
             ),
             {error, Reason}
     end.
@@ -649,12 +648,12 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
         true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
         Res
     catch
-        ?EXCEPTION(_, Reason, Stacktrace) ->
+        _:Reason:Stacktrace->
             _ = lager:error(
                 "Error while evaluating action; reason=~p, "
                 "bridge = ~p "
                 "stacktrace=~p",
-                [Reason, Bridge, ?STACKTRACE(Stacktrace)]
+                [Reason, Bridge, Stacktrace]
             ),
             {{error, Reason}, State}
     end.
