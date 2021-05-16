@@ -452,7 +452,7 @@ do_upgrade({hash, SPassword}, #{version := <<"1.1">>} = Pass0) ->
         protocol => cra,
         params => #{
             kdf => pbkdf2,
-            salt_length => bondy_auth_wamp_cra:salt_length(),
+            salt_length => bondy_password_cra:salt_length(),
             hash_length => HashLen,
             hash_function => bondy_password_cra:hash_function(),
             iterations => Iterations

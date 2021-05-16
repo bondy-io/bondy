@@ -250,7 +250,7 @@ do_handle(#call{procedure_uri = ?BONDY_SEC_ADD_SOURCE} = M, Ctxt) ->
 do_handle(#call{procedure_uri = ?BONDY_SEC_DELETE_SOURCE} = M, Ctxt) ->
     [Uri, Username, CIDR] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
-    case bondy_rbac_group:remove(Uri, Username, CIDR) of
+    case bondy_rbac_source:remove(Uri, Username, CIDR) of
         ok ->
             wamp_message:result(M#call.request_id, #{});
         {error, Reason} ->
