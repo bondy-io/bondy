@@ -464,7 +464,7 @@ maybe_eval(Realm, Fun, Mssg) ->
         Fun(Realm, Mssg)
     catch
         Class:Reason:Stacktrace ->
-            _ = lagger:error(
+            _ = lager:error(
                 "Error while evaluating user function; "
                 "class=~p, reason=~p, stacktrace=~p",
                 [Class, Reason, Stacktrace]
