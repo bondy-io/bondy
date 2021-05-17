@@ -166,8 +166,10 @@
     uri => ?BONDY_REALM_URI,
     description => <<"The Bondy administrative realm">>,
     authmethods => [
-        ?WAMP_CRA_AUTH, ?PASSWORD_AUTH,
-        ?WAMP_ANON_AUTH
+        ?TRUST_AUTH,
+        ?WAMP_ANON_AUTH,
+        ?WAMP_CRA_AUTH,
+        ?PASSWORD_AUTH
     ],
     security_enabled => true, % but we allow anonymous access
     users => [
