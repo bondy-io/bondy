@@ -115,7 +115,8 @@
                     "wamp.cancel",
                     "wamp.publish"
                 ],
-                "uri" : "*",
+                "uri" : "",
+                "match": "prefix",
                 "roles" : ["anonymous"]
             },
             {

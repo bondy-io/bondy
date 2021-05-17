@@ -528,7 +528,7 @@ validate_encoding(2) ->
     {binary, msgpack};
 
 validate_encoding(N) ->
-    case bondy_config:get([wamp_rawsocket, serializers, N], undefined) of
+    case bondy_config:get([wamp_serializers, N], undefined) of
         erl ->
             {binary, erl};
         bert ->

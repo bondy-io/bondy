@@ -136,7 +136,7 @@
             {automatically_create_realms,false}
         ]},
       {shutdown_grace_period,5},
-      {wamp_rawsocket,[{serializers,[]}]}
+      {wamp_serializers, []}
 ]).
 
 -define(CONFIG, [

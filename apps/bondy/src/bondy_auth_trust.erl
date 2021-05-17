@@ -53,7 +53,8 @@ init(Ctxt) ->
     try
 
         User = bondy_auth:user(Ctxt),
-        User =/= undefined orelse throw(no_such_role),
+        undefined =/= User andalso anonymous =/= bondy_rbac_user:username(User)
+        orelse throw(no_such_role),
         {ok, undefined}
 
     catch
