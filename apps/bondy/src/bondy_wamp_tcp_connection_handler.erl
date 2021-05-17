@@ -45,7 +45,7 @@
     hibernate = false       ::  boolean(),
     start_time              ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
-    active_n = 100          ::  once | -32768..32767,
+    active_n = once          ::  once | -32768..32767,
     buffer = <<>>           ::  binary(),
     shutdown_reason         ::  term() | undefined
 }).
@@ -114,6 +114,16 @@ init({Ref, Socket, Transport, _Opts0}) ->
     gen_server:enter_loop(?MODULE, [], St1, ?TIMEOUT).
 
 
+handle_call(Msg, From, State) ->
+    _ = lager:info("Received unknown call; message=~p, from=~p", [Msg, From]),
+    {noreply, State, ?TIMEOUT}.
+
+
+handle_cast(Msg, State) ->
+    _ = lager:info("Received unknown cast; message=~p", [Msg]),
+    {noreply, State, ?TIMEOUT}.
+
+
 handle_info(
     {tcp, Socket, <<?RAW_MAGIC:8, MaxLen:4, Encoding:4, _:16>>},
     #state{socket = Socket, protocol_state = undefined} = St0) ->
@@ -159,17 +169,9 @@ handle_info({tcp_passive, Socket}, #state{socket = Socket} = St) ->
     {noreply, St, ?TIMEOUT};
 
 handle_info({tcp_closed, _Socket}, State) ->
-    ok = socket_closed(false, State),
     {stop, normal, State};
 
-handle_info({tcp_error, Socket, Reason}, State) ->
-    _ = log(
-        error,
-        "Connection closing due to tcp_error; reason=~p, socket='~p',",
-        [Reason, Socket],
-        State
-    ),
-    ok = socket_closed(true, State),
+handle_info({tcp_error, _, _} = Reason, State) ->
     {stop, Reason, State};
 
 handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
@@ -219,38 +221,17 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 
-handle_call(Msg, From, State) ->
-    _ = lager:info("Received unknown call; message=~p, from=~p", [Msg, From]),
-    {noreply, State, ?TIMEOUT}.
 
+terminate(Reason, #state{transport = T, socket = S} = State)
+when T =/= undefined andalso S =/= undefined ->
+    ok = close_socket(Reason, State),
+    terminate(Reason, State#state{transport = undefined, socket = undefined});
 
-handle_cast(Msg, State) ->
-    _ = lager:info("Received unknown cast; message=~p", [Msg]),
-    {noreply, State, ?TIMEOUT}.
+terminate(Reason, #state{protocol_state = P} = State) when P =/= undefined ->
+    ok = bondy_wamp_protocol:terminate(P),
+    terminate(Reason, State#state{protocol_state = undefined});
 
-
-terminate(normal = Reason, State) ->
-    ok = terminate_protocol(State),
-    ok = close_socket(false, State),
-    _ = log(
-        info, <<"Connection closed by peer; reason=~p,">>, [Reason], State
-    ),
-    ok;
-
-terminate(shutdown, #state{shutdown_reason = Reason} = State) ->
-    ok = terminate_protocol(State),
-    ok = close_socket(false, State),
-    _ = log(
-        info, <<"Connection closed by router; reason=~p,">>, [Reason], State
-    ),
-    ok;
-
-terminate(Reason, State) ->
-    ok = terminate_protocol(State),
-    ok = close_socket(true, State),
-    _ = log(
-        error, <<"Connection closed due to error; reason=~p,">>, [Reason], State
-    ),
+terminate(_, _) ->
     ok.
 
 
@@ -262,25 +243,6 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
-
-
-terminate_protocol(#state{protocol_state = undefined}) ->
-    ok;
-
-terminate_protocol(#state{protocol_state = ProtocolState}) ->
-    ok = bondy_wamp_protocol:terminate(ProtocolState),
-    ok.
-
-
-%% @private
-
-close_socket(_, #state{socket = undefined}) ->
-    ok;
-
-close_socket(IsSocketError, #state{} = St) ->
-    ok = (St#state.transport):close(St#state.socket),
-    socket_closed(IsSocketError, St).
 
 
 %% @private
@@ -448,6 +410,7 @@ init_wamp(Len, Enc, St0) ->
     case inet:peername(St0#state.socket) of
         {ok, {_, _} = Peer} ->
             Proto = {raw, FrameType, EncName},
+
             case bondy_wamp_protocol:init(Proto, Peer, #{}) of
                 {ok, CBState} ->
                     St1 = St0#state{
@@ -456,13 +419,17 @@ init_wamp(Len, Enc, St0) ->
                         max_len = MaxLen,
                         protocol_state = CBState
                     },
+
                     ok = send_frame(
-                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1),
+                        <<?RAW_MAGIC, Len:4, Enc:4, 0:8, 0:8>>, St1
+                    ),
+
                     _ = log(info, "Established connection with peer;", [], St1),
                     {ok, St1};
                 {error, Reason} ->
                     {stop, Reason, St0}
             end;
+
         {ok, NonIPAddr} ->
             _ = lager:error(
                 "Unexpected peername when establishing connection,"
@@ -472,6 +439,7 @@ init_wamp(Len, Enc, St0) ->
                 [NonIPAddr, FrameType, EncName, MaxLen]
             ),
             {stop, invalid_socket, St0};
+
         {error, Reason} ->
             _ = lager:error(
                 "Invalid peername when establishing connection,"
@@ -626,7 +594,6 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     ],
     lager:log(Level, self(), Format, lists:append(Head, Tail)).
 
-
 %% @private
 socket_opened(St) ->
     Event = {socket_open, wamp, raw, St#state.peername},
@@ -634,15 +601,45 @@ socket_opened(St) ->
 
 
 %% @private
-socket_closed(true, St) ->
-    Event = {socket_error, wamp, raw, St#state.peername},
-    ok = bondy_event_manager:notify(Event),
-    socket_closed(false, St);
+close_socket(Reason, St) ->
+    Socket = St#state.socket,
+    catch (St#state.transport):close(Socket),
 
-socket_closed(false, St) ->
     Seconds = erlang:monotonic_time(second) - St#state.start_time,
-    Event = {socket_closed, wamp, raw, St#state.peername, Seconds},
-    bondy_event_manager:notify(Event).
+
+    %% We report socket stats
+    ok = bondy_event_manager:notify(
+        {socket_closed, wamp, raw, St#state.peername, Seconds}
+    ),
+
+    IncrSockerErrorCnt = fun() ->
+        %% We increase the socker error counter
+        bondy_event_manager:notify(
+            {socket_error, wamp, raw, St#state.peername}
+        )
+    end,
+
+    {Format, LogReason} = case Reason of
+        normal ->
+            {<<"Connection closed by peer; reason=~p,">>, Reason};
+
+        shutdown ->
+            {<<"Connection closed by router; reason=~p,">>, Reason};
+
+        {tcp_error, Socket, Reason} ->
+            %% We increase the socker error counter
+            ok = IncrSockerErrorCnt(),
+            {<<"Connection closing due to tcp_error; reason=~p">>, Reason};
+
+        _ ->
+            %% We increase the socker error counter
+            ok = IncrSockerErrorCnt(),
+            {<<"Connection closed due to system error; reason=~p,">>, Reason}
+    end,
+
+    _ = log(error, Format, [LogReason], St),
+    ok.
+
 
 
 %% @private
