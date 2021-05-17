@@ -528,10 +528,10 @@ validate_encoding(2) ->
     {binary, msgpack};
 
 validate_encoding(N) ->
-    case bondy_config:get([wamp_serializers, N], undefined) of
-        erl ->
+    case lists:keyfind(N, 2, bondy_config:get(wamp_serializers, [])) of
+        {erl, N} ->
             {binary, erl};
-        bert ->
+        {bert, N} ->
             {binary, bert};
         undefined ->
             %% TODO define correct error return
