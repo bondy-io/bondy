@@ -531,8 +531,7 @@ change_password(RealmUri, Username, New, Old) ->
 -spec to_external(User :: t()) -> external().
 
 to_external(#{type := ?TYPE, version := ?VERSION} = User) ->
-    %% We leave the authorized keys as they are public keys
-    Map = maps:without([password], User),
+    Map = maps:without([password, authorized_keys], User),
 
     Map#{
         has_password => has_password(User),
