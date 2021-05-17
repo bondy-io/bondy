@@ -322,14 +322,14 @@ terminate({error, Reason}, _Req, St) ->
 terminate({crash, Class, Reason}, _Req, St) ->
     %% A crash occurred in the handler.
     _ = log(error,
-        "Process crashed, error=~p, reason=~p",
+        "Process crashed; error=~p, reason=~p",
         [Class, Reason], St
     ),
     do_terminate(St);
 
 terminate(Other, _Req, St) ->
         _ = log(error,
-        "Process crashed, reason=~p",
+        "Process crashed; reason=~p",
         [Other], St
     ),
     do_terminate(St).
