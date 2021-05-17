@@ -312,11 +312,10 @@ password(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authorized_key(Term :: binary()) -> boolean().
+-spec authorized_key(Term :: binary()) -> {ok, binary()} | false.
 
-authorized_key(Term) when is_binary(Term) ->
-    %% TODO
-    is_binary(Term).
+authorized_key(Term) ->
+    is_binary(Term) andalso {ok, string:casefold(Term)}.
 
 
 %% -----------------------------------------------------------------------------
