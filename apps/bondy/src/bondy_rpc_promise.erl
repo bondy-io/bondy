@@ -165,6 +165,7 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
+    {_, _, CallerSessionId, _} = P#bondy_rpc_promise.caller,
     %% We match realm_uri for extra validation
     Key = key(RealmUri, P),
     OnEvict = fun(_) ->
@@ -172,7 +173,7 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
             "RPC Promise evicted from queue;"
             " realm_uri=~p, caller_session_id=~p, invocation_id=~p, call_id=~p"
             " timeout=~p",
-            [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
+            [RealmUri, CallerSessionId, InvocationId, CallId, Timeout]
         )
     end,
     Secs = erlang:round(Timeout / 1000),
