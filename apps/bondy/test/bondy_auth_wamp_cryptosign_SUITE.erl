@@ -48,7 +48,10 @@ end_per_suite(Config) ->
 
 add_realm(RealmUri, KeyPairs) ->
     %% We use the same keys for both users (not to be done in real life)
-    PubKeys = [maps:get(public, KeyPair) || KeyPair <- KeyPairs],
+    PubKeys = [
+        maps:get(public, KeyPair)
+        || KeyPair <- KeyPairs
+    ],
 
     Config = #{
         uri => RealmUri,
@@ -124,7 +127,9 @@ test_1(Config) ->
 
     Details = #{
         authextra => #{
-            <<"pubkey">> => maps:get(public, KeyPair)
+            <<"pubkey">> => list_to_binary(
+                hex_utils:bin_to_hexstr(maps:get(public, KeyPair))
+            )
         }
     },
 
@@ -132,9 +137,9 @@ test_1(Config) ->
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt1
     ),
 
-    HexChallenge = maps:get(challenge, Extra, undefined),
+    HexMessage = maps:get(challenge, Extra, undefined),
 
-    ?assertNotEqual(undefined, HexChallenge, "Challenge should be present"),
+    ?assertNotEqual(undefined, HexMessage, "Challenge should be present"),
 
     ?assertEqual(
         undefined,
@@ -142,11 +147,12 @@ test_1(Config) ->
         "Channel binding not supported yet, should be undefined"
     ),
 
+
     %% We simulate the response from the client
-    Challenge = hex_utils:hexstr_to_bin(HexChallenge),
+    Message = hex_utils:hexstr_to_bin(HexMessage),
     Signature = list_to_binary(
         hex_utils:bin_to_hexstr(
-            enacl:sign(Challenge, maps:get(secret, KeyPair))
+            enacl:sign_detached(Message, maps:get(secret, KeyPair))
         )
     ),
 

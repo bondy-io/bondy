@@ -95,10 +95,12 @@ requirements() ->
 
 challenge(Details, Ctxt, State) ->
     try
-        Key = maps_utils:get_path(
+        HexKey = maps_utils:get_path(
             [authextra, <<"pubkey">>], Details, undefined
         ),
-        Key =/= undefined orelse throw(missing_pubkey),
+        HexKey =/= undefined orelse throw(missing_pubkey),
+
+        Key = decode_hex(HexKey),
 
         %% The stored keys are hex formatted so that we can easily compare here
         Keys = bondy_rbac_user:authorized_keys(bondy_auth:user(Ctxt)),
@@ -109,7 +111,7 @@ challenge(Details, Ctxt, State) ->
                 Message = <<187,172,178,156,100,104,78,221,32,249,69,117,86,248,250,66,113,22,86,98,229,238,44,121,191,227,190,84,187,131,183,38>>,
 
                 NewState = State#{
-                    pubkey => decode_hex(Key),
+                    pubkey => Key,
                     message => Message
                 },
 

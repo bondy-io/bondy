@@ -312,10 +312,19 @@ password(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authorized_key(Term :: binary()) -> {ok, binary()} | false.
+-spec authorized_key(Term :: binary()) -> {ok, binary()} | boolean().
 
-authorized_key(Term) ->
-    is_binary(Term) andalso {ok, string:casefold(Term)}.
+authorized_key(Term) when is_binary(Term) ->
+    try
+        {ok, hex_utils:hexstr_to_bin(Term)}
+    catch
+        error:_ ->
+            %% Not in hex format
+            true
+    end;
+
+authorized_key(_) ->
+    false.
 
 
 %% -----------------------------------------------------------------------------
