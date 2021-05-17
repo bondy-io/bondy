@@ -2,7 +2,7 @@
     {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
-        "authmethods" : ["wampcra", "anonymous", "oauth2", "password", "trust"],
+        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
         "security_enabled" : true,
         "private_keys": [
             "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIOVy5ra743OMFyPgUkPXsQbCx4Z7ViNjee3exi2sMRWhoAoGCCqGSM49\nAwEHoUQDQgAE35dxB+NVWz4bXcC/XeV+ikfL6Vn3FgsAn6MZDwClOB8D31w8hTrH\nVHHDgjJ9xLK7obFDgrNAdpK11Y/tApQhVQ==\n-----END EC PRIVATE KEY-----\n\n",
@@ -27,6 +27,12 @@
                 "password" : "changethispassword",
                 "groups" : ["microservices"],
                 "meta" : {}
+            },
+            {
+                "username": "device1",
+                "authorized_keys": ["020b13239ca0f10a1c65feaf26e8dfca6e84c81d2509a2b7b75a7e5ee5ce4b66"],
+                "groups" : ["devices"],
+                "meta": {}
             }
         ],
         "groups" : [
@@ -37,6 +43,11 @@
             },
             {
                 "name" : "microservices",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "devices",
                 "groups" : [],
                 "meta" : {}
             },
@@ -83,6 +94,12 @@
             {
                 "usernames" : ["peer2"],
                 "authmethod" : "trust",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["device1"],
+                "authmethod" : "cryptosign",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             }
