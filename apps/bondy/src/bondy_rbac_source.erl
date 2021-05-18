@@ -144,8 +144,14 @@
 -spec new(Data :: map()) -> Source :: t().
 
 new(Data) when is_map(Data) ->
-    Source = maps_utils:validate(Data, ?SOURCE_VALIDATOR),
-    type_and_version(Source).
+    case maps_utils:validate(Data, ?SOURCE_VALIDATOR) of
+        #{usernames := anonymous, authmethod := M} when M /= ?WAMP_ANON_AUTH ->
+            error(
+                bondy_error:map({inconsistency_error, [usernames, authmethod]})
+            );
+        Source ->
+            type_and_version(Source)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -238,9 +244,14 @@ when (Keyword == all orelse Keyword == anonymous) ->
 
 remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
-    _ = [
-        plum_db:delete(Prefix, {Username, anchor_mask(CIDR)})
+    AMask = anchor_mask(CIDR),
+    UserSources =  lists:flatten([
+        {Username, match(RealmUri, Username, AMask)}
         || Username <- Usernames
+    ]),
+    _ = [
+        plum_db:delete(Prefix, {Username, AMask, Method})
+        || {Username, L} <- UserSources, #{authmethod := Method} <- L
     ],
     ok.
 
@@ -254,10 +265,10 @@ remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
 remove_all(RealmUri, Username) ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
     plum_db:fold(fun
-        ({{Id, _CIDR} = Key, _}, Acc) when Id == Username ->
+        ({{Id, _CIDR, _Method} = Key, _}, Acc) when Id == Username ->
             plum_db:delete(Prefix, Key),
             Acc;
-        ({{_, _}, _}, Acc) ->
+        ({{_, _, _}, _}, Acc) ->
             Acc
         end,
         ok,
@@ -303,7 +314,7 @@ match(RealmUri, Username, ConnIP) ->
         )
     ),
 
-    Pred = fun({{_, {IP, Mask}}, _}) ->
+    Pred = fun({{_, {IP, Mask}, _}, _}) ->
         mask_address(IP, Mask) == mask_address(ConnIP, Mask)
     end,
     [from_term(Term) || Term <- lists:filter(Pred, Sources)].
@@ -323,7 +334,7 @@ match_first(RealmUri, Username, ConnIP) ->
     %% We need to use the internal match function (do_match) as it returns Keys
     %% and Values, we need the keys to be able to sort
     Sources = sort_sources(do_match(RealmUri, Username)),
-    Fun = fun({{_, {IP, Mask}}, _} = Term) ->
+    Fun = fun({{_, {IP, Mask}, _}, _} = Term) ->
         mask_address(IP, Mask) == mask_address(ConnIP, Mask)
             andalso throw({result, from_term(Term)})
     end,
@@ -402,7 +413,9 @@ when Keyword == all orelse Keyword == anonymous ->
     Masked = anchor_mask(maps:get(cidr, Source)),
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
-    ok = plum_db:put(Prefix, {Keyword, Masked}, Source),
+    %% TODO
+    Authmethod = maps:get(authmethod, Source),
+    ok = plum_db:put(Prefix, {Keyword, Masked, Authmethod}, Source),
     ok;
 
 do_add(RealmUri, Usernames, #{type := source} = Source) ->
@@ -417,11 +430,13 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
     _ = lists:foreach(
         fun(Username) ->
             %% prev we added {Authmethod, Meta} instead of Source
-            plum_db:put(Prefix, {Username, Masked}, Source)
+            Authmethod = maps:get(authmethod, Source),
+            plum_db:put(Prefix, {Username, Masked, Authmethod}, Source)
         end,
         Usernames
     ),
     ok.
+
 
 %% @private
 %% Returns the Key Value
@@ -433,10 +448,21 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
 do_match(RealmUri, Username) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
-    plum_db:match(Prefix, {Username, '_'}, Opts).
+    plum_db:match(Prefix, {Username, '_', '_'}, Opts).
+
 
 %% @private
+
+
+from_term(
+    {{Username, CIDR, _M}, #{type := source, version := ?VERSION} = Source}) ->
+    Source#{
+        username => Username,
+        cidr => CIDR
+    };
+
 from_term({{Username, CIDR}, [{Authmethod, Options}]}) ->
+    %% Legacy version format
     Meta = maps:from_list(Options),
     Source = #{
         username => Username,
@@ -444,14 +470,7 @@ from_term({{Username, CIDR}, [{Authmethod, Options}]}) ->
         meta => Meta,
         cidr => CIDR
     },
-    {Username, type_and_version(Source)};
-
-from_term(
-    {{Username, CIDR}, #{type := source, version := ?VERSION} = Source}) ->
-    Source#{
-        username => Username,
-        cidr => CIDR
-    }.
+    {Username, type_and_version(Source)}.
 
 
 
@@ -506,12 +525,12 @@ sort_sources(Sources) ->
     %% and then by CIDR, so that most specific masks come first
     Sources1 = lists:sort(
         fun
-            ({{all, _}, _}, {{all, _}, _}) ->
+            ({{all, _, _}, _}, {{all, _, _}, _}) ->
                 true;
-            ({{all, _}, _}, _) ->
+            ({{all, _, _}, _}, _) ->
                 %% anything is greater than 'all'
                 true;
-            (_, {{all, _}, _}) ->
+            (_, {{all, _, _}, _}) ->
                 false;
             (_, _) ->
                 true
@@ -520,11 +539,12 @@ sort_sources(Sources) ->
     ),
 
     lists:sort(
-        fun({{_, {_, MaskA}}, _}, {{_, {_, MaskB}}, _}) ->
+        fun({{_, {_, MaskA}, _}, _}, {{_, {_, MaskB}, _}, _}) ->
             MaskA > MaskB
         end,
         Sources1
     ).
+
 
 %% group users sharing the same CIDR/Source/Options
 % group_sources(Sources) ->

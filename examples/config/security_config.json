@@ -62,16 +62,6 @@
                 "meta" : {}
             }
         ],
-        "named_sources" : [
-            {
-                "name" : "all",
-                "cidr" : "0.0.0.0/0"
-            },
-            {
-                "name" : "internal",
-                "cidr" : "10.0.0.0/24"
-            }
-        ],
         "sources" : [
             {
                 "usernames" : "all",

@@ -89,7 +89,10 @@ username(_) ->
 %% @doc Allows reserved names like "all", "anonymous", etc
 %% @end
 %% -----------------------------------------------------------------------------
--spec usernames(Term :: [binary()] | binary()) -> {ok, [binary()]} | false.
+-spec usernames(Term :: [binary()] | binary()) -> {ok, [binary()]} | boolean().
+
+usernames(all) ->
+    true;
 
 usernames(<<"all">>) ->
     {ok, all};
