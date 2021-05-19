@@ -686,7 +686,8 @@ start_http(Routes, Name) ->
         env => #{
             bondy => #{
                 auth => #{
-                    schemes => [basic, digest, bearer]
+                    %% REVIEW this in light of recent changes to auth methods
+                    schemes => [basic, bearer]
                 }
             },
             dispatch => cowboy_router:compile(Routes)
@@ -733,8 +734,9 @@ start_https(Routes, Name) ->
     ProtoOpts = #{
         env => #{
             bondy => #{
+                %% REVIEW this in light of recent changes to auth methods
                 auth => #{
-                    schemes => [basic, digest, bearer]
+                    schemes => [basic, bearer]
                 }
             },
             dispatch => cowboy_router:compile(Routes)
@@ -975,7 +977,7 @@ transport_opts(Name) ->
     %% In ranch 2.0 we will need to use socket_opts directly
     {SocketOpts, OtherSocketOpts} = case lists:keyfind(socket_opts, 1, Opts) of
         {socket_opts, L} -> normalise(L);
-        false -> []
+        false -> {[], []}
     end,
 
     TransportOpts = #{
@@ -1014,7 +1016,6 @@ normalise(Opts0) ->
 
     lists:splitwith(
         fun
-            ({backlog, _}) -> false;
             ({nodelay, _}) -> false;
             ({keepalive, _}) -> false;
             ({_, _}) -> true

@@ -225,7 +225,7 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
-    %% TODO we need to fix the wamp.hrl timeout
+    %% FIXME we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
     Timeout = case maps:find(timeout, Opts) of
