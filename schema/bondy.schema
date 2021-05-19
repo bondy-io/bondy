@@ -316,12 +316,29 @@
   hidden
 ]}.
 
-
-
+%% -----------------------------------------------------------------------------
+%% @doc The default timeout for WAMP (RPC) Calls when the CALL.Options.timeout
+%% property is not used. This value will be restricted by the
+%% 'wamp.max_call_timeout' property
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
-  {default, "10s"}, % Long enough but not infinity
-  {datatype, {duration, ms}},
-  hidden
+  {default, "30s"}, % Long enough but not infinity
+  {datatype, {duration, ms}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximum timeout value for WAMP (RPC) Calls when the CALL.Options.
+%% timeout. According to the protocol a missing value or a value
+%% of 0 diabels the timeout feature, but we disagree, set it to 24 hours if you
+%% want but not infinite.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.max_call_timeout", "bondy.wamp_max_call_timeout", [
+{default, "10m"}, % Long enough but not infinity
+{datatype, {duration, ms}},
+hidden
 ]}.
 
 {mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [

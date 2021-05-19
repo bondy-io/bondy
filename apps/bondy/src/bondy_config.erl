@@ -58,6 +58,11 @@ init() ->
 %% -----------------------------------------------------------------------------
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
+get(wamp_call_timeout = Key) ->
+    Value = app_config:get(?APP, Key),
+    Max = app_config:get(?APP, wamp_max_call_timeout),
+    min(Value, Max);
+
 get(Key) ->
     app_config:get(?APP, Key).
 
