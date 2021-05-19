@@ -113,6 +113,6 @@ authenticate(String, _, _, #{password := PWD} = State) ->
         true ->
             {ok, maps:new(), State};
         false ->
-            {error, bad_password, State}
+            {error, bad_signature, State}
     end.
 

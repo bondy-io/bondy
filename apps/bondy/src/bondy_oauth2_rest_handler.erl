@@ -587,10 +587,10 @@ reply(no_such_realm, Req) ->
 reply(unknown_user, Req) ->
     reply(oauth2_invalid_client, Req);
 
-reply(missing_password, Req) ->
+reply(missing_signature, Req) ->
     reply(oauth2_invalid_client, Req);
 
-reply(bad_password, Req) ->
+reply(bad_signature, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply(unknown_source, Req) ->

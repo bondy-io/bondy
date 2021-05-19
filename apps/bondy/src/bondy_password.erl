@@ -465,7 +465,7 @@ do_upgrade({hash, SPassword}, #{version := <<"1.1">>} = Pass0) ->
     do_upgrade({hash, SPassword}, Pass1);
 
 do_upgrade(String, #{version := Version} = Pass0) when is_binary(String) ->
-    %% TODO check password here and fail with error(bad_password).
+    %% TODO check password here and fail with error(bad_signature).
     %% We should be doing this on authentication to avoid checking twice
     %% maybe verify_hash with Opts {upgrade, true}
     UpgradeProtocol = bondy_config:get(

@@ -593,16 +593,8 @@ abort({authentication_failed, no_such_realm}, St) ->
     %% REVIEW shouldn't his be a ?WAMP_NO_SUCH_REALM error?
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
-abort({authentication_failed, bad_signature}, St) ->
+abort({authentication_failed, missing_signature}, St) ->
     Reason = <<"The signature did not match.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, bad_password}, St) ->
-    Reason = <<"The password did not match.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, missing_password}, St) ->
-    Reason = <<"The password was missing in the request.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort({authentication_failed, no_matching_sources}, St) ->
@@ -618,6 +610,11 @@ abort({authentication_failed, oauth2_invalid_grant}, St) ->
         " or invalid either because it does not match the Realm used in the"
         " request, or because it was issued to another peer."
     >>,
+    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
+
+abort({authentication_failed, _}, St) ->
+    %% no_such_role, invalid_role, bad_signature,
+    Reason = <<"The signature did not match.">>,
     abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
 
 abort(no_such_realm, St) ->
@@ -700,7 +697,7 @@ when UserId =/= <<"anonymous">> ->
             Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
             auth_challenge(Methods, St2);
         {error, Reason} ->
-            {error, Reason, St1}
+            {error, {authentication_failed, Reason}, St1}
     end;
 
 
@@ -721,7 +718,7 @@ maybe_auth_challenge(enabled, Details, Realm, St0) ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
             auth_challenge([?WAMP_ANON_AUTH], St2);
         {error, Reason} ->
-            {error, Reason, St1}
+            {error, {authentication_failed, Reason}, St1}
     end;
 
 maybe_auth_challenge(disabled, #{authid := UserId} = Details, _, St0) ->

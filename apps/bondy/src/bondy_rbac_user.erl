@@ -519,7 +519,7 @@ change_password(RealmUri, Username, New, Old) ->
                 true ->
                     change_password(RealmUri, Username, New);
                 false ->
-                    {error, bad_password}
+                    {error, bad_signature}
             end
     end.
 
