@@ -24,6 +24,7 @@
 
 -define(U1, <<"user_1">>).
 -define(U2, <<"user_2">>).
+-define(U3, <<"user_3">>).
 
 -compile([nowarn_export_all, export_all]).
 
@@ -58,6 +59,11 @@ add_realm(RealmUri) ->
                 name => <<"com.thing.system.service">>,
                 groups => [],
                 meta => #{}
+            },
+            #{
+                name => <<"com.thing.system.other">>,
+                groups => [],
+                meta => #{}
             }
         ],
         grants => [
@@ -73,7 +79,11 @@ add_realm(RealmUri) ->
                 ],
                 uri => <<"">>,
                 match => <<"prefix">>,
-                roles => [<<"com.thing.system.service">>]
+                roles => [
+                    <<"com.thing.system.service">>,
+                    <<"com.thing.system.other">>,
+                    ?U3
+                ]
             },
             #{
                 permissions => [
@@ -95,6 +105,11 @@ add_realm(RealmUri) ->
             },
             #{
                 username => ?U2,
+                groups => [],
+                meta => #{}
+            },
+            #{
+                username => ?U3,
                 groups => [],
                 meta => #{}
             }
@@ -126,6 +141,10 @@ test_1(Config) ->
         realm_uri => RealmUri,
         authid => ?U2
     },
+    U3Ctxt = #{
+        realm_uri => RealmUri,
+        authid => ?U3
+    },
 
     ?assertEqual(
         ok,
@@ -137,6 +156,12 @@ test_1(Config) ->
         {not_authorized, _},
         bondy_rbac:authorize(<<"wamp.register">>, <<"com.my.call">>, U2Ctxt),
         "U2 cannot register"
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"wamp.register">>, <<"com.my.call">>, U3Ctxt),
+        "U3 can register"
     ).
 
 
