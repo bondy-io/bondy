@@ -18,7 +18,7 @@
 
 
 -define(BONDY_ALREADY_EXISTS_ERROR, <<"bondy.error.already_exists">>).
--define(BONDY_SYSTEM_FAILURE_ERROR, <<"bondy.error.system_failure">>).
+-define(BONDY_INTERNAL_ERROR, <<"bondy.error.internal_error">>).
 -define(BONDY_API_GATEWAY_ADD_CLIENT,      <<"bondy.api_gateway.add_client">>).
 -define(BONDY_API_GATEWAY_ADD_RES_OWNER,   <<"bondy.api_gateway.add_resource_owner">>).
 -define(BONDY_API_GATEWAY_CLIENT_ADDED,    <<"bondy.api_gateway.client_added">>).

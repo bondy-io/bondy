@@ -78,8 +78,7 @@
 -export([realm_uri/1]).
 -export([user_id/1]).
 -export([user/1]).
--export([valid_role/2]).
--export([valid_roles/2]).
+
 
 
 
@@ -131,7 +130,7 @@
     Roles :: all | binary() | [binary()] | undefined,
     Peer :: {inet:ip_address(), inet:port_number()}) ->
     {ok, context()}
-    | {error, no_such_role | no_such_realm | invalid_role}
+    | {error, no_such_user | no_such_realm | no_such_group}
     | no_return().
 
 init(SessionId, Uri, UserId, Roles, Peer) when is_binary(Uri) ->
@@ -195,76 +194,6 @@ method_info() ->
 
 method_info(Method) ->
     maps:get(Method, ?BONDY_AUTHMETHODS_INFO).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns the requested role `Role' if user `User' is a member of that
-%% role, otherwise throws an 'invalid_role' exception.
-%% In case the requested role is the
-%% atom 'undefined' it returns the first groups in the user's groups or
-%% undefined if the user is not a member of any group.
-%% @end
-%% -----------------------------------------------------------------------------
--spec valid_role(Role :: binary(), User :: bondy_rbac_user:t()) ->
-    binary() | undefined.
-
-valid_role(undefined, User) ->
-    case bondy_rbac_user:groups(User) of
-        [] -> undefined;
-        L -> hd(L)
-    end;
-
-valid_role(Role, User) ->
-    %% Validate the user is a member of the requested group (role).
-    bondy_rbac_user:is_member(Role, User) orelse throw(invalid_role),
-    Role.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns the requested role `Role' if user `User' is a member of that
-%% role, otherwise throws an 'invalid_role' exception.
-%% In case the requested role is the
-%% atom 'undefined' it returns the first group in the user's groups or
-%% undefined if the user is not a member of any group.
-%% @end
-%% -----------------------------------------------------------------------------
--spec valid_roles(
-    Role :: binary() | [binary()] | undefined,
-    User :: bondy_rbac_user:t()) ->
-    {Role :: binary() | undefined, Roles :: [binary()]}.
-
-valid_roles(_, undefined) ->
-    {undefined, []};
-
-valid_roles([], _) ->
-    {undefined, []};
-
-valid_roles(undefined, _) ->
-    {undefined, []};
-
-valid_roles(_, #{username := anonymous}) ->
-    %% If anonymous (user) the only valid role (group) is anonymous
-    %% so we drop the requested ones.
-    {anonymous, [anonymous]};
-
-valid_roles(<<"all">>, User) ->
-    valid_roles(all, User);
-
-valid_roles(all, User) ->
-    {undefined, bondy_rbac_user:groups(User)};
-
-valid_roles(Role, User) when is_binary(Role) ->
-    {undefined, Roles} = valid_roles([Role], User),
-    {Role, Roles};
-
-valid_roles(Roles, User) ->
-    RolesSet = sets:from_list(Roles),
-    GroupsSet = sets:from_list(bondy_rbac_user:groups(User)),
-
-    RolesSet =:= sets:intersection(RolesSet, GroupsSet)
-        orelse throw(invalid_role),
-
-    {undefined, Roles}.
 
 
 %% -----------------------------------------------------------------------------
@@ -490,6 +419,53 @@ authenticate(Method, Signature, DataIn, Ctxt) ->
 
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the requested role `Role' if user `User' is a member of that
+%% role, otherwise throws an 'no_such_group' exception.
+%% In case the requested role is the
+%% atom 'undefined' it returns the first group in the user's groups or
+%% undefined if the user is not a member of any group.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec valid_roles(
+    Role :: binary() | [binary()] | undefined,
+    User :: bondy_rbac_user:t()) ->
+    {Role :: binary() | undefined, Roles :: [binary()]}.
+
+valid_roles(_, undefined) ->
+    {undefined, []};
+
+valid_roles([], _) ->
+    {undefined, []};
+
+valid_roles(undefined, _) ->
+    {undefined, []};
+
+valid_roles(_, #{username := anonymous}) ->
+    %% If anonymous (user) the only valid role (group) is anonymous
+    %% so we drop the requested ones.
+    {anonymous, [anonymous]};
+
+valid_roles(<<"all">>, User) ->
+    valid_roles(all, User);
+
+valid_roles(all, User) ->
+    {undefined, bondy_rbac_user:groups(User)};
+
+valid_roles(Role, User) when is_binary(Role) ->
+    {undefined, Roles} = valid_roles([Role], User),
+    {Role, Roles};
+
+valid_roles(Roles, User) ->
+    RolesSet = sets:from_list(Roles),
+    GroupsSet = sets:from_list(bondy_rbac_user:groups(User)),
+
+    RolesSet =:= sets:intersection(RolesSet, GroupsSet)
+        orelse throw(no_such_group),
+
+    {undefined, Roles}.
+
 %% @private
 casefold(anonymous) ->
     anonymous;
@@ -598,7 +574,7 @@ get_user(_, undefined) ->
 get_user(RealmUri, UserId) ->
     case bondy_rbac_user:lookup(RealmUri, UserId) of
         {error, not_found} ->
-            throw(no_such_role);
+            throw(no_such_user);
         User ->
             User
     end.

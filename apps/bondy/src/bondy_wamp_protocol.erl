@@ -211,11 +211,11 @@ handle_inbound(Data, St) ->
             handle_inbound_messages(Messages, St)
     catch
         _:{unsupported_encoding, _} = Reason ->
-            abort(Reason, St);
+            stop(Reason, St);
         _:badarg ->
-            abort(decoding, St);
+            stop(decoding_error, St);
         _:function_clause ->
-            abort(incompatible_message, St)
+            stop(invalid_message, St)
     end.
 
 
@@ -283,11 +283,14 @@ handle_inbound_messages(Messages, St) ->
     try
         handle_inbound_messages(Messages, St, [])
     catch
+        throw:Reason ->
+            stop(Reason, St);
         Class:Reason:Stacktrace when Class /= throw ->
             _ = lager:info(
                 "Unexpected error; class=~p reason=~s, state_name=~p, stacktrace=~p",
                 [Class, Reason, St#wamp_state.state_name, Stacktrace]
             ),
+            %% REVIEW shouldn't we call stop({system_failure, Reason}) to abort?
             error(Reason)
     end.
 
@@ -332,7 +335,9 @@ handle_inbound_messages(
     %% Client initiated a goodbye, we ignore any subsequent messages
     %% We reply with all previous messages plus a goodbye and stop
     Reply = wamp_message:goodbye(
-        #{message => <<"Session closed by client.">>}, ?WAMP_GOODBYE_AND_OUT),
+        #{message => <<"Session closed by client.">>},
+        ?WAMP_GOODBYE_AND_OUT
+    ),
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
     St1 = St0#wamp_state{state_name = closed},
     {stop, normal, lists:reverse([Bin|Acc]), St1};
@@ -346,37 +351,24 @@ handle_inbound_messages(
 
 handle_inbound_messages(
     [#hello{} = M|_],
-    #wamp_state{state_name = established, context = #{session := _}} = St0,
+    #wamp_state{state_name = established, context = #{session := _}} = St,
     Acc) ->
-    Ctxt = St0#wamp_state.context,
     %% Client already has a session!
     %% RFC: It is a protocol error to receive a second "HELLO" message during
     %% the lifetime of the session and the _Peer_ must fail the session if that
     %% happens.
-    ok = bondy_event_manager:notify({wamp, M, Ctxt}),
     %% We reply all previous messages plus an abort message and close
-    Abort = abort_message(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You've sent a HELLO message more than once.">>,
-        #{},
-        St0
-    ),
-    ok = bondy_event_manager:notify({wamp, Abort, Ctxt}),
-    Bin = wamp_encoding:encode(Abort, encoding(St0)),
-    St1 = St0#wamp_state{state_name = closed},
-    {stop, ?WAMP_PROTOCOL_VIOLATION, [Bin | Acc], St1};
+    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
+    Reason = <<"You've sent a HELLO message more than once.">>,
+    stop({protocol_violation, Reason}, Acc, St);
 
 handle_inbound_messages(
     [#hello{} = M|_], #wamp_state{state_name = challenging} = St, _) ->
     %% Client does not have a session but we already sent a challenge message
     %% in response to a HELLO message
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You've sent a HELLO message more than once.">>,
-        #{},
-        St
-    );
+    Reason = <<"You've sent a HELLO message more than once.">>,
+    stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     %% Client is requesting a session
@@ -391,7 +383,7 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
     %% Lookup or create realm
     case bondy_realm:get(Uri) of
         {error, not_found} ->
-            abort({authentication_failed, no_such_realm}, St1);
+            stop({authentication_failed, no_such_realm}, St1);
         Realm ->
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St1)
@@ -403,12 +395,8 @@ handle_inbound_messages(
     #wamp_state{state_name = established, context = #{session := _}} = St, _) ->
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
     %% Client already has a session so is already authenticated.
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You've sent an AUTHENTICATE message more than once.">>,
-        #{},
-        St
-    );
+    Reason = <<"You've sent an AUTHENTICATE message more than once.">>,
+    stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages(
     [#authenticate{} = M|_], #wamp_state{state_name = challenging} = St0, _) ->
@@ -427,7 +415,7 @@ handle_inbound_messages(
             St1 = St0#wamp_state{auth_context = AuthCtxt1},
             open_session(Extra, St1);
         {error, Reason} ->
-            abort({authentication_failed, Reason}, St0)
+            stop({authentication_failed, Reason}, St0)
     end;
 
 handle_inbound_messages(
@@ -435,12 +423,10 @@ handle_inbound_messages(
     when Name =/= challenging ->
     %% Client has not been sent a challenge
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    abort(
-        ?WAMP_PROTOCOL_VIOLATION,
-        <<"You need to request a session first by sending a HELLO message.">>,
-        #{},
-        St
-    );
+    Reason = <<
+        "You need to request a session first by sending a HELLO message."
+    >>,
+    stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages(
     [H|T],
@@ -461,7 +447,7 @@ handle_inbound_messages(
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO
     Reason = <<"You need to establish a session first.">>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St).
+    stop({protocol_violation, Reason}, St).
 
 
 
@@ -486,7 +472,7 @@ maybe_open_session({ok, St}) ->
     open_session(undefined, St);
 
 maybe_open_session({error, Reason, St}) ->
-    abort(Reason, St).
+    stop(Reason, St).
 
 
 %% -----------------------------------------------------------------------------
@@ -535,7 +521,7 @@ open_session(Extra, St0) ->
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
         error:{invalid_options, missing_client_role} = Reason ->
-            abort(Reason, St0)
+            stop(Reason, St0)
     end.
 
 
@@ -555,120 +541,6 @@ maybe_gen_authid(UserId) ->
     UserId.
 
 
-%% @private
-
-abort({unsupported_encoding, Format}, St) ->
-    Reason = <<"Unsupported message encoding">>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{encoding => Format}, St);
-
-abort(system_failure, St) ->
-    Reason = <<"Internal system error">>,
-    abort(?BONDY_SYSTEM_FAILURE_ERROR, Reason, #{}, St);
-
-abort(decoding, St) ->
-    Reason = <<"Error during message decoding">>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
-
-abort(incompatible_message, St) ->
-    Reason = <<"Incompatible message">>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
-
-abort({invalid_options, missing_client_role}, St) ->
-    Reason = <<
-        "No client roles provided. Please provide at least one client role."
-    >>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
-
-abort({authentication_failed, invalid_scheme}, St) ->
-    Reason = <<"Unsupported authentication scheme.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, invalid_authmethod}, St) ->
-    Reason = <<"Unsupported authentication method.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, no_such_realm}, St) ->
-    Uri = bondy_context:realm_uri(St#wamp_state.context),
-    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
-    %% REVIEW shouldn't his be a ?WAMP_NO_SUCH_REALM error?
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, missing_signature}, St) ->
-    Reason = <<"The signature did not match.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, no_matching_sources}, St) ->
-    Reason = <<
-        "The authentication source does not match the sources allowed"
-        " for this role."
-    >>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, oauth2_invalid_grant}, St) ->
-    Reason = <<
-        "The access token provided is expired, revoked, malformed,"
-        " or invalid either because it does not match the Realm used in the"
-        " request, or because it was issued to another peer."
-    >>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({authentication_failed, _}, St) ->
-    %% no_such_role, invalid_role, bad_signature,
-    Reason = <<"The signature did not match.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort(no_such_realm, St) ->
-    Uri = bondy_context:realm_uri(St#wamp_state.context),
-    Reason = <<"Realm '", Uri/binary, "' does not exist.">>,
-    abort(?WAMP_NO_SUCH_REALM, Reason, #{}, St);
-
-abort({missing_param, Param}, St) ->
-    Reason = <<"Missing value for required parameter '", Param/binary, "'.">>,
-    abort(?WAMP_PROTOCOL_VIOLATION, Reason, #{}, St);
-
-abort(no_such_role, St) ->
-    Reason = <<"User does not exist.">>,
-    abort(?WAMP_NO_SUCH_ROLE, Reason, #{}, St);
-
-abort({unsupported_authmethod, Param}, St) ->
-    Reason = <<
-        "Router could not use the '", Param/binary, "' authmethod requested."
-        " Either the method is not supported by the Router or it is not"
-        " allowed by the Realm."
-    >>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({invalid_authmethod, ?OAUTH2_AUTH = Method}, St) ->
-    Reason = <<"Router could not use the '", Method/binary, "' authmethod requested.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort(no_authmethod, St) ->
-    Reason = <<"Router could not use the authmethods requested.">>,
-    abort(?WAMP_AUTHORIZATION_FAILED, Reason, #{}, St);
-
-abort({Code, Term}, St) when is_atom(Term) ->
-    abort({Code, ?CHARS2BIN(atom_to_list(Term))}, St).
-
-
-%% @private
-abort(Type, Reason, Details, St)
-when is_binary(Type) andalso is_binary(Reason) ->
-    M = abort_message(Type, Reason, Details, St),
-    ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    Reply = wamp_encoding:encode(M, encoding(St)),
-    {stop, Reason, Reply, St}.
-
-
-%% @private
-abort_message(Type, Reason, Details0, _) ->
-    Details = Details0#{
-        message => Reason,
-        timestamp => bondy_utils:iso8601(erlang:system_time(microsecond))
-    },
-    wamp_message:abort(Details, Type).
-
-
-%% @private
 maybe_auth_challenge(_, {error, not_found}, St) ->
     {error, no_such_realm, St};
 
@@ -740,6 +612,10 @@ authroles(Details) ->
         undefined ->
             case maps:get(authrole, Details, undefined) of
                 undefined ->
+                    %% null
+                    undefined;
+                <<>> ->
+                    %% empty string
                     undefined;
                 Role ->
                     [Role]
@@ -747,8 +623,8 @@ authroles(Details) ->
         List when is_list(List) ->
             List;
         _ ->
-            %% TODO Should we abort?
-            []
+            Reason = <<"The value for 'x_authroles' is invalid. It should be a list of groupnames.">>,
+            throw({protocol_violation, Reason})
     end.
 
 
@@ -786,9 +662,185 @@ auth_challenge([], St) ->
 
 
 
+
 %% =============================================================================
 %% PRIVATE: UTILS
 %% =============================================================================
+
+
+
+%% @private
+
+stop(#abort{} = M, St) ->
+    stop(M, [], St);
+
+stop(Reason, St) ->
+    stop(abort_message(Reason), St).
+
+
+%% @private
+stop(#abort{reason_uri = Uri} = M, Acc, St0) ->
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
+    Bin = wamp_encoding:encode(M, encoding(St0)),
+
+    %% We reply all previous messages plus an abort message and close
+    St1 = St0#wamp_state{state_name = closed},
+    {stop, Uri, [Bin|Acc], St1}.
+
+
+%% @private
+abort_message(internal_error) ->
+    Details = #{
+        message => <<"Internal system error, contact your administrator.">>
+    },
+    wamp_message:abort(Details, ?BONDY_INTERNAL_ERROR);
+
+abort_message(decoding_error) ->
+    Details = #{
+        message => <<"An error ocurred while deserealising a message.">>
+    },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message(invalid_message) ->
+    Details = #{
+        message => <<"An invalid message was received.">>
+    },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message(no_authmethod) ->
+    Details = #{
+        message => <<"Router could not use the authmethod requested.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+
+abort_message(no_such_realm) ->
+    Details = #{
+        message => <<"Realm does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+
+abort_message(no_such_group) ->
+    Details = #{
+        message => <<"Group does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
+
+abort_message(no_such_user) ->
+    Details = #{
+        message => <<"User does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+
+abort_message({protocol_violation, Reason}) when is_binary(Reason) ->
+    wamp_message:abort(#{message => Reason}, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message({authentication_failed, invalid_authmethod}) ->
+    Details = #{
+        message => <<"Unsupported authentication method.">>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+
+abort_message({authentication_failed, no_such_realm}) ->
+    Details = #{
+        message => <<"Realm does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_REALM);
+
+abort_message({authentication_failed, no_such_group}) ->
+    Details = #{
+        message => <<"A group does not exist for the the groupname or one of the groupnames requested ('authrole' or 'x_authroles').">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
+
+abort_message({authentication_failed, no_such_user}) ->
+    Details = #{
+        message => <<"The user requested (via 'authid') does not exist.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+
+abort_message({authentication_failed, invalid_scheme}) ->
+    Details = #{
+        message => <<"Unsupported authentication scheme.">>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+
+abort_message({authentication_failed, missing_signature}) ->
+    Details = #{
+        message => <<"The signature did not match.">>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+
+abort_message({authentication_failed, oauth2_invalid_grant}) ->
+    Details = #{
+        message => <<
+            "The access token provided is expired, revoked, malformed,"
+            " or invalid either because it does not match the Realm used in the"
+            " request, or because it was issued to another peer."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+
+abort_message({authentication_failed, _}) ->
+    %% bad_signature,
+    Details = #{
+        message => <<"The signature did not match.">>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
+
+abort_message({unsupported_encoding, Encoding}) ->
+    Details = #{
+        message => <<
+            "Unsupported message encoding '",
+            (atom_to_binary(Encoding))/binary,
+            "'."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message({invalid_options, missing_client_role}) ->
+    Details = #{
+        message => <<
+            "No client roles provided. Please provide at least one client role."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message({missing_param, Param}) ->
+    Details = #{
+        message => <<
+            "Missing value for required parameter '", Param/binary, "'."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message({unsupported_authmethod, Method}) ->
+    Details = #{
+        message => <<
+            "Router could not use the '", Method/binary, "' authmethod requested."
+            " Either the method is not supported by the Router or it is not"
+            " allowed by the Realm."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+
+abort_message({invalid_authmethod, Method}) ->
+    Details = #{
+        message => <<
+            "Router could not use the authmethod requested ('",
+            Method/binary,
+            "')."
+        >>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHORIZATION_FAILED);
+
+abort_message({Code, Term}) when is_atom(Term) ->
+    abort_message({Code, ?CHARS2BIN(atom_to_list(Term))}).
+
+
+%% @private
+% abort_message(Details, Uri) when is_map(Details), is_binary(Uri) ->
+%     wamp_message:abort(Details, Uri).
+
 
 
 %% -----------------------------------------------------------------------------

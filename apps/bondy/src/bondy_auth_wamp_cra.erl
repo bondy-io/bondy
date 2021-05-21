@@ -57,7 +57,7 @@ init(Ctxt) ->
     try
 
         User = bondy_auth:user(Ctxt),
-        User =/= undefined orelse throw(no_such_role),
+        User =/= undefined orelse throw(no_such_user),
 
         PWD = bondy_rbac_user:password(User),
         PWD =/= undefined orelse throw(invalid_context),
