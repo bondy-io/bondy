@@ -408,12 +408,10 @@ handle_inbound_messages(
     Signature = M#authenticate.signature,
     Extra = M#authenticate.extra,
 
-    Result = bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0),
-
-    case Result of
-        {ok, Extra, AuthCtxt1} ->
+    case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
+        {ok, WelcomeAuthExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{auth_context = AuthCtxt1},
-            open_session(Extra, St1);
+            open_session(WelcomeAuthExtra, St1);
         {error, Reason} ->
             stop({authentication_failed, Reason}, St0)
     end;
