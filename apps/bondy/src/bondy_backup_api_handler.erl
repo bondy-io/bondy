@@ -52,7 +52,7 @@ handle_call(M, Ctxt) ->
         _:Reason ->
             %% We catch any exception from do_handle and turn it
             %% into a WAMP Error
-            Error = bondy_wamp_utils:maybe_error(Reason, M),
+            Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
             bondy:send(PeerId, Error)
     end.
 
