@@ -129,8 +129,12 @@ handle_info(
     #state{socket = Socket, protocol_state = undefined} = St0) ->
     case handle_handshake(MaxLen, Encoding, St0) of
         {ok, St1} ->
-            ok = maybe_active_once(St1),
-            {noreply, St1, ?TIMEOUT};
+            case maybe_active_once(St1) of
+                ok ->
+                    {noreply, St1, ?TIMEOUT};
+                {error, Reason} ->
+                    {stop, Reason, St1}
+            end;
         {stop, Reason, St1} ->
             {stop, Reason, St1}
     end;
@@ -157,8 +161,12 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = St0) ->
 
     case handle_data(<<Buffer/binary, Data/binary>>, St1) of
         {ok, St2} ->
-            ok = maybe_active_once(St2),
-            {noreply, St2, ?TIMEOUT};
+            case maybe_active_once(St1) of
+                ok ->
+                    {noreply, St2, ?TIMEOUT};
+                {error, Reason} ->
+                    {stop, Reason, St2}
+            end;
         {stop, Reason, St2} ->
             {stop, Reason, St2}
     end;
