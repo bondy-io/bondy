@@ -691,7 +691,7 @@ abort_message(internal_error) ->
     Details = #{
         message => <<"Internal system error, contact your administrator.">>
     },
-    wamp_message:abort(Details, ?BONDY_INTERNAL_ERROR);
+    wamp_message:abort(Details, ?BONDY_ERROR_INTERNAL);
 
 abort_message(decoding_error) ->
     Details = #{

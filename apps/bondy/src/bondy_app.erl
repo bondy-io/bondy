@@ -232,25 +232,25 @@ setup_wamp_subscriptions() ->
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?BONDY_SEC_USER_ADDED,
+        ?BONDY_RBAC_USER_ADDED,
         fun bondy_wamp_rest_gateway_api:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?BONDY_SEC_USER_DELETED,
+        ?BONDY_RBAC_USER_DELETED,
         fun bondy_wamp_rest_gateway_api:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?BONDY_SEC_USER_UPDATED,
+        ?BONDY_RBAC_USER_UPDATED,
         fun bondy_wamp_rest_gateway_api:handle_event/2
     ),
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?BONDY_SEC_PASSWORD_CHANGED,
+        ?BONDY_RBAC_USER_PASSWORD_CHANGED,
         fun bondy_wamp_rest_gateway_api:handle_event/2
     ),
     ok.

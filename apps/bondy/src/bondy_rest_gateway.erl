@@ -322,7 +322,7 @@ handle_cast(#event{} = Event, State) ->
     NewState = case {Topic, Event#event.arguments} of
         {undefined, _} ->
             State;
-        {?D_BONDY_REALM_DELETED, [Uri]} ->
+        {?BONDY_REALM_DELETED_OLD, [Uri]} ->
             on_realm_deleted(Uri, State)
     end,
     {noreply, NewState};
@@ -457,8 +457,8 @@ subscribe(State) ->
         match => <<"exact">>
     },
 
-    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?D_BONDY_REALM_DELETED),
-    Subs = maps:put(Id, ?D_BONDY_REALM_DELETED, State#state.subscriptions),
+    {ok, Id} = bondy:subscribe(?BONDY_PRIV_REALM_URI, Opts, ?BONDY_REALM_DELETED_OLD),
+    Subs = maps:put(Id, ?BONDY_REALM_DELETED_OLD, State#state.subscriptions),
 
     State#state{subscriptions = Subs}.
 
