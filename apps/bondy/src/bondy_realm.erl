@@ -33,35 +33,9 @@
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 
-%% We use persistent_term to cache the security status to avoid
-%% accessing plum_db.
--define(GET_SECURITY_STATUS(Uri),
-    try persistent_term:get({Uri, security_status}) of
-        Status -> Status
-    catch
-        error:badarg ->
-            Status = bondy_security:status(Uri),
-            ok = persistent_term:put({Uri, security_status}, Status),
-            Status
-    end
-).
--define(BONDY_SECURITY_ENABLE(Uri),
-    bondy_security:enable(Uri),
-    persistent_term:put({Uri, security_status}, enabled)
-).
--define(BONDY_SECURITY_DISABLE(Uri),
-    bondy_security:disable(Uri),
-    persistent_term:put({Uri, security_status}, disabled)
-).
--define(ERASE_SECURITY_STATUS(Uri),
-    begin
-        _ = persistent_term:erase({Uri, security_status}),
-        ok
-    end
-).
-
-
 -define(PDB_PREFIX, {security, realms}).
+-define(SECURITY_STATUS_PREFIX(RealmUri), {security_status, RealmUri}).
+
 -define(LOCAL_CIDRS, [
     %% single class A network 10.0.0.0 – 10.255.255.255
     {{10, 0, 0, 0}, 8},
@@ -406,8 +380,16 @@ is_authmethod(#realm{authmethods = L}, Method) ->
 %% -----------------------------------------------------------------------------
 -spec is_security_enabled(t() | uri()) -> boolean().
 
-is_security_enabled(R) ->
-    security_status(R) =:= enabled.
+is_security_enabled(#realm{uri = Uri}) ->
+    is_security_enabled(Uri);
+
+is_security_enabled(Uri) when is_binary(Uri) ->
+    exists(Uri) orelse error(no_such_realm),
+    case plum_db:get(?SECURITY_STATUS_PREFIX(Uri), enabled) of
+        true -> true;
+        false -> false;
+        undefined -> false
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -420,7 +402,17 @@ security_status(#realm{uri = Uri}) ->
     security_status(Uri);
 
 security_status(Uri) when is_binary(Uri) ->
-    ?GET_SECURITY_STATUS(Uri).
+    try persistent_term:get({Uri, security_status}) of
+        Status -> Status
+    catch
+        error:badarg ->
+            Status = case is_security_enabled(Uri) of
+                true -> enabled;
+                _ -> disabled
+            end,
+            ok = persistent_term:put({Uri, security_status}, Status),
+            Status
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -430,7 +422,9 @@ security_status(Uri) when is_binary(Uri) ->
 -spec enable_security(t()) -> ok.
 
 enable_security(#realm{uri = Uri}) ->
-    ?BONDY_SECURITY_ENABLE(Uri).
+    exists(Uri) orelse error(no_such_realm),
+    _ = plum_db:put(?SECURITY_STATUS_PREFIX(Uri), enabled, true),
+    persistent_term:put({Uri, security_status}, enabled).
 
 
 %% -----------------------------------------------------------------------------
@@ -443,7 +437,10 @@ disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, forbidden};
 
 disable_security(#realm{uri = Uri}) ->
-    ?BONDY_SECURITY_DISABLE(Uri).
+    exists(Uri) orelse error(no_such_realm),
+    _ = plum_db:put(?SECURITY_STATUS_PREFIX(Uri), enabled, false),
+    persistent_term:put({Uri, security_status}, disabled).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -634,7 +631,7 @@ delete(Uri) ->
     %% explicitely delete the users first
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
         [] ->
-            ok = ?ERASE_SECURITY_STATUS(Uri),
+            _ = persistent_term:erase({Uri, security_status}),
             plum_db:delete(?PDB_PREFIX, Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
@@ -933,3 +930,5 @@ gen_private_keys() ->
         jose_jwk:generate_key({namedCurve, secp256r1})
         || _ <- lists:seq(1, 3)
     ].
+
+

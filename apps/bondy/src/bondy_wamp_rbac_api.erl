@@ -87,25 +87,25 @@ do_handle(#call{procedure_uri = ?BONDY_REALM_LIST_OLD} = M, Ctxt) ->
     Ext = [bondy_realm:to_external(X) || X <- bondy_realm:list()],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{procedure_uri = ?BONDY_SECURITY_ENABLE} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_ENABLE} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     ok = bondy_realm:enable_security(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{});
 
-do_handle(#call{procedure_uri = ?BONDY_SECURITY_DISABLE} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_DISABLE} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     ok = bondy_realm:disable_security(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{});
 
-do_handle(#call{procedure_uri = ?BONDY_SECURITY_STATUS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_STATUS} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Status = bondy_realm:security_status(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{}, [Status]);
 
-do_handle(#call{procedure_uri = ?BONDY_SECURITY_IS_ENABLED} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_IS_ENABLED} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Boolean = bondy_realm:is_security_enabled(bondy_realm:fetch(Uri)),
