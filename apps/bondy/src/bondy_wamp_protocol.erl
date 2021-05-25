@@ -829,7 +829,7 @@ abort_message({invalid_authmethod, Method}) ->
             "')."
         >>
     },
-    wamp_message:abort(Details, ?WAMP_AUTHORIZATION_FAILED);
+    wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
 abort_message({Code, Term}) when is_atom(Term) ->
     abort_message({Code, ?CHARS2BIN(atom_to_list(Term))}).
