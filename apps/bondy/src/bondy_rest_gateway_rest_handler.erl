@@ -694,7 +694,7 @@ perform_action(
 
         {error, Reason} ->
             Error = #{
-                <<"code">> => ?BONDY_BAD_GATEWAY_ERROR,
+                <<"code">> => ?BONDY_ERROR_BAD_GATEWAY,
                 <<"message">> => <<"Error while connecting with upstream URL '", Url/binary, "'.">>,
                 <<"description">> => Reason %% TODO convert to string
             },
@@ -961,13 +961,14 @@ error_encoding(_Other) -> json.
 uri_to_status_code(timeout) ->
     ?HTTP_GATEWAY_TIMEOUT;
 
-uri_to_status_code(?BONDY_BAD_GATEWAY_ERROR) ->
+uri_to_status_code(?BONDY_ERROR_BAD_GATEWAY) ->
     ?HTTP_SERVICE_UNAVAILABLE;
 
 uri_to_status_code(?BONDY_ERROR_TIMEOUT) ->
     ?HTTP_GATEWAY_TIMEOUT;
 
 uri_to_status_code(?WAMP_AUTHORIZATION_FAILED) ->
+    %% REVIEW
     ?HTTP_FORBIDDEN;
 
 uri_to_status_code(?WAMP_CANCELLED) ->
@@ -992,6 +993,7 @@ uri_to_status_code(?WAMP_NET_FAILURE) ->
     ?HTTP_BAD_GATEWAY;
 
 uri_to_status_code(?WAMP_NOT_AUTHORIZED) ->
+    %% REVIEW
     ?HTTP_UNAUTHORIZED;
 
 uri_to_status_code(?WAMP_NO_ELIGIBLE_CALLE) ->
@@ -1057,7 +1059,7 @@ mops_eval(Expr, Ctxt) ->
     catch
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
-                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_API_GATEWAY_ERROR_INVALID_EXPR,
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
                     Expr,
@@ -1069,13 +1071,13 @@ mops_eval(Expr, Ctxt) ->
             });
         error:{badkey, Key} ->
             throw(#{
-                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_API_GATEWAY_ERROR_INVALID_EXPR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkeypath, Path} ->
             throw(#{
-                <<"code">> => ?BONDY_REST_GATEWAY_INVALID_EXPR_ERROR,
+                <<"code">> => ?BONDY_API_GATEWAY_ERROR_INVALID_EXPR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })

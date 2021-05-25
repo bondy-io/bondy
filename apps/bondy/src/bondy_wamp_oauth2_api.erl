@@ -65,17 +65,17 @@ handle_call(M, Ctxt) ->
 -spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     wamp_messsage:result() | wamp_message:error().
 
-do_handle(#call{procedure_uri = ?LOOKUP_TOKEN} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_OAUTH2_LOOKUP_TOKEN} = M, Ctxt) ->
     [Uri, Issuer, Token] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
     Result = bondy_oauth2:lookup_token(Uri, Issuer, Token),
     bondy_wamp_utils:maybe_error(Result, M);
 
-do_handle(#call{procedure_uri = ?REVOKE_TOKEN} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_OAUTH2_REVOKE_TOKEN} = M, Ctxt) ->
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
     Result = erlang:apply(bondy_oauth2, revoke_token, L),
     bondy_wamp_utils:maybe_error(Result, M);
 
-do_handle(#call{procedure_uri = ?REVOKE_TOKENS} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_OAUTH2_REVOKE_TOKENS} = M, Ctxt) ->
     [Uri, Issuer, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
     Result = bondy_oauth2:revoke_token(refresh_token, Uri, Issuer, Username),
     bondy_wamp_utils:maybe_error(Result, M);
