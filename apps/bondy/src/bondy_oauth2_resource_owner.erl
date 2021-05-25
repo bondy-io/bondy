@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_api.erl -
+%%  bondy_oauth2_resource_owner.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%

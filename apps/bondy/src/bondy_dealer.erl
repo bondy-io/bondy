@@ -614,7 +614,7 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
 do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
     %% TODO Maybe
     %% ReqId = bondy_utils:get_id(global),
-    %% spawn with pool -> bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
+    %% spawn with pool -> bondy_wamp_meta_api:handle_call(M, Ctxt);
     %% {ok, ReqId, Ctxt}.
     ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
     handle_call(M, Ctxt).
@@ -633,30 +633,30 @@ handle_call(
 handle_call(
     #call{procedure_uri = <<"bondy.api_gateway.", _/binary>>} = M,
     Ctxt) ->
-    bondy_rest_gateway_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_rest_gateway_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.security.", _/binary>>} = M,
     Ctxt) ->
-    bondy_rbac_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_rbac_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.oauth2.", _/binary>>} = M,
     Ctxt) ->
-    bondy_oauth2_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_oauth2_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.backup.", _/binary>>} = M,
     Ctxt) ->
-    bondy_backup_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_backup_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_meta_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_meta_api_handler:handle_call(M, Ctxt);
+    bondy_wamp_meta_api:handle_call(M, Ctxt);
 
 handle_call(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
