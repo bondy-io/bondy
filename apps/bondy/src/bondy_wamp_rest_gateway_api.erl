@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_rest_gateway_api_handler.erl - the Cowboy handler for all API Gateway
+%%  bondy_wamp_rest_gateway_api.erl - the Cowboy handler for all API Gateway
 %%  requests
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
@@ -21,7 +21,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_rest_gateway_api_handler).
+-module(bondy_wamp_rest_gateway_api).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").

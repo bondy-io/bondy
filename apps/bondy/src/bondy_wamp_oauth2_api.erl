@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_oauth2_api_handler).
+-module(bondy_wamp_oauth2_api).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
