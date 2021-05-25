@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_rest_gateway.erl -
+%%  bondy_http_api_gateway.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_rest_gateway).
+-module(bondy_http_api_gateway).
 -behaviour(gen_server).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -765,10 +765,10 @@ start_https(Routes, Name) ->
 
 validate_spec(Map) ->
     try
-        Spec = bondy_rest_gateway_spec_parser:parse(Map),
+        Spec = bondy_http_api_gateway_spec_parser:parse(Map),
         %% We compile it to validate the spec, if it is not valid it fill
         %% fail with badarg
-        SchemeTables = bondy_rest_gateway_spec_parser:dispatch_table(Spec),
+        SchemeTables = bondy_http_api_gateway_spec_parser:dispatch_table(Spec),
         [_ = cowboy_router:compile(Table) || {_Scheme, Table} <- SchemeTables],
         {ok, Spec}
     catch
@@ -792,7 +792,7 @@ load_dispatch_tables() ->
     Specs = lists:sort([
         begin
             try
-                Parsed = bondy_rest_gateway_spec_parser:parse(V),
+                Parsed = bondy_http_api_gateway_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
                 _ = lager:info(
                     "Loading and parsing API Gateway specification from store"
@@ -814,7 +814,7 @@ load_dispatch_tables() ->
         V =/= '$deleted'
     ]),
 
-    Result = bondy_rest_gateway_spec_parser:dispatch_table(
+    Result = bondy_http_api_gateway_spec_parser:dispatch_table(
         [element(3, S) || S <- Specs], base_routes()),
 
     case Result of
@@ -925,7 +925,7 @@ admin_spec() ->
 
 %% @private
 parse_specs(Specs, BaseRoutes) ->
-    case [bondy_rest_gateway_spec_parser:parse(S) || S <- Specs] of
+    case [bondy_http_api_gateway_spec_parser:parse(S) || S <- Specs] of
         [] ->
             [
                 {<<"http">>, BaseRoutes},
@@ -936,7 +936,7 @@ parse_specs(Specs, BaseRoutes) ->
                 maybe_init_groups(maps:get(<<"realm_uri">>, Spec))
                 || Spec <- L
             ],
-            bondy_rest_gateway_spec_parser:dispatch_table(L, BaseRoutes)
+            bondy_http_api_gateway_spec_parser:dispatch_table(L, BaseRoutes)
     end.
 
 

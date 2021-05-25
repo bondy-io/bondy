@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_rest_gateway_SUITE.erl -
+%%  bondy_http_api_gateway_SUITE.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_rest_gateway_SUITE).
+-module(bondy_http_api_gateway_SUITE).
 -include_lib("common_test/include/ct.hrl").
 -compile([nowarn_export_all, export_all]).
 
@@ -110,7 +110,7 @@ simple_1_test(_) ->
             }
         }
     },
-    bondy_rest_gateway_spec_parser:parse(Spec).
+    bondy_http_api_gateway_spec_parser:parse(Spec).
 
 
 %% png() ->

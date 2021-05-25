@@ -85,23 +85,23 @@ handle_event(?BONDY_RBAC_USER_PASSWORD_CHANGED, #event{arguments = [RealmUri, Us
 -spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     wamp_messsage:result() | wamp_message:error().
 
-do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LOAD} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_HTTP_API_GATEWAY_LOAD} = M, Ctxt) ->
     [Spec] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-    case bondy_rest_gateway:load(Spec) of
+    case bondy_http_api_gateway:load(Spec) of
         ok ->
             wamp_message:result(M#call.request_id, #{});
         {error, Reason} ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_HTTP_API_GATEWAY_LIST} = M, Ctxt) ->
     [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
-    Result = bondy_rest_gateway:list(),
+    Result = bondy_http_api_gateway:list(),
     wamp_message:result(M#call.request_id, #{}, [Result]);
 
-do_handle(#call{procedure_uri = ?BONDY_API_GATEWAY_LOOKUP} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_HTTP_API_GATEWAY_LOOKUP} = M, Ctxt) ->
     [Id] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-    case bondy_rest_gateway:lookup(Id) of
+    case bondy_http_api_gateway:lookup(Id) of
         {error, Reason} ->
             bondy_wamp_utils:error(Reason, M);
         Spec ->

@@ -114,12 +114,12 @@ start_phase(init_admin_listeners, normal, []) ->
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
-    bondy_rest_gateway:start_admin_listeners();
+    bondy_http_api_gateway:start_admin_listeners();
 
 start_phase(configure_features, normal, []) ->
     ok = bondy_realm:apply_config(),
     %% ok = bondy_oauth2:apply_config(),
-    ok = bondy_rest_gateway:apply_config(),
+    ok = bondy_http_api_gateway:apply_config(),
     ok;
 
 start_phase(init_registry, normal, []) ->
@@ -145,7 +145,7 @@ start_phase(init_listeners, normal, []) ->
     ok = bondy_wamp_tcp:start_listeners(),
     %% WAMP Websocket and REST Gateway HTTP listeners
     %% @TODO We need to separate the /ws path into another listener/port number
-    ok = bondy_rest_gateway:start_listeners(),
+    ok = bondy_http_api_gateway:start_listeners(),
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),
     ok.
@@ -292,7 +292,7 @@ stop_router_services() ->
         "Suspending HTTP/S and WS/S listeners. "
         "No new connections will be accepted."
     ),
-    ok = bondy_rest_gateway:suspend_listeners(),
+    ok = bondy_http_api_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
     _ = lager:info(
@@ -315,7 +315,7 @@ stop_router_services() ->
 
     %% We force the HTTP/S and WS/S connections to stop
     _ = lager:info("Terminating all HTTP/S and WS/S connections"),
-    ok = bondy_rest_gateway:stop_listeners(),
+    ok = bondy_http_api_gateway:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
     _ = lager:info("Terminating all TCP/TLS connections"),
