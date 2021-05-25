@@ -17,25 +17,25 @@
 %% =============================================================================
 
 
--define(BONDY_OAUTH2_ADD_CLIENT,      <<"bondy.api_gateway.add_client">>).
--define(BONDY_OAUTH2_ADD_RES_OWNER,   <<"bondy.api_gateway.add_resource_owner">>).
+-define(BONDY_OAUTH2_CLIENT_ADD,      <<"bondy.api_gateway.add_client">>).
+-define(BONDY_OAUTH2_RES_OWNER_ADD,   <<"bondy.api_gateway.add_resource_owner">>).
 -define(BONDY_OAUTH2_CLIENT_ADDED,    <<"bondy.api_gateway.client_added">>).
 -define(BONDY_OAUTH2_CLIENT_DELETED,  <<"bondy.api_gateway.client_deleted">>).
 -define(BONDY_OAUTH2_CLIENT_UPDATED,  <<"bondy.api_gateway.client_updated">>).
--define(BONDY_OAUTH2_DELETE_CLIENT,   <<"bondy.api_gateway.delete_client">>).
--define(BONDY_OAUTH2_DELETE_RES_OWNER,     <<"bondy.api_gateway.delete_resource_owner">>).
--define(BONDY_OAUTH2_FETCH_CLIENT,     <<"bondy.api_gateway.fetch_client">>).
--define(BONDY_OAUTH2_FETCH_RES_OWNER, <<"bondy.api_gateway.fetch_resource_owner">>).
+-define(BONDY_OAUTH2_CLIENT_DELETE,   <<"bondy.api_gateway.delete_client">>).
+-define(BONDY_OAUTH2_RES_OWNER_DELETE,     <<"bondy.api_gateway.delete_resource_owner">>).
+-define(BONDY_OAUTH2_CLIENT_GET,     <<"bondy.api_gateway.fetch_client">>).
+-define(BONDY_OAUTH2_RES_OWNER_GET, <<"bondy.api_gateway.fetch_resource_owner">>).
 -define(BONDY_API_GATEWAY_LIST,              <<"bondy.api_gateway.list">>).
--define(BONDY_OAUTH2_LIST_CLIENTS,     <<"bondy.api_gateway.list_clients">>).
--define(BONDY_OAUTH2_LIST_RES_OWNERS, <<"bondy.api_gateway.list_resource_owners">>).
+-define(BONDY_OAUTH2_CLIENT_LIST,     <<"bondy.api_gateway.list_clients">>).
+-define(BONDY_OAUTH2_RES_OWNER_LIST, <<"bondy.api_gateway.list_resource_owners">>).
 -define(BONDY_API_GATEWAY_LOAD,             <<"bondy.api_gateway.load">>).
 -define(BONDY_API_GATEWAY_LOOKUP,            <<"bondy.api_gateway.lookup">>).
 -define(BONDY_OAUTH2_RES_OWNER_ADDED, <<"bondy.api_gateway.resource_owner_added">>).
 -define(BONDY_OAUTH2_RES_OWNER_DELETED,   <<"bondy.api_gateway.resource_owner_deleted">>).
 -define(BONDY_OAUTH2_RES_OWNER_UPDATED,   <<"bondy.api_gateway.resource_owner_updated">>).
--define(BONDY_OAUTH2_UPDATE_CLIENT,   <<"bondy.api_gateway.update_client">>).
--define(BONDY_OAUTH2_UPDATE_RES_OWNER,     <<"bondy.api_gateway.update_resource_owner">>).
+-define(BONDY_OAUTH2_CLIENT_UPDATE,   <<"bondy.api_gateway.update_client">>).
+-define(BONDY_OAUTH2_RES_OWNER_UPDATE,     <<"bondy.api_gateway.update_resource_owner">>).
 -define(BONDY_BACKUP_CREATE,            <<"bondy.backup.create">>).
 -define(BONDY_BACKUP_FINISHED,          <<"bondy.backup.finished">>).
 -define(BONDY_BACKUP_RESTORE,           <<"bondy.backup.restore">>).
@@ -102,6 +102,6 @@
 -define(BONDY_SUBS_LIST,                <<"bondy.subscription.list">>).
 -define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
 -define(BONDY_REALM_UPDATE,             <<"bondy.security.update_realm">>).
--define(BONDY_OAUTH2_LOOKUP_TOKEN, <<"bondy.oauth2.lookup_token">>).
--define(BONDY_OAUTH2_REVOKE_TOKEN, <<"bondy.oauth2.revoke_token">>).
--define(BONDY_OAUTH2_REVOKE_TOKENS, <<"bondy.oauth2.revoke_tokens">>).
+-define(BONDY_OAUTH2_TOKEN_LOOKUP, <<"bondy.oauth2.lookup_token">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE, <<"bondy.oauth2.revoke_token">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE_ALL, <<"bondy.oauth2.revoke_tokens">>).
