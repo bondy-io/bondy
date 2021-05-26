@@ -29,6 +29,7 @@
 -export([error/2]).
 -export([no_such_procedure_error/1]).
 -export([no_such_registration_error/1]).
+-export([no_such_session_error/1]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
@@ -137,38 +138,42 @@ no_such_procedure_error(#call{} = M) ->
         M,
         #{},
         ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-        }
+        [Mssg]
     ).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 no_such_registration_error(RegId) when is_integer(RegId) ->
-    Mssg = <<"No registration exists for the supplied RegistrationId">>,
     wamp_message:error(
         ?UNREGISTER,
         RegId,
         #{},
         ?WAMP_NO_SUCH_REGISTRATION,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"No registration exists for the supplied RegistrationId or the details provided did not match an existing registration.">>
-        }
+        [<<"No registration exists for the supplied RegistrationId">>]
     ).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+no_such_session_error(SessionId) when is_integer(SessionId) ->
+    wamp_message:error(
+        ?UNREGISTER,
+        SessionId,
+        #{},
+        ?WAMP_NO_SUCH_SESSION,
+        [<<"No session exists for the supplied identifier">>]
+    ).
 
 
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
-
 
 
 
