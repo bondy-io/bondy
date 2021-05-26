@@ -27,7 +27,6 @@
 
 
 
-
 -export([handle_call/2]).
 
 
@@ -65,6 +64,18 @@ handle_call(M, Ctxt) ->
 %% =============================================================================
 
 
+do_handle(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
+    [RealmUri, SessionId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    case bondy_session:lookup(RealmUri, SessionId) of
+        {error, not_found} ->
+            {error, bondy_wamp_utils:no_such_session_error(SessionId)};
+        Session ->
+            wamp_message:result(
+                M#call.request_id,
+                #{},
+                [bondy_session:to_details_map(Session)]
+            )
+    end;
 
 %% -----------------------------------------------------------------------------
 %% WAMP REGISTRATION META PROCEDURES
