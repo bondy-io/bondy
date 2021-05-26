@@ -26,7 +26,7 @@ wamp_error_map() = #{error_uri =&gt; <a href="#type-uri">uri()</a>, details =&gt
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#aae_exchanges-0">aae_exchanges/0</a></td><td></td></tr><tr><td valign="top"><a href="#ack-2">ack/2</a></td><td>
 Acknowledges the reception of a WAMP message.</td></tr><tr><td valign="top"><a href="#call-5">call/5</a></td><td>
-A blocking call.</td></tr><tr><td valign="top"><a href="#publish-5">publish/5</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td>
+A blocking call.</td></tr><tr><td valign="top"><a href="#is_remote_peer-1">is_remote_peer/1</a></td><td></td></tr><tr><td valign="top"><a href="#publish-5">publish/5</a></td><td></td></tr><tr><td valign="top"><a href="#send-2">send/2</a></td><td>
 Sends a message to a WAMP peer.</td></tr><tr><td valign="top"><a href="#send-3">send/3</a></td><td>
 Sends a message to a local WAMP peer.</td></tr><tr><td valign="top"><a href="#send-4">send/4</a></td><td></td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td>
 Starts bondy.</td></tr><tr><td valign="top"><a href="#subscribe-3">subscribe/3</a></td><td>Calls bondy_broker:subscribe/3.</td></tr><tr><td valign="top"><a href="#subscribe-4">subscribe/4</a></td><td>Calls bondy_broker:subscribe/4.</td></tr></table>
@@ -65,6 +65,12 @@ call(ProcedureUri::binary(), Opts::map(), Args::list() | undefined, ArgsKw::map(
 <br />
 
 A blocking call.
+
+<a name="is_remote_peer-1"></a>
+
+### is_remote_peer/1 ###
+
+`is_remote_peer(X1) -> any()`
 
 <a name="publish-5"></a>
 

@@ -19,20 +19,34 @@ across the nodes in the cluster. However, each node has access to a local
 replica of the global registry and thus can load balance between local and
 remote Callees.
 
+## Supported Load Balancing Strategies
+
+Bondy supports all WAMP Basic and Advanced Profile load balancing
+strategies for Shared Registrations and extends those with additional
+strategies.
+
+### Single
+
+### First
+
+### Last
+
+### Random
+
+### Round Robin
+
+### Jump Consistent Hash
+
+### Queue Least Loaded
+
+### Queue Least Loaded Sample
+
 In the future we will explore implementing distributed load balancing
 algorithms such as Ant Colony, Particle Swarm Optimization and Biased Random
 Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976b5c0106e894bd4c41d89.pdf)
 <a name="types"></a>
 
 ## Data Types ##
-
-
-
-
-### <a name="type-continuation">continuation()</a> ###
-
-
-__abstract datatype__: `continuation()`
 
 
 
@@ -47,11 +61,19 @@ entries() = [<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</
 
 
 
+### <a name="type-iterator">iterator()</a> ###
+
+
+__abstract datatype__: `iterator()`
+
+
+
+
 ### <a name="type-opts">opts()</a> ###
 
 
 <pre><code>
-opts() = #{strategy =&gt; <a href="#type-strategy">strategy()</a>, force_locality =&gt; boolean()}
+opts() = #{strategy =&gt; <a href="#type-strategy">strategy()</a>, x_force_locality =&gt; boolean(), x_routing_key =&gt; binary()}
 </code></pre>
 
 
@@ -61,7 +83,7 @@ opts() = #{strategy =&gt; <a href="#type-strategy">strategy()</a>, force_localit
 
 
 <pre><code>
-strategy() = single | first | last | random | round_robin
+strategy() = single | first | last | random | round_robin | jump_consistent_hash | queue_least_loaded | queue_least_loaded_sample
 </code></pre>
 
 <a name="index"></a>
@@ -90,7 +112,7 @@ get(Entries::<a href="#type-entries">entries()</a>, Opts::<a href="#type-opts">o
 ### iterate/1 ###
 
 <pre><code>
-iterate(X1::<a href="#type-continuation">continuation()</a>) -&gt; {<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, <a href="#type-continuation">continuation()</a>} | {error, noproc}
+iterate(Iterator::<a href="#type-iterator">iterator()</a>) -&gt; {<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, <a href="#type-iterator">iterator()</a>} | {error, noproc} | end_of_table
 </code></pre>
 <br />
 
@@ -99,7 +121,7 @@ iterate(X1::<a href="#type-continuation">continuation()</a>) -&gt; {<a href="bon
 ### iterate/2 ###
 
 <pre><code>
-iterate(Entries0::<a href="#type-entries">entries()</a>, Opts0::<a href="#type-opts">opts()</a>) -&gt; {<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, <a href="#type-continuation">continuation()</a>} | $end_of_table
+iterate(Entries::<a href="#type-entries">entries()</a>, Opts0::<a href="#type-opts">opts()</a>) -&gt; {<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, <a href="#type-iterator">iterator()</a>} | $end_of_table | {error, noproc | map()}
 </code></pre>
 <br />
 

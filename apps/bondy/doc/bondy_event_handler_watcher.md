@@ -5,7 +5,7 @@
 * [Function Index](#index)
 * [Function Details](#functions)
 
-This module provides a bridge between WAMP events and OTP events.
+Implements the event watcher capability as designed by Lager.
 
 __Behaviours:__ [`gen_server`](gen_server.md).
 

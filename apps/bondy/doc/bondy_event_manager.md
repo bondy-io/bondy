@@ -11,11 +11,39 @@ events.
 <a name="description"></a>
 
 ## Description ##
+
 It implements the "watched" handler capability i.e.
 `add_watched_handler/2,3`, `swap_watched_handler/2,3`.
 In addition, this module mirrors most of the gen_event API and adds variants
 with two arguments were the first argument is the defaul event manager
-(`bondy_event_manager`).<a name="index"></a>
+(`bondy_event_manager`).
+
+```
+       +---------------------------------------+
+       |                                       |
+       |          bondy_event_manager          |
+       |                                       |
+       +---------------------------------------+
+                           |
+                           |
+                           v
+       +---------------------------------------+
+       |                                       |
+       |    bondy_event_handler_watcher_sup    |
+       |                                       |
+       +---------------------------------------+
+                           |
+                           +--------------------------------+
+                           |                                |
+        +---------------------------------------+       +---+---+
+        |                                       |       |       |
+        |     bondy_event_handler_watcher 1     |       |   N   |
+        |                                       |       |       |
+        +---------------------------------------+       +-------+
+                        simple_one_for_one
+```
+
+<a name="index"></a>
 
 ## Function Index ##
 

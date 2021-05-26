@@ -29,7 +29,7 @@ defined implementation backend callback module
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#callback_mode-0">callback_mode/0</a></td><td></td></tr><tr><td valign="top"><a href="#code_change-4">code_change/4</a></td><td></td></tr><tr><td valign="top"><a href="#disable-0">disable/0</a></td><td></td></tr><tr><td valign="top"><a href="#disabled-3">disabled/3</a></td><td></td></tr><tr><td valign="top"><a href="#discovering-3">discovering/3</a></td><td>In this state the agent uses the callback module to discover peers
-by calling its lookup/2 callback.</td></tr><tr><td valign="top"><a href="#enable-0">enable/0</a></td><td></td></tr><tr><td valign="top"><a href="#format_status-2">format_status/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#joined-3">joined/3</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-0">lookup/0</a></td><td></td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#status-0">status/0</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-3">terminate/3</a></td><td></td></tr></table>
+by calling its lookup/2 callback.</td></tr><tr><td valign="top"><a href="#enable-0">enable/0</a></td><td></td></tr><tr><td valign="top"><a href="#format_status-2">format_status/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#joined-3">joined/3</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-0">lookup/0</a></td><td></td></tr><tr><td valign="top"><a href="#start-0">start/0</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-3">terminate/3</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -120,15 +120,6 @@ start() -&gt; {ok, pid()} | ignore | {error, term()}
 
 <pre><code>
 start_link() -&gt; {ok, pid()} | ignore | {error, term()}
-</code></pre>
-<br />
-
-<a name="status-0"></a>
-
-### status/0 ###
-
-<pre><code>
-status() -&gt; enabled | disabled
 </code></pre>
 <br />
 

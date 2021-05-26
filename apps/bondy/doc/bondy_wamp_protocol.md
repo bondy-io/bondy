@@ -19,7 +19,7 @@
 
 
 <pre><code>
-state() = #wamp_state{subprotocol = <a href="#type-subprotocol">subprotocol()</a> | undefined, authmethod = any(), auth_signature = binary() | undefined, auth_timestamp = integer() | undefined, state_name = <a href="#type-state_name">state_name()</a>, context = <a href="bondy_context.md#type-t">bondy_context:t()</a> | undefined} | undefined
+state() = #wamp_state{subprotocol = <a href="#type-subprotocol">subprotocol()</a> | undefined, authmethod = any(), challenge = binary() | undefined, auth_context = map() | undefined, auth_timestamp = integer() | undefined, state_name = <a href="#type-state_name">state_name()</a>, context = <a href="bondy_context.md#type-t">bondy_context:t()</a> | undefined} | undefined
 </code></pre>
 
 
@@ -126,7 +126,7 @@ session_id(Wamp_state::<a href="#type-state">state()</a>) -&gt; <a href="#type-i
 ### terminate/1 ###
 
 <pre><code>
-terminate(St::<a href="#type-state">state()</a>) -&gt; ok
+terminate(Wamp_state::<a href="#type-state">state()</a>) -&gt; ok
 </code></pre>
 <br />
 

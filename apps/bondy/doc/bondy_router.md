@@ -24,7 +24,7 @@ The pools are implemented using the sidejob library in order to provide
 load regulation. Inn case a maximum pool capacity has been reached,
 the router will handle the message synchronously i.e. blocking the
 calling processes (usually the one that handles the transport connection
-e.g. [`bondy_wamp_ws_handler`](bondy_wamp_ws_handler.md)).
+e.g. [`bondy_wamp_ws_connection_handler`](bondy_wamp_ws_connection_handler.md)).
 
 The router also handles messages synchronously in those
 cases where it needs to preserve message ordering guarantees.

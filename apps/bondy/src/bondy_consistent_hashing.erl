@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  babel_consistent_hashing.erl -
+%%  bondy_consistent_hashing.erl -
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
@@ -84,6 +84,9 @@ jump_consistent_hash(Key, N) ->
 %% A Fast, Minimal Memory, Consistent Hash Algorithm
 %% https://arxiv.org/pdf/1406.2294.pdf
 %%
+%% @end
+%% -----------------------------------------------------------------------------
+
 %% static int32_t jump_consistent_hash(uint64_t key, int32_t num_buckets) {
 %%   int64_t b = -1, j = 0;
 %%   while (j < num_buckets) {
@@ -93,9 +96,7 @@ jump_consistent_hash(Key, N) ->
 %%   }
 %%   return (int32_t)b;
 %% }
-%% @end
-%% -----------------------------------------------------------------------------
-
+%%
 jump_consistent_hash(Key, N, _, J0) when J0 < N ->
     %% B1 = J0,
     NewKey = (Key * ?MAGIC + 1) band ?MASK,

@@ -306,7 +306,7 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Loads a security config file from
-%% `bondy_config:get([security, config_file])` if defined and applies its
+%% `bondy_config:get([security, config_file])' if defined and applies its
 %% definitions.
 %% @end
 %% -----------------------------------------------------------------------------
