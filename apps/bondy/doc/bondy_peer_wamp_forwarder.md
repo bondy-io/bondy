@@ -74,7 +74,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#async_forward-4">async_forward/4</a></td><td></td></tr><tr><td valign="top"><a href="#broadcast-4">broadcast/4</a></td><td></td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#forward-4">forward/4</a></td><td>Forwards a wamp message to a cluster peer (node).</td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#receive_ack-2">receive_ack/2</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#async_forward-4">async_forward/4</a></td><td></td></tr><tr><td valign="top"><a href="#broadcast-4">broadcast/4</a></td><td></td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#forward-4">forward/4</a></td><td>Forwards a wamp message to a peer (cluster node).</td></tr><tr><td valign="top"><a href="#handle_call-3">handle_call/3</a></td><td></td></tr><tr><td valign="top"><a href="#handle_cast-2">handle_cast/2</a></td><td></td></tr><tr><td valign="top"><a href="#handle_info-2">handle_info/2</a></td><td></td></tr><tr><td valign="top"><a href="#init-1">init/1</a></td><td></td></tr><tr><td valign="top"><a href="#receive_ack-2">receive_ack/2</a></td><td></td></tr><tr><td valign="top"><a href="#start_link-0">start_link/0</a></td><td></td></tr><tr><td valign="top"><a href="#terminate-2">terminate/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -114,12 +114,15 @@ forward(From::<a href="#type-remote_peer_id">remote_peer_id()</a>, To::<a href="
 </code></pre>
 <br />
 
-Forwards a wamp message to a cluster peer (node). It returns ok when the
-remote bondy_peer_wamp_forwarder acknoledges the reception of the message,
-but it does not imply the message handler has actually received the message.
-This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT wamp
+Forwards a wamp message to a peer (cluster node).
+It returns `ok` when the remote bondy_peer_wamp_forwarder acknoledges the
+reception of the message, but it does not imply the message handler has
+actually received the message.
+
+This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP
 message types. It will fail with an exception if another type is passed
-as the second argument.
+as the third argument.
+
 This is equivalent to calling async_forward/3 and then yield/2.
 
 <a name="handle_call-3"></a>
@@ -150,7 +153,10 @@ This is equivalent to calling async_forward/3 and then yield/2.
 
 ### receive_ack/2 ###
 
-`receive_ack(Id, Timeout) -> any()`
+<pre><code>
+receive_ack(Id::<a href="#type-remote_peer_id">remote_peer_id()</a>, Timeout::timeout()) -&gt; ok | no_return()
+</code></pre>
+<br />
 
 <a name="start_link-0"></a>
 

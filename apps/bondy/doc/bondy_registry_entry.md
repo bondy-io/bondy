@@ -69,8 +69,7 @@ Returns the value of the subscription's or registration's session_id
 property.</td></tr><tr><td valign="top"><a href="#to_details_map-1">to_details_map/1</a></td><td>
 Converts the entry into a map according to the WAMP protocol Details
 dictionary format.</td></tr><tr><td valign="top"><a href="#to_map-1">to_map/1</a></td><td>
-Converts the entry into a map according to the WAMP protocol Details
-dictionary format.</td></tr><tr><td valign="top"><a href="#type-1">type/1</a></td><td>
+Converts the entry into a map.</td></tr><tr><td valign="top"><a href="#type-1">type/1</a></td><td>
 Returns the type of the entry, the atom 'registration' or 'subscription'.</td></tr><tr><td valign="top"><a href="#uri-1">uri/1</a></td><td>
 Returns the uri this entry is about i.e.</td></tr></table>
 
@@ -288,8 +287,7 @@ to_map(Entry::<a href="#type-t">t()</a>) -&gt; <a href="#type-details_map">detai
 </code></pre>
 <br />
 
-Converts the entry into a map according to the WAMP protocol Details
-dictionary format.
+Converts the entry into a map
 
 <a name="type-1"></a>
 

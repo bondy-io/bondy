@@ -1,8 +1,13 @@
 
 
 # Module bondy_config #
+* [Description](#description)
 * [Function Index](#index)
 * [Function Details](#functions)
+
+An implementation of app_config behaviour.
+
+__Behaviours:__ [`app_config`](app_config.md).
 
 <a name="index"></a>
 
@@ -45,7 +50,7 @@ get(Key::list() | atom() | tuple(), Default::term()) -&gt; term()
 ### set/2 ###
 
 <pre><code>
-set(Key::atom() | tuple(), Default::term()) -&gt; ok
+set(Key::<a href="key_value.md#type-key">key_value:key()</a> | tuple(), Value::term()) -&gt; ok
 </code></pre>
 <br />
 

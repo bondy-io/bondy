@@ -135,12 +135,12 @@ new(Data) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%%
 %% **Use cases**
 %%
-%% * grant <permissions> on any to all|{<user>|<group>[,...]}
-%% * grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
-
+%% ```
+%% grant <permissions> on any to all|{<user>|<group>[,...]}
+%% grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
+%% '''
 %% @end
 %% -----------------------------------------------------------------------------
 -spec grant(RealmUri :: uri(), Map0 :: map()) -> ok | {error, Reason :: any()}.
@@ -659,7 +659,7 @@ group_grants(Grants) ->
     ].
 
 
-%% @private
+
 % on_create(RealmUri, Name) ->
 %     ok = bondy_event_manager:notify(
 %         {security_grant_added, RealmUri, Name}
@@ -667,7 +667,7 @@ group_grants(Grants) ->
 %     ok.
 
 
-% %% @private
+
 % on_update(RealmUri, Name) ->
 %     ok = bondy_event_manager:notify(
 %         {security_grant_updated, RealmUri, Name}
@@ -675,7 +675,7 @@ group_grants(Grants) ->
 %     ok.
 
 
-% %% @private
+
 % on_delete(RealmUri, Name) ->
 %     ok = bondy_event_manager:notify(
 %         {security_grant_deleted, RealmUri, Name}

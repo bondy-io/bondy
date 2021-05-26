@@ -130,7 +130,6 @@
 %% `Password' must be a binary with a minimum size of 6 bytes and a maximum
 %% size of 256 bytes, otherwise fails with error `invalid_password'.
 %%
-%% @throws invalid_password
 %%
 %% Example:
 %%
@@ -154,7 +153,6 @@ future(Password) when is_binary(Password) ->
 %% `Password' must be a binary with a minimum size of 6 bytes and a maximum
 %% size of 256 bytes, otherwise fails with error `invalid_password'.
 %%
-%% @throws invalid_password
 %% @end
 %% -----------------------------------------------------------------------------
 -spec new(binary() | future(), opts()) -> t() | no_return().

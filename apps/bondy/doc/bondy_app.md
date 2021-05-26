@@ -40,7 +40,9 @@ Application behaviour callback
 
 `start_phase(X1, X2, X3) -> any()`
 
-Application behaviour callback
+Application behaviour callback.
+The order in which this function is called with the different phases is
+defined in the bondy_app.src file.
 
 <a name="stop-0"></a>
 

@@ -8,7 +8,7 @@
 
 An in-memory registry for PubSub subscriptions and Routed RPC registrations,
 providing pattern matching capabilities including support for WAMP's
-version 2.0 match policies (exact, prefix and wilcard).
+version 2.0 match policies (exact, prefix and wildcard).
 
 __Behaviours:__ [`gen_server`](gen_server.md).
 
@@ -18,7 +18,7 @@ __Behaviours:__ [`gen_server`](gen_server.md).
 
 The registry is stored both in memory (tuplespace) and disk (plum_db).
 Also a trie-based indexed is used for exact and prefix matching currently
-while support for wilcard matching is soon to be supported.
+while support for wildcard matching is soon to be supported.
 
 This module also provides a singleton server to perform the initialisation
 of the tuplespace from the plum_db copy.
@@ -36,7 +36,7 @@ so they can survive in case the singleton dies.
 
 
 <pre><code>
-continuation() = {<a href="bondy_registry_entry.md#type-entry_type">bondy_registry_entry:entry_type()</a>, <a href="plum_db.md#type-continuation">plum_db:continuation()</a>}
+continuation() = {<a href="bondy_registry_entry.md#type-entry_type">bondy_registry_entry:entry_type()</a>, <a href="/Volumes/Work/Leapsight/bondy/_build/default/lib/plum_db/doc/plum_db.md#type-continuation">plum_db:continuation()</a>}
 </code></pre>
 
 
@@ -56,7 +56,7 @@ eot() = ?EOT
 
 
 <pre><code>
-task() = fun((<a href="bondy_registry_entry.md#type-details_map">bondy_registry_entry:details_map()</a>, <a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; ok)
+task() = fun((<a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, <a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; ok)
 </code></pre>
 
 <a name="index"></a>
@@ -69,7 +69,7 @@ Adds an entry to the registry.</td></tr><tr><td valign="top"><a href="#add_local
 and callees.</td></tr><tr><td valign="top"><a href="#code_change-3">code_change/3</a></td><td></td></tr><tr><td valign="top"><a href="#entries-1">entries/1</a></td><td>
 Continues returning the list of entries owned by a session started with
 <a href="#entries-4"><code>entries/4</code></a>.</td></tr><tr><td valign="top"><a href="#entries-2">entries/2</a></td><td>
-Returns the list of entries owned by the the active session.</td></tr><tr><td valign="top"><a href="#entries-4">entries/4</a></td><td>
+Returns the list of entries owned by the active session.</td></tr><tr><td valign="top"><a href="#entries-4">entries/4</a></td><td>
 Returns the complete list of entries owned by a session matching
 RealmUri and SessionId.</td></tr><tr><td valign="top"><a href="#entries-5">entries/5</a></td><td>
 Works like <a href="#entries-3"><code>entries/3</code></a>, but only returns a limited (Limit) number of
@@ -91,7 +91,7 @@ SessionId} relation.</td></tr><tr><td valign="top"><a href="#start_link-0">start
 ### add/4 ###
 
 <pre><code>
-add(Type::<a href="bondy_registry_entry.md#type-entry_type">bondy_registry_entry:entry_type()</a>, Uri::<a href="#type-uri">uri()</a>, Options::map(), Ctxt::<a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; {ok, <a href="bondy_registry_entry.md#type-details_map">bondy_registry_entry:details_map()</a>, IsFirstEntry::boolean()} | {error, {already_exists, <a href="bondy_registry_entry.md#type-details_map">bondy_registry_entry:details_map()</a>}}
+add(Type::<a href="bondy_registry_entry.md#type-entry_type">bondy_registry_entry:entry_type()</a>, Uri::<a href="#type-uri">uri()</a>, Options::map(), Ctxt::<a href="bondy_context.md#type-t">bondy_context:t()</a>) -&gt; {ok, <a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, IsFirstEntry::boolean()} | {error, {already_exists, <a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>}}
 </code></pre>
 <br />
 
@@ -104,7 +104,7 @@ According to the WAMP specification, in the case of a subscription that was
 already added before by the same _Subscriber_, the _Broker_ should not fail
 and answer with a "SUBSCRIBED" message, containing the existing
 "Subscription|id". So in this case this function returns
-{ok, bondy_registry_entry:details_map(), boolean()}.
+{ok, bondy_registry_entry:t(), boolean()}.
 
 In case of a registration, as a default, only a single Callee may
 register a procedure for an URI. However, when shared registrations are
@@ -124,7 +124,7 @@ return an error tuple.
 ### add_local_subscription/4 ###
 
 <pre><code>
-add_local_subscription(RealmUri::<a href="#type-uri">uri()</a>, Uri::<a href="#type-uri">uri()</a>, Opts::map(), Pid::pid()) -&gt; {ok, <a href="bondy_registry_entry.md#type-details_map">bondy_registry_entry:details_map()</a>, IsFirstEntry::boolean()} | {error, {already_exists, <a href="bondy_registry_entry.md#type-details_map">bondy_registry_entry:details_map()</a>}}
+add_local_subscription(RealmUri::<a href="#type-uri">uri()</a>, Uri::<a href="#type-uri">uri()</a>, Opts::map(), Pid::pid()) -&gt; {ok, <a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>, IsFirstEntry::boolean()} | {error, {already_exists, <a href="bondy_registry_entry.md#type-t">bondy_registry_entry:t()</a>}}
 </code></pre>
 <br />
 
@@ -165,7 +165,7 @@ entries(Type::<a href="bondy_registry_entry.md#type-entry_type">bondy_registry_e
 </code></pre>
 <br />
 
-Returns the list of entries owned by the the active session.
+Returns the list of entries owned by the active session.
 
 This function is equivalent to calling [`entries/2`](#entries-2) with the RealmUri
 and SessionId extracted from the Context.

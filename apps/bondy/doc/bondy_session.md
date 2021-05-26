@@ -72,21 +72,21 @@ rate_window() = #rate_window{limit = pos_integer(), duration = pos_integer()}
 
 
 
-### <a name="type-session">session()</a> ###
-
-
-<pre><code>
-session() = #session{id = <a href="#type-id">id()</a>, realm_uri = <a href="#type-uri">uri()</a>, node = atom(), pid = pid() | undefined, peer = <a href="#type-peer">peer()</a> | undefined, agent = binary(), seq = non_neg_integer(), roles = map() | undefined, authid = binary() | undefined, authrole = binary() | undefined, authmethod = binary() | undefined, created = <a href="calendar.md#type-date_time">calendar:date_time()</a>, expires_in = pos_integer() | infinity, rate = <a href="#type-rate_window">rate_window()</a>, quota = <a href="#type-quota_window">quota_window()</a>}
-</code></pre>
-
-
-
-
 ### <a name="type-session_opts">session_opts()</a> ###
 
 
 <pre><code>
 session_opts() = #{roles =&gt; map()}
+</code></pre>
+
+
+
+
+### <a name="type-t">t()</a> ###
+
+
+<pre><code>
+t() = #session{id = <a href="#type-id">id()</a>, realm_uri = <a href="#type-uri">uri()</a>, node = atom(), pid = pid() | undefined, peer = <a href="#type-peer">peer()</a> | undefined, agent = binary(), seq = non_neg_integer(), roles = map() | undefined, authid = binary() | undefined, authrole = binary() | undefined, authmethod = binary() | undefined, created = <a href="calendar.md#type-date_time">calendar:date_time()</a>, expires_in = pos_integer() | infinity, rate = <a href="#type-rate_window">rate_window()</a>, quota = <a href="#type-quota_window">quota_window()</a>}
 </code></pre>
 
 <a name="index"></a>
@@ -97,7 +97,9 @@ session_opts() = #{roles =&gt; map()}
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#agent-1">agent/1</a></td><td></td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#created-1">created/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
 Retrieves the session identified by Id from the tuplespace.</td></tr><tr><td valign="top"><a href="#id-1">id/1</a></td><td></td></tr><tr><td valign="top"><a href="#incr_seq-1">incr_seq/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-1">list_peer_ids/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-2">list_peer_ids/2</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
 Retrieves the session identified by Id from the tuplespace or 'not_found'
-if it doesn't exist.</td></tr><tr><td valign="top"><a href="#new-3">new/3</a></td><td>Creates a new transient session (not persisted).</td></tr><tr><td valign="top"><a href="#new-4">new/4</a></td><td></td></tr><tr><td valign="top"><a href="#open-3">open/3</a></td><td>
+if it doesn't exist.</td></tr><tr><td valign="top"><a href="#new-3">new/3</a></td><td>Creates a new transient session (not persisted).</td></tr><tr><td valign="top"><a href="#new-4">new/4</a></td><td></td></tr><tr><td valign="top"><a href="#node-1">node/1</a></td><td>
+Returns the node of the process managing the transport that the session
+identified by Id runs on.</td></tr><tr><td valign="top"><a href="#open-3">open/3</a></td><td>
 Creates a new session provided the RealmUri exists or can be dynamically
 created.</td></tr><tr><td valign="top"><a href="#open-4">open/4</a></td><td>
 Creates a new session provided the RealmUri exists or can be dynamically
@@ -116,7 +118,7 @@ Returns the number of sessions in the tuplespace.</td></tr><tr><td valign="top">
 ### agent/1 ###
 
 <pre><code>
-agent(Session::<a href="#type-session">session()</a>) -&gt; binary() | undefined
+agent(Session::<a href="#type-t">t()</a>) -&gt; binary() | undefined
 </code></pre>
 <br />
 
@@ -125,7 +127,7 @@ agent(Session::<a href="#type-session">session()</a>) -&gt; binary() | undefined
 ### close/1 ###
 
 <pre><code>
-close(Session::<a href="#type-session">session()</a>) -&gt; ok
+close(Session::<a href="#type-t">t()</a>) -&gt; ok
 </code></pre>
 <br />
 
@@ -134,7 +136,7 @@ close(Session::<a href="#type-session">session()</a>) -&gt; ok
 ### created/1 ###
 
 <pre><code>
-created(Session::<a href="#type-session">session()</a>) -&gt; <a href="calendar.md#type-date_time">calendar:date_time()</a>
+created(Session::<a href="#type-t">t()</a>) -&gt; <a href="calendar.md#type-date_time">calendar:date_time()</a>
 </code></pre>
 <br />
 
@@ -143,7 +145,7 @@ created(Session::<a href="#type-session">session()</a>) -&gt; <a href="calendar.
 ### fetch/1 ###
 
 <pre><code>
-fetch(Id::<a href="#type-id">id()</a>) -&gt; <a href="#type-session">session()</a> | no_return()
+fetch(Id::<a href="#type-id">id()</a>) -&gt; <a href="#type-t">t()</a> | no_return()
 </code></pre>
 <br />
 
@@ -155,7 +157,7 @@ does not exist it fails with reason '{badarg, Id}'.
 ### id/1 ###
 
 <pre><code>
-id(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-id">id()</a>
+id(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-id">id()</a>
 </code></pre>
 <br />
 
@@ -164,7 +166,7 @@ id(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-id">id()
 ### incr_seq/1 ###
 
 <pre><code>
-incr_seq(Session::<a href="#type-id">id()</a> | <a href="#type-session">session()</a>) -&gt; map()
+incr_seq(Session::<a href="#type-id">id()</a> | <a href="#type-t">t()</a>) -&gt; map()
 </code></pre>
 <br />
 
@@ -197,7 +199,7 @@ incr_seq(Session::<a href="#type-id">id()</a> | <a href="#type-session">session(
 ### lookup/1 ###
 
 <pre><code>
-lookup(Id::<a href="#type-id">id()</a>) -&gt; <a href="#type-session">session()</a> | {error, not_found}
+lookup(Id::<a href="#type-id">id()</a>) -&gt; <a href="#type-t">t()</a> | {error, not_found}
 </code></pre>
 <br />
 
@@ -209,7 +211,7 @@ if it doesn't exist.
 ### new/3 ###
 
 <pre><code>
-new(Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-realm">bondy_realm:realm()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-session">session()</a> | no_return()
+new(Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-t">bondy_realm:t()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-t">t()</a> | no_return()
 </code></pre>
 <br />
 
@@ -220,16 +222,28 @@ Creates a new transient session (not persisted)
 ### new/4 ###
 
 <pre><code>
-new(Id::<a href="#type-id">id()</a>, Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-realm">bondy_realm:realm()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-session">session()</a> | no_return()
+new(Id::<a href="#type-id">id()</a>, Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-t">bondy_realm:t()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-t">t()</a> | no_return()
 </code></pre>
 <br />
+
+<a name="node-1"></a>
+
+### node/1 ###
+
+<pre><code>
+node(Session::<a href="#type-t">t()</a>) -&gt; atom()
+</code></pre>
+<br />
+
+Returns the node of the process managing the transport that the session
+identified by Id runs on.
 
 <a name="open-3"></a>
 
 ### open/3 ###
 
 <pre><code>
-open(Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-realm">bondy_realm:realm()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-session">session()</a> | no_return()
+open(Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-t">bondy_realm:t()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-t">t()</a> | no_return()
 </code></pre>
 <br />
 
@@ -244,7 +258,7 @@ if the realm does not exist or cannot be created
 ### open/4 ###
 
 <pre><code>
-open(Id::<a href="#type-id">id()</a>, Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-realm">bondy_realm:realm()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-session">session()</a> | no_return()
+open(Id::<a href="#type-id">id()</a>, Peer::<a href="#type-peer">peer()</a>, RealmUri::<a href="#type-uri">uri()</a> | <a href="bondy_realm.md#type-t">bondy_realm:t()</a>, Opts::<a href="#type-session_opts">session_opts()</a>) -&gt; <a href="#type-t">t()</a> | no_return()
 </code></pre>
 <br />
 
@@ -259,7 +273,7 @@ if the realm does not exist or cannot be created
 ### peer/1 ###
 
 <pre><code>
-peer(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-peer">peer()</a>
+peer(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-peer">peer()</a>
 </code></pre>
 <br />
 
@@ -268,7 +282,7 @@ peer(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-peer">
 ### peer_id/1 ###
 
 <pre><code>
-peer_id(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-local_peer_id">local_peer_id()</a>
+peer_id(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-local_peer_id">local_peer_id()</a>
 </code></pre>
 <br />
 
@@ -279,7 +293,7 @@ Returns the identifier for the owner of this session
 ### pid/1 ###
 
 <pre><code>
-pid(Session::<a href="#type-session">session()</a>) -&gt; pid()
+pid(Session::<a href="#type-t">t()</a>) -&gt; pid()
 </code></pre>
 <br />
 
@@ -291,7 +305,7 @@ identified by Id runs on.
 ### realm_uri/1 ###
 
 <pre><code>
-realm_uri(Session::<a href="#type-id">id()</a> | <a href="#type-session">session()</a>) -&gt; <a href="#type-uri">uri()</a>
+realm_uri(Session::<a href="#type-id">id()</a> | <a href="#type-t">t()</a>) -&gt; <a href="#type-uri">uri()</a>
 </code></pre>
 <br />
 
@@ -300,7 +314,7 @@ realm_uri(Session::<a href="#type-id">id()</a> | <a href="#type-session">session
 ### roles/1 ###
 
 <pre><code>
-roles(Session::<a href="#type-id">id()</a> | <a href="#type-session">session()</a>) -&gt; map()
+roles(Session::<a href="#type-id">id()</a> | <a href="#type-t">t()</a>) -&gt; map()
 </code></pre>
 <br />
 
@@ -320,7 +334,7 @@ Returns the number of sessions in the tuplespace.
 ### to_details_map/1 ###
 
 <pre><code>
-to_details_map(Session::<a href="#type-session">session()</a>) -&gt; <a href="#type-details">details()</a>
+to_details_map(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-details">details()</a>
 </code></pre>
 <br />
 
@@ -329,7 +343,7 @@ to_details_map(Session::<a href="#type-session">session()</a>) -&gt; <a href="#t
 ### update/1 ###
 
 <pre><code>
-update(Session::<a href="#type-session">session()</a>) -&gt; ok
+update(Session::<a href="#type-t">t()</a>) -&gt; ok
 </code></pre>
 <br />
 

@@ -17,7 +17,8 @@ It is used by
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#close_context-1">close_context/1</a></td><td></td></tr><tr><td valign="top"><a href="#features-0">features/0</a></td><td></td></tr><tr><td valign="top"><a href="#handle_message-2">handle_message/2</a></td><td>
-Handles a wamp message.</td></tr><tr><td valign="top"><a href="#handle_peer_message-4">handle_peer_message/4</a></td><td></td></tr><tr><td valign="top"><a href="#is_feature_enabled-1">is_feature_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#publish-5">publish/5</a></td><td></td></tr><tr><td valign="top"><a href="#publish-6">publish/6</a></td><td></td></tr><tr><td valign="top"><a href="#subscribe-3">subscribe/3</a></td><td></td></tr><tr><td valign="top"><a href="#subscribe-4">subscribe/4</a></td><td>For internal use.</td></tr><tr><td valign="top"><a href="#unsubscribe-1">unsubscribe/1</a></td><td>For internal Bondy use.</td></tr><tr><td valign="top"><a href="#unsubscribe-2">unsubscribe/2</a></td><td></td></tr></table>
+Handles a wamp message.</td></tr><tr><td valign="top"><a href="#handle_peer_message-4">handle_peer_message/4</a></td><td>Handles a message sent by a peer node through the
+bondy_peer_wamp_forwarder.</td></tr><tr><td valign="top"><a href="#is_feature_enabled-1">is_feature_enabled/1</a></td><td>Returns true if feature F is enabled by the broker.</td></tr><tr><td valign="top"><a href="#publish-5">publish/5</a></td><td></td></tr><tr><td valign="top"><a href="#publish-6">publish/6</a></td><td></td></tr><tr><td valign="top"><a href="#subscribe-3">subscribe/3</a></td><td></td></tr><tr><td valign="top"><a href="#subscribe-4">subscribe/4</a></td><td>For internal use.</td></tr><tr><td valign="top"><a href="#unsubscribe-1">unsubscribe/1</a></td><td>For internal Bondy use.</td></tr><tr><td valign="top"><a href="#unsubscribe-2">unsubscribe/2</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -65,6 +66,9 @@ handle_peer_message(Publish::<a href="#type-wamp_publish">wamp_publish()</a>, To
 </code></pre>
 <br />
 
+Handles a message sent by a peer node through the
+bondy_peer_wamp_forwarder.
+
 <a name="is_feature_enabled-1"></a>
 
 ### is_feature_enabled/1 ###
@@ -73,6 +77,8 @@ handle_peer_message(Publish::<a href="#type-wamp_publish">wamp_publish()</a>, To
 is_feature_enabled(F::binary()) -&gt; boolean()
 </code></pre>
 <br />
+
+Returns true if feature F is enabled by the broker.
 
 <a name="publish-5"></a>
 

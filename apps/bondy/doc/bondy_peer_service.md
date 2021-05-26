@@ -21,7 +21,7 @@ __This module defines the `bondy_peer_service` behaviour.__<br /> Required callb
 
 
 <pre><code>
-peer() = <a href="plum_db_peer_service.md#type-partisan_peer">plum_db_peer_service:partisan_peer()</a>
+peer() = <a href="/Volumes/Work/Leapsight/bondy/_build/default/lib/plum_db/doc/plum_db_peer_service.md#type-partisan_peer">plum_db_peer_service:partisan_peer()</a>
 </code></pre>
 
 <a name="index"></a>
