@@ -22,7 +22,7 @@
         "query_match" :
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
         "schemes" : ["http"],
-        "cors_headers": {
+        "headers": {
             "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
             "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
@@ -36,7 +36,7 @@
         "timeout" : 5000,
         "connect_timeout" : 5000,
         "schemes" : "{{variables.schemes}}",
-        "headers": "{{variables.cors_headers}}",
+        "headers": "{{variables.headers}}",
         "security":{}
     },
     "versions" :  {
@@ -48,6 +48,49 @@
             },
             "languages": ["en", "es-AR"],
             "paths" : {
+                "services/call" : {
+                    "summary":"Allows to perform an arbitrary WAMP call.",
+                    "description":"",
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post" : {
+                        "action" : {
+                            "type" : "wamp_call",
+                            "procedure" : "{{request.body.procedure}}",
+                            "options" : "{{request.body.options}}",
+                            "arguments" : "{{request.body.arguments}}",
+                            "arguments_kw" : "{{request.body.arguments_kw}}"
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": {
+                                    "error_uri": "{{action.error.error_uri}}",
+                                    "arguments" : "{{action.error.arguments}}",
+                                    "arguments_kw" : "{{action.error.arguments_kw}}",
+                                    "details": "{{action.error.details}}"
+                                }
+                            },
+                            "on_result": {
+                                "body": {
+                                    "arguments" : "{{action.result.arguments}}",
+                                    "arguments_kw" : "{{action.result.arguments_kw}}",
+                                    "details": "{{action.result.details}}"
+                                }
+                            }
+                        }
+                    }
+                },
                 "/services/create_backup" : {
                     "is_collection" : false,
                     "options": {
@@ -823,6 +866,42 @@
                             "on_result" : {
                                 "body" :
                                     "{{action.result.arguments |> head}}"
+                            }
+                        }
+                    }
+                },
+                "/realms/:realm_uri/users/:id/change_password" : {
+                    "is_collection" : false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "bondy.rbac.user.change_password",
+                            "options": {},
+                            "arguments": [
+                                "{{request.bindings.realm_uri}}",
+                                "{{request.bindings.id}}",
+                                "{{request.body.new_password}}"
+                            ],
+                            "arguments_kw": {}
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": "{{variables.wamp_error_body}}"
+                            },
+                            "on_result": {
+                                "body": "{{action.result.arguments |> head}}"
                             }
                         }
                     }
