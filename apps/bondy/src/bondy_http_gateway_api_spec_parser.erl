@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_http_api_gateway_spec_parser.erl - parses the Bondy API Specification file
+%%  bondy_http_gateway_api_spec_parser.erl - parses the Bondy API Specification file
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -44,7 +44,7 @@
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_http_api_gateway_spec_parser).
+-module(bondy_http_gateway_api_spec_parser).
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -81,7 +81,7 @@
     ?BONDY_ERROR_ALREADY_EXISTS =>              ?HTTP_BAD_REQUEST,
     ?BONDY_ERROR_NOT_FOUND =>                   ?HTTP_NOT_FOUND,
     ?BONDY_ERROR_BAD_GATEWAY =>                 ?HTTP_SERVICE_UNAVAILABLE,
-    ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR =>    ?HTTP_INTERNAL_SERVER_ERROR,
+    ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR =>    ?HTTP_INTERNAL_SERVER_ERROR,
     ?BONDY_ERROR_TIMEOUT =>                     ?HTTP_GATEWAY_TIMEOUT,
     %% REVIEW
     ?WAMP_AUTHORIZATION_FAILED =>               ?HTTP_FORBIDDEN,
@@ -1507,8 +1507,8 @@ dispatch_table_path(
 
     Schemes = maps:get(<<"schemes">>, Spec3),
     Sec = maps:get(<<"security">>, Spec3),
-    Mod = bondy_http_api_gateway_rest_handler,
-    %% Args required by bondy_http_api_gateway_rest_handler
+    Mod = bondy_http_gateway_rest_handler,
+    %% Args required by bondy_http_gateway_rest_handler
     Languages = [string:lowercase(X) || X <- maps:get(?LANGUAGES_KEY, Version)],
     Args = #{
         api_spec => Spec3,
@@ -1702,7 +1702,7 @@ mops_eval(Expr, Ctxt) ->
     catch
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
                     Expr,
@@ -1714,13 +1714,13 @@ mops_eval(Expr, Ctxt) ->
             });
         error:{badkey, Key} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkeypath, Path} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })

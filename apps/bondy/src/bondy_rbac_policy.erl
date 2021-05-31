@@ -299,16 +299,11 @@ type_and_version(Map) ->
 
 
 %% @private
-
 normalise_resource(any, _) ->
     any;
 
 normalise_resource(Uri, Strategy) ->
     {Uri, Strategy}.
-
-
-
-
 
 
 % @private
@@ -414,6 +409,8 @@ do_grant([{RoleName, RoleType} | T], RealmUri, Resource, Permissions0) ->
 
     ok = plum_db:put(Prefix, Key, Permissions1),
 
+    ok = on_grant(RealmUri, RoleType, RoleName),
+
     do_grant(T, RealmUri, Resource, Permissions0).
 
 
@@ -474,11 +471,11 @@ revoke(RealmUri, RoleList, Resource, Permissions) ->
 do_revoke([], _, _, _) ->
     ok;
 
-do_revoke([{Name, RoleType}|Roles], RealmUri, Resource, Permissions) ->
+do_revoke([{RoleName, RoleType}|Roles], RealmUri, Resource, Permissions) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
     %% check if there is currently a GRANT we can revoke
-    case plum_db:get(Prefix, {Name, Resource}) of
+    case plum_db:get(Prefix, {RoleName, Resource}) of
         undefined ->
             %% can't REVOKE what wasn't GRANTED
             do_revoke(Roles, RealmUri, Resource, Permissions);
@@ -493,10 +490,13 @@ do_revoke([{Name, RoleType}|Roles], RealmUri, Resource, Permissions) ->
 
             case NewPerms of
                 [] ->
-                    plum_db:delete(Prefix, {Name, Resource});
+                    plum_db:delete(Prefix, {RoleName, Resource});
                 _ ->
-                    plum_db:put(Prefix, {Name, Resource}, NewPerms)
+                    plum_db:put(Prefix, {RoleName, Resource}, NewPerms)
             end,
+
+            ok = on_revoke(RealmUri, RoleType, RoleName),
+
             do_revoke(Roles, RealmUri, Resource, Permissions)
     end.
 
@@ -660,24 +660,15 @@ group_grants(Grants) ->
 
 
 
-% on_create(RealmUri, Name) ->
-%     ok = bondy_event_manager:notify(
-%         {security_grant_added, RealmUri, Name}
-%     ),
-%     ok.
+on_grant(RealmUri, RoleType, Rolename) ->
+    ok = bondy_event_manager:notify(
+        {rbac_policy_granted, RealmUri, RoleType, Rolename}
+    ),
+    ok.
 
 
-
-% on_update(RealmUri, Name) ->
-%     ok = bondy_event_manager:notify(
-%         {security_grant_updated, RealmUri, Name}
-%     ),
-%     ok.
-
-
-
-% on_delete(RealmUri, Name) ->
-%     ok = bondy_event_manager:notify(
-%         {security_grant_deleted, RealmUri, Name}
-%     ),
-%     ok.
+on_revoke(RealmUri, RoleType, Rolename) ->
+    ok = bondy_event_manager:notify(
+        {rbac_policy_revoked, RealmUri, RoleType, Rolename}
+    ),
+    ok.

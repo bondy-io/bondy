@@ -1,6 +1,6 @@
 
 
-# Module bondy_wamp_rbac_api #
+# Module bondy_wamp_http_gateway_api #
 * [Function Index](#index)
 * [Function Details](#functions)
 

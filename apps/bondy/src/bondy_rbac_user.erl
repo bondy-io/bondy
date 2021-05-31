@@ -776,7 +776,7 @@ remove_group(Groupname, #{username := Key} = User, Prefix) ->
 %% @private
 on_create(RealmUri, Username) ->
     ok = bondy_event_manager:notify(
-        {security_user_added, RealmUri, Username}
+        {rbac_user_added, RealmUri, Username}
     ),
     ok.
 
@@ -784,7 +784,7 @@ on_create(RealmUri, Username) ->
 %% @private
 on_update(RealmUri, Username) ->
     ok = bondy_event_manager:notify(
-        {security_user_updated, RealmUri, Username}
+        {rbac_user_updated, RealmUri, Username}
     ),
     ok.
 
@@ -792,7 +792,7 @@ on_update(RealmUri, Username) ->
 %% @private
 on_password_change(RealmUri, Username) ->
     ok = bondy_event_manager:notify(
-        {security_password_changed, RealmUri, Username}
+        {rbac_user_password_changed, RealmUri, Username}
     ),
     on_update(RealmUri, Username).
 
@@ -800,7 +800,7 @@ on_password_change(RealmUri, Username) ->
 %% @private
 on_delete(RealmUri, Username) ->
     ok = bondy_event_manager:notify(
-        {security_user_deleted, RealmUri, Username}
+        {rbac_user_deleted, RealmUri, Username}
     ),
     ok.
 

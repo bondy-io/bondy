@@ -17,90 +17,201 @@
 %% =============================================================================
 
 
--define(BONDY_OAUTH2_CLIENT_ADD,      <<"bondy.api_gateway.add_client">>).
--define(BONDY_OAUTH2_RES_OWNER_ADD,   <<"bondy.api_gateway.add_resource_owner">>).
--define(BONDY_OAUTH2_CLIENT_ADDED,    <<"bondy.api_gateway.client_added">>).
--define(BONDY_OAUTH2_CLIENT_DELETED,  <<"bondy.api_gateway.client_deleted">>).
--define(BONDY_OAUTH2_CLIENT_UPDATED,  <<"bondy.api_gateway.client_updated">>).
--define(BONDY_OAUTH2_CLIENT_DELETE,   <<"bondy.api_gateway.delete_client">>).
--define(BONDY_OAUTH2_RES_OWNER_DELETE,     <<"bondy.api_gateway.delete_resource_owner">>).
--define(BONDY_OAUTH2_CLIENT_GET,     <<"bondy.api_gateway.fetch_client">>).
--define(BONDY_OAUTH2_RES_OWNER_GET, <<"bondy.api_gateway.fetch_resource_owner">>).
--define(BONDY_HTTP_API_GATEWAY_LIST,              <<"bondy.api_gateway.list">>).
--define(BONDY_OAUTH2_CLIENT_LIST,     <<"bondy.api_gateway.list_clients">>).
--define(BONDY_OAUTH2_RES_OWNER_LIST, <<"bondy.api_gateway.list_resource_owners">>).
--define(BONDY_HTTP_API_GATEWAY_LOAD,             <<"bondy.api_gateway.load">>).
--define(BONDY_HTTP_API_GATEWAY_LOOKUP,            <<"bondy.api_gateway.lookup">>).
--define(BONDY_OAUTH2_RES_OWNER_ADDED, <<"bondy.api_gateway.resource_owner_added">>).
--define(BONDY_OAUTH2_RES_OWNER_DELETED,   <<"bondy.api_gateway.resource_owner_deleted">>).
--define(BONDY_OAUTH2_RES_OWNER_UPDATED,   <<"bondy.api_gateway.resource_owner_updated">>).
--define(BONDY_OAUTH2_CLIENT_UPDATE,   <<"bondy.api_gateway.update_client">>).
--define(BONDY_OAUTH2_RES_OWNER_UPDATE,     <<"bondy.api_gateway.update_resource_owner">>).
+
+%% =============================================================================
+%% PROCEDURE URIS
+%% =============================================================================
+
+
 -define(BONDY_BACKUP_CREATE,            <<"bondy.backup.create">>).
--define(BONDY_BACKUP_FINISHED,          <<"bondy.backup.finished">>).
 -define(BONDY_BACKUP_RESTORE,           <<"bondy.backup.restore">>).
--define(BONDY_BACKUP_RESTORE_FINISHED,  <<"bondy.backup.restore_finished">>).
--define(BONDY_BACKUP_RESTORE_STARTED,   <<"bondy.backup.restore_started">>).
--define(BONDY_BACKUP_STARTED,           <<"bondy.backup.started">>).
 -define(BONDY_BACKUP_STATUS,            <<"bondy.backup.status">>).
--define(BONDY_CALLEE_GET,               <<"bondy.callee.get">>).
--define(BONDY_CALLEE_LIST,              <<"bondy.callee.list">>).
--define(BONDY_RBAC_USER_CHANGE_PASSWORD,          <<"bondy.security.change_password">>).
+
 -define(BONDY_CLUSTER_CONNECTIONS,      <<"bondy.cluster.connections">>).
 -define(BONDY_CLUSTER_MEMBERS,          <<"bondy.cluster.members">>).
 -define(BONDY_CLUSTER_PEER_INFO,        <<"bondy.cluster.peer_info">>).
 -define(BONDY_CLUSTER_STATUS,           <<"bondy.cluster.status">>).
+
+-define(BONDY_HTTP_GATEWAY_ADD,         <<"bondy.http_gateway.api.add">>).
+-define(BONDY_HTTP_GATEWAY_GET,         <<"bondy.http_gateway.api.get">>).
+-define(BONDY_HTTP_GATEWAY_LIST,        <<"bondy.http_gateway.api.list">>).
+-define(BONDY_HTTP_GATEWAY_LOAD,        <<"bondy.http_gateway.api.load">>).
+-define(BONDY_HTTP_GATEWAY_DELETE,      <<"bondy.http_gateway.api.delete">>).
+
+-define(BONDY_OAUTH2_CLIENT_ADD,        <<"bondy.oauth2.client.add">>).
+-define(BONDY_OAUTH2_CLIENT_DELETE,     <<"bondy.oauth2.client.delete">>).
+-define(BONDY_OAUTH2_CLIENT_GET,        <<"bondy.oauth2.client.get">>).
+-define(BONDY_OAUTH2_CLIENT_LIST,       <<"bondy.oauth2.client.list">>).
+-define(BONDY_OAUTH2_CLIENT_UPDATE,     <<"bondy.oauth2.client.update">>).
+-define(BONDY_OAUTH2_RES_OWNER_ADD,     <<"bondy.oauth2.resource_owner.add">>).
+-define(BONDY_OAUTH2_RES_OWNER_DELETE,<<"bondy.oauth2.resource_owner.delete">>).
+-define(BONDY_OAUTH2_RES_OWNER_GET,     <<"bondy.oauth2.resource_owner.get">>).
+-define(BONDY_OAUTH2_RES_OWNER_LIST, <<"bondy.oauth2.resource_owners.list">>).
+-define(BONDY_OAUTH2_RES_OWNER_UPDATE,  <<"bondy.oauth2.resource_owner.update">>).
+-define(BONDY_OAUTH2_TOKEN_GET,         <<"bondy.oauth2.token.get">>).
+-define(BONDY_OAUTH2_TOKEN_LOOKUP,      <<"bondy.oauth2.token.lookup">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE,      <<"bondy.oauth2.token.revoke">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE_ALL,  <<"bondy.oauth2.token.revoke_all">>).
+-define(BONDY_OAUTH2_TOKEN_REFRESH,     <<"bondy.oauth2.token.refresh">>).
+
+-define(BONDY_RBAC_GROUP_ADD,           <<"bondy.rbac.group.add">>).
+-define(BONDY_RBAC_GROUP_DELETE,        <<"bondy.rbac.group.delete">>).
+-define(BONDY_RBAC_GROUP_FIND,          <<"bondy.rbac.group.find">>).
+-define(BONDY_RBAC_GROUP_LIST,          <<"bondy.rbac.group.list">>).
+-define(BONDY_RBAC_GROUP_UPDATE,        <<"bondy.rbac.group.update">>).
+-define(BONDY_RBAC_SOURCE_ADD,          <<"bondy.rbac.source.add">>).
+-define(BONDY_RBAC_SOURCE_DELETE,       <<"bondy.rbac.source.delete">>).
+-define(BONDY_RBAC_SOURCE_FIND,         <<"bondy.rbac.source.find">>).
+-define(BONDY_RBAC_SOURCE_LIST,         <<"bondy.rbac.source.list">>).
+-define(BONDY_RBAC_SOURCE_MATCH,         <<"bondy.rbac.source.match">>).
+-define(BONDY_RBAC_USER_ADD,            <<"bondy.rbac.user.add">>).
+-define(BONDY_RBAC_USER_CHANGE_PASSWORD, <<"bondy.rbac.user.change_password">>).
+-define(BONDY_RBAC_USER_DELETE,         <<"bondy.rbac.user.delete">>).
+-define(BONDY_RBAC_USER_FIND,           <<"bondy.rbac.user.find">>).
+-define(BONDY_RBAC_USER_LIST,           <<"bondy.rbac.user.list">>).
+-define(BONDY_RBAC_USER_UPDATE,         <<"bondy.rbac.user.update">>).
+
+-define(BONDY_REALM_CREATE,             <<"bondy.realm.create">>).
+-define(BONDY_REALM_DELETE,             <<"bondy.realm.delete">>).
+-define(BONDY_REALM_GET,                <<"bondy.realm.get">>).
+-define(BONDY_REALM_LIST,               <<"bondy.realm.list">>).
+-define(BONDY_REALM_SECURITY_DISABLE,   <<"bondy.realm.security.disable">>).
+-define(BONDY_REALM_SECURITY_ENABLE,    <<"bondy.realm.security.enable">>).
+-define(BONDY_REALM_SECURITY_IS_ENABLED, <<"bondy.realm.security.is_enabled">>).
+-define(BONDY_REALM_SECURITY_STATUS,    <<"bondy.realm.security.status">>).
+-define(BONDY_REALM_UPDATE,             <<"bondy.realm.update">>).
+
+-define(BONDY_REGISTRY_LIST,            <<"bondy.registry.list">>).
+-define(BONDY_REG_MATCH,                <<"bondy.registry.match">>).
+-define(BONDY_SUBSCRIPTION_LIST,        <<"bondy.subscription.list">>).
+-define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
+-define(BONDY_WAMP_CALLEE_GET,          <<"bondy.wamp.callee.get">>).
+-define(BONDY_WAMP_CALLEE_LIST,         <<"bondy.wamp.callee.list">>).
+
+
+%% =============================================================================
+%% TOPIC URIS
+%% =============================================================================
+
+
+-define(BONDY_BACKUP_FAILED,            <<"bondy.backup.failed">>).
+-define(BONDY_BACKUP_FINISHED,          <<"bondy.backup.finished">>).
+-define(BONDY_BACKUP_RESTORE_FAILED,    <<"bondy.backup.restore_failed">>).
+-define(BONDY_BACKUP_RESTORE_FINISHED,  <<"bondy.backup.restore_finished">>).
+-define(BONDY_BACKUP_RESTORE_STARTED,   <<"bondy.backup.restore_started">>).
+-define(BONDY_BACKUP_STARTED,           <<"bondy.backup.started">>).
+-define(BONDY_OAUTH2_CLIENT_ADDED,      <<"bondy.oauth2.client.added">>).
+-define(BONDY_OAUTH2_CLIENT_DELETED,    <<"bondy.oauth2.client.deleted">>).
+-define(BONDY_OAUTH2_CLIENT_UPDATED,    <<"bondy.oauth2.client.updated">>).
+-define(BONDY_OAUTH2_RES_OWNER_ADDED, <<"bondy.oauth2.resource_owner.added">>).
+-define(BONDY_OAUTH2_RES_OWNER_DELETED, <<"bondy.oauth2.resource_owner.deleted">>).
+-define(BONDY_OAUTH2_RES_OWNER_UPDATED, <<"bondy.oauth2.resource_owner.updated">>).
+-define(BONDY_RBAC_GROUP_ADDED,         <<"bondy.rbac.group.added">>).
+-define(BONDY_RBAC_GROUP_DELETED,       <<"bondy.rbac.group.deleted">>).
+-define(BONDY_RBAC_GROUP_UPDATED,       <<"bondy.rbac.group.updated">>).
+-define(BONDY_RBAC_SOURCE_ADDED,        <<"bondy.rbac.source.added">>).
+-define(BONDY_RBAC_SOURCE_DELETED,      <<"bondy.rbac.source.deleted">>).
+-define(BONDY_RBAC_USER_ADDED,          <<"bondy.rbac.user.added">>).
+-define(BONDY_RBAC_USER_DELETED,        <<"bondy.rbac.user.deleted">>).
+-define(BONDY_RBAC_USER_LOGGED_IN,      <<"bondy.rbac.user.logged_in">>).
+-define(BONDY_RBAC_USER_PASSWORD_CHANGED, <<"bondy.rbac.user.password_changed">>).
+-define(BONDY_RBAC_USER_UPDATED,        <<"bondy.rbac.user.updated">>).
+-define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
+-define(BONDY_REALM_DELETED,          <<"bondy.realm.deleted">>).
+
+
+%% =============================================================================
+%% ERROR URIS
+%% =============================================================================
+
+
+
 -define(BONDY_ERROR_ALREADY_EXISTS, <<"bondy.error.already_exists">>).
--define(BONDY_ERROR_BACKUP_FAILED,      <<"bondy.error.backup_failed">>).
--define(BONDY_ERROR_BACKUP_RESTORE_FAILED,  <<"bondy.error.backup_restore_failed">>).
 -define(BONDY_ERROR_BAD_GATEWAY, <<"bondy.error.bad_gateway">>).
+-define(BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR, <<"bondy.error.http_gateway.invalid_expression">>).
 -define(BONDY_ERROR_INTERNAL, <<"bondy.error.internal_error">>).
 -define(BONDY_ERROR_NOT_FOUND, <<"bondy.error.not_found">>).
 -define(BONDY_ERROR_NOT_IN_SESSION, <<"bondy.error.not_in_session">>).
 -define(BONDY_ERROR_TIMEOUT, <<"bondy.error.timeout">>).
--define(BONDY_INCONSISTENCY_ERROR, <<"bondy.error.inconsistency_error">>).
--define(BONDY_REALM_CREATE,             <<"bondy.realm.create">>).
--define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
--define(BONDY_REALM_CREATE_OLD,           <<"bondy.security.create_realm">>).
--define(BONDY_REALM_DELETE,             <<"bondy.realm.delete">>).
+-define(BONDY_ERROR_INCONSISTENCY_ERROR, <<"bondy.error.inconsistency_error">>).
+
+
+
+%% =============================================================================
+%% TO BE DEPRECATED PROCEDURES
+%% =============================================================================
+
+
+-define(BONDY_HTTP_GATEWAY_GET_OLD, <<"bondy.api_gateway.lookup">>).
+-define(BONDY_HTTP_GATEWAY_LIST_OLD, <<"bondy.api_gateway.list">>).
+-define(BONDY_HTTP_GATEWAY_LOAD_OLD, <<"bondy.api_gateway.load">>).
+-define(BONDY_OAUTH2_CLIENT_ADD_OLD, <<"bondy.api_gateway.add_client">>).
+-define(BONDY_OAUTH2_CLIENT_DELETE_OLD, <<"bondy.api_gateway.delete_client">>).
+-define(BONDY_OAUTH2_CLIENT_GET_OLD, <<"bondy.api_gateway.fetch_client">>).
+-define(BONDY_OAUTH2_CLIENT_LIST_OLD, <<"bondy.api_gateway.list_clients">>).
+-define(BONDY_OAUTH2_CLIENT_UPDATED_OLD, <<"bondy.api_gateway.client_updated">>).
+-define(BONDY_OAUTH2_CLIENT_UPDATE_OLD, <<"bondy.api_gateway.update_client">>).
+-define(BONDY_OAUTH2_RES_OWNER_ADD_OLD, <<"bondy.api_gateway.add_resource_owner">>).
+-define(BONDY_OAUTH2_RES_OWNER_DELETE_OLD, <<"bondy.api_gateway.delete_resource_owner">>).
+-define(BONDY_OAUTH2_RES_OWNER_GET_OLD, <<"bondy.api_gateway.fetch_resource_owner">>).
+-define(BONDY_OAUTH2_RES_OWNER_LIST_OLD, <<"bondy.api_gateway.list_resource_owners">>).
+-define(BONDY_OAUTH2_RES_OWNER_UPDATED_OLD, <<"bondy.api_gateway.resource_owner_updated">>).
+-define(BONDY_OAUTH2_RES_OWNER_UPDATE_OLD, <<"bondy.api_gateway.update_resource_owner">>).
+-define(BONDY_OAUTH2_TOKEN_LOOKUP_OLD, <<"bondy.oauth2.lookup_token">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE_ALL_OLD, <<"bondy.oauth2.revoke_tokens">>).
+-define(BONDY_OAUTH2_TOKEN_REVOKE_OLD, <<"bondy.oauth2.revoke_token">>).
+-define(BONDY_RBAC_GROUP_ADD_OLD, <<"bondy.security.add_group">>).
+-define(BONDY_RBAC_GROUP_DELETE_OLD, <<"bondy.security.delete_group">>).
+-define(BONDY_RBAC_GROUP_FIND_OLD, <<"bondy.security.find_group">>).
+-define(BONDY_RBAC_GROUP_LIST_OLD, <<"bondy.security.list_groups">>).
+-define(BONDY_RBAC_GROUP_UPDATE_OLD, <<"bondy.security.update_group">>).
+-define(BONDY_RBAC_SOURCE_ADD_OLD, <<"bondy.security.add_source">>).
+-define(BONDY_RBAC_SOURCE_DELETE_OLD, <<"bondy.security.delete_source">>).
+-define(BONDY_RBAC_SOURCE_FIND_OLD, <<"bondy.security.find_source">>).
+-define(BONDY_RBAC_SOURCE_LIST_OLD, <<"bondy.security.list_sources">>).
+-define(BONDY_RBAC_USER_ADD_OLD, <<"bondy.security.add_user">>).
+-define(BONDY_RBAC_USER_CHANGE_PASSWORD_OLD, <<"bondy.security.change_password">>).
+-define(BONDY_RBAC_USER_DELETE_OLD, <<"bondy.security.delete_user">>).
+-define(BONDY_RBAC_USER_FIND_OLD, <<"bondy.security.find_user">>).
+-define(BONDY_RBAC_USER_LIST_OLD, <<"bondy.security.list_users">>).
+-define(BONDY_RBAC_USER_UPDATE_OLD, <<"bondy.security.update_user">>).
+-define(BONDY_REALM_CREATE_OLD, <<"bondy.security.create_realm">>).
+-define(BONDY_REALM_DELETE_OLD, <<"bondy.security.delete_realm">>).
+-define(BONDY_REALM_GET_OLD, <<"bondy.realm.get">>).
+-define(BONDY_REALM_LIST_OLD, <<"bondy.security.list_realms">>).
+-define(BONDY_REALM_SECURITY_DISABLE_OLD, <<"bondy.security.disable">>).
+-define(BONDY_REALM_SECURITY_ENABLE_OLD, <<"bondy.security.enable">>).
+-define(BONDY_REALM_SECURITY_IS_ENABLED_OLD, <<"bondy.security.is_enabled">>).
+-define(BONDY_REALM_SECURITY_STATUS_OLD, <<"bondy.security.status">>).
+-define(BONDY_REALM_UPDATE_OLD, <<"bondy.security.update_realm">>).
+-define(BONDY_REGISTRY_LIST_OLD, <<"bondy.registry.list">>).
+-define(BONDY_REG_MATCH_OLD, <<"bondy.registry.match">>).
+-define(BONDY_SUBSCRIPTION_LIST_OLD, <<"bondy.subscription.list">>).
+-define(BONDY_TELEMETRY_METRICS_OLD, <<"bondy.telemetry.metrics">>).
+-define(BONDY_WAMP_CALLEE_GET_OLD, <<"bondy.callee.get">>).
+-define(BONDY_WAMP_CALLEE_LIST_OLD, <<"bondy.callee.list">>).
+
+
+
+
+%% =============================================================================
+%% TO BE DEPRECATED TOPICS
+%% =============================================================================
+
+
+-define(BONDY_OAUTH2_CLIENT_ADDED_OLD,    <<"bondy.api_gateway.client_added">>).
+-define(BONDY_OAUTH2_CLIENT_DELETED_OLD,  <<"bondy.api_gateway.client_deleted">>).
+-define(BONDY_OAUTH2_RES_OWNER_ADDED_OLD, <<"bondy.api_gateway.resource_owner_added">>).
+-define(BONDY_OAUTH2_RES_OWNER_DELETED_OLD,   <<"bondy.api_gateway.resource_owner_deleted">>).
+-define(BONDY_RBAC_GROUP_ADDED_OLD,          <<"bondy.security.group_added">>).
+-define(BONDY_RBAC_GROUP_DELETED_OLD,        <<"bondy.security.group_deleted">>).
+-define(BONDY_RBAC_GROUP_UPDATED_OLD,        <<"bondy.security.group_updated">>).
+-define(BONDY_RBAC_SOURCE_ADDED_OLD,         <<"bondy.security.source_added">>).
+-define(BONDY_RBAC_SOURCE_DELETED_OLD,       <<"bondy.security.source_deleted">>).
+-define(BONDY_RBAC_USER_ADDED_OLD,           <<"bondy.security.user_added">>).
+-define(BONDY_RBAC_USER_DELETED_OLD,         <<"bondy.security.user_deleted">>).
+-define(BONDY_RBAC_USER_LOGGED_IN_OLD,       <<"bondy.security.user_logged_in">>).
+-define(BONDY_RBAC_USER_PASSWORD_CHANGED_OLD,     <<"bondy.security.password_changed">>).
+-define(BONDY_RBAC_USER_UPDATED_OLD,         <<"bondy.security.user_updated">>).
+-define(BONDY_REALM_CREATED_OLD,            <<"bondy.security.realm_created">>).
 -define(BONDY_REALM_DELETED_OLD,          <<"bondy.security.realm_deleted">>).
--define(BONDY_REALM_DELETE_OLD,           <<"bondy.security.delete_realm">>).
--define(BONDY_REALM_LIST,               <<"bondy.realm.list">>).
--define(BONDY_REALM_LIST_OLD,            <<"bondy.security.list_realms">>).
--define(BONDY_REGISTRY_LIST,            <<"bondy.registry.list">>).
--define(BONDY_REG_MATCH,                <<"bondy.registry.match">>).
--define(BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR, <<"bondy.error.api_gateway.invalid_expression">>).
--define(BONDY_REALM_SECURITY_DISABLE,         <<"bondy.security.disable">>).
--define(BONDY_REALM_SECURITY_ENABLE,          <<"bondy.security.enable">>).
--define(BONDY_REALM_SECURITY_IS_ENABLED,      <<"bondy.security.is_enabled">>).
--define(BONDY_REALM_SECURITY_STATUS,          <<"bondy.security.status">>).
--define(BONDY_RBAC_GROUP_ADD,            <<"bondy.security.add_group">>).
--define(BONDY_RBAC_SOURCE_ADD,           <<"bondy.security.add_source">>).
--define(BONDY_RBAC_USER_ADD,             <<"bondy.security.add_user">>).
--define(BONDY_RBAC_GROUP_DELETE,         <<"bondy.security.delete_group">>).
--define(BONDY_RBAC_SOURCE_DELETE,        <<"bondy.security.delete_source">>).
--define(BONDY_RBAC_USER_DELETE,          <<"bondy.security.delete_user">>).
--define(BONDY_RBAC_GROUP_FIND,           <<"bondy.security.find_group">>).
--define(BONDY_RBAC_SOURCE_FIND,          <<"bondy.security.find_source">>).
--define(BONDY_RBAC_USER_FIND,            <<"bondy.security.find_user">>).
--define(BONDY_RBAC_GROUP_ADDED,          <<"bondy.security.group_added">>).
--define(BONDY_RBAC_GROUP_DELETED,        <<"bondy.security.group_deleted">>).
--define(BONDY_RBAC_GROUP_UPDATED,        <<"bondy.security.group_updated">>).
--define(BONDY_RBAC_GROUP_LIST,          <<"bondy.security.list_groups">>).
--define(BONDY_RBAC_SOURCE_LIST,         <<"bondy.security.list_sources">>).
--define(BONDY_RBAC_USER_LIST,           <<"bondy.security.list_users">>).
--define(BONDY_RBAC_USER_PASSWORD_CHANGED,     <<"bondy.security.password_changed">>).
--define(BONDY_RBAC_SOURCE_ADDED,         <<"bondy.security.source_added">>).
--define(BONDY_RBAC_SOURCE_DELETED,       <<"bondy.security.source_deleted">>).
--define(BONDY_RBAC_GROUP_UPDATE,         <<"bondy.security.update_group">>).
--define(BONDY_RBAC_USER_UPDATE,          <<"bondy.security.update_user">>).
--define(BONDY_RBAC_USER_ADDED,           <<"bondy.security.user_added">>).
--define(BONDY_RBAC_USER_DELETED,         <<"bondy.security.user_deleted">>).
--define(BONDY_RBAC_USER_LOGGED_IN,       <<"bondy.security.user_logged_in">>).
--define(BONDY_RBAC_USER_UPDATED,         <<"bondy.security.user_updated">>).
--define(BONDY_SUBS_LIST,                <<"bondy.subscription.list">>).
--define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
--define(BONDY_REALM_UPDATE,             <<"bondy.security.update_realm">>).
--define(BONDY_OAUTH2_TOKEN_LOOKUP, <<"bondy.oauth2.lookup_token">>).
--define(BONDY_OAUTH2_TOKEN_REVOKE, <<"bondy.oauth2.revoke_token">>).
--define(BONDY_OAUTH2_TOKEN_REVOKE_ALL, <<"bondy.oauth2.revoke_tokens">>).

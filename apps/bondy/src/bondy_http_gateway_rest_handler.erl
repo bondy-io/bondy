@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_http_api_gateway_rest_handler.erl -
+%%  bondy_http_gateway_rest_handler.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -27,15 +27,15 @@
 %%
 %% For every path defined in a BAGS file, Bondy will configure and install a
 %% Cowboy route using this module. The initial state of the module responds to
-%% a contract between this module and the {@link bondy_http_api_gateway_spec_parser}
+%% a contract between this module and the {@link bondy_http_gateway_api_spec_parser}
 %% and contains the parsed and preprocessed definition of the paths
 %% specification which this module uses to dynamically implement its behaviour.
 %%
-%% See {@link bondy_http_api_gateway} for a detail description of the
+%% See {@link bondy_http_gateway} for a detail description of the
 %% Bondy API Gateway Specification Format.
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_http_api_gateway_rest_handler).
+-module(bondy_http_gateway_rest_handler).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
@@ -1059,7 +1059,7 @@ mops_eval(Expr, Ctxt) ->
     catch
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => iolist_to_binary([
                     <<"There was an error evaluating the MOPS expression '">>,
                     Expr,
@@ -1071,13 +1071,13 @@ mops_eval(Expr, Ctxt) ->
             });
         error:{badkey, Key} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => <<"There is no value for key '", Key/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkeypath, Path} ->
             throw(#{
-                <<"code">> => ?BONDY_HTTP_API_GATEWAY_ERROR_INVALID_EXPR,
+                <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
                 <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })

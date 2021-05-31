@@ -94,7 +94,7 @@ init([]) ->
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
         ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
         ?WORKER(bondy_backup, [], permanent, 5000),
-        ?WORKER(bondy_http_api_gateway, [], permanent, 5000),
+        ?WORKER(bondy_http_gateway, [], permanent, 5000),
         ?WORKER(bondy_peer_discovery_agent, [], permanent, 5000)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_http_api_gateway_utils.erl -
+%%  bondy_http_gateway_utils.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_http_api_gateway_utils).
+-module(bondy_http_gateway_utils).
 
 -type state_fun() :: fun((any()) -> any()).
 -export_type([state_fun/0]).

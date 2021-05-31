@@ -34,10 +34,10 @@
 <tr><td><a href="bondy_event_handler_watcher.md" class="module">bondy_event_handler_watcher</a></td></tr>
 <tr><td><a href="bondy_event_handler_watcher_sup.md" class="module">bondy_event_handler_watcher_sup</a></td></tr>
 <tr><td><a href="bondy_event_manager.md" class="module">bondy_event_manager</a></td></tr>
-<tr><td><a href="bondy_http_api_gateway.md" class="module">bondy_http_api_gateway</a></td></tr>
-<tr><td><a href="bondy_http_api_gateway_rest_handler.md" class="module">bondy_http_api_gateway_rest_handler</a></td></tr>
-<tr><td><a href="bondy_http_api_gateway_spec_parser.md" class="module">bondy_http_api_gateway_spec_parser</a></td></tr>
-<tr><td><a href="bondy_http_api_gateway_utils.md" class="module">bondy_http_api_gateway_utils</a></td></tr>
+<tr><td><a href="bondy_http_gateway.md" class="module">bondy_http_gateway</a></td></tr>
+<tr><td><a href="bondy_http_gateway_api_spec_parser.md" class="module">bondy_http_gateway_api_spec_parser</a></td></tr>
+<tr><td><a href="bondy_http_gateway_rest_handler.md" class="module">bondy_http_gateway_rest_handler</a></td></tr>
+<tr><td><a href="bondy_http_gateway_utils.md" class="module">bondy_http_gateway_utils</a></td></tr>
 <tr><td><a href="bondy_http_utils.md" class="module">bondy_http_utils</a></td></tr>
 <tr><td><a href="bondy_logger_formatter.md" class="module">bondy_logger_formatter</a></td></tr>
 <tr><td><a href="bondy_oauth2.md" class="module">bondy_oauth2</a></td></tr>
@@ -77,16 +77,20 @@
 <tr><td><a href="bondy_subscribers_sup.md" class="module">bondy_subscribers_sup</a></td></tr>
 <tr><td><a href="bondy_sup.md" class="module">bondy_sup</a></td></tr>
 <tr><td><a href="bondy_utils.md" class="module">bondy_utils</a></td></tr>
+<tr><td><a href="bondy_wamp_api.md" class="module">bondy_wamp_api</a></td></tr>
 <tr><td><a href="bondy_wamp_backup_api.md" class="module">bondy_wamp_backup_api</a></td></tr>
+<tr><td><a href="bondy_wamp_cluster_api.md" class="module">bondy_wamp_cluster_api</a></td></tr>
 <tr><td><a href="bondy_wamp_event_manager.md" class="module">bondy_wamp_event_manager</a></td></tr>
+<tr><td><a href="bondy_wamp_http_gateway_api.md" class="module">bondy_wamp_http_gateway_api</a></td></tr>
 <tr><td><a href="bondy_wamp_meta_api.md" class="module">bondy_wamp_meta_api</a></td></tr>
-<tr><td><a href="bondy_wamp_meta_event_handler.md" class="module">bondy_wamp_meta_event_handler</a></td></tr>
 <tr><td><a href="bondy_wamp_oauth2_api.md" class="module">bondy_wamp_oauth2_api</a></td></tr>
 <tr><td><a href="bondy_wamp_protocol.md" class="module">bondy_wamp_protocol</a></td></tr>
 <tr><td><a href="bondy_wamp_rbac_api.md" class="module">bondy_wamp_rbac_api</a></td></tr>
-<tr><td><a href="bondy_wamp_rest_gateway_api.md" class="module">bondy_wamp_rest_gateway_api</a></td></tr>
+<tr><td><a href="bondy_wamp_realm_api.md" class="module">bondy_wamp_realm_api</a></td></tr>
+<tr><td><a href="bondy_wamp_router_event_handler.md" class="module">bondy_wamp_router_event_handler</a></td></tr>
 <tr><td><a href="bondy_wamp_tcp.md" class="module">bondy_wamp_tcp</a></td></tr>
 <tr><td><a href="bondy_wamp_tcp_connection_handler.md" class="module">bondy_wamp_tcp_connection_handler</a></td></tr>
+<tr><td><a href="bondy_wamp_telemetry_api.md" class="module">bondy_wamp_telemetry_api</a></td></tr>
 <tr><td><a href="bondy_wamp_utils.md" class="module">bondy_wamp_utils</a></td></tr>
 <tr><td><a href="bondy_wamp_ws_connection_handler.md" class="module">bondy_wamp_ws_connection_handler</a></td></tr></table>
 

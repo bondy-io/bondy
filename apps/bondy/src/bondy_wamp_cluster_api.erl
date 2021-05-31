@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_backup_api.erl -
+%%  bondy_wamp_cluster_api.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -21,7 +21,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_backup_api).
+-module(bondy_wamp_cluster_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("wamp/include/wamp.hrl").
@@ -46,17 +46,21 @@
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
 
 
-handle_call(?BONDY_BACKUP_CREATE, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-    bondy_wamp_utils:maybe_error(bondy_backup:backup(Info), M);
+handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, _Ctxt) ->
+    %% TODO
+    bondy_wamp_utils:no_such_procedure_error(M);
 
-handle_call(?BONDY_BACKUP_STATUS, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-    bondy_wamp_utils:maybe_error(bondy_backup:status(Info), M);
+handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, _Ctxt) ->
+    %% TODO
+    bondy_wamp_utils:no_such_procedure_error(M);
 
-handle_call(?BONDY_BACKUP_RESTORE, #call{} = M, Ctxt) ->
-    [Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-    bondy_wamp_utils:maybe_error(bondy_backup:restore(Info), M);
+handle_call(?BONDY_CLUSTER_PEER_INFO, #call{} = M, _Ctxt) ->
+    %% TODO
+    bondy_wamp_utils:no_such_procedure_error(M);
+
+handle_call(?BONDY_CLUSTER_STATUS, #call{} = M, _Ctxt) ->
+    %% TODO
+    bondy_wamp_utils:no_such_procedure_error(M);
 
 handle_call(_, #call{} = M, _) ->
     bondy_wamp_utils:no_such_procedure_error(M).
