@@ -155,7 +155,7 @@ do_handle(#call{procedure_uri = ?BONDY_REGISTRY_LIST} = M, Ctxt) ->
     end;
 
 
-do_handle(#call{procedure_uri = ?BONDY_CALLEE_LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_WAMP_CALLEE_LIST} = M, Ctxt) ->
         %% L can be [RealmUri, ProcUri] or [RealmUri, ProcUri, Details]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
 
@@ -191,7 +191,7 @@ do_handle(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_SUBS_LIST} = M, Ctxt) ->
+do_handle(#call{procedure_uri = ?BONDY_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     case list(subscription, RealmUri) of
         {ok, Result} ->

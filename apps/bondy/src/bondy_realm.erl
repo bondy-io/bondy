@@ -672,11 +672,11 @@ password_opts(RealmUri) ->
 %% -----------------------------------------------------------------------------
 to_external(#realm{} = R) ->
     #{
-        uri => R#realm.uri,
-        description => R#realm.description,
-        authmethods => R#realm.authmethods,
-        security_status => security_status(R),
-        public_keys => [
+        <<"uri">> => R#realm.uri,
+        <<"description">> => R#realm.description,
+        <<"authmethods">> => R#realm.authmethods,
+        <<"security_status">> => security_status(R),
+        <<"public_keys">> => [
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
         ]

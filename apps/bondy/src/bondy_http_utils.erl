@@ -81,7 +81,6 @@ forwarded_for(Req) ->
     NewReq :: cowboy_req:req().
 
 set_meta_headers(Req) ->
-
     cowboy_req:set_resp_headers(meta_headers(), Req).
 
 
@@ -92,6 +91,13 @@ set_meta_headers(Req) ->
 -spec meta_headers() -> map().
 
 meta_headers() ->
-    #{
-        <<"via">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
-    }.
+    case persistent_term:get({?MODULE, meta_headers}, undefined) of
+        undefined ->
+            Meta = #{
+                <<"server">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
+            },
+            _ = persistent_term:put({?MODULE, meta_headers}, Meta),
+            Meta;
+        Meta ->
+            Meta
+    end.

@@ -21,7 +21,7 @@
 %% Bondy events
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_meta_event_handler).
+-module(bondy_wamp_router_event_handler).
 -behaviour(gen_event).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -49,63 +49,81 @@ init([]) ->
     State = #state{},
     {ok, State}.
 
+
 handle_event({realm_added, Uri}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
-    {ok, State};
-
-handle_event({realm_deleted, Uri}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_REALM_DELETED_OLD, [Uri], #{}, ?BONDY_PRIV_REALM_URI),
-    {ok, State};
-
-handle_event({security_group_added, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_GROUP_ADDED, [RealmUri, Name], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_group_updated, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_GROUP_UPDATED, [RealmUri, Name], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_group_deleted, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_GROUP_DELETED, [RealmUri, Name], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_user_added, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_USER_ADDED, [RealmUri, Username], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_BONDY_SEC_USER_UPDATED, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_USER_UPDATED, [RealmUri, Username], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_user_deleted, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(#{}, ?BONDY_RBAC_USER_DELETED, [RealmUri, Username], #{}, R)
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
-    {ok, State};
-
-handle_event({security_password_changed, RealmUri, Username}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_RBAC_USER_PASSWORD_CHANGED, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?BONDY_PRIV_REALM_URI
     ),
     {ok, State};
 
-handle_event({security_user_logged_in, RealmUri, Username, Meta}, State) ->
+handle_event({realm_deleted, Uri}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?BONDY_PRIV_REALM_URI
+    ),
+    {ok, State};
+
+handle_event({rbac_group_added, RealmUri, Name}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_GROUP_ADDED, [RealmUri, Name], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_group_updated, RealmUri, Name}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_GROUP_UPDATED, [RealmUri, Name], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_group_deleted, RealmUri, Name}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_GROUP_DELETED, [RealmUri, Name], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_user_added, RealmUri, Username}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_USER_ADDED, [RealmUri, Username], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_user_updated, RealmUri, Username}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_USER_UPDATED, [RealmUri, Username], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_user_deleted, RealmUri, Username}, State) ->
+    _ = [
+        _ = bondy:publish(
+            #{}, ?BONDY_RBAC_USER_DELETED, [RealmUri, Username], #{}, R
+        )
+        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+    ],
+    {ok, State};
+
+handle_event({rbac_user_password_changed, RealmUri, Username}, State) ->
+    Uri = ?BONDY_RBAC_USER_PASSWORD_CHANGED,
+    _ = bondy:publish(
+        #{}, Uri, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
+    ),
+    {ok, State};
+
+handle_event({rbac_user_logged_in, RealmUri, Username, Meta}, State) ->
     Uri = ?BONDY_RBAC_USER_LOGGED_IN,
     _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
     {ok, State};
@@ -117,11 +135,15 @@ handle_event({backup_started, File}, State) ->
     {ok, State};
 
 handle_event({backup_finished, Args}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(
+        #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?BONDY_PRIV_REALM_URI
+    ),
     {ok, State};
 
-handle_event({backup_error, Args}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_ERROR_BACKUP_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI),
+handle_event({backup_failed, Args}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI
+    ),
     {ok, State};
 
 handle_event({backup_restore_started, File}, State) ->
@@ -136,8 +158,9 @@ handle_event({backup_restore_finished, Args}, State) ->
     ),
     {ok, State};
 
-handle_event({backup_restore_error, Args}, State) ->
-    _ = bondy:publish(#{}, ?BONDY_ERROR_BACKUP_RESTORE_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI),
+handle_event({backup_restore_failed, Args}, State) ->
+    Uri = ?BONDY_BACKUP_RESTORE_FAILED,
+    _ = bondy:publish(#{}, Uri, Args, #{}, ?BONDY_PRIV_REALM_URI),
     {ok, State};
 
 %% REGISTRATION META API

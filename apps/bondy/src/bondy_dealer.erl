@@ -622,37 +622,12 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 
 %% @private
 handle_call(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M0,
-    Ctxt) ->
-    %% Deprecated API Call,
-    %% TODO set an alarm with ref to this client
-    NewUri = binary:replace(M0#call.procedure_uri, <<"com.leapsight.">>, <<>>),
-    M1 = M0#call{procedure_uri = NewUri},
-    handle_call(M1, Ctxt);
-
-handle_call(
-    #call{procedure_uri = <<"bondy.api_gateway.", _/binary>>} = M,
-    Ctxt) ->
-    bondy_wamp_rest_gateway_api:handle_call(M, Ctxt);
-
-handle_call(
-    #call{procedure_uri = <<"bondy.security.", _/binary>>} = M,
-    Ctxt) ->
-    bondy_wamp_rbac_api:handle_call(M, Ctxt);
-
-handle_call(
-    #call{procedure_uri = <<"bondy.oauth2.", _/binary>>} = M,
-    Ctxt) ->
-    bondy_wamp_oauth2_api:handle_call(M, Ctxt);
-
-handle_call(
-    #call{procedure_uri = <<"bondy.backup.", _/binary>>} = M,
-    Ctxt) ->
-    bondy_wamp_backup_api:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
+    bondy_wamp_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_meta_api:handle_call(M, Ctxt);
+    bondy_wamp_api:handle_call(M, Ctxt);
 
 handle_call(
     #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->

@@ -21,172 +21,30 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_rbac_api).
+-behaviour(bondy_wamp_api).
+
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
--export([handle_call/2]).
+-export([handle_call/3]).
+-export([handle_event/2]).
+
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
-
-handle_call(M, Ctxt) ->
-    PeerId = bondy_context:peer_id(Ctxt),
-
-    try
-        Reply = do_handle(M, Ctxt),
-        bondy:send(PeerId, Reply)
-    catch
-        _:Reason ->
-            %% We catch any exception from do_handle and turn it
-            %% into a WAMP Error
-            Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
-            bondy:send(PeerId, Error)
-    end.
+-spec handle_call(
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
 
 
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-
--spec do_handle(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
-    wamp_messsage:result() | wamp_message:error().
-
-%% REALMS ----------------------------------------------------------------------
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_CREATE_OLD} = M, Ctxt) ->
-    [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    Realm = bondy_realm:add(Data),
-    Ext = bondy_realm:to_external(Realm),
-    wamp_message:result(M#call.request_id, #{}, [Ext]);
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_UPDATE} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 2),
-
-    Realm = bondy_realm:update(Uri, Data),
-    Ext = bondy_realm:to_external(Realm),
-    wamp_message:result(M#call.request_id, #{}, [Ext]);
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_LIST_OLD} = M, Ctxt) ->
-    [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0, 0),
-
-    Ext = [bondy_realm:to_external(X) || X <- bondy_realm:list()],
-    wamp_message:result(M#call.request_id, #{}, [Ext]);
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_ENABLE} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    ok = bondy_realm:enable_security(bondy_realm:fetch(Uri)),
-    wamp_message:result(M#call.request_id, #{});
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_DISABLE} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    ok = bondy_realm:disable_security(bondy_realm:fetch(Uri)),
-    wamp_message:result(M#call.request_id, #{});
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_STATUS} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    Status = bondy_realm:security_status(bondy_realm:fetch(Uri)),
-    wamp_message:result(M#call.request_id, #{}, [Status]);
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_SECURITY_IS_ENABLED} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    Boolean = bondy_realm:is_security_enabled(bondy_realm:fetch(Uri)),
-    wamp_message:result(M#call.request_id, #{}, [Boolean]);
-
-do_handle(#call{procedure_uri = ?BONDY_REALM_DELETE_OLD} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-
-    case bondy_realm:delete(Uri) of
-        ok ->
-            wamp_message:result(M#call.request_id, #{});
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
-%% USERS -----------------------------------------------------------------------
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_ADD} = M, Ctxt) ->
-    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
-
-    case bondy_rbac_user:add(Uri, bondy_rbac_user:new(Data)) of
-        {ok, User} ->
-            Ext = bondy_rbac_user:to_external(User),
-            wamp_message:result(M#call.request_id, #{}, [Ext]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_UPDATE} = M, Ctxt) ->
-    [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-
-    case bondy_rbac_user:update(Uri, Username, Info) of
-        {ok, User} ->
-            Ext = bondy_rbac_user:to_external(User),
-            wamp_message:result(M#call.request_id, #{}, [Ext]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_DELETE} = M, Ctxt) ->
-    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
-
-    case bondy_rbac_user:remove(Uri, Username) of
-        ok ->
-            wamp_message:result(M#call.request_id, #{});
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_LIST} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-
-    Ext = [bondy_rbac_user:to_external(X) || X <- bondy_rbac_user:list(Uri)],
-    wamp_message:result(M#call.request_id, #{}, [Ext]);
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_FIND} = M, Ctxt) ->
-    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
-
-    case bondy_rbac_user:lookup(Uri, Username) of
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M);
-        User ->
-            Ext = bondy_rbac_user:to_external(User),
-            wamp_message:result(M#call.request_id, #{}, [Ext])
-    end;
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_USER_CHANGE_PASSWORD} = M, Ctxt) ->
-    %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
-    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
-
-    case erlang:apply(bondy_rbac_user, change_password, L) of
-        ok ->
-            wamp_message:result(M#call.request_id, #{});
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
-%% GROUPS ----------------------------------------------------------------------
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_ADD} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_GROUP_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:add(Uri, bondy_rbac_group:new(Data)) of
@@ -197,7 +55,7 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_ADD} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_DELETE} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_GROUP_DELETE, #call{} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:remove(Uri, Name) of
@@ -207,12 +65,7 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_DELETE} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_LIST} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-    Ext = [bondy_rbac_group:to_external(X) || X <- bondy_rbac_group:list(Uri)],
-    wamp_message:result(M#call.request_id, #{}, [Ext]);
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_FIND} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_GROUP_FIND, #call{} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:lookup(Uri, Name) of
@@ -223,7 +76,12 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_FIND} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_UPDATE} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_GROUP_LIST, #call{} = M, Ctxt) ->
+    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    Ext = [bondy_rbac_group:to_external(X) || X <- bondy_rbac_group:list(Uri)],
+    wamp_message:result(M#call.request_id, #{}, [Ext]);
+
+handle_call(?BONDY_RBAC_GROUP_UPDATE, #call{} = M, Ctxt) ->
     [Uri, Name, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_group:update(Uri, Name, Info) of
@@ -234,9 +92,7 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_GROUP_UPDATE} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-%% SOURCES ---------------------------------------------------------------------
-
-do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_ADD} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_SOURCE_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_source:add(Uri, bondy_rbac_source:new_assignment(Data)) of
@@ -247,7 +103,7 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_ADD} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_DELETE} = M, Ctxt) ->
+handle_call(?BONDY_RBAC_SOURCE_DELETE, #call{} = M, Ctxt) ->
     [Uri, Username, CIDR] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_source:remove(Uri, Username, CIDR) of
@@ -257,13 +113,114 @@ do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_DELETE} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_LIST} = M, _) ->
-    %% @TODO
+handle_call(?BONDY_RBAC_SOURCE_FIND, #call{} = M, _) ->
+    %% TODO
     bondy_wamp_utils:no_such_procedure_error(M);
 
-do_handle(#call{procedure_uri = ?BONDY_RBAC_SOURCE_FIND} = M, _) ->
-    %% @TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
+handle_call(?BONDY_RBAC_SOURCE_LIST, #call{} = M, Ctxt) ->
+    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    Ext = [
+        bondy_rbac_source:to_external(S)
+        || S <- bondy_rbac_source:list(Uri)
+    ],
+    wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-do_handle(#call{} = M, _) ->
+handle_call(?BONDY_RBAC_SOURCE_MATCH, #call{} = M, Ctxt) ->
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
+    Ext = [
+        bondy_rbac_source:to_external(S)
+        || S <- erlang:apply(bondy_rbac_source, match, L)
+    ],
+    wamp_message:result(M#call.request_id, #{}, [Ext]);
+
+handle_call(?BONDY_RBAC_USER_ADD, #call{} = M, Ctxt) ->
+    [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
+    case bondy_rbac_user:add(Uri, bondy_rbac_user:new(Data)) of
+        {ok, User} ->
+            Ext = bondy_rbac_user:to_external(User),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_RBAC_USER_DELETE, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
+    case bondy_rbac_user:remove(Uri, Username) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_RBAC_USER_FIND, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
+    case bondy_rbac_user:lookup(Uri, Username) of
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M);
+        User ->
+            Ext = bondy_rbac_user:to_external(User),
+            wamp_message:result(M#call.request_id, #{}, [Ext])
+    end;
+
+handle_call(?BONDY_RBAC_USER_LIST, #call{} = M, Ctxt) ->
+    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+
+    Ext = [bondy_rbac_user:to_external(X) || X <- bondy_rbac_user:list(Uri)],
+    wamp_message:result(M#call.request_id, #{}, [Ext]);
+
+handle_call(?BONDY_RBAC_USER_UPDATE, #call{} = M, Ctxt) ->
+    [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:update(Uri, Username, Info) of
+        {ok, User} ->
+            Ext = bondy_rbac_user:to_external(User),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_RBAC_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
+    %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
+
+    case erlang:apply(bondy_rbac_user, change_password, L) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(_, #call{} = M, _) ->
     bondy_wamp_utils:no_such_procedure_error(M).
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+handle_event(
+    ?BONDY_RBAC_USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
+    ok;
+
+handle_event(
+    ?BONDY_RBAC_USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
+
+handle_event(
+    ?BONDY_RBAC_USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
+
+handle_event(
+    ?BONDY_RBAC_USER_PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
+    bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
+
+handle_event(_, _) ->
+    ok.
+
+
+

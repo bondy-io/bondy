@@ -110,7 +110,7 @@ simple_1_test(_) ->
             }
         }
     },
-    bondy_http_api_gateway_spec_parser:parse(Spec).
+    bondy_http_gateway_api_spec_parser:parse(Spec).
 
 
 %% png() ->
