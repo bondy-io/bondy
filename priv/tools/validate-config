@@ -69,11 +69,17 @@ main([EtcDir, _ReleaseDir]) ->
             ),
             true;
         [B1, B2] ->
-            ?LOG_ERROR(
-                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Please provide only one of them i.e. use \"bondy.conf.template\" in case environment variables replacement is required).",
+            ?LOG_INFO(
+                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Using \"bondy.conf.template\" and moving \"bondy.conf\" to \"disabled/bondy.conf\".",
                 [B1, B2, EtcDir]
             ),
-            false
+            DisabledDir = filename:join(EtcDir, "disabled"),
+            ok = file:make_dir(DisabledDir),
+            ok = file:rename(
+                filename:join(EtcDir, "bondy.conf"),
+                filename:join(DisabledDir, "bondy.conf")
+            ),
+            true
     end,
 
     % Etc = sets:from_list(files(EtcDir)),
