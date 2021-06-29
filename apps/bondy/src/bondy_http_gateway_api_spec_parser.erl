@@ -1464,7 +1464,9 @@ do_dispatch_table(API) ->
         <<"versions">> := Vers
     } = API,
 
-    lists:append([dispatch_table_version(Host, Realm, V) || V <- maps:to_list(Vers)]).
+    lists:append([
+        dispatch_table_version(Host, Realm, V) || V <- maps:to_list(Vers)
+    ]).
 
 
 %% -----------------------------------------------------------------------------
@@ -1483,8 +1485,10 @@ dispatch_table_version(Host, Realm, {_Name, Version}) ->
         <<"is_deprecated">> := Deprecated,
         <<"paths">> := Paths
     } = Version,
-    [dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
-        || P <- maps:to_list(Paths)].
+    [
+        dispatch_table_path(Host, BasePath, Deprecated, Realm, P, Version)
+        || P <- maps:to_list(Paths)
+    ].
 
 
 %% -----------------------------------------------------------------------------
