@@ -21,7 +21,7 @@
             "{{request.query_params |> with([_q,_p,_limit,_sort,_page])}}",
         "query_match" :
             "{{request.query_params |> without([_q,_p,_limit,_sort,_page])}}",
-        "schemes" : ["http"],
+        "schemes" : ["http", "https"],
         "headers": {
             "access-control-allow-origin": "*",
             "access-control-allow-credentials": "true",
