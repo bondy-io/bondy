@@ -618,6 +618,40 @@ hidden
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
 
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "admin_api.https.versions", "bondy.admin_api_https.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.admin_api_https.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("admin_api.https.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case Version of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(string:trim(Value), ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 %% =============================================================================
@@ -803,11 +837,46 @@ hidden
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
-%% with the api_gateway.ssl config variable, for example:
+%% with the admin_api.ssl config variable, for example:
 {mapping, "api_gateway.https.cacertfile", "bondy.api_gateway_https.socket_opts.cacertfile", [
   {datatype, file},
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "api_gateway.https.versions", "bondy.api_gateway_https.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.api_gateway_https.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("api_gateway.https.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case Version of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(string:trim(Value), ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 
@@ -1238,6 +1307,40 @@ hidden
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
 
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "wamp.tls.versions", "bondy.wamp_tls.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.wamp_tls.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("wamp.tls.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case Version of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(string:trim(Value), ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 %% =============================================================================
@@ -1352,6 +1455,40 @@ end}.
   {datatype, file},
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "cluster.tls.versions", "partisan.tls_options.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "partisan.tls_options.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("cluster.tls.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case Version of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(string:trim(Value), ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
 
 
 
