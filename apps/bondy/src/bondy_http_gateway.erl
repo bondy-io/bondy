@@ -985,7 +985,7 @@ transport_opts(Name) ->
     TransportOpts = #{
         num_acceptors => PoolSize,
         max_connections =>  MaxConnections,
-        socket_opts => [{port, Port}, SocketOpts]
+        socket_opts => [{port, Port} | SocketOpts]
     },
     {TransportOpts, OtherSocketOpts}.
 
