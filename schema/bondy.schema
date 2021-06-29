@@ -534,7 +534,7 @@ hidden
 %% @doc https.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
-  {default, 18083},
+  {default, 18084},
   {datatype, integer},
   hidden
 ]}.
