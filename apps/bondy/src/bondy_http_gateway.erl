@@ -683,26 +683,8 @@ maybe_start_http(Routes, Name) ->
 -spec start_http(list(), atom()) -> ok | {error, any()}.
 
 start_http(Routes, Name) ->
-    {TransportOpts, _OtherTransportOpts}  = transport_opts(Name),
-    ProtoOpts = #{
-        env => #{
-            bondy => #{
-                auth => #{
-                    %% REVIEW this in light of recent changes to auth methods
-                    schemes => [basic, bearer]
-                }
-            },
-            dispatch => cowboy_router:compile(Routes)
-        },
-        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
-        %% cowboy_metrics_h must be first on the list
-        stream_handlers => [
-            cowboy_metrics_h, cowboy_compress_h, cowboy_stream_h
-        ],
-        middlewares => [
-            cowboy_router, cowboy_handler
-        ]
-    },
+    {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+
     case cowboy:start_clear(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
             ok;
@@ -716,7 +698,6 @@ start_http(Routes, Name) ->
             Error
     end.
 
-
 maybe_start_https(Routes, Name) ->
     case bondy_config:get([Name, enabled], true) of
         true ->
@@ -725,6 +706,35 @@ maybe_start_https(Routes, Name) ->
             ok
     end.
 
+
+cowboy_opts(Routes, Name) ->
+    {TransportOpts, _OtherTransportOpts}  = transport_opts(Name),
+    ProtocolOpts = #{
+        env => #{
+            bondy => #{
+                auth => #{
+                    %% REVIEW this in light of recent changes to auth methods
+                    schemes => [basic, bearer]
+                }
+            },
+            dispatch => cowboy_router:compile(Routes)
+        },
+        metrics_callback => fun bondy_prometheus_cowboy_collector:observe/1,
+        %% cowboy_metrics_h must be first on the list
+        stream_handlers => [
+            cowboy_metrics_h,
+            cowboy_compress_h,
+            cowboy_stream_h
+        ],
+        middlewares => [
+            cowboy_router,
+            cowboy_handler
+        ]
+    },
+    {TransportOpts, ProtocolOpts}.
+
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -732,25 +742,8 @@ maybe_start_https(Routes, Name) ->
 -spec start_https(list(), atom()) -> ok | {error, any()}.
 
 start_https(Routes, Name) ->
-    {TransportOpts, _OtherTransportOpts} = transport_opts(Name),
-    ProtoOpts = #{
-        env => #{
-            bondy => #{
-                %% REVIEW this in light of recent changes to auth methods
-                auth => #{
-                    schemes => [basic, bearer]
-                }
-            },
-            dispatch => cowboy_router:compile(Routes)
-        },
-        stream_handlers => [
-            cowboy_compress_h, cowboy_stream_h
-        ],
-        middlewares => [
-            cowboy_router,
-            cowboy_handler
-        ]
-    },
+    {TransportOpts, ProtoOpts} = cowboy_opts(Routes, Name),
+
     case cowboy:start_tls(Name, TransportOpts, ProtoOpts) of
         {ok, _} ->
             ok;
