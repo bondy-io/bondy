@@ -149,8 +149,8 @@ handle_info(
     %% transports on the connecting port (such as WebSocket), the
     %% _Router_ MUST *fail the connection*.
     _ = lager:error(
-        "Received data before WAMP protocol handshake, reason=invalid_handshake, data=~p",
-        [Data]
+        "Received data before WAMP protocol handshake, reason=invalid_handshake, transport=~p, peername=~p, encoding=~p, data=~p",
+        [St#state.transport, St#state.peername, St#state.encoding, Data]
     ),
     {stop, invalid_handshake, St};
 
