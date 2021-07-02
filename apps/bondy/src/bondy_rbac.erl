@@ -268,7 +268,7 @@ check_permission({Permission}, #bondy_rbac_context{realm_uri = Uri} = Context0) 
     %% This is for things with undetermined inputs or
     %% permissions that don't tie to a particular resource, like 'ping' and
     %% 'stats'.
-    MatchG = match_grant(any, Context#bondy_rbac_context.permissions),
+    MatchG = match_grants(any, Context#bondy_rbac_context.permissions),
     case lists:member(Permission, MatchG) of
         true ->
             {true, Context};
@@ -281,7 +281,7 @@ check_permission({Permission}, #bondy_rbac_context{realm_uri = Uri} = Context0) 
 check_permission(
     {Permission, Resource}, #bondy_rbac_context{realm_uri = Uri} = Ctxt0) ->
     Ctxt = maybe_refresh_context(Uri, Ctxt0),
-    MatchG = match_grant(Resource, Ctxt#bondy_rbac_context.permissions),
+    MatchG = match_grants(Resource, Ctxt#bondy_rbac_context.permissions),
     case lists:member(Permission, MatchG) of
         true ->
             {true, Ctxt};
@@ -334,31 +334,36 @@ maybe_refresh_context(RealmUri, Context) ->
 
 
 %% @private
-match_grant(any, Grants) ->
+match_grants(Resource, Grants) ->
+    match_grants(Resource, Grants, []).
+
+
+%% @private
+match_grants(any, Grants, Acc) ->
     case lists:keyfind(any, 1, Grants) of
         {any, Permissions} ->
-            Permissions;
+            Acc ++ Permissions;
         false ->
-            []
+            Acc
     end;
 
-match_grant(Resource, Grants) ->
+match_grants(Resource, Grants, Acc) ->
     %% find the first grant that matches the resource name
     %% and then merge in the 'any' grants, if any
     Fun = fun
-        ({{Uri, Strategy}, Permissions}, Acc) ->
+        ({{Uri, Strategy}, Permissions}, IAcc) ->
             case wamp_uri:match(Resource, Uri, Strategy) of
                 true ->
-                    Permissions ++ Acc;
+                    Permissions ++ IAcc;
                 false ->
-                    []
+                    IAcc
             end;
-        (_, Acc) ->
-            Acc
+        (_, IAcc) ->
+            IAcc
     end,
     lists:umerge(
-        lists:sort(lists:foldl(Fun, [], Grants)),
-        lists:sort(match_grant(any, Grants))
+        lists:sort(lists:foldl(Fun, Acc, Grants)),
+        lists:sort(match_grants(any, Grants))
     ).
 
 
