@@ -2,7 +2,7 @@
 -name ${BONDY_ERL_NODENAME}
 
 ## Cookie for distributed erlang
--cookie ${BONDY_ERL_DISTRIBUTED_COOKIE}
+-setcookie ${BONDY_ERL_DISTRIBUTED_COOKIE}
 
 ## Explicit connections only.
 -connect_all false
