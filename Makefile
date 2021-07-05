@@ -33,6 +33,14 @@ prodrun:
 	${REBAR} as prod release
 	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
 
+prodtarrun:
+	rm -rf _build/tar
+	${REBAR} as prod tar
+	mkdir -p _build/tar
+	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
+	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
+
+
 node1:
 	${REBAR} as node1 release
 	_build/node1/rel/bondy/bin/bondy console
