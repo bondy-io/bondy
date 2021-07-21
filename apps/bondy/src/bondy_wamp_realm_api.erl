@@ -58,7 +58,7 @@ handle_call(?BONDY_REALM_DELETE, M, Ctxt) ->
     end;
 
 handle_call(?BONDY_REALM_GET, M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0, 0),
+    [Uri] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
 
     Ext = bondy_realm:to_external(bondy_realm:fetch(Uri)),
     wamp_message:result(M#call.request_id, #{}, [Ext]);
