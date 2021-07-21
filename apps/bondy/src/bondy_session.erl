@@ -123,8 +123,9 @@
     %% Peer WAMP Roles played by peer
     roles                           ::  map() | undefined,
     %% WAMP Auth
-    authid                          ::  binary() | undefined,
+    is_anonymous = false            ::  boolean(),    authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
+    authroles = []                  ::  [binary()],
     authmethod                      ::  binary() | undefined,
     %% Expiration and Limits
     created                         ::  calendar:date_time(),
@@ -175,8 +176,10 @@
 -export([realm_uri/1]).
 -export([roles/1]).
 -export([size/0]).
--export([to_details_map/1]).
+-export([to_external/1]).
+-export([info/1]).
 -export([update/1]).
+-export([user/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -437,6 +440,19 @@ peer(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec user(t()) -> bondy_rbac_user:t().
+
+user(#session{realm_uri = Uri, authid = Id}) ->
+    bondy_rbac_user:fetch(Uri, Id);
+
+user(Id) when is_integer(Id) ->
+    user(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec incr_seq(id() | t()) -> map().
 
 incr_seq(#session{id = Id}) ->
@@ -508,7 +524,7 @@ list() ->
 %% -----------------------------------------------------------------------------
 list(#{return := details_map}) ->
     Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
-    [to_details_map(X) || T <- Tabs, X <- ets:tab2list(T)];
+    [to_external(X) || T <- Tabs, X <- ets:tab2list(T)];
 
 list(_) ->
     Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
@@ -537,19 +553,37 @@ list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_details_map(t()) -> details().
+-spec to_external(t()) -> details().
 
-to_details_map(#session{} = S) ->
+to_external(#session{} = S) ->
     #{
         session => S#session.id,
         authid => S#session.authid,
         authrole => S#session.authrole,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
+        'x_authroles' => S#session.authroles,
         transport => #{
             peername => inet_utils:peername_to_binary(S#session.peer)
         }
     }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec info(t()) -> details().
+
+info(#session{is_anonymous = true} = S) ->
+    to_external(S);
+
+info(#session{is_anonymous = false} = S) ->
+    Map = to_external(S),
+    Map#{'x_meta' => bondy_rbac_user:meta(user(S))}.
+
+
 
 
 %% =============================================================================
@@ -564,17 +598,31 @@ parse_details(Opts, Session0)  when is_map(Opts) ->
 
 
 %% @private
+parse_details(roles, undefined, _) ->
+    error({invalid_options, missing_client_role});
 
 parse_details(roles, Roles, Session) when is_map(Roles) ->
     length(maps:keys(Roles)) > 0 orelse
     error({invalid_options, missing_client_role}),
     Session#session{roles = parse_roles(Roles)};
 
+parse_details(agent, V, Session) when is_binary(V) ->
+    Session#session{agent = V};
+
+parse_details(is_anonymous, V, Session) when is_boolean(V) ->
+    Session#session{is_anonymous = V};
+
 parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
 
-parse_details(agent, V, Session) when is_binary(V) ->
-    Session#session{agent = V};
+parse_details(authrole, V, Session) when is_binary(V) ->
+    Session#session{authrole = V};
+
+parse_details(authroles, V, Session) when is_list(V) ->
+    Session#session{authroles = V};
+
+parse_details(authmethod, V, Session) when is_binary(V) ->
+    Session#session{authmethod = V};
 
 parse_details(_, _, Session) ->
     Session.
@@ -654,8 +702,10 @@ when is_binary(RealmUri) orelse RealmUri == '_' ->
         agent = '_',
         seq = '_',
         roles = '_',
+        is_anonymous = '_',
         authid = '_',
         authrole = '_',
+        authroles = '_',
         authmethod = '_',
         created = '_',
         expires_in = '_',

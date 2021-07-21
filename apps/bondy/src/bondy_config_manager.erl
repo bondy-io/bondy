@@ -35,12 +35,10 @@
         'x_routing_key'
     ]},
     {interrupt, [
-        'x_caller_authroles',
-        'x_caller_session'
+        'x_session_info'
     ]},
     {register, [
-        'x_disclose_caller_authroles',
-        'x_disclose_caller_session',
+        'x_disclose_session_info',
         'x_force_locality',
         %% number of concurrent, outstanding calls that can exist
         %% for a single endpoint
@@ -57,8 +55,6 @@
         'x_routing_key'
     ]},
     {subscribe, [
-        'x_disclose_publisher_authroles',
-        'x_disclose_publisher_session'
     ]},
     {yield, [
     ]}
@@ -77,12 +73,9 @@
     {error, [
     ]},
     {event, [
-        'x_caller_authroles',
-        'x_caller_session'
     ]},
     {invocation, [
-        'x_caller_authroles',
-        'x_caller_session'
+        'x_session_info'
     ]},
     {result, [
     ]}

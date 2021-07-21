@@ -667,16 +667,22 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
 
-    Details = #{
-        procedure => Uri,
-        trust_level => 0
-    },
+    Details0 = #{procedure => Uri, trust_level => 0},
 
-    case DiscloseCaller orelse DiscloseMe of
+    Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->
-            Details#{caller => bondy_context:session_id(Ctxt)};
+            Details0#{caller => bondy_context:session_id(Ctxt)};
         false ->
-            Details
+            Details0
+    end,
+
+    case maps:get('x_disclose_session_info', RegOpts, false) of
+        true ->
+            Session = bondy_context:session(Ctxt),
+            Info = bondy_session:info(Session),
+            Details1#{'x_session_info' => Info};
+        false ->
+            Details1
     end.
 
 

@@ -489,7 +489,23 @@ open_session(Extra, St0) ->
         AuthCtxt = St0#wamp_state.auth_context,
         Id = bondy_context:id(Ctxt0),
         Realm = bondy_context:realm_uri(Ctxt0),
-        Details = bondy_context:request_details(Ctxt0),
+        ReqDetails = bondy_context:request_details(Ctxt0),
+        Authid = bondy_auth:user_id(AuthCtxt),
+        Authrole = bondy_auth:role(AuthCtxt),
+        Authroles = bondy_auth:roles(AuthCtxt),
+        Authprovider = bondy_auth:provider(AuthCtxt),
+        Authmethod = bondy_auth:method(AuthCtxt),
+
+        Details = #{
+            is_anonymous => Authid == anonymous,
+            agent => maps:get(agent, ReqDetails, undefined),
+            roles => maps:get(roles, ReqDetails, undefined),
+            authid => maybe_gen_authid(Authid),
+            authprovider => Authprovider,
+            authmethod => Authmethod,
+            authrole => Authrole,
+            authroles => Authroles
+        },
 
         %% We open a session
         Session = bondy_session_manager:open(
@@ -497,18 +513,21 @@ open_session(Extra, St0) ->
         ),
 
         %% We set the session in the context
-        Ctxt1 = Ctxt0#{session => Session},
+        Ctxt1 = Ctxt0#{
+            session => Session
+        },
         St1 = update_context(Ctxt1, St0),
+
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             Id,
-            #{
+            Details#{
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles(),
-                authprovider => bondy_auth:provider(AuthCtxt),
-                authmethod => bondy_auth:method(AuthCtxt),
-                authrole => to_bin(bondy_auth:role(AuthCtxt)),
+                authprovider => Authprovider,
+                authmethod => Authmethod,
+                authrole => to_bin(Authrole),
                 'x_authroles' => [to_bin(R) || R <- bondy_auth:roles(AuthCtxt)],
                 authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
                 authextra => Extra
