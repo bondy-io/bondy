@@ -48,26 +48,19 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec cidr(Term :: binary() | tuple()) ->
-    {ok, bondy_rbac_source:cidr()} | boolean().
+    {ok, bondy_cidr:t()} | boolean().
 
 cidr(Bin) when is_binary(Bin) ->
-    case re:split(Bin, "/", [{return, list}, {parts, 2}]) of
-        [Prefix, LenStr] ->
-            {ok, Addr} = inet:parse_address(Prefix),
-            {PrefixLen, _} = string:to_integer(LenStr),
-            {ok, {Addr, PrefixLen}};
-        _ ->
+    try
+        CIDR = bondy_cidr:parse(Bin),
+        {ok, CIDR}
+    catch
+        error:badarg ->
             false
     end;
 
-cidr({IP, PrefixLen}) when PrefixLen >= 0 ->
-    case inet:ntoa(IP) of
-        {error, einval} -> false;
-        _ -> true
-    end;
-
-cidr(_) ->
-    false.
+cidr(Term)  ->
+    bondy_cidr:is_type(Term).
 
 
 %% -----------------------------------------------------------------------------
