@@ -44,7 +44,7 @@
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
 
 
-handle_call(?BONDY_RBAC_GROUP_ADD, #call{} = M, Ctxt) ->
+handle_call(?BONDY_GROUP_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:add(Uri, bondy_rbac_group:new(Data)) of
@@ -55,7 +55,7 @@ handle_call(?BONDY_RBAC_GROUP_ADD, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_GROUP_DELETE, #call{} = M, Ctxt) ->
+handle_call(?BONDY_GROUP_DELETE, #call{} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:remove(Uri, Name) of
@@ -65,7 +65,7 @@ handle_call(?BONDY_RBAC_GROUP_DELETE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_GROUP_FIND, #call{} = M, Ctxt) ->
+handle_call(?BONDY_GROUP_GET, #call{} = M, Ctxt) ->
     [Uri, Name] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_group:lookup(Uri, Name) of
@@ -76,12 +76,12 @@ handle_call(?BONDY_RBAC_GROUP_FIND, #call{} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
-handle_call(?BONDY_RBAC_GROUP_LIST, #call{} = M, Ctxt) ->
+handle_call(?BONDY_GROUP_LIST, #call{} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     Ext = [bondy_rbac_group:to_external(X) || X <- bondy_rbac_group:list(Uri)],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-handle_call(?BONDY_RBAC_GROUP_UPDATE, #call{} = M, Ctxt) ->
+handle_call(?BONDY_GROUP_UPDATE, #call{} = M, Ctxt) ->
     [Uri, Name, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_group:update(Uri, Name, Info) of
@@ -92,7 +92,7 @@ handle_call(?BONDY_RBAC_GROUP_UPDATE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_SOURCE_ADD, #call{} = M, Ctxt) ->
+handle_call(?BONDY_SOURCE_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_source:add(Uri, bondy_rbac_source:new_assignment(Data)) of
@@ -103,7 +103,7 @@ handle_call(?BONDY_RBAC_SOURCE_ADD, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_SOURCE_DELETE, #call{} = M, Ctxt) ->
+handle_call(?BONDY_SOURCE_DELETE, #call{} = M, Ctxt) ->
     [Uri, Username, CIDR] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_source:remove(Uri, Username, CIDR) of
@@ -113,11 +113,11 @@ handle_call(?BONDY_RBAC_SOURCE_DELETE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_SOURCE_FIND, #call{} = M, _) ->
+handle_call(?BONDY_SOURCE_GET, #call{} = M, _) ->
     %% TODO
     bondy_wamp_utils:no_such_procedure_error(M);
 
-handle_call(?BONDY_RBAC_SOURCE_LIST, #call{} = M, Ctxt) ->
+handle_call(?BONDY_SOURCE_LIST, #call{} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     Ext = [
         bondy_rbac_source:to_external(S)
@@ -125,7 +125,7 @@ handle_call(?BONDY_RBAC_SOURCE_LIST, #call{} = M, Ctxt) ->
     ],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-handle_call(?BONDY_RBAC_SOURCE_MATCH, #call{} = M, Ctxt) ->
+handle_call(?BONDY_SOURCE_MATCH, #call{} = M, Ctxt) ->
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
     Ext = [
         bondy_rbac_source:to_external(S)
@@ -133,7 +133,7 @@ handle_call(?BONDY_RBAC_SOURCE_MATCH, #call{} = M, Ctxt) ->
     ],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-handle_call(?BONDY_RBAC_USER_ADD, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:add(Uri, bondy_rbac_user:new(Data)) of
@@ -144,7 +144,7 @@ handle_call(?BONDY_RBAC_USER_ADD, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_USER_DELETE, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_DELETE, #call{} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:remove(Uri, Username) of
@@ -154,7 +154,7 @@ handle_call(?BONDY_RBAC_USER_DELETE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_USER_FIND, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_GET, #call{} = M, Ctxt) ->
     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
     case bondy_rbac_user:lookup(Uri, Username) of
@@ -165,13 +165,13 @@ handle_call(?BONDY_RBAC_USER_FIND, #call{} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
-handle_call(?BONDY_RBAC_USER_LIST, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_LIST, #call{} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
 
     Ext = [bondy_rbac_user:to_external(X) || X <- bondy_rbac_user:list(Uri)],
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
-handle_call(?BONDY_RBAC_USER_UPDATE, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_UPDATE, #call{} = M, Ctxt) ->
     [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_user:update(Uri, Username, Info) of
@@ -182,7 +182,7 @@ handle_call(?BONDY_RBAC_USER_UPDATE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_RBAC_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
+handle_call(?BONDY_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
     %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3, 4),
 
@@ -204,19 +204,19 @@ handle_call(_, #call{} = M, _) ->
 %% @end
 %% -----------------------------------------------------------------------------
 handle_event(
-    ?BONDY_RBAC_USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
+    ?BONDY_USER_ADDED, #event{arguments = [_RealmUri, _Username]}) ->
     ok;
 
 handle_event(
-    ?BONDY_RBAC_USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
+    ?BONDY_USER_UPDATED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
 handle_event(
-    ?BONDY_RBAC_USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
+    ?BONDY_USER_DELETED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
 handle_event(
-    ?BONDY_RBAC_USER_PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
+    ?BONDY_USER_PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
 handle_event(_, _) ->
