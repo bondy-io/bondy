@@ -88,7 +88,7 @@
     type                :=  source,
     version             :=  binary(),
     username            :=  binary() | all | anonymous,
-    cidr                :=  cidr(),
+    cidr                :=  bondy_cidr:t(),
     authmethod          :=  binary(),
     meta                =>  #{binary() => any()}
 }.
@@ -97,19 +97,17 @@
     type                :=  source,
     version             :=  binary(),
     username            :=  binary() | all | anonymous,
-    cidr                :=  cidr(),
+    cidr                :=  bondy_cidr:t(),
     authmethod          :=  binary(),
     meta                =>  #{binary() => any()}
 }.
 
 -type external()        ::  t().
--type cidr()            ::  {inet:ip_address(), non_neg_integer()}.
 -type list_opts()       ::  #{limit => pos_integer()}.
 
 -export_type([t/0]).
 -export_type([assignment/0]).
 -export_type([user_source/0]).
--export_type([cidr/0]).
 
 -export([add/2]).
 -export([add/3]).
@@ -236,7 +234,7 @@ add(RealmUri, Usernames, #{type := source} = Source) ->
 -spec remove(
     RealmUri :: uri(),
     Usernames :: [binary() | anonymous] | binary() | anonymous | all,
-    CIDR :: bondy_rbac_source:cidr()) -> ok.
+    CIDR :: bondy_cidr:t()) -> ok.
 
 remove(RealmUri, Keyword, CIDR)
 when (Keyword == all orelse Keyword == anonymous) ->
@@ -244,7 +242,7 @@ when (Keyword == all orelse Keyword == anonymous) ->
 
 remove(RealmUri, Usernames, CIDR) when is_list(Usernames) ->
     Prefix  = ?PLUMDB_PREFIX(RealmUri),
-    AMask = anchor_mask(CIDR),
+    AMask = bondy_cidr:anchor_mask(CIDR),
     UserSources =  lists:flatten([
         {Username, match(RealmUri, Username, AMask)}
         || Username <- Usernames
@@ -314,8 +312,8 @@ match(RealmUri, Username, ConnIP) ->
         )
     ),
 
-    Pred = fun({{_, {IP, Mask}, _}, _}) ->
-        mask_address(IP, Mask) == mask_address(ConnIP, Mask)
+    Pred = fun({{_, {_, Mask} = CIDR, _}, _}) ->
+        bondy_cidr:match(CIDR, {ConnIP, Mask})
     end,
     [from_term(Term) || Term <- lists:filter(Pred, Sources)].
 
@@ -334,9 +332,9 @@ match_first(RealmUri, Username, ConnIP) ->
     %% We need to use the internal match function (do_match) as it returns Keys
     %% and Values, we need the keys to be able to sort
     Sources = sort_sources(do_match(RealmUri, Username)),
-    Fun = fun({{_, {IP, Mask}, _}, _} = Term) ->
-        mask_address(IP, Mask) == mask_address(ConnIP, Mask)
-            andalso throw({result, from_term(Term)})
+    Fun = fun({{_, {_, Mask} = CIDR, _}, _} = Term) ->
+        bondy_cidr:match(CIDR, {ConnIP, Mask})
+        andalso throw({result, from_term(Term)})
     end,
     try
         ok = lists:foreach(Fun, Sources),
@@ -410,7 +408,7 @@ to_external(#{type := source, version := ?VERSION} = Source) ->
 do_add(RealmUri, Keyword, #{type := source} = Source)
 when Keyword == all orelse Keyword == anonymous ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
-    Masked = anchor_mask(maps:get(cidr, Source)),
+    Masked = bondy_cidr:anchor_mask(maps:get(cidr, Source)),
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
     %% TODO
@@ -425,7 +423,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
     Unknown = bondy_rbac_user:unknown(RealmUri, Usernames),
     [] =:= Unknown orelse throw({unknown_users, Unknown}),
 
-    Masked = anchor_mask(maps:get(cidr, Source)),
+    Masked = bondy_cidr:anchor_mask(maps:get(cidr, Source)),
 
     _ = lists:foreach(
         fun(Username) ->
@@ -481,43 +479,6 @@ type_and_version(Map) ->
         type => source
     }.
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-mask_address({_, _, _, _} = Addr, Maskbits) ->
-    B = list_to_binary(tuple_to_list(Addr)),
-    <<Subnet:Maskbits, _Host/bitstring>> = B,
-    Subnet;
-
-mask_address({A, B, C, D, E, F, G, H}, Maskbits) ->
-    <<Subnet:Maskbits, _Host/bitstring>> = <<
-        A:16, B:16, C:16, D:16, E:16,F:16, G:16, H:16
-    >>,
-    Subnet.
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc returns the real bottom of a netmask. Eg if 192.168.1.1/16 is
-%% provided, return 192.168.0.0/16
-%% @end
-%% -----------------------------------------------------------------------------
-anchor_mask({_, _, _, _} = Addr, Maskbits) ->
-    M = mask_address(Addr, Maskbits),
-    Rem = 32 - Maskbits,
-    <<A:8, B:8, C:8, D:8>> = <<M:Maskbits, 0:Rem>>,
-    {{A, B, C, D}, Maskbits};
-
-anchor_mask({_, _, _, _, _, _, _, _} = Addr, Maskbits) ->
-    M = mask_address(Addr, Maskbits),
-    Rem = 128 - Maskbits,
-    <<A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>> = <<M:Maskbits, 0:Rem>>,
-    {{A, B, C, D, E, F, G, H}, Maskbits}.
-
-anchor_mask({Addr, Mask}) ->
-    anchor_mask(Addr, Mask).
 
 
 sort_sources(Sources) ->
