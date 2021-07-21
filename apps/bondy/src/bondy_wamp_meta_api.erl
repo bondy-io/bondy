@@ -73,7 +73,7 @@ do_handle(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
             wamp_message:result(
                 M#call.request_id,
                 #{},
-                [bondy_session:to_details_map(Session)]
+                [bondy_session:to_external(Session)]
             )
     end;
 

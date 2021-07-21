@@ -127,7 +127,7 @@
 }.
 -type peer_id()         ::  local_peer_id() | remote_peer_id().
 
-
+-type maybe(T)          ::  T | undefined.
 
 
 
