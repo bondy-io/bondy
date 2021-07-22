@@ -558,12 +558,14 @@ maybe_gen_authid(UserId) ->
     UserId.
 
 
-maybe_auth_challenge(_, {error, not_found}, St) ->
-    {error, no_such_realm, St};
-
 maybe_auth_challenge(Details, Realm, St) ->
-    Status = bondy_realm:security_status(Realm),
-    maybe_auth_challenge(Status, Details, Realm, St).
+    case bondy_realm:allow_connections(Realm) of
+        true ->
+            Status = bondy_realm:security_status(Realm),
+            maybe_auth_challenge(Status, Details, Realm, St);
+        false ->
+            {error, connections_not_allowed, St}
+    end.
 
 
 %% @private
@@ -729,6 +731,12 @@ abort_message(no_authmethod) ->
         message => <<"Router could not use the authmethod requested.">>
     },
     wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+
+abort_message(connections_not_allowed) ->
+    Details = #{
+        message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>
+    },
+    wamp_message:abort(Details, ?WAMP_AUTHENTICATION_FAILED);
 
 abort_message(no_such_realm) ->
     Details = #{
