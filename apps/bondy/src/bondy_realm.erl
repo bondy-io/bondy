@@ -20,17 +20,29 @@
 %% -----------------------------------------------------------------------------
 %% @doc A Realm is a routing and administrative domain, optionally protected by
 %% authentication and authorization. It manages a set of users, credentials,
-%% groups and permissions.
+%% groups, sources and permissions.
 %%
 %% A user belongs to and logs into a realm and Bondy messages are only routed
 %% within a Realm.
 %%
-%% Realms, users, credentials, groups and permissions are persisted to disk and
-%% replicated across the cluster using the plum_db subsystem.
+%% Realms, users, credentials, groups, sources and permissions are persisted to
+%% disk and replicated across the cluster using the `plum_db' subsystem.
 %%
 %% ## Bondy Admin Realm
-%% When you start Bondy for the first time it created the Bondy Admin realm
-%% a.k.a `com.leapsight.bondy'.
+%% When you start Bondy for the first time it creates the Bondy Admin realm
+%% a.k.a `com.leapsight.bondy'. This realm is the root or master realm which
+%% allows and administror user to create, list, modify and delete realms.
+%%
+%% ## Same Sign-on (SSO)
+%% Bondy SSO (Same Sign-on) is a feature that allows users to access multiple
+%% realms using just one set of credentials.
+%%
+%% It is enabled by setting the realm's `sso_realm_uri' property during realm
+%% creation or during an update operation.
+%%
+%% - It requires the user to authenticate when opening a session in a realm.
+%% - Changing credentials e.g. updating password can be performed while
+%% connected to any realm
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
@@ -86,6 +98,13 @@
         required => true,
         datatype => boolean,
         default => true
+    },
+    <<"is_sso_realm">> => #{
+        alias => is_sso_realm,
+        key => <<"is_sso_realm">>,
+        required => true,
+        datatype => boolean,
+        default => false
     },
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
@@ -161,6 +180,12 @@
     <<"security_enabled">> => #{
         alias => security_enabled,
         key => <<"security_enabled">>,
+        required => false,
+        datatype => boolean
+    },
+    <<"is_sso_realm">> => #{
+        alias => is_sso_realm,
+        key => <<"is_sso_realm">>,
         required => false,
         datatype => boolean
     },
@@ -343,6 +368,7 @@
     uri                             ::  uri(),
     description                     ::  binary(),
     authmethods                     ::  [binary()], % a wamp property
+    is_sso_realm = false            ::  boolean(),
     allow_connections = true        ::  boolean(),
     sso_realm_uri                   ::  maybe(uri()),
     private_keys = #{}              ::  map(),
@@ -352,20 +378,21 @@
 
 -type t()                           ::  #realm{}.
 -type external()                    ::  #{
-                                            uri := uri(),
-                                            description :=  binary(),
-                                            authmethods :=  [binary()],
-                                            public_keys :=  [term()],
-                                            security_status :=  enabled
-                                                                | disabled
-                                        }.
+    uri := uri(),
+    description :=  binary(),
+    authmethods :=  [binary()],
+    public_keys :=  [term()],
+    security_status :=  enabled | disabled
+}.
 
 -export_type([t/0]).
 -export_type([uri/0]).
 -export_type([external/0]).
 
 -export([add/1]).
+-export([allow_connections/1]).
 -export([apply_config/0]).
+-export([apply_config/1]).
 -export([authmethods/1]).
 -export([delete/1]).
 -export([disable_security/1]).
@@ -379,6 +406,7 @@
 -export([get_random_kid/1]).
 -export([is_authmethod/2]).
 -export([is_security_enabled/1]).
+-export([is_sso_realm/1]).
 -export([list/0]).
 -export([lookup/1]).
 -export([password_opts/1]).
@@ -411,31 +439,48 @@ apply_config() ->
             ok;
 
         Filename ->
-            case bondy_utils:json_consult(Filename) of
-                {ok, Realms} ->
-                    _ = lager:info(
-                        "Loading configuration file; path=~p",
-                        [Filename]
-                    ),
-                    %% We add the realm and allow an update if it
-                    %% already exists by setting IsStrict argument
-                    %% to false
-                    _ = [add_or_update(Data) || Data <- Realms],
-                    ok;
+            apply_config(Filename)
+    end.
 
-                {error, enoent} ->
-                    _ = lager:warning(
-                        "No configuration file found; path=~p",
-                        [Filename]
-                    ),
-                    ok;
 
-                {error, {badarg, Reason}} ->
-                    error({invalid_config, Reason});
+%% -----------------------------------------------------------------------------
+%% @doc Loads a security config file from `Filename'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec apply_config(Filename :: file:filename_all()) -> ok | no_return().
 
-                {error, Reason} ->
-                    error(Reason)
-            end
+apply_config(Filename) ->
+    case bondy_utils:json_consult(Filename) of
+        {ok, Realms} ->
+            _ = lager:info(
+                "Loading configuration file; path=~p",
+                [Filename]
+            ),
+            %% Becuase realms can have the sso_realm_uri property wnhich
+            %% defines another realm where authentication and credential
+            %% management is delegated, we need to ensure all realms in the
+            %% file are processed based on a precedence graph, so that SSO
+            %% realms are created before the realms targetting them.
+            SortedRealms = sort(Realms),
+
+            %% We add the realm and allow an update if it
+            %% already exists by setting IsStrict argument
+            %% to false
+            _ = [add_or_update(Data) || Data <- SortedRealms],
+            ok;
+
+        {error, enoent} ->
+            _ = lager:warning(
+                "No configuration file found; path=~p",
+                [Filename]
+            ),
+            ok;
+
+        {error, {badarg, Reason}} ->
+            error({invalid_config, Reason});
+
+        {error, Reason} ->
+            error(Reason)
     end.
 
 
@@ -466,6 +511,10 @@ is_authmethod(#realm{authmethods = L}, Method) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the same sign on (SSO) realm URI used by the realm.
+%% If a value is set, then all authentication and user creation will be done on
+%% the Realm represented by the SSO Realm.
+%% Groups, Permissions and Sources are still managed by this realm.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec sso_realm_uri(Realm :: t() | uri()) -> maybe(uri()).
@@ -474,6 +523,39 @@ sso_realm_uri(Uri) when is_binary(Uri) ->
     sso_realm_uri(fetch(Uri));
 
 sso_realm_uri(#realm{sso_realm_uri = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if the Realm is enabled as a Same Sign-on (SSO) realm.
+%% Otherwise returns `false'.
+%% If this property is `true', the `sso_realm_uri' cannot be set.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_sso_realm(Realm :: t() | uri()) -> boolean().
+
+is_sso_realm(Uri) when is_binary(Uri) ->
+    is_sso_realm(fetch(Uri));
+
+is_sso_realm(#realm{is_sso_realm = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if the Realm is allowing connections. Otherwise returns
+%% `false'.
+%% This setting is used to either temporarilly restrict new connections to the
+%% realm or to avoid connections when the realm is used as a Single Sign-on
+%% Realm. When connections are not allowed the only way of managing the
+%% resources in the realm is through ac connection to the Bondy admin realm.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec allow_connections(Realm :: t() | uri()) -> boolean().
+
+allow_connections(Uri) when is_binary(Uri) ->
+    allow_connections(fetch(Uri));
+
+allow_connections(#realm{allow_connections = Val}) ->
     Val.
 
 
@@ -493,6 +575,8 @@ is_security_enabled(Uri) when is_binary(Uri) ->
         false -> false;
         undefined -> false
     end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -801,6 +885,7 @@ to_external(#realm{} = R) ->
         <<"description">> => R#realm.description,
         <<"authmethods">> => R#realm.authmethods,
         <<"security_status">> => security_status(R),
+        <<"is_sso_realm">> => R#realm.is_sso_realm,
         <<"allow_connections">> => R#realm.allow_connections,
         <<"sso_realm_uri">> => R#realm.sso_realm_uri,
         <<"public_keys">> => [
@@ -841,19 +926,19 @@ maybe_enable_security(false, Realm) ->
 validate_rbac_config(Realm, Map) ->
     Groups = [
         bondy_rbac_group:new(Data)
-        || Data <- maps:get(<<"groups">>, Map)
+        || Data <- maps:get(<<"groups">>, Map, [])
     ],
     Users = [
         bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
-        || Data <- maps:get(<<"users">>, Map)
+        || Data <- maps:get(<<"users">>, Map, [])
     ],
     SourceAssignments = [
         bondy_rbac_source:new_assignment(Data)
-        || Data <- maps:get(<<"sources">>, Map)
+        || Data <- maps:get(<<"sources">>, Map, [])
     ],
     Grants = [
         bondy_rbac_policy:new(Data)
-        || Data <- maps:get(<<"grants">>, Map)
+        || Data <- maps:get(<<"grants">>, Map, [])
     ],
     #{
         groups => Groups,
@@ -960,6 +1045,10 @@ merge_and_store(Realm0, Map) ->
         password_opts = get_password_opts(Realm1#realm.authmethods)
     },
 
+
+    ok = check_integrity_constraints(Realm2),
+    ok = check_sso_realm_exists(Realm2#realm.sso_realm_uri),
+
     Uri = Realm2#realm.uri,
     ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm2),
     ok = maybe_enable_security(maps:get(<<"security_enabled">>, Map), Realm2),
@@ -973,11 +1062,35 @@ merge_and_store(Realm0, Map) ->
     Realm2.
 
 
+%% @private
+check_sso_realm_exists(undefined) ->
+    ok;
+
+check_sso_realm_exists(Uri) ->
+    case lookup(Uri) of
+        {error, not_found} ->
+            error(
+                {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that does not exist.">>}
+            );
+        Realm ->
+            is_sso_realm(Realm) orelse
+            error(
+                {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that is not configured as a Same Sign-on Realm (its property 'is_sso_realm' has to be set to true).">>}
+            ),
+            ok
+    end.
+
+
+
+%% @private
 fold_props(<<"description">>, V, Realm) ->
     Realm#realm{description = V};
 
 fold_props(<<"authmethods">>, V, Realm) ->
     Realm#realm{authmethods = V};
+
+fold_props(<<"is_sso_realm">>, V, Realm) ->
+    Realm#realm{is_sso_realm = V};
 
 fold_props(<<"allow_connections">>, V, Realm) ->
     Realm#realm{allow_connections = V};
@@ -1076,4 +1189,107 @@ gen_private_keys() ->
         || _ <- lists:seq(1, 3)
     ].
 
+
+%% @private
+sort(Realms) ->
+    try
+        Graph = precedence_graph(Realms),
+
+        case digraph_utils:topsort(Graph) of
+            false ->
+                Reason = <<"Bondy could not compute a precendece graph for the realms defined on the configuration file.">>,
+                error({invalid_config, Reason});
+            Vertices ->
+                [element(2, digraph:vertex(Graph, V)) || V <- Vertices]
+        end
+
+    catch
+        throw:{cycle, Path} ->
+            EReason = iolib:format(
+                <<"Bondy could not compute a precendece graph for the realms defined on the configuration file as they form a cycle with path ~p">>,
+                [Path]
+            ),
+            error({invalid_config, EReason})
+    end.
+
+
+
+%% @private
+precedence_graph(Realms) ->
+    Graph = digraph:new([acyclic]),
+    Vertices = [
+        begin
+            R = validate_uris(R0),
+            Uri = maps:get(<<"uri">>, R),
+            digraph:add_vertex(Graph, Uri, R)
+        end || R0 <- Realms
+    ],
+    precedence_graph(Vertices, Graph).
+
+
+%% @private
+precedence_graph([H|T], Graph) ->
+    {H, Realm} = digraph:vertex(Graph, H),
+    case maps:find(<<"sso_realm_uri">>, Realm) of
+        {ok, SSOUri} ->
+            ok = maybe_add_edge(Graph, SSOUri, H),
+            precedence_graph(T, Graph);
+        error ->
+            precedence_graph(T, Graph)
+    end;
+
+precedence_graph([], Graph) ->
+    Graph.
+
+
+maybe_add_edge(Graph, A, B) ->
+    case digraph:vertex(Graph, A) of
+        {A, _} ->
+            case digraph:add_edge(Graph, A, B) of
+                {error, {bad_edge, Path}} ->
+                    throw({cycle, Path});
+                {error, Reason} ->
+                    error(Reason);
+                _Edge ->
+                    ok
+            end;
+        false ->
+            %% The SSO Uri is not in the config file so it must exist already
+            check_sso_realm_exists(A)
+    end.
+
+
+%% @private
+validate_uris(Data) ->
+    %% We prevalidate the data
+    Opts = #{keep_unknown => true},
+    Validator = #{
+        <<"uri">> => #{
+            alias => uri,
+            key => <<"uri">>,
+            required => true,
+            datatype => binary,
+            validator => fun bondy_data_validators:realm_uri/1
+        },
+        <<"sso_realm_uri">> => #{
+            alias => sso_realm_uri,
+            key => <<"sso_realm_uri">>,
+            required => false,
+            datatype => binary,
+            validator => fun bondy_data_validators:realm_uri/1
+        }
+    },
+    maps_utils:validate(Data, Validator, Opts).
+
+
+%% @private
+check_integrity_constraints(#realm{is_sso_realm = true} = Realm) ->
+    Realm#realm.sso_realm_uri == undefined
+        orelse error(
+            {integrity_constraint_violation, <<"The properties 'is_sso_realm' and 'sso_realm_uri' cannot be used together">>}
+        ),
+    ok;
+
+check_integrity_constraints(#realm{is_sso_realm = false}) ->
+    ok.
 

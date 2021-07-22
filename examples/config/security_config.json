@@ -159,5 +159,28 @@
                 }
             ]
         }
+    },
+    {
+        "uri" : "com.leapsight.sso_enabled.a",
+        "description" : "A test realm",
+        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "security_enabled" : true,
+        "allow_connections": true,
+        "sso_realm_uri": "com.leapsight.sso"
+    },
+    {
+        "uri" : "com.leapsight.sso_enabled.b",
+        "description" : "A test realm",
+        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "security_enabled" : true,
+        "allow_connections": true,
+        "sso_realm_uri": "com.leapsight.sso"
+    },
+    {
+        "uri" : "com.leapsight.sso",
+        "description" : "A test realm",
+        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "security_enabled" : true,
+        "allow_connections": false
     }
 ]
