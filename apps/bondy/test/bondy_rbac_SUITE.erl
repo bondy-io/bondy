@@ -135,14 +135,17 @@ test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
     U1Ctxt = #{
         realm_uri => RealmUri,
+        security_enabled => true,
         authid => ?U1
     },
     U2Ctxt = #{
         realm_uri => RealmUri,
+        security_enabled => true,
         authid => ?U2
     },
     U3Ctxt = #{
         realm_uri => RealmUri,
+        security_enabled => true,
         authid => ?U3
     },
 

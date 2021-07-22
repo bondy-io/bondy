@@ -123,6 +123,7 @@
     %% Peer WAMP Roles played by peer
     roles                           ::  map() | undefined,
     %% WAMP Auth
+    security_enabled = true         ::  boolean(),
     is_anonymous = false            ::  boolean(),    authid                          ::  binary() | undefined,
     authrole                        ::  binary() | undefined,
     authroles = []                  ::  [binary()],
@@ -180,6 +181,7 @@
 -export([info/1]).
 -export([update/1]).
 -export([user/1]).
+-export([is_security_enabled/1]).
 % -export([stats/0]).
 
 %% -export([features/1]).
@@ -474,6 +476,22 @@ size() ->
     tuplespace:size(?SESSION_SPACE_NAME).
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_security_enabled(t()) -> boolean().
+
+is_security_enabled(#session{security_enabled = Val}) ->
+    Val;
+
+is_security_enabled(Id) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    ets:lookup_element(Tab, Id, #session.security_enabled).
+
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Retrieves the session identified by Id from the tuplespace or 'not_found'
@@ -609,6 +627,9 @@ parse_details(roles, Roles, Session) when is_map(Roles) ->
 parse_details(agent, V, Session) when is_binary(V) ->
     Session#session{agent = V};
 
+parse_details(security_enabled, V, Session) when is_boolean(V) ->
+    Session#session{security_enabled = V};
+
 parse_details(is_anonymous, V, Session) when is_boolean(V) ->
     Session#session{is_anonymous = V};
 
@@ -702,6 +723,7 @@ when is_binary(RealmUri) orelse RealmUri == '_' ->
         agent = '_',
         seq = '_',
         roles = '_',
+        security_enabled = '_',
         is_anonymous = '_',
         authid = '_',
         authrole = '_',

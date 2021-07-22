@@ -41,6 +41,7 @@
     %% Realm and Session
     realm_uri => uri(),
     node => atom(),
+    security_enabled => boolean(),
     session => bondy_session:t() | undefined,
     %% Peer Info
     peer => bondy_session:peer(),
@@ -68,16 +69,17 @@
 -export([has_session/1]).
 -export([id/1]).
 -export([is_anonymous/1]).
--export([is_feature_enabled/3]).
 -export([is_closing/1]).
+-export([is_feature_enabled/3]).
+-export([is_security_enabled/1]).
 -export([is_shutting_down/1]).
 -export([local_context/1]).
 -export([new/0]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
--export([peername/1]).
 -export([peer_id/1]).
+-export([peername/1]).
 -export([realm_uri/1]).
 -export([request_details/1]).
 -export([request_id/1]).
@@ -99,6 +101,7 @@
 -export([set_session/2]).
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
+
 
 
 
@@ -130,7 +133,11 @@ new() ->
 %% -----------------------------------------------------------------------------
 local_context(RealmUri) when is_binary(RealmUri) ->
     Ctxt = new(),
-    Ctxt#{realm_uri => RealmUri}.
+
+    Ctxt#{
+        realm_uri => RealmUri,
+        security_enabled => bondy_realm:is_security_enabled(RealmUri)
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -312,6 +319,23 @@ agent(#{session := S}) ->
 
 agent(#{}) ->
     undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_security_enabled(t()) -> boolean().
+
+is_security_enabled(#{session := Session}) when Session =/= undefined ->
+    bondy_session:is_security_enabled(Session);
+
+is_security_enabled(#{security_enabled := Val}) when is_boolean(Val) ->
+    Val;
+
+is_security_enabled(#{realm_uri := Uri}) ->
+    bondy_realm:is_security_enabled(Uri).
+
 
 
 %% -----------------------------------------------------------------------------

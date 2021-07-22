@@ -488,7 +488,7 @@ open_session(Extra, St0) ->
         Ctxt0 = St0#wamp_state.context,
         AuthCtxt = St0#wamp_state.auth_context,
         Id = bondy_context:id(Ctxt0),
-        Realm = bondy_context:realm_uri(Ctxt0),
+        RealmUri = bondy_context:realm_uri(Ctxt0),
         ReqDetails = bondy_context:request_details(Ctxt0),
         Authid = bondy_auth:user_id(AuthCtxt),
         Authrole = bondy_auth:role(AuthCtxt),
@@ -497,6 +497,7 @@ open_session(Extra, St0) ->
         Authmethod = bondy_auth:method(AuthCtxt),
 
         Details = #{
+            security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
             agent => maps:get(agent, ReqDetails, undefined),
             roles => maps:get(roles, ReqDetails, undefined),
@@ -509,7 +510,7 @@ open_session(Extra, St0) ->
 
         %% We open a session
         Session = bondy_session_manager:open(
-            Id, maps:get(peer, Ctxt0), Realm, Details
+            Id, maps:get(peer, Ctxt0), RealmUri, Details
         ),
 
         %% We set the session in the context
