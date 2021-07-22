@@ -649,9 +649,7 @@ merge(RealmUri, U1, U2) ->
             User;
 
         {P0, Future} when is_function(Future, 1) ->
-            %% If a password existed we keep the same protocol and params
-            P1 = bondy_password:replace(Future, P0),
-            maps:put(password, P1, User);
+            apply_password(User, password_opts(RealmUri));
 
         {_, P1} ->
             bondy_password:is_type(P1) orelse error(badarg),
