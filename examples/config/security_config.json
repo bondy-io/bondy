@@ -181,6 +181,7 @@
         "description" : "A test realm",
         "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
         "security_enabled" : true,
+        "is_sso_realm": true,
         "allow_connections": false
     }
 ]

@@ -85,15 +85,13 @@
     {plum_db, [
         {prefixes, [
             %% ram
-            {registry_registrations, ram},
-            {registry_subscriptions, ram},
+            {bondy_registry_registrations, ram},
+            {bondy_registry_subscriptions, ram},
             %% ram_disk
-            {security, ram_disk},
-            {security_config, ram_disk},
+            {bondy_realm, ram_disk},
             {security_group_grants, ram_disk},
             {security_groups, ram_disk},
             {security_sources, ram_disk},
-            {security_status, ram_disk},
             {security_user_grants, ram_disk},
             {security_users, ram_disk},
             %% disk

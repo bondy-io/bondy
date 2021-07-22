@@ -94,8 +94,7 @@
     ok | no_return().
 
 authorize(Permission, Resource, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    case bondy_realm:is_security_enabled(RealmUri) of
+    case bondy_context:is_security_enabled(Ctxt) of
         true ->
             %% TODO We need to cache the RBAC Context in the Bondy Context
             SecurityCtxt = get_context(Ctxt),

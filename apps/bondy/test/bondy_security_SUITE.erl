@@ -139,16 +139,16 @@ add_realm(RealmUri) ->
 
 security_toggle(Config) ->
     R = ?config(realm, Config),
-
+    Uri = bondy_realm:uri(R),
     ok = bondy_realm:enable_security(R),
 
-    ?assertEqual(enabled, bondy_realm:security_status(R)),
     ?assertEqual(true, bondy_realm:is_security_enabled(R)),
+    ?assertEqual(enabled, bondy_realm:security_status(R)),
 
     ok = bondy_realm:disable_security(R),
 
-    ?assertEqual(disabled, bondy_realm:security_status(R)),
-    ?assertEqual(false, bondy_realm:is_security_enabled(R)),
+    ?assertEqual(false, bondy_realm:is_security_enabled(Uri)),
+    ?assertEqual(disabled, bondy_realm:security_status(Uri)),
 
     ok = bondy_realm:enable_security(R),
 

@@ -53,9 +53,7 @@
 %% -define(PDB_PREFIX, {security, realms}).
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
--define(PDB_PREFIX(Uri), {security, Uri}).
--define(SEC_STATUS_PREFIX(Uri), {security_status, Uri}).
--define(SEC_STATUS_KEY(Uri), {?MODULE, ?SEC_STATUS_PREFIX(Uri)}).
+-define(PDB_PREFIX(Uri), {bondy_realm, Uri}).
 
 %% The maps_utils:validate/2 specification.
 -define(REALM_VALIDATOR, #{
@@ -368,6 +366,7 @@
     uri                             ::  uri(),
     description                     ::  binary(),
     authmethods                     ::  [binary()], % a wamp property
+    security_enabled = true         ::  boolean(),
     is_sso_realm = false            ::  boolean(),
     allow_connections = true        ::  boolean(),
     sso_realm_uri                   ::  maybe(uri()),
@@ -381,6 +380,8 @@
     uri := uri(),
     description :=  binary(),
     authmethods :=  [binary()],
+    is_sso_realm :=  boolean(),
+    allow_connections :=  boolean(),
     public_keys :=  [term()],
     security_status :=  enabled | disabled
 }.
@@ -565,18 +566,11 @@ allow_connections(#realm{allow_connections = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec is_security_enabled(t() | uri()) -> boolean().
 
-is_security_enabled(#realm{uri = Uri}) ->
-    is_security_enabled(Uri);
+is_security_enabled(#realm{security_enabled = Val}) ->
+    Val;
 
 is_security_enabled(Uri) when is_binary(Uri) ->
-    exists(Uri) orelse error(no_such_realm),
-    case plum_db:get(?SEC_STATUS_PREFIX(Uri), enabled) of
-        true -> true;
-        false -> false;
-        undefined -> false
-    end.
-
-
+    is_security_enabled(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -585,20 +579,10 @@ is_security_enabled(Uri) when is_binary(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec security_status(t() | uri()) -> enabled | disabled.
 
-security_status(#realm{uri = Uri}) ->
-    security_status(Uri);
-
-security_status(Uri) when is_binary(Uri) ->
-    case persistent_term:get(?SEC_STATUS_KEY(Uri), undefined) of
-        undefined ->
-            Status = case is_security_enabled(Uri) of
-                true -> enabled;
-                _ -> disabled
-            end,
-            ok = persistent_term:put(?SEC_STATUS_KEY(Uri), Status),
-            Status;
-        Status ->
-            Status
+security_status(Term) ->
+    case is_security_enabled(Term) of
+        true -> enabled;
+        false -> disabled
     end.
 
 
@@ -608,10 +592,12 @@ security_status(Uri) when is_binary(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec enable_security(t()) -> ok.
 
-enable_security(#realm{uri = Uri}) ->
-    exists(Uri) orelse error(no_such_realm),
-    _ = plum_db:put(?SEC_STATUS_PREFIX(Uri), enabled, true),
-    persistent_term:put(?SEC_STATUS_KEY(Uri), enabled).
+enable_security(#realm{} = Realm) ->
+    _ = update(Realm, #{<<"security_enabled">> => true}),
+    ok;
+
+enable_security(Uri) when is_binary(Uri) ->
+    enable_security(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -623,11 +609,15 @@ enable_security(#realm{uri = Uri}) ->
 disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, forbidden};
 
-disable_security(#realm{uri = Uri}) ->
-    exists(Uri) orelse error(no_such_realm),
-    _ = plum_db:put(?SEC_STATUS_PREFIX(Uri), enabled, false),
-    persistent_term:put(?SEC_STATUS_KEY(Uri), disabled).
+disable_security(#realm{uri = ?BONDY_PRIV_REALM_URI}) ->
+    {error, forbidden};
 
+disable_security(#realm{} = Realm) ->
+    _ = update(Realm, #{<<"security_enabled">> => false}),
+    ok;
+
+disable_security(Uri) when is_binary(Uri) ->
+    disable_security(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -836,9 +826,8 @@ delete(Uri) when is_binary(Uri) ->
     %% explicitely delete the users
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
         [] ->
-            _ = persistent_term:erase(?SEC_STATUS_KEY(Uri)),
             plum_db:delete(?PDB_PREFIX(Uri), Uri),
-            ok = bondy_event_manager:notify({realm_deleted, Uri}),
+            ok = on_delete(Uri),
             %% TODO we need to close all sessions for this realm
             ok;
         L when length(L) > 0 ->
@@ -906,20 +895,6 @@ to_external(#realm{} = R) ->
 add_bondy_realm() ->
     Data = maps_utils:validate(?BONDY_REALM, ?BONDY_REALM_VALIDATOR),
     do_add(Data).
-
-
-%% @private
-maybe_enable_security(_, #realm{uri = ?BONDY_REALM_URI} = Realm) ->
-    enable_security(Realm);
-
-maybe_enable_security(undefined, Realm) ->
-    enable_security(Realm);
-
-maybe_enable_security(true, Realm) ->
-    enable_security(Realm);
-
-maybe_enable_security(false, Realm) ->
-    disable_security(Realm).
 
 
 %% @private
@@ -1051,7 +1026,6 @@ merge_and_store(Realm0, Map) ->
 
     Uri = Realm2#realm.uri,
     ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm2),
-    ok = maybe_enable_security(maps:get(<<"security_enabled">>, Map), Realm2),
 
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
@@ -1060,26 +1034,6 @@ merge_and_store(Realm0, Map) ->
     ok = apply_rbac_config(Realm2, RBACData),
 
     Realm2.
-
-
-%% @private
-check_sso_realm_exists(undefined) ->
-    ok;
-
-check_sso_realm_exists(Uri) ->
-    case lookup(Uri) of
-        {error, not_found} ->
-            error(
-                {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that does not exist.">>}
-            );
-        Realm ->
-            is_sso_realm(Realm) orelse
-            error(
-                {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that is not configured as a Same Sign-on Realm (its property 'is_sso_realm' has to be set to true).">>}
-            ),
-            ok
-    end.
-
 
 
 %% @private
@@ -1107,14 +1061,21 @@ fold_props(_, _, Realm) ->
     Realm.
 
 
-
+%% @private
 on_add(Realm) ->
     ok = bondy_event_manager:notify({realm_added, Realm#realm.uri}),
     ok.
 
 
+%% @private
 on_update(Realm) ->
     ok = bondy_event_manager:notify({realm_updated, Realm#realm.uri}),
+    ok.
+
+
+%% @private
+on_delete(Uri) ->
+    ok = bondy_event_manager:notify({realm_deleted, Uri}),
     ok.
 
 
@@ -1205,13 +1166,14 @@ sort(Realms) ->
 
     catch
         throw:{cycle, Path} ->
-            EReason = iolib:format(
-                <<"Bondy could not compute a precendece graph for the realms defined on the configuration file as they form a cycle with path ~p">>,
-                [Path]
+            EReason = list_to_binary(
+                io_lib:format(
+                    <<"Bondy could not compute a precendece graph for the realms defined on the configuration file as they form a cycle with path ~p">>,
+                    [Path]
+                )
             ),
             error({invalid_config, EReason})
     end.
-
 
 
 %% @private
@@ -1283,10 +1245,35 @@ validate_uris(Data) ->
 
 
 %% @private
+check_sso_realm_exists(undefined) ->
+    ok;
+
+check_sso_realm_exists(Uri) ->
+    case lookup(Uri) of
+        {error, not_found} ->
+            error(
+                {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that does not exist.">>}
+            );
+        Realm ->
+            is_sso_realm(Realm) orelse
+            error(
+                {
+                    invalid_config,
+                    <<"Property 'sso_realm_uri' refers to a realm that is not configured as a Same Sign-on Realm (its property 'is_sso_realm' has to be set to true).">>
+                }
+            ),
+            ok
+    end.
+
+
+%% @private
 check_integrity_constraints(#realm{is_sso_realm = true} = Realm) ->
     Realm#realm.sso_realm_uri == undefined
         orelse error(
-            {integrity_constraint_violation, <<"The properties 'is_sso_realm' and 'sso_realm_uri' cannot be used together">>}
+            {
+                invalid_config,
+                <<"The realm is defined as a Same Sign-on (SSO) realm (the property 'is_sso_realm' is set to 'true') but also as using another realm for SSO (property 'sso_realm_uri' is defined. An SSO realm cannot itself use SSO.">>
+            }
         ),
     ok;
 
