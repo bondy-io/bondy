@@ -234,7 +234,7 @@ is_type(_) ->
 %% -----------------------------------------------------------------------------
 -spec protocol(t()) -> protocol() | undefined.
 
-protocol(#{version := ?VERSION, protocol := Value}) ->
+protocol(#{type := password, version := ?VERSION, protocol := Value}) ->
     Value;
 
 protocol(#{version := <<"1.1">>}) ->
