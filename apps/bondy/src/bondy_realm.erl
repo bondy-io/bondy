@@ -18,14 +18,19 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% An implementation of a WAMP realm.
-%% A Realm is a routing and administrative domain, optionally
-%% protected by authentication and authorization. Bondy messages are
-%% only routed within a Realm.
+%% @doc A Realm is a routing and administrative domain, optionally protected by
+%% authentication and authorization. It manages a set of users, credentials,
+%% groups and permissions.
 %%
-%% Realms are persisted to disk and replicated across the cluster using the
-%% plum_db subsystem.
+%% A user belongs to and logs into a realm and Bondy messages are only routed
+%% within a Realm.
+%%
+%% Realms, users, credentials, groups and permissions are persisted to disk and
+%% replicated across the cluster using the plum_db subsystem.
+%%
+%% ## Bondy Admin Realm
+%% When you start Bondy for the first time it created the Bondy Admin realm
+%% a.k.a `com.leapsight.bondy'.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
@@ -33,11 +38,15 @@
 -include("bondy.hrl").
 -include("bondy_security.hrl").
 
--define(PDB_PREFIX, {security, realms}).
--define(SECURITY_STATUS_PREFIX(RealmUri), {security_status, RealmUri}).
+%% -define(PDB_PREFIX, {security, realms}).
+%% TODO This is a breaking change, we need to migrate the realms in
+%% {security, realms} into their new {security, RealmUri}
+-define(PDB_PREFIX(Uri), {security, Uri}).
+-define(SEC_STATUS_PREFIX(Uri), {security_status, Uri}).
+-define(SEC_STATUS_KEY(Uri), {?MODULE, ?SEC_STATUS_PREFIX(Uri)}).
 
 %% The maps_utils:validate/2 specification.
--define(REALM_SPEC, #{
+-define(REALM_VALIDATOR, #{
     <<"uri">> => #{
         alias => uri,
         key => <<"uri">>,
@@ -70,6 +79,22 @@
         required => true,
         datatype => boolean,
         default => true
+    },
+    <<"allow_connections">> => #{
+        alias => allow_connections,
+        key => <<"allow_connections">>,
+        required => true,
+        datatype => boolean,
+        default => true
+    },
+    <<"sso_realm_uri">> => #{
+        alias => sso_realm_uri,
+        key => <<"sso_realm_uri">>,
+        required => true,
+        datatype => binary,
+        allow_undefined => true,
+        default => undefined,
+        validator => fun bondy_data_validators:realm_uri/1
     },
     <<"users">> => #{
         alias => users,
@@ -112,17 +137,93 @@
 
 
 %% The overriden maps_utils:validate/2 specification
-%% to make private_keys not required on update
--define(UPDATE_REALM_SPEC, ?REALM_SPEC#{
+%% to make certain keys not required on update
+-define(REALM_UPDATE_VALIDATOR, #{
+    <<"uri">> => #{
+        alias => uri,
+        key => <<"uri">>,
+        required => true,
+        datatype => binary,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
+    <<"description">> => #{
+        alias => description,
+        key => <<"description">>,
+        required => false,
+        datatype => binary
+    },
+    <<"authmethods">> => #{
+        alias => authmethods,
+        key => <<"authmethods">>,
+        required => false,
+        datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}}
+    },
+    <<"security_enabled">> => #{
+        alias => security_enabled,
+        key => <<"security_enabled">>,
+        required => false,
+        datatype => boolean
+    },
+    <<"allow_connections">> => #{
+        alias => allow_connections,
+        key => <<"allow_connections">>,
+        required => false,
+        datatype => boolean
+    },
+    <<"sso_realm_uri">> => #{
+        alias => sso_realm_uri,
+        key => <<"sso_realm_uri">>,
+        required => false,
+        datatype => binary,
+        allow_undefined => true,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
+    <<"users">> => #{
+        alias => users,
+        key => <<"users">>,
+        required => false,
+        datatype => {list, map}
+    },
+    <<"groups">> => #{
+        alias => groups,
+        key => <<"groups">>,
+        required => false,
+        datatype => {list, map}
+    },
+    <<"sources">> => #{
+        alias => sources,
+        key => <<"sources">>,
+        required => false,
+        datatype => {list, map}
+    },
+    <<"grants">> => #{
+        alias => grants,
+        key => <<"grants">>,
+        required => true,
+        default => [],
+        datatype => {list, map}
+    },
     <<"private_keys">> => #{
         alias => private_keys,
         key => <<"private_keys">>,
         required => false,
-        allow_undefined => false,
-        allow_null => false,
         validator => fun validate_private_keys/1
     }
 }).
+
+
+%% BONDY realm can only use the local default provider
+-define(BONDY_REALM_VALIDATOR,
+    maps:without(
+        [<<"allow_connections">>, <<"sso_realm_uri">>], ?REALM_VALIDATOR
+    )
+).
+
+-define(BONDY_REALM_UPDATE_VALIDATOR,
+    maps:without(
+        [<<"allow_connections">>, <<"sso_realm_uri">>], ?REALM_UPDATE_VALIDATOR
+    )
+).
 
 
 %% The default configuration for the admin realm
@@ -242,6 +343,8 @@
     uri                             ::  uri(),
     description                     ::  binary(),
     authmethods                     ::  [binary()], % a wamp property
+    allow_connections = true        ::  boolean(),
+    sso_realm_uri                   ::  maybe(uri()),
     private_keys = #{}              ::  map(),
     public_keys = #{}               ::  map(),
     password_opts                   ::  bondy_password:opts() | undefined
@@ -262,7 +365,6 @@
 -export_type([external/0]).
 
 -export([add/1]).
--export([add/2]).
 -export([apply_config/0]).
 -export([authmethods/1]).
 -export([delete/1]).
@@ -282,6 +384,7 @@
 -export([password_opts/1]).
 -export([public_keys/1]).
 -export([security_status/1]).
+-export([sso_realm_uri/1]).
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
@@ -306,33 +409,30 @@ apply_config() ->
     case bondy_config:get([security, config_file], undefined) of
         undefined ->
             ok;
-        FName ->
-            case bondy_utils:json_consult(FName) of
+
+        Filename ->
+            case bondy_utils:json_consult(Filename) of
                 {ok, Realms} ->
                     _ = lager:info(
                         "Loading configuration file; path=~p",
-                        [FName]
+                        [Filename]
                     ),
-                    _ = [
-                        begin
-                            Valid = maps_utils:validate(
-                                Data, ?UPDATE_REALM_SPEC
-                            ),
-                            %% We add the realm and allow an update if it
-                            %% already exists by setting IsStrict argument
-                            %% to false
-                            maybe_add(Valid, false)
-                        end || Data <- Realms
-                    ],
+                    %% We add the realm and allow an update if it
+                    %% already exists by setting IsStrict argument
+                    %% to false
+                    _ = [add_or_update(Data) || Data <- Realms],
                     ok;
+
                 {error, enoent} ->
                     _ = lager:warning(
                         "No configuration file found; path=~p",
-                        [FName]
+                        [Filename]
                     ),
                     ok;
+
                 {error, {badarg, Reason}} ->
                     error({invalid_config, Reason});
+
                 {error, Reason} ->
                     error(Reason)
             end
@@ -365,6 +465,19 @@ is_authmethod(#realm{authmethods = L}, Method) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the same sign on (SSO) realm URI used by the realm.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec sso_realm_uri(Realm :: t() | uri()) -> maybe(uri()).
+
+sso_realm_uri(Uri) when is_binary(Uri) ->
+    sso_realm_uri(fetch(Uri));
+
+sso_realm_uri(#realm{sso_realm_uri = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -375,7 +488,7 @@ is_security_enabled(#realm{uri = Uri}) ->
 
 is_security_enabled(Uri) when is_binary(Uri) ->
     exists(Uri) orelse error(no_such_realm),
-    case plum_db:get(?SECURITY_STATUS_PREFIX(Uri), enabled) of
+    case plum_db:get(?SEC_STATUS_PREFIX(Uri), enabled) of
         true -> true;
         false -> false;
         undefined -> false
@@ -392,15 +505,15 @@ security_status(#realm{uri = Uri}) ->
     security_status(Uri);
 
 security_status(Uri) when is_binary(Uri) ->
-    try persistent_term:get({Uri, security_status}) of
-        Status -> Status
-    catch
-        error:badarg ->
+    case persistent_term:get(?SEC_STATUS_KEY(Uri), undefined) of
+        undefined ->
             Status = case is_security_enabled(Uri) of
                 true -> enabled;
                 _ -> disabled
             end,
-            ok = persistent_term:put({Uri, security_status}, Status),
+            ok = persistent_term:put(?SEC_STATUS_KEY(Uri), Status),
+            Status;
+        Status ->
             Status
     end.
 
@@ -413,8 +526,8 @@ security_status(Uri) when is_binary(Uri) ->
 
 enable_security(#realm{uri = Uri}) ->
     exists(Uri) orelse error(no_such_realm),
-    _ = plum_db:put(?SECURITY_STATUS_PREFIX(Uri), enabled, true),
-    persistent_term:put({Uri, security_status}, enabled).
+    _ = plum_db:put(?SEC_STATUS_PREFIX(Uri), enabled, true),
+    persistent_term:put(?SEC_STATUS_KEY(Uri), enabled).
 
 
 %% -----------------------------------------------------------------------------
@@ -428,8 +541,8 @@ disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
 
 disable_security(#realm{uri = Uri}) ->
     exists(Uri) orelse error(no_such_realm),
-    _ = plum_db:put(?SECURITY_STATUS_PREFIX(Uri), enabled, false),
-    persistent_term:put({Uri, security_status}, disabled).
+    _ = plum_db:put(?SEC_STATUS_PREFIX(Uri), enabled, false),
+    persistent_term:put(?SEC_STATUS_KEY(Uri), disabled).
 
 
 
@@ -560,11 +673,11 @@ get(Uri, Opts) ->
             Realm;
         {error, not_found} when Uri == ?BONDY_REALM_URI ->
             %% We always create the Bondy admin realm if not found
-            add(?BONDY_REALM, false);
+            add_bondy_realm();
         {error, not_found} ->
             case bondy_config:get([security, automatically_create_realms]) of
                 true ->
-                    add(Opts#{<<"uri">> => Uri}, false);
+                    add(Opts#{<<"uri">> => Uri});
                 false ->
                     {error, not_found}
             end
@@ -577,58 +690,79 @@ get(Uri, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec add(uri() | map()) -> t() | no_return().
 
+add(?BONDY_PRIV_REALM_URI) ->
+    error(forbidden);
+
+add(?BONDY_REALM_URI) ->
+    error(forbidden);
+
 add(Uri) when is_binary(Uri) ->
     add(#{<<"uri">> => Uri});
 
-add(Map) ->
-    add(Map, true, ?REALM_SPEC).
+add(Map0) ->
+    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?REALM_VALIDATOR),
+
+    case exists(Uri) of
+        true ->
+            error({already_exists, Uri});
+        false ->
+            do_add(Map1)
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(map(), boolean()) -> t() | no_return().
+-spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
-add(Map, IsStrict) ->
-    add(Map, IsStrict, ?REALM_SPEC).
+update(?BONDY_PRIV_REALM_URI, _) ->
+    error(forbidden);
+
+update(Uri, Data) when is_binary(Uri) ->
+    do_update(fetch(Uri), Data);
+
+update(#realm{uri = ?BONDY_PRIV_REALM_URI}, _) ->
+    error(forbidden);
+
+update(#realm{uri = ?BONDY_REALM_URI} = Realm, Data0) ->
+    Data = maps_utils:validate(Data0, ?BONDY_REALM_UPDATE_VALIDATOR),
+    do_update(Realm, Data);
+
+update(#realm{} = Realm, Data0) ->
+    Data = maps_utils:validate(Data0, ?REALM_UPDATE_VALIDATOR),
+    do_update(Realm, Data).
+
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec update(uri(), map()) -> t() | no_return().
-
-update(_Uri, Map) ->
-    add(Map, false, ?UPDATE_REALM_SPEC).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec delete(uri()) -> ok | {error, forbidden | active_users}.
-
-delete(?BONDY_REALM_URI) ->
-    {error, forbidden};
+-spec delete(t() | uri()) -> ok | {error, forbidden | active_users}.
 
 delete(?BONDY_PRIV_REALM_URI) ->
     {error, forbidden};
 
-delete(Uri) ->
+delete(?BONDY_REALM_URI) ->
+    {error, forbidden};
+
+delete(Uri) when is_binary(Uri) ->
     %% If there are users in the realm, the caller will need to first
-    %% explicitely delete the users first
+    %% explicitely delete the users
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
         [] ->
-            _ = persistent_term:erase({Uri, security_status}),
-            plum_db:delete(?PDB_PREFIX, Uri),
+            _ = persistent_term:erase(?SEC_STATUS_KEY(Uri)),
+            plum_db:delete(?PDB_PREFIX(Uri), Uri),
             ok = bondy_event_manager:notify({realm_deleted, Uri}),
             %% TODO we need to close all sessions for this realm
             ok;
         L when length(L) > 0 ->
             {error, active_users}
-    end.
+    end;
+
+delete(#realm{uri = Uri}) ->
+    delete(Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -638,7 +772,8 @@ delete(Uri) ->
 -spec list() -> [t()].
 
 list() ->
-    [V || {_K, [V]} <- plum_db:to_list(?PDB_PREFIX), V =/= '$deleted'].
+    Opts = [{remove_tombstones, true}, {resolver, lww}],
+    [V || {_K, V} <- plum_db:match(?PDB_PREFIX('_'), '_', Opts)].
 
 
 %% -----------------------------------------------------------------------------
@@ -666,6 +801,8 @@ to_external(#realm{} = R) ->
         <<"description">> => R#realm.description,
         <<"authmethods">> => R#realm.authmethods,
         <<"security_status">> => security_status(R),
+        <<"allow_connections">> => R#realm.allow_connections,
+        <<"sso_realm_uri">> => R#realm.sso_realm_uri,
         <<"public_keys">> => [
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
@@ -678,6 +815,12 @@ to_external(#realm{} = R) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
+add_bondy_realm() ->
+    Data = maps_utils:validate(?BONDY_REALM, ?BONDY_REALM_VALIDATOR),
+    do_add(Data).
 
 
 %% @private
@@ -732,9 +875,6 @@ get_password_opts(Methods) when is_list(Methods) ->
     end.
 
 
-
-
-
 %% @private
 apply_rbac_config(#realm{uri = Uri}, Map) ->
     #{
@@ -745,9 +885,9 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
     } = Map,
 
     _ = [
-            ok = maybe_error(
-                bondy_rbac_group:add_or_update(Uri, Group)
-            )
+        ok = maybe_error(
+            bondy_rbac_group:add_or_update(Uri, Group)
+        )
         || Group <- Groups
     ],
 
@@ -783,71 +923,86 @@ maybe_error(ok) ->
 
 
 %% @private
-add(Map0, IsStrict, Spec) ->
-    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, Spec),
-    wamp_uri:is_valid(Uri) orelse error({?WAMP_INVALID_URI, Uri}),
-    maybe_add(Map1, IsStrict).
-
-
-%% @private
-maybe_add(#{<<"uri">> := Uri} = Map, IsStrict) ->
+add_or_update(#{<<"uri">> := Uri} = Data0) ->
     case lookup(Uri) of
-        #realm{} when IsStrict ->
-            error({already_exists, Uri});
         #realm{} = Realm ->
-            do_update(Realm, Map);
+            Data = maps_utils:validate(Data0, ?REALM_UPDATE_VALIDATOR),
+            do_update(Realm, Data);
         {error, not_found} ->
-            do_add(Map)
+            Data = maps_utils:validate(Data0, ?REALM_VALIDATOR),
+            do_add(Data)
     end.
+
 
 
 %% @private
 do_add(#{<<"uri">> := Uri} = Map) ->
     Realm0 = #realm{uri = Uri},
-    Realm1 = add_or_update(Realm0, Map),
+    Realm = merge_and_store(Realm0, Map),
+    ok = on_add(Realm),
+    Realm.
 
-    ok = bondy_event_manager:notify({realm_added, Realm1#realm.uri}),
-    Realm1.
+
+
+%% @private
+do_update(Realm0, Map) ->
+    Realm = merge_and_store(Realm0, Map),
+    ok = on_update(Realm),
+    Realm.
 
 
 
 %% @private
-do_update(Realm, Map) ->
-    NewRealm = add_or_update(Realm, Map),
-    ok = bondy_event_manager:notify({realm_updated, NewRealm#realm.uri}),
-    NewRealm.
-
-
-%% @private
-add_or_update(Realm0, Map) ->
-    #{
-        <<"description">> := Desc,
-        <<"authmethods">> := Methods,
-        <<"security_enabled">> := SecurityEnabled
-    } = Map,
-
-    KeyList = maps:get(<<"private_keys">>, Map, undefined),
-
-    Realm1 = Realm0#realm{
-        description = Desc,
-        authmethods = Methods,
+merge_and_store(Realm0, Map) ->
+    Realm1 = maps:fold(fun fold_props/3, Realm0, Map),
+    Realm2 = Realm1#realm{
         %% TODO derive password options based on authmethods
-        password_opts = get_password_opts(Methods)
+        password_opts = get_password_opts(Realm1#realm.authmethods)
     },
+
+    Uri = Realm2#realm.uri,
+    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm2),
+    ok = maybe_enable_security(maps:get(<<"security_enabled">>, Map), Realm2),
 
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
     %% elements have been validated.
-    RBACData = validate_rbac_config(Realm1, Map),
+    RBACData = validate_rbac_config(Realm2, Map),
+    ok = apply_rbac_config(Realm2, RBACData),
 
-    NewRealm = set_keys(Realm1, KeyList),
+    Realm2.
 
-    Uri = NewRealm#realm.uri,
-    ok = plum_db:put(?PDB_PREFIX, Uri, NewRealm),
-    ok = maybe_enable_security(SecurityEnabled, NewRealm),
-    ok = apply_rbac_config(NewRealm, RBACData),
 
-    NewRealm.
+fold_props(<<"description">>, V, Realm) ->
+    Realm#realm{description = V};
+
+fold_props(<<"authmethods">>, V, Realm) ->
+    Realm#realm{authmethods = V};
+
+fold_props(<<"allow_connections">>, V, Realm) ->
+    Realm#realm{allow_connections = V};
+
+fold_props(<<"sso_realm_uri">>, V, Realm) ->
+    Realm#realm{sso_realm_uri = V};
+
+fold_props(<<"private_keys">>, V, Realm) ->
+    set_keys(Realm, V);
+
+fold_props(_, _, Realm) ->
+    %% We ignote the rest of the properties.
+    %% They will be handled separately.
+    Realm.
+
+
+
+on_add(Realm) ->
+    ok = bondy_event_manager:notify({realm_added, Realm#realm.uri}),
+    ok.
+
+
+on_update(Realm) ->
+    ok = bondy_event_manager:notify({realm_updated, Realm#realm.uri}),
+    ok.
 
 
 %% @private
@@ -878,7 +1033,7 @@ set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
 -spec do_lookup(uri()) -> t() | {error, not_found}.
 
 do_lookup(Uri) ->
-    case plum_db:get(?PDB_PREFIX, Uri) of
+    case plum_db:get(?PDB_PREFIX(Uri), Uri) of
         #realm{} = Realm ->
             Realm;
         undefined ->
