@@ -427,13 +427,12 @@ remove(RealmUri, Username0) ->
     t() | {error, not_found}.
 
 lookup(RealmUri, Username0) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    Username = normalise_username(Username0),
-
-    case Username == anonymous of
-        true ->
+    case normalise_username(Username0) of
+        anonymous ->
             ?ANONYMOUS;
-        false ->
+        Username ->
+            Prefix = ?PLUMDB_PREFIX(RealmUri),
+
             case plum_db:get(Prefix, Username) of
                 undefined -> {error, not_found};
                 Value -> from_term({Username, Value})
