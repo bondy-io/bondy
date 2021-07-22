@@ -18,7 +18,11 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc A user is a role that is able to log into a Bondy Realm.
+%% They  have attributes associated with themelves like username, credentials
+%% (password or authorized keys) and metadata determined by the client
+%% applications. Users can be assigned group memberships.
+%%
 %% **Note:**
 %% Usernames and group names are stored in lower case. All functions in this
 %% module are case sensitice so when using the functions in this module make
