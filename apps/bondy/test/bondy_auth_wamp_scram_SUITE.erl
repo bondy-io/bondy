@@ -101,7 +101,18 @@ add_realm(RealmUri) ->
             }
         ]
     },
+
     _ = bondy_realm:add(Config),
+
+    ?assertEqual(
+        scram,
+        bondy_password:protocol(
+            bondy_rbac_user:password(
+                bondy_rbac_user:fetch(RealmUri, ?U1)
+
+            )
+        )
+    ),
 
     dbg:stop(),
     ok.
