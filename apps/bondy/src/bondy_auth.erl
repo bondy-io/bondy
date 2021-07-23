@@ -577,7 +577,7 @@ get_user(RealmUri, UserId) ->
         {error, not_found} ->
             throw(no_such_user);
         User ->
-            User
+            bondy_rbac_user:resolve(User)
     end.
 
 
