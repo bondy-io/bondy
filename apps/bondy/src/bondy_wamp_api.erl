@@ -84,6 +84,8 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     wamp_messsage:result() | wamp_message:error().
 
+handle(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_wamp_backup_api:handle_call(Proc, M, Ctxt);
 
 handle(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
     bondy_wamp_cluster_api:handle_call(Proc, M, Ctxt);
@@ -105,9 +107,6 @@ handle(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
 
 % handle(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
 % bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
-
-handle(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
-bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
 
 handle(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_wamp_realm_api:handle_call(Proc, M, Ctxt);
