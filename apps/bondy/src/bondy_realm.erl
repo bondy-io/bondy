@@ -1070,7 +1070,6 @@ merge_and_store(Realm0, Map) ->
 
 
 %% @private
-
 fold_props(<<"allow_connections">>, V, Realm) ->
     Realm#realm{allow_connections = V};
 
