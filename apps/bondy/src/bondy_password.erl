@@ -108,6 +108,7 @@
 -export([upgrade/2]).
 -export([verify_hash/2]).
 -export([verify_string/2]).
+-export([opts_validator/0]).
 
 
 
@@ -209,10 +210,21 @@ default_opts() ->
 -spec default_opts(protocol()) -> opts().
 
 default_opts(Protocol) ->
-KDF = bondy_config:get([security, password, Protocol, kdf]),
+    KDF = bondy_config:get([security, password, Protocol, kdf]),
     KDFOpts = maps:from_list(bondy_config:get([security, password, KDF])),
     Params = maps:put(kdf, KDF, KDFOpts),
     #{protocol => Protocol, params => Params}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec opts_validator() -> map().
+
+opts_validator() ->
+    ?OPTS_VALIDATOR.
+
 
 
 %% -----------------------------------------------------------------------------

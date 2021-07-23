@@ -260,6 +260,8 @@
         ?PASSWORD_AUTH
     ],
     security_enabled => true, % but we allow anonymous access
+    allow_connections => true,
+    sso_realm_uri => undefined,
     users => [
         #{
             username => <<"admin">>,
@@ -414,6 +416,7 @@
 -export([public_keys/1]).
 -export([security_status/1]).
 -export([sso_realm_uri/1]).
+-export([is_allowed_sso_realm/2]).
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
@@ -488,6 +491,7 @@ apply_config(Filename) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the list of supported authentication methods for Realm.
+%% If the
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authmethods(Realm :: t() | uri()) -> [binary()].
@@ -528,9 +532,30 @@ sso_realm_uri(#realm{sso_realm_uri = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the same sign on (SSO) realm URI used by the realm.
+%% If a value is set, then all authentication and user creation will be done on
+%% the Realm represented by the SSO Realm.
+%% Groups, Permissions and Sources are still managed by this realm.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_allowed_sso_realm(
+    Realm :: t() | uri(), SSORealmUri :: uri()) -> boolean().
+
+is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
+    is_allowed_sso_realm(fetch(Uri), SSORealmUri);
+
+is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
+    %% TODO change sso_realm_uri to allowd_sso_realms
+    Val =:= SSORealmUri.
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Returns `true' if the Realm is enabled as a Same Sign-on (SSO) realm.
 %% Otherwise returns `false'.
 %% If this property is `true', the `sso_realm_uri' cannot be set.
+%% This property cannot be set to `false' once it has been set to `true'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_sso_realm(Realm :: t() | uri()) -> boolean().
@@ -806,11 +831,13 @@ update(#realm{uri = ?BONDY_PRIV_REALM_URI}, _) ->
     error(forbidden);
 
 update(#realm{uri = ?BONDY_REALM_URI} = Realm, Data0) ->
-    Data = maps_utils:validate(Data0, ?BONDY_REALM_UPDATE_VALIDATOR),
+    Data1 = maps:put(<<"uri">>, ?BONDY_REALM_URI, Data0),
+    Data = maps_utils:validate(Data1, ?BONDY_REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
-update(#realm{} = Realm, Data0) ->
-    Data = maps_utils:validate(Data0, ?REALM_UPDATE_VALIDATOR),
+update(#realm{uri = Uri} = Realm, Data0) ->
+    Data1 = maps:put(<<"uri">>, Uri, Data0),
+    Data = maps_utils:validate(Data1, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data).
 
 
@@ -1043,17 +1070,29 @@ merge_and_store(Realm0, Map) ->
 
 
 %% @private
-fold_props(<<"description">>, V, Realm) ->
-    Realm#realm{description = V};
+
+fold_props(<<"allow_connections">>, V, Realm) ->
+    Realm#realm{allow_connections = V};
 
 fold_props(<<"authmethods">>, V, Realm) ->
     Realm#realm{authmethods = V};
 
-fold_props(<<"is_sso_realm">>, V, Realm) ->
-    Realm#realm{is_sso_realm = V};
+fold_props(<<"description">>, V, Realm) ->
+    Realm#realm{description = V};
 
-fold_props(<<"allow_connections">>, V, Realm) ->
-    Realm#realm{allow_connections = V};
+fold_props(<<"is_sso_realm">>, true, #realm{is_sso_realm = false} = Realm) ->
+    Realm#realm{is_sso_realm = true};
+
+fold_props(<<"is_sso_realm">>, false, #realm{is_sso_realm = true}) ->
+    error(
+        {
+            forbidden,
+            <<"Cannot set property 'is_sso_realm' to 'false' once it was set to 'true'.">>
+        }
+    );
+
+fold_props(<<"security_enabled">>, V, Realm) ->
+    Realm#realm{security_enabled = V};
 
 fold_props(<<"sso_realm_uri">>, V, Realm) ->
     Realm#realm{sso_realm_uri = V};
