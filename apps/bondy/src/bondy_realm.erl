@@ -592,8 +592,11 @@ security_status(Term) ->
 %% -----------------------------------------------------------------------------
 -spec enable_security(t()) -> ok.
 
-enable_security(#realm{} = Realm) ->
-    _ = update(Realm, #{<<"security_enabled">> => true}),
+enable_security(#realm{uri = Uri} = Realm) ->
+    _ = update(Realm, #{
+        <<"uri">> => Uri,
+        <<"security_enabled">> => true
+    }),
     ok;
 
 enable_security(Uri) when is_binary(Uri) ->
@@ -612,8 +615,11 @@ disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
 disable_security(#realm{uri = ?BONDY_PRIV_REALM_URI}) ->
     {error, forbidden};
 
-disable_security(#realm{} = Realm) ->
-    _ = update(Realm, #{<<"security_enabled">> => false}),
+disable_security(#realm{uri = Uri} = Realm) ->
+    _ = update(Realm, #{
+        <<"uri">> => Uri,
+        <<"security_enabled">> => false
+    }),
     ok;
 
 disable_security(Uri) when is_binary(Uri) ->
