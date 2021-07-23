@@ -192,6 +192,20 @@
         "security_enabled" : true,
         "allow_connections": true,
         "sso_realm_uri": "com.leapsight.sso",
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            }
+        ],
         "users" : [
             {
                 "username": "amanda",
