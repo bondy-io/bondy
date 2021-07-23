@@ -42,8 +42,8 @@
 
 
 %% PLUM_DB
--define(REG_PREFIX, registry_registrations).
--define(SUBS_PREFIX, registry_subscriptions).
+-define(REG_PREFIX, bondy_registry_registrations).
+-define(SUBS_PREFIX, bondy_registry_subscriptions).
 -define(PREFIXES, [?REG_PREFIX, ?SUBS_PREFIX]).
 -define(REG_FULL_PREFIX(RealmUri), {?REG_PREFIX, RealmUri}).
 -define(SUBS_FULL_PREFIX(RealmUri), {?SUBS_PREFIX, RealmUri}).
