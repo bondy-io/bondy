@@ -94,8 +94,20 @@ handle(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
 handle(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
     bondy_wamp_oauth2_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
+handle(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
     bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+
+handle(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+
+handle(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+
+% handle(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
+% bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+
+handle(<<"bondy.rbac.", _/binary>> = Proc, M, Ctxt) ->
+bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
 
 handle(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_wamp_realm_api:handle_call(Proc, M, Ctxt);
