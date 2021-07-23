@@ -280,6 +280,7 @@
 -export([update/3]).
 -export([username/1]).
 -export([resolve/1]).
+-export([exists/2]).
 
 
 %% =============================================================================
@@ -601,6 +602,16 @@ lookup(RealmUri, Username0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec exists(RealmUri :: uri(), Username :: binary()) -> boolean().
+
+exists(RealmUri, Username0) ->
+    lookup(RealmUri, Username0) =/= {error, not_found}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec fetch(uri(), binary()) -> t() | no_return().
 
 fetch(RealmUri, Username) ->
@@ -855,16 +866,11 @@ when is_binary(SSOUri) ->
 
     %% Key validations first
     ok = not_exists_check(?PLUMDB_PREFIX(RealmUri), Username),
-    ok = not_exists_check(?PLUMDB_PREFIX(SSOUri), Username),
     ok = no_unknown_groups(RealmUri, maps:get(groups, User0)),
-    ok = no_unknown_groups(SSOUri, maps:get(groups, SSOOpts)),
-    bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
-        orelse throw(invalid_sso_realm),
 
     %% We split the user into LocalUser, SSOUser and Opts
     {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
     User2 = apply_password(User1, password_opts(RealmUri, Opts)),
-
     {SSOUser0, LocalUser0} = maps_utils:split(
         [password, authorized_keys], User2
     ),
@@ -879,8 +885,9 @@ when is_binary(SSOUri) ->
         meta => maps:get(meta, SSOOpts)
     }),
 
-    %% We first add the user to the SSO realm
-    {ok, _} = maybe_throw(create(SSOUri, SSOUser)),
+    ok = maybe_add_sso_user(
+        not exists(SSOUri, Username), RealmUri, SSOUri, SSOUser
+    ),
 
     %% We finally add the local user to the realm
     create(RealmUri, LocalUser);
@@ -900,6 +907,19 @@ do_add(RealmUri, User0) ->
 
 
 %% @private
+maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
+    bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
+        orelse throw(invalid_sso_realm),
+    ok = no_unknown_groups(SSOUri, maps:get(groups, SSOUser)),
+
+    %% We first add the user to the SSO realm
+    {ok, _} = maybe_throw(create(SSOUri, SSOUser)),
+    ok;
+
+maybe_add_sso_user(false, _, _, _) ->
+    ok.
+
+%% @private
 create(RealmUri, #{username := Username} = User) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
         ok ->
@@ -908,7 +928,6 @@ create(RealmUri, #{username := Username} = User) ->
         Error ->
             Error
     end.
-
 
 
 %% @private
