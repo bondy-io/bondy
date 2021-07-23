@@ -6,8 +6,8 @@
     "status_codes" : {
         "bondy.error.badarg" : 400,
         "bondy.error.not_found" : 404,
-        "bondy.error.role_exists": 400,
-        "bondy.error.unknown_user": 400
+        "bondy.error.already_exists": 400,
+        "bondy.error.no_such_user": 400
     },
     "variables" : {
         "oauth2" : {

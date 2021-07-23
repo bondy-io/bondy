@@ -421,7 +421,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
 
     %% We validate all usernames exist
     Unknown = bondy_rbac_user:unknown(RealmUri, Usernames),
-    [] =:= Unknown orelse throw({unknown_users, Unknown}),
+    [] =:= Unknown orelse throw({no_such_users, Unknown}),
 
     Masked = bondy_cidr:anchor_mask(maps:get(cidr, Source)),
 
