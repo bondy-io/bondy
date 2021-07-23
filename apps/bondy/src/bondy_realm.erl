@@ -363,6 +363,15 @@
     ]
 }).
 
+-define(BONDY_PRIV_REALM, #realm{
+    uri = ?BONDY_PRIV_REALM_URI,
+    description = <<"The private realm used by bondy">>,
+    authmethods = [],
+    security_enabled = true,
+    is_sso_realm = false,
+    allow_connections = true
+}).
+
 
 -record(realm, {
     uri                             ::  uri(),
@@ -740,6 +749,9 @@ lookup(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec fetch(uri()) -> t().
+
+fetch(?BONDY_PRIV_REALM_URI) ->
+    ?BONDY_PRIV_REALM;
 
 fetch(Uri) ->
     case lookup(Uri) of
