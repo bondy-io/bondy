@@ -174,8 +174,7 @@
 		key => groups,
         allow_null => false,
         allow_undefined => false,
-        required => true,
-        default => [],
+        required => false,
         datatype => {list, binary},
         validator => fun bondy_data_validators:groupnames/1
     },
@@ -184,9 +183,7 @@
 		key => meta,
         allow_null => false,
         allow_undefined => false,
-        required => true,
-        datatype => map,
-        default => #{}
+        datatype => map
     }
 }).
 
@@ -236,9 +233,10 @@
     password_opts       =>  bondy_password:opts()
 }.
 -type update_opts()        ::  #{
-    allow_sso_update    =>  boolean(),
-    sso_opts            =>  sso_opts(),
-    password_opts       =>  bondy_password:opts()
+    forward_credentials     =>  boolean(),
+    update_credentials      =>  boolean(),
+    sso_opts                =>  sso_opts(),
+    password_opts           =>  bondy_password:opts()
 }.
 -type sso_opts()        ::  #{
     realm_uri           =>  uri(),
@@ -247,7 +245,11 @@
     groups              =>  [binary()],
     meta                =>  #{binary() => any()}
 }.
--type add_error()       ::  no_such_realm | reserved_name | role_exists.
+-type add_error()       ::  no_such_realm | reserved_name | already_exists.
+-type update_error()    ::  no_such_realm
+                            | reserved_name
+                            | no_such_user
+                            | {no_such_groups, [bondy_rbac_group:name()]}.
 
 -type list_opts()       ::  #{
     limit => pos_integer()
@@ -518,7 +520,7 @@ add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User, Opts) ->
     try
         add(RealmUri, User)
     catch
-        throw:role_exists ->
+        throw:already_exists ->
             update(RealmUri, Username, User, Opts);
 
         throw:Reason ->
@@ -532,7 +534,7 @@ add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec update(RealmUri :: uri(), Username :: binary(), Data :: map()) ->
-    {ok, NewUser :: t()} | {error, any()}.
+    {ok, NewUser :: t()} | {error, update_error()}.
 
 update(RealmUri, Username, Data) ->
     update(RealmUri, Username, Data, #{}).
@@ -550,52 +552,34 @@ update(RealmUri, Username, Data) ->
     Opts :: update_opts()) ->
     {ok, NewUser :: t()} | {error, any()}.
 
-update(RealmUri, Username0, Data0, _Opts) when is_binary(Username0) ->
+update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
     try
 
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
-        Prefix = ?PLUMDB_PREFIX(RealmUri),
         Username = normalise_username(Username0),
         ok = not_reserved_name_check(Username),
-
-        case plum_db:get(Prefix, Username) of
-            undefined ->
-                throw(unknown_user);
-            Value ->
-                User = from_term({Username, Value}),
-                %% If we have a password string in Data we convert it to a
-                %% bondy_password:t()
-                NewUser = merge(RealmUri, User, Data),
-                ok = no_unknown_groups(RealmUri, maps:get(groups, NewUser)),
-                ok = plum_db:put(Prefix, Username, NewUser),
-                ok = on_update(RealmUri, Username),
-                {ok, NewUser}
-        end
-
+        do_update(RealmUri, Username, Data, Opts)
     catch
         throw:Reason ->
             {error, Reason}
     end.
-
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), binary() | map()) ->
-    ok | {error, unknown_user | reserved_name}.
+    ok | {error, no_such_user | reserved_name}.
 
 remove(RealmUri, #{type := ?TYPE, username := Username}) ->
     remove(RealmUri, Username);
 
 remove(RealmUri, Username0) ->
     try
-        Prefix = ?PLUMDB_PREFIX(RealmUri),
         Username = normalise_username(Username0),
 
         ok = not_reserved_name_check(Username),
-        ok = exists_check(Prefix, Username),
+        ok = exists_check(RealmUri, Username),
 
         %% We remove this user from sources
         ok = bondy_rbac_source:remove_all(RealmUri, Username),
@@ -605,7 +589,7 @@ remove(RealmUri, Username0) ->
         ok = bondy_rbac_policy:revoke_user(RealmUri, Username),
 
         %% We finally delete the user
-        ok = plum_db:delete(Prefix, Username),
+        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Username),
 
         on_delete(RealmUri, Username)
 
@@ -827,9 +811,169 @@ normalise_username(_) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-password_opts(RealmUri) ->
-    password_opts(RealmUri, #{}).
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec do_add(RealmUri :: binary(), User :: t()) -> ok | no_return().
+
+do_add(RealmUri, #{sso_opts := #{realm_uri := SSOUri} = SSOOpts} = User0)
+when is_binary(SSOUri) ->
+    Username = maps:get(username, User0),
+
+    %% Key validations first
+    ok = not_exists_check(RealmUri, Username),
+    ok = group_exists_check(RealmUri, maps:get(groups, User0, [])),
+
+    %% We split the user into LocalUser, SSOUser and Opts
+    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
+    User2 = apply_password(User1, password_opts(RealmUri, Opts)),
+    {SSOUser0, LocalUser0} = maps_utils:split(
+        [password, authorized_keys], User2
+    ),
+
+    LocalUser = LocalUser0#{
+        sso_realm_uri => SSOUri
+    },
+
+    SSOUser = type_and_version(SSOUser0#{
+        username => Username,
+        groups => maps:get(groups, SSOOpts, []),
+        meta => maps:get(meta, SSOOpts, #{})
+    }),
+
+    ok = maybe_add_sso_user(
+        not exists(SSOUri, Username), RealmUri, SSOUri, SSOUser
+    ),
+
+    %% We finally add the local user to the realm
+    store(RealmUri, LocalUser, fun on_create/2);
+
+do_add(RealmUri, User0) ->
+    Username = maps:get(username, User0),
+
+    %% Key validations first
+    ok = not_exists_check(RealmUri, Username),
+    ok = group_exists_check(RealmUri, maps:get(groups, User0, [])),
+
+    %% We split the user into LocalUser, SSOUSer and Opts
+    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
+    User = apply_password(User1, password_opts(RealmUri, Opts)),
+
+    store(RealmUri, User, fun on_create/2).
+
+
+%% @private
+maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
+
+    bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
+        orelse throw(invalid_sso_realm),
+    ok = group_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
+
+    %% We first add the user to the SSO realm
+    {ok, _} = maybe_throw(store(SSOUri, SSOUser, fun on_create/2)),
+    ok;
+
+maybe_add_sso_user(false, _, _, _) ->
+    ok.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec do_update(
+    RealmUri :: binary(),
+    Username :: t(),
+    Data :: map(),
+    Opts :: update_opts()) ->
+    ok | no_return().
+
+do_update(
+    RealmUri,
+    Username,
+    #{sso_opts := #{realm_uri := SSOUri} = SSOOpts} = Data0,
+    Opts
+) when is_binary(SSOUri) ->
+    case lookup(RealmUri, Username) of
+        {error, not_found} ->
+            throw(no_such_user);
+
+        User ->
+            case lookup(SSOUri, Username) of
+                {error, not_found} ->
+                    throw(not_sso_user);
+
+                SSOUser ->
+                    Keys = case maps:find(forward_credentials, Opts) of
+                        {ok, true} ->
+                            [sso_opts];
+                        _ ->
+                            [
+                                sso_opts,
+                                password_opts,
+                                password,
+                                authorized_keys
+                            ]
+                    end,
+
+                    {SSOData0, LocalData} = maps_utils:split(
+                        [password_opts, password, authorized_keys],
+                        maps:without(Keys, Data0)
+                    ),
+
+                    SSOData1 = case maps:find(groups, SSOOpts) of
+                        {ok, Groups} ->
+                            maps:put(groups, Groups, SSOData0);
+                        _ ->
+                            SSOData0
+                    end,
+
+                    SSOData = case maps:find(meta, SSOOpts) of
+                        {ok, Meta} ->
+                            maps:put(meta, Meta, SSOData1);
+                        _ ->
+                            SSOData1
+                    end,
+
+                    _ = maybe_throw(
+                        do_update(SSOUri, SSOUser, SSOData, Opts)
+                    ),
+                    do_update(RealmUri, User, LocalData, Opts)
+            end
+
+    end;
+
+do_update(RealmUri, Username, Data0, Opts) when is_binary(Username) ->
+    case lookup(RealmUri, Username) of
+        {error, not_found} ->
+            throw(no_such_user);
+        User ->
+            do_update(RealmUri, User, Data0, Opts)
+    end;
+
+do_update(RealmUri, User, Data0, Opts0) when is_map(User) ->
+    ok = group_exists_check(RealmUri, maps:get(groups, Data0, [])),
+    %% We split the user into LocalUser and Opts
+    {UserOpts, Data} = maps_utils:split([sso_opts, password_opts], Data0),
+    Opts = maps:merge(UserOpts, Opts0),
+    NewUser = merge(RealmUri, User, Data, Opts),
+    store(RealmUri, NewUser, fun on_update/2).
+
+
+%% @private
+store(RealmUri, #{username := Username} = User, Fun) ->
+    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
+        ok ->
+            ok = Fun(RealmUri, User),
+            {ok, User};
+        Error ->
+            Error
+    end.
+
 
 
 %% @private
@@ -841,7 +985,7 @@ password_opts(RealmUri, _) ->
 
 
 %% @private
-merge(RealmUri, U1, U2) ->
+merge(RealmUri, U1, U2, #{update_credentials := true} = Opts) ->
     User = maps:merge(U1, U2),
     P0 = maps:get(password, U1, undefined),
     Future = maps:get(password, U2, undefined),
@@ -851,20 +995,25 @@ merge(RealmUri, U1, U2) ->
             User;
 
         {undefined, _}  ->
-            apply_password(User, password_opts(RealmUri));
+            apply_password(User, password_opts(RealmUri, Opts));
 
         {P0, undefined} ->
             bondy_password:is_type(P0) orelse error(badarg),
             User;
 
         {P0, Future} when is_function(Future, 1) ->
-            apply_password(User, password_opts(RealmUri));
+            apply_password(User, password_opts(RealmUri, Opts));
 
         {_, P1} ->
             bondy_password:is_type(P1) orelse error(badarg),
             maps:put(password, P1, User)
 
-    end.
+    end;
+
+merge(_, U1, U2, _) ->
+    %% We only allow updates to modify credentials if explicitely requested via
+    %% option update_credentials
+    maps:merge(U1, maps:without([password, authorized_keys], U2)).
 
 
 %% @private
@@ -890,86 +1039,6 @@ apply_password(User, _) ->
     User.
 
 
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec do_add(RealmUri :: binary(), User :: t()) -> ok | no_return().
-
-do_add(RealmUri, #{sso_opts := #{realm_uri := SSOUri} = SSOOpts} = User0)
-when is_binary(SSOUri) ->
-    Username = maps:get(username, User0),
-
-    %% Key validations first
-    ok = not_exists_check(?PLUMDB_PREFIX(RealmUri), Username),
-    ok = no_unknown_groups(RealmUri, maps:get(groups, User0)),
-
-    %% We split the user into LocalUser, SSOUser and Opts
-    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
-    User2 = apply_password(User1, password_opts(RealmUri, Opts)),
-    {SSOUser0, LocalUser0} = maps_utils:split(
-        [password, authorized_keys], User2
-    ),
-
-    LocalUser = LocalUser0#{
-        sso_realm_uri => SSOUri
-    },
-
-    SSOUser = type_and_version(SSOUser0#{
-        username => Username,
-        groups => maps:get(groups, SSOOpts),
-        meta => maps:get(meta, SSOOpts)
-    }),
-
-    ok = maybe_add_sso_user(
-        not exists(SSOUri, Username), RealmUri, SSOUri, SSOUser
-    ),
-
-    %% We finally add the local user to the realm
-    store(RealmUri, LocalUser, fun on_create/2);
-
-do_add(RealmUri, User0) ->
-    Username = maps:get(username, User0),
-
-    %% Key validations first
-    ok = not_exists_check(?PLUMDB_PREFIX(RealmUri), Username),
-    ok = no_unknown_groups(RealmUri, maps:get(groups, User0)),
-
-    %% We split the user into LocalUser, SSOUSer and Opts
-    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
-    User = apply_password(User1, password_opts(RealmUri, Opts)),
-
-    store(RealmUri, User, fun on_create/2).
-
-
-%% @private
-maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
-
-    bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
-        orelse throw(invalid_sso_realm),
-    ok = no_unknown_groups(SSOUri, maps:get(groups, SSOUser)),
-
-    %% We first add the user to the SSO realm
-    {ok, _} = maybe_throw(store(SSOUri, SSOUser, fun on_create/2)),
-    ok;
-
-maybe_add_sso_user(false, _, _, _) ->
-    ok.
-
-
-%% @private
-store(RealmUri, #{username := Username} = User, Fun) ->
-    case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
-        ok ->
-            ok = Fun(RealmUri, User),
-            {ok, User};
-        Error ->
-            Error
-    end.
-
-
 %% @private
 maybe_throw({error, Reason}) ->
     throw(Reason);
@@ -978,27 +1047,27 @@ maybe_throw(Term) ->
     Term.
 
 %% @private
-exists_check(Prefix, Username) ->
-    case plum_db:get(Prefix, Username) of
-        undefined -> throw(unknown_user);
+exists_check(RealmUri, Username) ->
+    case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
+        undefined -> throw(no_such_user);
         _ -> ok
     end.
 
 
 %% @private
-not_exists_check(Prefix, Username) ->
-    case plum_db:get(Prefix, Username) of
+not_exists_check(RealmUri, Username) ->
+    case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
         undefined -> ok;
-        _ -> throw(role_exists)
+        _ -> throw(already_exists)
     end.
 
 %% @private
-no_unknown_groups(RealmUri, Groups) ->
+group_exists_check(RealmUri, Groups) ->
     case bondy_rbac_group:unknown(RealmUri, Groups) of
         [] ->
             ok;
         Unknown ->
-            throw({unknown_groups, Unknown})
+            throw({no_such_groups, Unknown})
     end.
 
 

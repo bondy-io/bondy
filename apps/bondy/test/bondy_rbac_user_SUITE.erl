@@ -36,7 +36,8 @@ all() ->
         test,
         invalid_sso_realm,
         resolve,
-        add_sso_user_to_realm
+        add_sso_user_to_realm,
+        update
     ].
 
 
@@ -204,7 +205,7 @@ invalid_sso_realm(Config) ->
         }
     },
     ?assertEqual(
-        {error, role_exists},
+        {error, already_exists},
         bondy_rbac_user:add(?REALM1_URI, bondy_rbac_user:new(User0))
     ),
 
@@ -250,3 +251,77 @@ add_sso_user_to_realm(_) ->
         SSOU1,
         bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
     ).
+
+
+update(_) ->
+    SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+    User0 = bondy_rbac_user:fetch(?REALM2_URI, ?SSOU1),
+
+    Data0 = #{
+        password => <<"newpassword">>,
+        groups => [],
+        sso_opts => #{
+            realm_uri => ?SSO_REALM_URI
+        }
+    },
+
+    ?assertEqual(
+        {ok, User0},
+        bondy_rbac_user:update(
+            ?REALM2_URI, ?SSOU1, Data0, #{forward_credentials => false}
+        )
+    ),
+    ?assertEqual(
+        SSOUser0,
+        bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+    ),
+
+
+    ?assertEqual(
+        {ok, User0},
+        bondy_rbac_user:update(
+            ?REALM2_URI, ?SSOU1, Data0, #{forward_credentials => true}
+        )
+    ),
+    ?assertEqual(
+        SSOUser0,
+        bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+    ),
+
+    ?assertEqual(
+        {ok, User0},
+        bondy_rbac_user:update(
+            ?REALM2_URI, ?SSOU1, Data0, #{
+                forward_credentials => true,
+                update_credentials => true
+            }
+        )
+    ),
+    ?assertNotEqual(
+        SSOUser0,
+        bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+    ),
+
+
+
+    % ?assertError(
+    %     badarg,
+    %     bondy_rbac_user:update(?SSO_REALM_URI, ?SSOU1, Data)
+    % ),
+
+    % Data1 = #{
+    %     password => <<"newpassword">>,
+    %     groups => [],
+    %     meta => #{fruit => <<"not passion fruit">>},
+    %     sso_opts => #{
+    %         realm_uri => ?SSO_REALM_URI,
+    %         groups => [],
+    %         meta => #{fruit => <<"mango again">>}
+    %     }
+    % },
+    % {ok, New} = bondy_rbac_user:update(?REALM2_URI, ?SSOU1, Data),
+    % ?assertEqual(
+    %     SSOU1,
+    %     maps:get(meta, )
+    % ),
+    ok.

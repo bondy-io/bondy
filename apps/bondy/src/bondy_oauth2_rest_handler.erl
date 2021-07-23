@@ -584,7 +584,7 @@ prepare_meta(_, Meta, _) ->
 reply(no_such_realm, Req) ->
     reply(oauth2_invalid_client, Req);
 
-reply(unknown_user, Req) ->
+reply(no_such_user, Req) ->
     reply(oauth2_invalid_client, Req);
 
 reply(missing_signature, Req) ->

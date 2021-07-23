@@ -107,7 +107,7 @@
 
 -type external()        ::  t().
 -type name()            ::  binary() | anonymous | all.
--type add_error()       ::  no_such_realm | reserved_name | role_exists.
+-type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type list_opts()       ::  #{limit => pos_integer()}.
 
 -export_type([t/0]).
@@ -216,7 +216,7 @@ add_or_update(RealmUri, #{type := group, name := Name} = Group) ->
     try
         do_add(RealmUri, Group)
     catch
-        throw:role_exists ->
+        throw:already_exists ->
             update(RealmUri, Name, Group);
 
         throw:Reason ->
@@ -245,7 +245,7 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 throw(unknown_group);
             Group ->
                 NewGroup = maps:merge(from_term({Name, Group}), Data),
-                ok = no_unknown_groups(RealmUri, maps:get(groups, NewGroup)),
+                ok = group_exists_check(RealmUri, maps:get(groups, NewGroup)),
 
                 ok = plum_db:put(Prefix, Name, NewGroup),
                 ok = on_update(RealmUri, Name),
@@ -465,7 +465,7 @@ do_add(RealmUri, #{type := group, name := Name} = Group) ->
     %% we do it again.
     ok = not_reserved_name_check(Name),
     ok = not_exists_check(Prefix, Name),
-    ok = no_unknown_groups(RealmUri, maps:get(groups, Group)),
+    ok = group_exists_check(RealmUri, maps:get(groups, Group)),
 
     case plum_db:put(Prefix, Name, Group) of
         ok ->
@@ -489,17 +489,17 @@ exists_check(Prefix, Name) ->
 not_exists_check(Prefix, Name) ->
     case plum_db:get(Prefix, Name) of
         undefined -> ok;
-        _ -> throw(role_exists)
+        _ -> throw(already_exists)
     end.
 
 
 %% @private
-no_unknown_groups(RealmUri, Groups) ->
+group_exists_check(RealmUri, Groups) ->
     case unknown(RealmUri, Groups) of
         [] ->
             ok;
         Unknown ->
-            throw({unknown_groups, Unknown})
+            throw({no_such_groups, Unknown})
     end.
 
 
