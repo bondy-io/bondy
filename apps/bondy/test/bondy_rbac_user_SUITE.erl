@@ -32,7 +32,8 @@
 
 all() ->
     [
-        test
+        test,
+        invalid_sso_realm
     ].
 
 
@@ -155,4 +156,34 @@ test(_) ->
     _SSOU1 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
     _SSOU2 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU2),
     ok.
+
+
+invalid_sso_realm(Config) ->
+    KeyPairs = ?config(keypairs, Config),
+    PubKeys = [
+        maps:get(public, KeyPair)
+        || KeyPair <- KeyPairs
+    ],
+    User0 = #{
+        username => ?SSOU1,
+        authorized_keys => PubKeys,
+        groups => [],
+        meta => #{fruit => <<"passion fruit">>},
+        sso_opts => #{
+            realm_uri => <<"com.wrong.uri">>,
+            groups => [],
+            meta => #{fruit => <<"mango">>}
+        }
+    },
+    ?assertEqual(
+        {error, role_exists},
+        bondy_rbac_user:add(?REALM_URI, bondy_rbac_user:new(User0))
+    ),
+
+    User1 = User0#{username => <<"foo">>},
+    ?assertEqual(
+        {error, invalid_sso_realm},
+        bondy_rbac_user:add(?REALM_URI, bondy_rbac_user:new(User1))
+    ).
+
 
