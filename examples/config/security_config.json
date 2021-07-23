@@ -161,27 +161,61 @@
         }
     },
     {
-        "uri" : "com.leapsight.sso_enabled.a",
+        "uri" : "com.leapsight.test_1",
         "description" : "A test realm",
-        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "authmethods" : ["cryptosign", "wampcra"],
         "security_enabled" : true,
         "allow_connections": true,
-        "sso_realm_uri": "com.leapsight.sso"
+        "sso_realm_uri": "com.leapsight.sso",
+        "users" : [
+            {
+                "username": "martin",
+                "password": "123456",
+                "groups": [],
+                "meta": {
+                    "band": "Queens of the Stone Edge"
+                },
+                "sso_opts" : {
+                    "realm_uri": "com.leapsight.sso",
+                    "groups": [],
+                    "meta": {
+                        "food": "BBQ"
+                    }
+                }
+            }
+        ]
     },
     {
-        "uri" : "com.leapsight.sso_enabled.b",
+        "uri" : "com.leapsight.test_2",
         "description" : "A test realm",
-        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "authmethods" : ["cryptosign", "wampcra"],
         "security_enabled" : true,
         "allow_connections": true,
-        "sso_realm_uri": "com.leapsight.sso"
+        "sso_realm_uri": "com.leapsight.sso",
+        "users" : [
+            {
+                "username": "amanda",
+                "password": "123456",
+                "groups": [],
+                "meta": {
+                    "band": "Depeche Mode"
+                },
+                "sso_opts" : {
+                    "realm_uri": "com.leapsight.sso",
+                    "groups": [],
+                    "meta": {
+                        "food": "Indian"
+                    }
+                }
+            }
+        ]
     },
     {
         "uri" : "com.leapsight.sso",
         "description" : "A test realm",
-        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
+        "authmethods" : ["cryptosign", "wampcra"],
         "security_enabled" : true,
-        "is_sso_realm": true,
-        "allow_connections": false
+        "allow_connections": false,
+        "is_sso_realm": true
     }
 ]

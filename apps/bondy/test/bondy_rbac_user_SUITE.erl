@@ -33,7 +33,8 @@
 all() ->
     [
         test,
-        invalid_sso_realm
+        invalid_sso_realm,
+        resolve
     ].
 
 
@@ -153,9 +154,34 @@ add_realm(RealmUri, SSORealmUri, KeyPairs) ->
 test(_) ->
     _LU1 = bondy_rbac_user:fetch(?REALM_URI, ?LU1),
     _LU2 = bondy_rbac_user:fetch(?REALM_URI, ?LU2),
+    _ = bondy_rbac_user:fetch(?REALM_URI, ?SSOU1),
+    _ = bondy_rbac_user:fetch(?REALM_URI, ?SSOU2),
     _SSOU1 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
     _SSOU2 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU2),
     ok.
+
+
+resolve(_) ->
+    Local = bondy_rbac_user:fetch(?REALM_URI, ?SSOU1),
+    Resolved = bondy_rbac_user:resolve(Local),
+
+    ?assertEqual(
+        [],
+        bondy_rbac_user:authorized_keys(Local)
+    ),
+
+    ?assertNotEqual(
+        [],
+        bondy_rbac_user:authorized_keys(Resolved)
+    ),
+
+    ?assertEqual(
+        #{
+            fruit => <<"passion fruit">>,
+            sso => #{fruit => <<"mango">>}
+        },
+        maps:get(meta, Resolved)
+    ).
 
 
 invalid_sso_realm(Config) ->

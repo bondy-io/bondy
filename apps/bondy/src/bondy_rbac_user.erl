@@ -263,21 +263,23 @@
 -export([has_authorized_keys/1]).
 -export([has_password/1]).
 -export([is_member/2]).
+-export([is_sso_managed/1]).
 -export([list/1]).
 -export([list/2]).
 -export([lookup/2]).
 -export([meta/1]).
 -export([new/1]).
 -export([new/2]).
+-export([normalise_username/1]).
 -export([password/1]).
 -export([remove/2]).
 -export([remove_group/2]).
+-export([sso_realm_uri/1]).
 -export([to_external/1]).
 -export([unknown/2]).
 -export([update/3]).
 -export([username/1]).
--export([normalise_username/1]).
--export([sso_realm_uri/1]).
+-export([resolve/1]).
 
 
 %% =============================================================================
@@ -335,6 +337,19 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns `true' if user `User' is managed in a SSO Realm, `false' if it
+%% is locally managed.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_sso_managed(User :: t()) -> boolean().
+
+is_sso_managed(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
+    true;
+
+is_sso_managed(#{type := ?TYPE}) ->
+    false.
+
+%% -----------------------------------------------------------------------------
 %% @doc Returns the URI of the Same Sign-on Realm in case the user is a SSO
 %% user. Otherwise, returns `undefined'.
 %% @end
@@ -346,6 +361,35 @@ sso_realm_uri(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
 
 sso_realm_uri(#{type := ?TYPE}) ->
     undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc If the user `User' is no sso-managed, returns `User' unmomdified.
+%% Otherwise, fetches the user's credentials and additional metadata from the
+%% SSO Realm and merges it into `User' using the following procedure:
+%%
+%% * Copies the `password' and `authorized_keys' from the SSO user into `User'.
+%% * Adds the `meta` contents from the SSO user to a key names `sso' to the
+%% `User' `meta' map.
+%%
+%% The call fails with an exception if the SSO user associated with `User' was
+%% not found.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec resolve(User :: t()) -> Resolved :: t() | no_return().
+
+resolve(#{type := ?TYPE, sso_realm_uri := Uri, username := Username} = User0) ->
+    SSOUser = fetch(Uri, Username),
+    User = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
+    case maps:find(meta, SSOUser) of
+        {ok, Meta} ->
+            maps_utils:put_path([meta, sso], Meta, User);
+        error ->
+            User
+    end;
+
+resolve(#{type := ?TYPE} = User) ->
+    User.
 
 
 %% -----------------------------------------------------------------------------
