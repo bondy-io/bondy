@@ -35,7 +35,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 
--define(VALIDATOR, ?ADD_OPTS_VALIDATOR#{
+-define(VALIDATOR, ?OPTS_VALIDATOR#{
     <<"username">> => #{
         alias => username,
 		key => username,
@@ -84,7 +84,47 @@
     }
 }).
 
--define(ADD_OPTS_VALIDATOR, #{
+
+-define(UPDATE_VALIDATOR, ?OPTS_VALIDATOR#{
+    <<"password">> => #{
+        alias => password,
+		key => password,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => [binary, {function, 0}, map],
+        validator => fun bondy_data_validators:password/1
+    },
+    <<"authorized_keys">> => #{
+        alias => authorized_keys,
+		key => authorized_keys,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary},
+        validator => {list, fun bondy_data_validators:authorized_key/1}
+    },
+    <<"groups">> => #{
+        alias => groups,
+		key => groups,
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => {list, binary},
+        validator => {list, fun bondy_data_validators:groupname/1}
+    },
+    <<"meta">> => #{
+        alias => meta,
+		key => meta,
+        allow_null => false,
+        allow_undefined => false,
+        required => false,
+        datatype => map
+    }
+}).
+
+
+-define(OPTS_VALIDATOR, #{
     <<"sso_opts">> => #{
         alias => sso_opts,
         key => sso_opts,
@@ -150,43 +190,6 @@
     }
 }).
 
--define(UPDATE_VALIDATOR, #{
-    <<"password">> => #{
-        alias => password,
-		key => password,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => [binary, {function, 0}, map],
-        validator => fun bondy_data_validators:password/1
-    },
-    <<"authorized_keys">> => #{
-        alias => authorized_keys,
-		key => authorized_keys,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary},
-        validator => {list, fun bondy_data_validators:authorized_key/1}
-    },
-    <<"groups">> => #{
-        alias => groups,
-		key => groups,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary},
-        validator => {list, fun bondy_data_validators:groupname/1}
-    },
-    <<"meta">> => #{
-        alias => meta,
-		key => meta,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => map
-    }
-}).
 
 -define(ANONYMOUS, type_and_version(#{
     username => anonymous,
@@ -232,6 +235,11 @@
     sso_opts            =>  sso_opts(),
     password_opts       =>  bondy_password:opts()
 }.
+-type update_opts()        ::  #{
+    allow_sso_update    =>  boolean(),
+    sso_opts            =>  sso_opts(),
+    password_opts       =>  bondy_password:opts()
+}.
 -type sso_opts()        ::  #{
     realm_uri           =>  uri(),
     password            =>  bondy_password:future() | bondy_password:t(),
@@ -251,19 +259,22 @@
 -export_type([new_opts/0]).
 -export_type([sso_opts/0]).
 -export_type([add_opts/0]).
+-export_type([update_opts/0]).
 
 
 -export([add/2]).
 -export([add_or_update/2]).
+-export([add_or_update/3]).
 -export([authorized_keys/1]).
 -export([change_password/3]).
 -export([change_password/4]).
+-export([exists/2]).
 -export([fetch/2]).
 -export([groups/1]).
 -export([has_authorized_keys/1]).
 -export([has_password/1]).
 -export([is_member/2]).
--export([is_sso_managed/1]).
+-export([is_sso_user/1]).
 -export([list/1]).
 -export([list/2]).
 -export([lookup/2]).
@@ -274,13 +285,13 @@
 -export([password/1]).
 -export([remove/2]).
 -export([remove_group/2]).
+-export([resolve/1]).
 -export([sso_realm_uri/1]).
 -export([to_external/1]).
 -export([unknown/2]).
 -export([update/3]).
+-export([update/4]).
 -export([username/1]).
--export([resolve/1]).
--export([exists/2]).
 
 
 %% =============================================================================
@@ -342,13 +353,14 @@ is_member(Name0, #{type := ?TYPE, groups := Val}) ->
 %% is locally managed.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_sso_managed(User :: t()) -> boolean().
+-spec is_sso_user(User :: t()) -> boolean().
 
-is_sso_managed(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
+is_sso_user(#{type := ?TYPE, sso_realm_uri := Val}) when is_binary(Val) ->
     true;
 
-is_sso_managed(#{type := ?TYPE}) ->
+is_sso_user(#{type := ?TYPE}) ->
     false.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the URI of the Same Sign-on Realm in case the user is a SSO
@@ -409,7 +421,7 @@ has_password(User) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec password(User :: t()) ->
-    bondy_password:future() | bondy_password:t() |  undefined.
+    maybe(bondy_password:future() | bondy_password:t()).
 
 password(#{type := ?TYPE, password := Future}) when is_function(Future, 1) ->
     Future;
@@ -475,9 +487,7 @@ add(RealmUri, #{type := ?TYPE, username := Username} = User) ->
         %% we do it again.
         %% We asume the username is normalised
         ok = not_reserved_name_check(Username),
-        {ok, _} = OK = do_add(RealmUri, User),
-        ok = on_create(RealmUri, Username),
-        OK
+        do_add(RealmUri, User)
     catch
         throw:Reason ->
             {error, Reason}
@@ -492,12 +502,24 @@ add(RealmUri, #{type := ?TYPE, username := Username} = User) ->
 -spec add_or_update(RealmUri :: uri(), User :: t()) ->
     {ok, t()} | {error, add_error()}.
 
-add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User) ->
+add_or_update(RealmUri, User) ->
+    add_or_update(RealmUri, User, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds a new user or updates an existing one.
+%% This change is globally replicated.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_or_update(RealmUri :: uri(), User :: t(), Opts :: update_opts()) ->
+    {ok, t()} | {error, add_error()}.
+
+add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User, Opts) ->
     try
         add(RealmUri, User)
     catch
         throw:role_exists ->
-            update(RealmUri, Username, User);
+            update(RealmUri, Username, User, Opts);
 
         throw:Reason ->
             {error, Reason}
@@ -512,7 +534,23 @@ add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User) ->
 -spec update(RealmUri :: uri(), Username :: binary(), Data :: map()) ->
     {ok, NewUser :: t()} | {error, any()}.
 
-update(RealmUri, Username0, Data0) when is_binary(Username0) ->
+update(RealmUri, Username, Data) ->
+    update(RealmUri, Username, Data, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Updates an existing user.
+%% This change is globally replicated.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec update(
+    RealmUri :: uri(),
+    Username :: binary(),
+    Data :: map(),
+    Opts :: update_opts()) ->
+    {ok, NewUser :: t()} | {error, any()}.
+
+update(RealmUri, Username0, Data0, _Opts) when is_binary(Username0) ->
     try
 
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
@@ -890,7 +928,7 @@ when is_binary(SSOUri) ->
     ),
 
     %% We finally add the local user to the realm
-    create(RealmUri, LocalUser);
+    store(RealmUri, LocalUser, fun on_create/2);
 
 do_add(RealmUri, User0) ->
     Username = maps:get(username, User0),
@@ -903,27 +941,29 @@ do_add(RealmUri, User0) ->
     {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
     User = apply_password(User1, password_opts(RealmUri, Opts)),
 
-    create(RealmUri, User).
+    store(RealmUri, User, fun on_create/2).
 
 
 %% @private
 maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
+
     bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
         orelse throw(invalid_sso_realm),
     ok = no_unknown_groups(SSOUri, maps:get(groups, SSOUser)),
 
     %% We first add the user to the SSO realm
-    {ok, _} = maybe_throw(create(SSOUri, SSOUser)),
+    {ok, _} = maybe_throw(store(SSOUri, SSOUser, fun on_create/2)),
     ok;
 
 maybe_add_sso_user(false, _, _, _) ->
     ok.
 
+
 %% @private
-create(RealmUri, #{username := Username} = User) ->
+store(RealmUri, #{username := Username} = User, Fun) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
         ok ->
-            ok = on_create(RealmUri, Username),
+            ok = Fun(RealmUri, User),
             {ok, User};
         Error ->
             Error
@@ -1003,7 +1043,7 @@ remove_group(Groupname, #{username := Key} = User, Prefix) ->
 
 
 %% @private
-on_create(RealmUri, Username) ->
+on_create(RealmUri, #{username := Username}) ->
     ok = bondy_event_manager:notify(
         {rbac_user_added, RealmUri, Username}
     ),
@@ -1011,7 +1051,7 @@ on_create(RealmUri, Username) ->
 
 
 %% @private
-on_update(RealmUri, Username) ->
+on_update(RealmUri, #{username := Username}) ->
     ok = bondy_event_manager:notify(
         {rbac_user_updated, RealmUri, Username}
     ),
