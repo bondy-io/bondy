@@ -27,6 +27,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth).
+-include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
