@@ -66,46 +66,6 @@
 -type rate_window()                 ::  #rate_window{}.
 
 
-%% -record(oauth2_token, {
-%%     authid                          ::  binary(),
-%%     access_token                    ::  binary(),
-%%     refresh_token                   ::  binary()
-%% }).
-
-%% -record(wamp_credential, {
-%%     %% The authentication ID of the session that joined
-%%     authid                          ::  binary(),
-%%     %% The authentication role of the session that joined
-%%     authrole                        ::  binary(),
-%%     %% The authentication method that was used for authentication
-%%     authmethod                      ::  binary(),
-%%     %% The provider that performed the authentication of the session that joined
-%%     authprovider = <<"bondy">>       ::  binary()
-%% }).
-
-%% -type credential()                  ::  #oauth2_token{} | #wamp_credential{}.
-
-% THE NEW SESSION
-% -record(session, {
-%     id                              ::  id(),
-%     realm_uri                       ::  uri(),
-%     expires_in                      ::  pos_integer(),
-%     seq = 0                         ::  non_neg_integer(),
-%     rate = ?DEFAULT_RATE            ::  rate(),
-%     quota = ?DEFAULT_QUOTA          ::  quota(),
-%     is_active = true                ::  boolean(),
-%     %% The credential used to establish the session
-%     credential                      ::  credential(),
-%     rate_window = ?DEFAULT_RATE     ::  rate_window(),
-%     quota_window = ?DEFAULT_QUOTA   ::  quota_window(),
-%     created                         ::  pos_integer(),
-%     last_updated                    ::  pos_integer(),
-%     resumed                         ::  boolean(),
-%     resumable                       ::  boolean(),
-%     resumed_token                   ::  binary(),
-%     metadata = #{}                  ::  map()
-% }).
-
 -record(session, {
     id                              ::  id(),
     realm_uri                       ::  uri(),
