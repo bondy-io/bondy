@@ -518,7 +518,7 @@ add_or_update(RealmUri, User) ->
 
 add_or_update(RealmUri, #{type := ?TYPE, username := Username} = User, Opts) ->
     try
-        add(RealmUri, User)
+        maybe_throw(add(RealmUri, User))
     catch
         throw:already_exists ->
             update(RealmUri, Username, User, Opts);

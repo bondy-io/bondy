@@ -998,7 +998,11 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_user:add_or_update(Uri, User)
+            bondy_rbac_user:add_or_update(
+                Uri,
+                User,
+                #{update_credentials => true, forward_credentials => true}
+            )
         )
         || User <- Users
     ],
