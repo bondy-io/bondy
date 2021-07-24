@@ -136,6 +136,24 @@
                 "uri" : "com.example",
                 "match": "prefix",
                 "roles" : ["peer1", "peer2"]
+            },
+            {
+                "permissions" : [
+                    "wamp.call",
+                    "wamp.cancel"
+                ],
+                "uri" : "wamp.",
+                "match": "prefix",
+                "roles" : ["peer1", "peer2"]
+            },
+            {
+                "permissions" : [
+                    "wamp.call",
+                    "wamp.cancel"
+                ],
+                "uri" : "bondy.",
+                "match": "prefix",
+                "roles" : ["peer1", "peer2"]
             }
         ],
         "oauth2" : {
