@@ -689,8 +689,8 @@ list(RealmUri, Opts) ->
 %% -----------------------------------------------------------------------------
 change_password(RealmUri, Username, New) when is_binary(New) ->
     case update(RealmUri, Username, #{password => New}) of
-        {ok, _} ->
-            on_password_change(RealmUri, Username);
+        {ok, User} ->
+            on_password_change(RealmUri, User);
         Error ->
             Error
     end.
@@ -1128,11 +1128,11 @@ on_update(RealmUri, #{username := Username}) ->
 
 
 %% @private
-on_password_change(RealmUri, Username) ->
+on_password_change(RealmUri, #{username := Username} = User) ->
     ok = bondy_event_manager:notify(
         {rbac_user_password_changed, RealmUri, Username}
     ),
-    on_update(RealmUri, Username).
+    on_update(RealmUri, User).
 
 
 %% @private
