@@ -291,8 +291,7 @@
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>,
                 <<"wamp.disclose_publisher">>,
-                <<"wamp.disclose_publisher_authroles">>,
-                <<"wamp.disclose_publisher_session">>
+                <<"wamp.disclose_session_info">>
             ],
             uri => <<"">>,
             match => <<"prefix">>,
@@ -308,8 +307,7 @@
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>,
                 <<"wamp.disclose_publisher">>,
-                <<"wamp.disclose_publisher_authroles">>,
-                <<"wamp.disclose_publisher_session">>
+                <<"wamp.disclose_session_info">>
             ],
             uri => <<"">>,
             match => <<"prefix">>,
