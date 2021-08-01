@@ -1,5 +1,77 @@
 [
     {
+        "uri" : "com.leapsight.bondy",
+        "authmethods" : ["wampcra", "anonymous", "password", "trust"],
+        "security_enabled" : true,
+        "users" : [
+        ],
+        "groups" : [
+            {
+                "name" : "administrators",
+                "groups" : [],
+                "meta" : {
+                    "description": "The administrators of Bondy."
+                }
+            }
+        ],
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate using password credentials."
+                }
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate using password credentials."
+                }
+            },
+            {
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate as anonymous."
+                }
+            }
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : "all"
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : ["anonymous"]
+            }
+        ]
+    },
+    {
         "uri" : "com.leapsight.test",
         "description" : "A test realm",
         "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust"],
