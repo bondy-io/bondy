@@ -688,7 +688,11 @@ list(RealmUri, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 change_password(RealmUri, Username, New) when is_binary(New) ->
-    case update(RealmUri, Username, #{password => New}) of
+    Opts = #{
+        update_credentials => true,
+        forward_credentials => true
+    },
+    case update(RealmUri, Username, #{password => New}, Opts) of
         {ok, User} ->
             on_password_change(RealmUri, User);
         Error ->
