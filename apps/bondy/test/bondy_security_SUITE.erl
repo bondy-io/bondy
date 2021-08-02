@@ -229,8 +229,6 @@ api_client_update(Config) ->
 
     RealmUri = ?config(realm_uri, Prev),
     ClientId = ?config(client_id, Prev),
-    Secret = <<"New-Password">>,
-
 
     ?assertMatch(
         {ok, #{
@@ -242,20 +240,29 @@ api_client_update(Config) ->
             RealmUri,
             ClientId,
             #{
-                <<"client_secret">> => Secret,
+                <<"client_secret">> => <<"New-Password">>,
                 <<"meta">> => #{<<"foo">> => <<"bar">>}
             }
         )
     ),
-    {save_config,
-        lists:keyreplace(client_secret, 1, Prev, {client_secret, Secret})}.
+
+    %% Updating password has no effect, we need to use the change password API
+    ?assertMatch(
+        {error, bad_signature},
+        do_authenticate(RealmUri, ClientId, <<"New-Password">>)
+    ),
+
+    {save_config, Prev}.
 
 api_client_auth2(Config) ->
     {api_client_update, Prev} = ?config(saved_config, Config),
-    Uri = ?config(realm_uri, Prev),
-    Id = ?config(client_id, Prev),
-    Secret = ?config(client_secret, Prev),
-    ok = authenticate(Uri, Id, Secret),
+    RealmUri = ?config(realm_uri, Prev),
+    ClientId = ?config(client_id, Prev),
+    NewSecret = <<"New-Password">>,
+
+    ok = bondy_rbac_user:change_password(RealmUri, ClientId, NewSecret),
+
+    ok = authenticate(RealmUri, ClientId, NewSecret),
 
     {save_config, Prev}.
 
@@ -324,8 +331,7 @@ resource_owner_update(Config) ->
         }
     ),
     #{groups := Gs} = bondy_rbac_user:lookup(RealmUri, Username),
-    {save_config,
-        lists:keyreplace(password, 1, Prev, {password, Pass})}.
+    {save_config, Prev}.
 
 resource_owner_change_password(Config) ->
     {resource_owner_update, Prev} = ?config(saved_config, Config),
@@ -444,6 +450,10 @@ user_update(Config) ->
         #{
             <<"password">> => Pass,
             <<"meta">> => #{<<"foo">> => <<"bar2">>}
+        },
+        #{
+            update_credentials => true,
+            forward_credentials => true
         }
     ),
     {save_config,
@@ -554,18 +564,18 @@ password_token_crud_1(Config) ->
 
 
 authenticate(Uri, Username, Secret) ->
+    Result = do_authenticate(Uri, Username, Secret),
+    ?assertMatch({ok, _, _}, Result),
+    ok.
+
+
+do_authenticate(Uri, Username, Secret) ->
     SessionId = 1,
     Roles = [],
     Peer = {{127,0,0,1}, 1111},
     {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),
-
     ?assertEqual(
         true,
         lists:member(?PASSWORD_AUTH, bondy_auth:available_methods(Ctxt))
     ),
-
-    ?assertMatch(
-        {ok, _, _},
-        bondy_auth:authenticate(?PASSWORD_AUTH, Secret, #{}, Ctxt)
-    ),
-    ok.
+    bondy_auth:authenticate(?PASSWORD_AUTH, Secret, #{}, Ctxt).
