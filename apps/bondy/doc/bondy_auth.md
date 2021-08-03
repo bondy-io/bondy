@@ -40,7 +40,7 @@ context() = #{session_id =&gt; <a href="#type-id">id()</a> | undefined, realm_ur
 
 
 <pre><code>
-requirements() = #{identification =&gt; boolean, password =&gt; {true, #{protocols =&gt; [cra | scram]}} | boolean(), authorized_keys =&gt; boolean()}
+requirements() = #{identification =&gt; boolean, password =&gt; {true, #{protocols =&gt; [cra | scram]}} | boolean(), authorized_keys =&gt; boolean(), any =&gt; <a href="#type-requirements">requirements()</a>, all =&gt; <a href="#type-requirements">requirements()</a>}
 </code></pre>
 
 <a name="index"></a>

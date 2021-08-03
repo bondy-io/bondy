@@ -30,7 +30,7 @@ authorized_key(Term::binary()) -&gt; {ok, binary()} | boolean()
 ### cidr/1 ###
 
 <pre><code>
-cidr(Term::binary() | tuple()) -&gt; {ok, <a href="bondy_rbac_source.md#type-cidr">bondy_rbac_source:cidr()</a>} | boolean()
+cidr(Term::binary() | tuple()) -&gt; {ok, <a href="bondy_cidr.md#type-t">bondy_cidr:t()</a>} | boolean()
 </code></pre>
 <br />
 

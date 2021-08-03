@@ -33,16 +33,6 @@ assignment() = #source_assignment{usernames = [binary() | all | anonymous], data
 
 
 
-### <a name="type-cidr">cidr()</a> ###
-
-
-<pre><code>
-cidr() = {<a href="inet.md#type-ip_address">inet:ip_address()</a>, non_neg_integer()}
-</code></pre>
-
-
-
-
 ### <a name="type-external">external()</a> ###
 
 
@@ -67,7 +57,7 @@ list_opts() = #{limit =&gt; pos_integer()}
 
 
 <pre><code>
-t() = #{type =&gt; source, version =&gt; binary(), username =&gt; binary() | all | anonymous, cidr =&gt; <a href="#type-cidr">cidr()</a>, authmethod =&gt; binary(), meta =&gt; #{binary() =&gt; any()}}
+t() = #{type =&gt; source, version =&gt; binary(), username =&gt; binary() | all | anonymous, cidr =&gt; <a href="bondy_cidr.md#type-t">bondy_cidr:t()</a>, authmethod =&gt; binary(), meta =&gt; #{binary() =&gt; any()}}
 </code></pre>
 
 
@@ -77,7 +67,7 @@ t() = #{type =&gt; source, version =&gt; binary(), username =&gt; binary() | all
 
 
 <pre><code>
-user_source() = #{type =&gt; source, version =&gt; binary(), username =&gt; binary() | all | anonymous, cidr =&gt; <a href="#type-cidr">cidr()</a>, authmethod =&gt; binary(), meta =&gt; #{binary() =&gt; any()}}
+user_source() = #{type =&gt; source, version =&gt; binary(), username =&gt; binary() | all | anonymous, cidr =&gt; <a href="bondy_cidr.md#type-t">bondy_cidr:t()</a>, authmethod =&gt; binary(), meta =&gt; #{binary() =&gt; any()}}
 </code></pre>
 
 <a name="index"></a>
@@ -210,7 +200,7 @@ new_assignment(Data::map()) -&gt; Source::<a href="#type-assignment">assignment(
 ### remove/3 ###
 
 <pre><code>
-remove(RealmUri::<a href="#type-uri">uri()</a>, Usernames::[binary() | anonymous] | binary() | anonymous | all, CIDR::<a href="bondy_rbac_source.md#type-cidr">bondy_rbac_source:cidr()</a>) -&gt; ok
+remove(RealmUri::<a href="#type-uri">uri()</a>, Usernames::[binary() | anonymous] | binary() | anonymous | all, CIDR::<a href="bondy_cidr.md#type-t">bondy_cidr:t()</a>) -&gt; ok
 </code></pre>
 <br />
 

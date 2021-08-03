@@ -2,10 +2,10 @@
 {application,bondy}.
 {modules,[bondy,bondy_admin_ping_http_handler,bondy_admin_ready_http_handler,
           bondy_alarm_handler,bondy_app,bondy_auth,bondy_auth_anonymous,
-          bondy_auth_oauth2,bondy_auth_password,bondy_auth_trust,
-          bondy_auth_wamp_cra,bondy_auth_wamp_cryptosign,
+          bondy_auth_oauth2,bondy_auth_password,bondy_auth_ticket,
+          bondy_auth_trust,bondy_auth_wamp_cra,bondy_auth_wamp_cryptosign,
           bondy_auth_wamp_scram,bondy_backup,bondy_broker,bondy_cache,
-          bondy_cli_table,bondy_config,bondy_config_manager,
+          bondy_cidr,bondy_cli_table,bondy_config,bondy_config_manager,
           bondy_consistent_hashing,bondy_context,bondy_data_validators,
           bondy_dealer,bondy_error,bondy_event_handler_watcher,
           bondy_event_handler_watcher_sup,bondy_event_manager,
