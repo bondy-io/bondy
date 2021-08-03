@@ -216,7 +216,7 @@ handle_event(
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
 handle_event(
-    ?BONDY_USER_PASSWORD_CHANGED, #event{arguments = [RealmUri, Username]}) ->
+    ?BONDY_USER_CREDENTIALS_CHANGED, #event{arguments = [RealmUri, Username]}) ->
     bondy_oauth2:revoke_refresh_tokens(RealmUri, Username);
 
 handle_event(_, _) ->

@@ -270,6 +270,7 @@
 -export([authorized_keys/1]).
 -export([change_password/3]).
 -export([change_password/4]).
+-export([change_authorized_keys/3]).
 -export([exists/2]).
 -export([fetch/2]).
 -export([groups/1]).
@@ -379,7 +380,7 @@ sso_realm_uri(#{type := ?TYPE}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc If the user `User' is no sso-managed, returns `User' unmomdified.
+%% @doc If the user `User' is no sso-managed, returns `User' unmodified.
 %% Otherwise, fetches the user's credentials and additional metadata from the
 %% SSO Realm and merges it into `User' using the following procedure:
 %%
@@ -687,25 +688,24 @@ list(RealmUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_password(RealmUri, Username, New) when is_binary(New) ->
-    Opts = #{
-        update_credentials => true,
-        forward_credentials => true
-    },
-    case update(RealmUri, Username, #{password => New}, Opts) of
-        {ok, User} ->
-            on_password_change(RealmUri, User);
-        Error ->
-            Error
-    end.
+change_authorized_keys(RealmUri, Username, Keys) when is_list(Keys) ->
+    update_credentials(RealmUri, Username, #{authorized_keys => Keys}).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_password(_, _, Old, Old) ->
-    ok;
+change_password(RealmUri, Username, New) when is_binary(New) ->
+    change_password(RealmUri, Username, New, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+change_password(RealmUri, Username, New, undefined) ->
+    update_credentials(RealmUri, Username, #{password => New});
 
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
@@ -713,11 +713,16 @@ change_password(RealmUri, Username, New, Old) ->
             Error;
         #{password := PW} ->
             case bondy_password:verify_string(Old, PW) of
+                true when Old == New ->
+                    ok;
                 true ->
-                    change_password(RealmUri, Username, New);
+                    update_credentials(RealmUri, Username, #{password => New});
                 false ->
                     {error, bad_signature}
-            end
+            end;
+        _ ->
+            %% User did not have a password or it is an SSO user
+            update_credentials(RealmUri, Username, #{password => New})
     end.
 
 
@@ -969,6 +974,20 @@ do_update(RealmUri, User, Data0, Opts0) when is_map(User) ->
 
 
 %% @private
+update_credentials(RealmUri, Username, Data) ->
+    Opts = #{
+        update_credentials => true,
+        forward_credentials => true
+    },
+    case update(RealmUri, Username, Data, Opts) of
+        {ok, User} ->
+            on_credentials_change(RealmUri, User);
+        Error ->
+            Error
+    end.
+
+
+%% @private
 store(RealmUri, #{username := Username} = User, Fun) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
         ok ->
@@ -1132,9 +1151,9 @@ on_update(RealmUri, #{username := Username}) ->
 
 
 %% @private
-on_password_change(RealmUri, #{username := Username} = User) ->
+on_credentials_change(RealmUri, #{username := Username} = User) ->
     ok = bondy_event_manager:notify(
-        {rbac_user_password_changed, RealmUri, Username}
+        {rbac_user_credentials_changed, RealmUri, Username}
     ),
     on_update(RealmUri, User).
 
