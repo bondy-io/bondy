@@ -784,6 +784,12 @@ abort_message({authentication_failed, no_such_user}) ->
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
 
+abort_message({authentication_failed, user_disabled}) ->
+    Details = #{
+        message => <<"The user requested (via 'authid') is disabled so we cannot establish a session. Contact your administrator to enable the user.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
+
 abort_message({authentication_failed, invalid_scheme}) ->
     Details = #{
         message => <<"Unsupported authentication scheme.">>

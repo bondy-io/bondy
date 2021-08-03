@@ -593,6 +593,7 @@ get_user(RealmUri, UserId) ->
         {error, not_found} ->
             throw(no_such_user);
         User ->
+            bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             bondy_rbac_user:resolve(User)
     end.
 

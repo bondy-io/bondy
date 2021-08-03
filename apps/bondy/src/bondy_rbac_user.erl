@@ -353,13 +353,16 @@ is_enabled(RealmUri, Username) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc If the user `User' is no sso-managed, returns `User' unmodified.
-%% Otherwise, fetches the user's credentials and additional metadata from the
-%% SSO Realm and merges it into `User' using the following procedure:
+%% @doc If the user `User' is not sso-managed, returns `User' unmodified.
+%% Otherwise, fetches the user's credentials, the enabled status and additional
+%% metadata from the SSO Realm and merges it into `User' using the following
+%% procedure:
 %%
 %% * Copies the `password' and `authorized_keys' from the SSO user into `User'.
 %% * Adds the `meta` contents from the SSO user to a key names `sso' to the
 %% `User' `meta' map.
+%% * Sets the `enabled' property by performing the conjunction (logical AND) of
+%% both user records.
 %%
 %% The call fails with an exception if the SSO user associated with `User' was
 %% not found.
@@ -369,14 +372,19 @@ is_enabled(RealmUri, Username) ->
 
 resolve(#{type := ?TYPE, sso_realm_uri := Uri} = User0) when is_binary(Uri) ->
     SSOUser = fetch(Uri, maps:get(username, User0)),
-    User = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
+    User1 = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
 
-    case maps:find(meta, SSOUser) of
+    User2 = case maps:find(meta, SSOUser) of
         {ok, Meta} ->
-            maps_utils:put_path([meta, sso], Meta, User);
+            maps_utils:put_path([meta, sso], Meta, User1);
         error ->
-            User
-    end;
+            User1
+    end,
+
+    Enabled = maps:get(enabled, SSOUser, true)
+        andalso maps:get(enabled, User0, true),
+
+    maps:put(enabled, Enabled, User2);
 
 resolve(#{type := ?TYPE} = User) ->
     User.
