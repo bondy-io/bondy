@@ -88,7 +88,7 @@
     meta => #{}
 })).
 
-
+-define(TYPE, group).
 -define(VERSION, <<"1.1">>).
 -define(PLUMDB_PREFIX(RealmUri), {security_groups, RealmUri}).
 -define(FOLD_OPTS, [{resolver, lww}]).
@@ -114,6 +114,8 @@
 -export_type([external/0]).
 
 -export([add/2]).
+-export([add_group/3]).
+-export([add_groups/3]).
 -export([add_or_update/2]).
 -export([exists/2]).
 -export([fetch/2]).
@@ -125,11 +127,13 @@
 -export([meta/1]).
 -export([name/1]).
 -export([new/1]).
+-export([normalise_name/1]).
 -export([remove/2]).
+-export([remove_group/3]).
+-export([remove_groups/3]).
 -export([to_external/1]).
 -export([unknown/2]).
 -export([update/3]).
--export([normalise_name/1]).
 
 
 %% =============================================================================
@@ -175,7 +179,7 @@ groups(#{groups := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec is_member(Name :: name(), Group :: t()) -> boolean().
 
-is_member(Name0, #{type := group, groups := Val}) ->
+is_member(Name0, #{type := ?TYPE, groups := Val}) ->
     Name = normalise_name(Name0),
     Name == all orelse lists:member(Name, Val).
 
@@ -186,7 +190,7 @@ is_member(Name0, #{type := group, groups := Val}) ->
 %% -----------------------------------------------------------------------------
 -spec meta(Group :: t()) -> map().
 
-meta(#{type := group, meta := Val}) -> Val.
+meta(#{type := ?TYPE, meta := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -195,7 +199,7 @@ meta(#{type := group, meta := Val}) -> Val.
 %% -----------------------------------------------------------------------------
 -spec add(uri(), t()) -> {ok, t()} | {error, any()}.
 
-add(RealmUri, #{type := group} = Group) ->
+add(RealmUri, #{type := ?TYPE} = Group) ->
     try
         do_add(RealmUri, Group)
     catch
@@ -212,7 +216,7 @@ add(RealmUri, #{type := group} = Group) ->
 -spec add_or_update(RealmUri :: uri(), Gropu :: t()) ->
     {ok, t()} | {error, add_error()}.
 
-add_or_update(RealmUri, #{type := group, name := Name} = Group) ->
+add_or_update(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
     try
         do_add(RealmUri, Group)
     catch
@@ -258,6 +262,74 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
     end.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds group named `Groupname' to gropus `Groups' in realm with uri
+%% `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_group(
+    RealmUri :: uri(),
+    Groups :: all | t() | list(t()) | name() | list(name()),
+    Groupname :: name()) -> ok.
+
+add_group(RealmUri, Groups, Groupname) ->
+    add_groups(RealmUri, Groups, [Groupname]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Adds groups `Groupnames' to gropus `Groups' in realm with uri
+%% `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add_groups(
+    RealmUri :: uri(),
+    Groups :: all | t() | list(t()) | name() | list(name()),
+    Groupnames :: [name()]) -> ok.
+
+add_groups(RealmUri, Groups, Groupnames)  ->
+    Fun = fun(Current, ToAdd) ->
+         sets:to_list(
+            sets:union(
+                sets:from_list(Current),
+                sets:from_list(ToAdd)
+            )
+        )
+    end,
+    update_groups(RealmUri, Groups, Groupnames, Fun).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes groups `Groupnames' from gropus `Groups' in realm with uri
+%% `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_group(
+    RealmUri :: uri(),
+    Groups :: all | t() | list(t()) | name() | list(name()),
+    Groupname :: name()) -> ok.
+
+remove_group(RealmUri, Groups, Groupname) ->
+    remove_groups(RealmUri, Groups, [Groupname]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes groups `Groupnames' from gropus `Groups' in realm with uri
+%% `RealmUri'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove_groups(
+    RealmUri :: uri(),
+    Groups :: all | t() | list(t()) | name() | list(name()),
+    Groupnames :: [name()]) -> ok.
+
+remove_groups(RealmUri, Groups, Groupnames) ->
+    Fun = fun(Current, ToRemove) ->
+        Current -- ToRemove
+    end,
+    update_groups(RealmUri, Groups, Groupnames, Fun).
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -265,15 +337,13 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
 -spec remove(uri(), binary() | map()) ->
     ok | {error, unknown_group | reserved_name}.
 
-remove(RealmUri, #{type := group, name := Name}) ->
+remove(RealmUri, #{type := ?TYPE, name := Name}) ->
     remove(RealmUri, Name);
 
 remove(RealmUri, Name) ->
     try
-        Prefix = ?PLUMDB_PREFIX(RealmUri),
-
         ok = not_reserved_name_check(Name),
-        ok = exists_check(Prefix, Name),
+        ok = exists_check(?PLUMDB_PREFIX(RealmUri), Name),
 
         %% delete any associated grants, so if a group with the same name
         %% is added again, they don't pick up these grants
@@ -284,11 +354,11 @@ remove(RealmUri, Name) ->
         %% groups) removing and updating the record in the db.
         %% By doing this we will be automatically upgradings those object
         %% versions.
-        ok = bondy_rbac_user:remove_group(RealmUri, Name),
-        ok = remove_group(Prefix, Name),
+        ok = bondy_rbac_user:remove_group(RealmUri, all, Name),
+        ok = remove_groups(RealmUri, all, Name),
 
         %% We finally delete the group
-        ok = plum_db:delete(Prefix, Name),
+        ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Name),
 
         on_delete(RealmUri, Name)
 
@@ -392,7 +462,7 @@ list(RealmUri, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec to_external(Group :: t()) -> external().
 
-to_external(#{type := group, version := ?VERSION} = Group) ->
+to_external(#{type := ?TYPE, version := ?VERSION} = Group) ->
     Group.
 
 
@@ -458,7 +528,7 @@ normalise_name(_) ->
 
 
 %% @private
-do_add(RealmUri, #{type := group, name := Name} = Group) ->
+do_add(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     %% This should have been validated before but just to avoid any issues
@@ -519,10 +589,8 @@ from_term({Name, PList}) when is_list(PList) ->
     Group = maps:put(name, Name, Group0),
     type_and_version(Group);
 
-from_term({_, #{type := group, version := ?VERSION} = Group}) ->
+from_term({_, #{type := ?TYPE, version := ?VERSION} = Group}) ->
     Group.
-
-
 
 %% @private
 type_and_version(Group) ->
@@ -533,31 +601,42 @@ type_and_version(Group) ->
 
 
 %% @private
-remove_group(Prefix, Name) ->
+-spec update_groups(
+    RealmUri :: uri(),
+    Groups :: all | t() | list(t()) | name() | list(name()),
+    Groupnames :: [name()],
+    Fun :: fun((list(), list()) -> list())
+) -> ok | no_return().
+
+update_groups(RealmUri, all, Groupnames, Fun) ->
     plum_db:fold(fun
         ({_, [?TOMBSTONE]}, Acc) ->
             Acc;
         ({_, _} = Term, Acc) ->
-            ok = remove_group(Name, from_term(Term), Prefix),
+            ok = update_groups(RealmUri, from_term(Term), Groupnames, Fun),
             Acc
         end,
         ok,
-        Prefix,
+        ?PLUMDB_PREFIX(RealmUri),
         ?FOLD_OPTS
-    ).
+    );
 
+update_groups(RealmUri, Groups, Groupnames, Fun) when is_list(Groups) ->
+    _ = [
+        update_groups(RealmUri, User, Groupnames, Fun) || User <- Groups
+    ],
+    ok;
 
-%% @private
-remove_group(Name, #{name := Key} = Group, Prefix) ->
-    case is_member(Name, Group) of
-        true ->
-            NewGroups = maps:get(groups, Group) -- [Name],
-            NewGroup = maps:put(groups, NewGroups, Group),
-            ok = plum_db:put(Prefix, Key, NewGroup),
-            ok;
-        false ->
-            ok
-    end.
+update_groups(RealmUri, #{type := ?TYPE} = Group, Groupnames, Fun)
+when is_function(2, Fun) ->
+    Update = #{groups => Fun(maps:get(groups, Group), Groupnames)},
+    case update(RealmUri, Group, Update) of
+        {ok, _} -> ok;
+        {error, Reason} -> throw(Reason)
+    end;
+
+update_groups(RealmUri, GroupName, Groupnames, Fun) when is_binary(GroupName) ->
+    update_groups(RealmUri, fetch(RealmUri, GroupName), Groupnames, Fun).
 
 
 %% @private

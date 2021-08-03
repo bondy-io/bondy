@@ -92,6 +92,49 @@ handle_call(?BONDY_GROUP_UPDATE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
+handle_call(?BONDY_GROUP_ADD_GROUP, #call{} = M, Ctxt) ->
+    [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_group:add_group(Uri, Name, Group) of
+        {ok, Group} ->
+            Ext = bondy_rbac_group:to_external(Group),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_GROUP_ADD_GROUPS, #call{} = M, Ctxt) ->
+    [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_group:add_groups(Uri, Name, Group) of
+        ok ->
+            Ext = bondy_rbac_group:to_external(Group),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_GROUP_REMOVE_GROUP, #call{} = M, Ctxt) ->
+    [Uri, Name, Groupname] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_group:remove_group(Uri, Name, Groupname) of
+        {ok, Group} ->
+            Ext = bondy_rbac_group:to_external(Group),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_GROUP_REMOVE_GROUPS, #call{} = M, Ctxt) ->
+    [Uri, Name, Groupnames] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_group:remove_groups(Uri, Name, Groupnames) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
 handle_call(?BONDY_SOURCE_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
@@ -126,6 +169,7 @@ handle_call(?BONDY_SOURCE_LIST, #call{} = M, Ctxt) ->
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 
 handle_call(?BONDY_SOURCE_MATCH, #call{} = M, Ctxt) ->
+    %% [Uri, Username] or [Uri, Username, IPAddress]
     L = bondy_wamp_utils:validate_call_args(M, Ctxt, 2, 3),
     Ext = [
         bondy_rbac_source:to_external(S)
@@ -194,10 +238,52 @@ handle_call(?BONDY_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
     end;
 
 handle_call(?BONDY_USER_CHANGE_AUTHORIZED_KEYS, #call{} = M, Ctxt) ->
-    %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
-    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    [Uri, Username, Keys] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
-    case erlang:apply(bondy_rbac_user, change_authorized_keys, L) of
+    case bondy_rbac_user:change_authorized_keys(Uri, Username, Keys) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+
+handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
+    [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:add_group(Uri, Name, Group) of
+        {ok, Group} ->
+            Ext = bondy_rbac_user:to_external(Group),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_USER_ADD_GROUPS, #call{} = M, Ctxt) ->
+    [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:add_groups(Uri, Name, Group) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_USER_REMOVE_GROUP, #call{} = M, Ctxt) ->
+    [Uri, Name, Groupname] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:remove_group(Uri, Name, Groupname) of
+        {ok, Group} ->
+            Ext = bondy_rbac_user:to_external(Group),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+handle_call(?BONDY_USER_REMOVE_GROUPS, #call{} = M, Ctxt) ->
+    [Uri, Name, Groupnames] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case bondy_rbac_user:remove_groups(Uri, Name, Groupnames) of
         ok ->
             wamp_message:result(M#call.request_id, #{});
         {error, Reason} ->

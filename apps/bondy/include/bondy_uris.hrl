@@ -55,6 +55,10 @@
 -define(BONDY_OAUTH2_TOKEN_REFRESH,     <<"bondy.oauth2.token.refresh">>).
 
 -define(BONDY_GROUP_ADD,           <<"bondy.group.add">>).
+-define(BONDY_GROUP_ADD_GROUP,     <<"bondy.group.add_group">>).
+-define(BONDY_GROUP_ADD_GROUPS,    <<"bondy.group.add_groups">>).
+-define(BONDY_GROUP_REMOVE_GROUP,  <<"bondy.group.remove_group">>).
+-define(BONDY_GROUP_REMOVE_GROUPS, <<"bondy.group.remove_groups">>).
 -define(BONDY_GROUP_DELETE,        <<"bondy.group.delete">>).
 -define(BONDY_GROUP_GET,           <<"bondy.group.get">>).
 -define(BONDY_GROUP_LIST,          <<"bondy.group.list">>).
@@ -71,6 +75,10 @@
 -define(BONDY_USER_GET,            <<"bondy.user.get">>).
 -define(BONDY_USER_LIST,           <<"bondy.user.list">>).
 -define(BONDY_USER_UPDATE,         <<"bondy.user.update">>).
+-define(BONDY_USER_ADD_GROUP,      <<"bondy.user.add_group">>).
+-define(BONDY_USER_ADD_GROUPS,     <<"bondy.user.add_groups">>).
+-define(BONDY_USER_REMOVE_GROUP,   <<"bondy.user.remove_group">>).
+-define(BONDY_USER_REMOVE_GROUPS,  <<"bondy.user.remove_groups">>).
 
 -define(BONDY_REALM_CREATE,             <<"bondy.realm.create">>).
 -define(BONDY_REALM_DELETE,             <<"bondy.realm.delete">>).
