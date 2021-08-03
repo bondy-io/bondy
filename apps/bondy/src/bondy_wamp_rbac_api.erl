@@ -209,6 +209,21 @@ handle_call(?BONDY_USER_GET, #call{} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{}, [Ext])
     end;
 
+handle_call(?BONDY_USER_IS_ENABLED, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    Res = bondy_rbac_user:is_enabled(Uri, Username),
+    wamp_message:result(M#call.request_id, #{}, [Res]);
+
+handle_call(?BONDY_USER_ENABLE, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    ok = bondy_rbac_user:enable(Uri, Username),
+    wamp_message:result(M#call.request_id, #{});
+
+handle_call(?BONDY_USER_DISABLE, #call{} = M, Ctxt) ->
+    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    ok = bondy_rbac_user:disable(Uri, Username),
+    wamp_message:result(M#call.request_id, #{});
+
 handle_call(?BONDY_USER_LIST, #call{} = M, Ctxt) ->
     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
 
