@@ -34,6 +34,10 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
+-define(TYPE, user).
+-define(VERSION, <<"1.1">>).
+-define(PLUMDB_PREFIX(RealmUri), {security_users, RealmUri}).
+-define(FOLD_OPTS, [{resolver, lww}]).
 
 -define(VALIDATOR, ?OPTS_VALIDATOR#{
     <<"username">> => #{
@@ -139,17 +143,12 @@
 }).
 
 
-
 -define(ANONYMOUS, type_and_version(#{
     username => anonymous,
     groups => [anonymous],
     meta => #{}
 })).
 
--define(TYPE, user).
--define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {security_users, RealmUri}).
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -type t()       ::  #{
     type                :=  ?TYPE,
@@ -160,9 +159,10 @@
     authorized_keys     =>  [binary()],
     sso_realm_uri       =>  maybe(uri()),
     meta                =>  #{binary() => any()},
-    %% Transient will not be stored
+    %% Transient, will not be stored
     password_opts       =>  bondy_password:opts()
 }.
+
 
 -type external() ::  #{
     type                :=  ?TYPE,
@@ -186,15 +186,14 @@
     update_credentials      =>  boolean(),
     password_opts           =>  bondy_password:opts()
 }.
+-type list_opts()       ::  #{
+    limit => pos_integer()
+}.
 -type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type update_error()    ::  no_such_realm
                             | reserved_name
                             | no_such_user
                             | {no_such_groups, [bondy_rbac_group:name()]}.
-
--type list_opts()       ::  #{
-    limit => pos_integer()
-}.
 
 
 -export_type([t/0]).
