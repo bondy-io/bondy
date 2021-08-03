@@ -89,7 +89,7 @@ t() = #{type =&gt; password, version =&gt; binary(), protocol =&gt; <a href="#ty
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#data-1">data/1</a></td><td></td></tr><tr><td valign="top"><a href="#default_opts-0">default_opts/0</a></td><td></td></tr><tr><td valign="top"><a href="#default_opts-1">default_opts/1</a></td><td></td></tr><tr><td valign="top"><a href="#from_term-1">from_term/1</a></td><td></td></tr><tr><td valign="top"><a href="#future-1">future/1</a></td><td>Creates a functional object that takes a single argument
 <code>Opts :: opts()</code> that when applied calls <code>new(Password, Opts)</code>.</td></tr><tr><td valign="top"><a href="#hash_length-1">hash_length/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_type-1">is_type/1</a></td><td></td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td>Hash a plaintext password <code>Password</code> and the protocol and protocol
-params defined in options <code>Opts</code>, returning t().</td></tr><tr><td valign="top"><a href="#params-1">params/1</a></td><td></td></tr><tr><td valign="top"><a href="#protocol-1">protocol/1</a></td><td></td></tr><tr><td valign="top"><a href="#replace-2">replace/2</a></td><td>Returns a new password object from <code>String</code> applying the same protocol
+params defined in options <code>Opts</code>, returning t().</td></tr><tr><td valign="top"><a href="#opts_validator-0">opts_validator/0</a></td><td></td></tr><tr><td valign="top"><a href="#params-1">params/1</a></td><td></td></tr><tr><td valign="top"><a href="#protocol-1">protocol/1</a></td><td></td></tr><tr><td valign="top"><a href="#replace-2">replace/2</a></td><td>Returns a new password object from <code>String</code> applying the same protocol
 and params found in password <code>PWD</code>.</td></tr><tr><td valign="top"><a href="#upgrade-2">upgrade/2</a></td><td></td></tr><tr><td valign="top"><a href="#verify_hash-2">verify_hash/2</a></td><td></td></tr><tr><td valign="top"><a href="#verify_string-2">verify_string/2</a></td><td></td></tr></table>
 
 
@@ -194,6 +194,15 @@ params defined in options `Opts`, returning t().
 
 `Password` must be a binary with a minimum size of 6 bytes and a maximum
 size of 256 bytes, otherwise fails with error `invalid_password`.
+
+<a name="opts_validator-0"></a>
+
+### opts_validator/0 ###
+
+<pre><code>
+opts_validator() -&gt; map()
+</code></pre>
+<br />
 
 <a name="params-1"></a>
 

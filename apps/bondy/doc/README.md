@@ -16,6 +16,7 @@
 <tr><td><a href="bondy_auth_anonymous.md" class="module">bondy_auth_anonymous</a></td></tr>
 <tr><td><a href="bondy_auth_oauth2.md" class="module">bondy_auth_oauth2</a></td></tr>
 <tr><td><a href="bondy_auth_password.md" class="module">bondy_auth_password</a></td></tr>
+<tr><td><a href="bondy_auth_ticket.md" class="module">bondy_auth_ticket</a></td></tr>
 <tr><td><a href="bondy_auth_trust.md" class="module">bondy_auth_trust</a></td></tr>
 <tr><td><a href="bondy_auth_wamp_cra.md" class="module">bondy_auth_wamp_cra</a></td></tr>
 <tr><td><a href="bondy_auth_wamp_cryptosign.md" class="module">bondy_auth_wamp_cryptosign</a></td></tr>
@@ -23,6 +24,7 @@
 <tr><td><a href="bondy_backup.md" class="module">bondy_backup</a></td></tr>
 <tr><td><a href="bondy_broker.md" class="module">bondy_broker</a></td></tr>
 <tr><td><a href="bondy_cache.md" class="module">bondy_cache</a></td></tr>
+<tr><td><a href="bondy_cidr.md" class="module">bondy_cidr</a></td></tr>
 <tr><td><a href="bondy_cli_table.md" class="module">bondy_cli_table</a></td></tr>
 <tr><td><a href="bondy_config.md" class="module">bondy_config</a></td></tr>
 <tr><td><a href="bondy_config_manager.md" class="module">bondy_config_manager</a></td></tr>

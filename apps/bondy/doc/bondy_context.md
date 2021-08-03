@@ -39,7 +39,7 @@ subprotocol_2() = <a href="#type-subprotocol">subprotocol()</a> | {http, text, j
 
 
 <pre><code>
-t() = #{id =&gt; <a href="#type-id">id()</a>, realm_uri =&gt; <a href="#type-uri">uri()</a>, node =&gt; atom(), session =&gt; <a href="bondy_session.md#type-t">bondy_session:t()</a> | undefined, peer =&gt; <a href="bondy_session.md#type-peer">bondy_session:peer()</a>, authmethod =&gt; binary(), authid =&gt; binary(), is_anonymous =&gt; boolean(), roles =&gt; map(), request_id =&gt; <a href="#type-id">id()</a>, request_timestamp =&gt; integer(), request_timeout =&gt; non_neg_integer(), request_details =&gt; map(), is_closing =&gt; boolean(), is_shutting_down =&gt; boolean(), user_info =&gt; map()}
+t() = #{id =&gt; <a href="#type-id">id()</a>, realm_uri =&gt; <a href="#type-uri">uri()</a>, node =&gt; atom(), security_enabled =&gt; boolean(), session =&gt; <a href="bondy_session.md#type-t">bondy_session:t()</a> | undefined, peer =&gt; <a href="bondy_session.md#type-peer">bondy_session:peer()</a>, authmethod =&gt; binary(), authid =&gt; binary(), is_anonymous =&gt; boolean(), roles =&gt; map(), request_id =&gt; <a href="#type-id">id()</a>, request_timestamp =&gt; integer(), request_timeout =&gt; non_neg_integer(), request_details =&gt; map(), is_closing =&gt; boolean(), is_shutting_down =&gt; boolean(), user_info =&gt; map()}
 </code></pre>
 
 <a name="index"></a>
@@ -58,7 +58,7 @@ Returns true if the context is associated with a session,
 false otherwise.</td></tr><tr><td valign="top"><a href="#id-1">id/1</a></td><td>Returns the context identifier.</td></tr><tr><td valign="top"><a href="#is_anonymous-1">is_anonymous/1</a></td><td>
 Returns true if the user is anonymous.</td></tr><tr><td valign="top"><a href="#is_closing-1">is_closing/1</a></td><td>
 Returns true if the context and session are closing.</td></tr><tr><td valign="top"><a href="#is_feature_enabled-3">is_feature_enabled/3</a></td><td>
-Returns true if the feature Feature is enabled for role Role.</td></tr><tr><td valign="top"><a href="#is_shutting_down-1">is_shutting_down/1</a></td><td>
+Returns true if the feature Feature is enabled for role Role.</td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_shutting_down-1">is_shutting_down/1</a></td><td>
 Returns true if bondy is shutting down.</td></tr><tr><td valign="top"><a href="#local_context-1">local_context/1</a></td><td></td></tr><tr><td valign="top"><a href="#new-0">new/0</a></td><td>
 Initialises a new context.</td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td></td></tr><tr><td valign="top"><a href="#node-1">node/1</a></td><td>
 Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#peer-1">peer/1</a></td><td>
@@ -212,6 +212,15 @@ is_feature_enabled(Ctxt::<a href="#type-t">t()</a>, Role::atom(), Feature::binar
 <br />
 
 Returns true if the feature Feature is enabled for role Role.
+
+<a name="is_security_enabled-1"></a>
+
+### is_security_enabled/1 ###
+
+<pre><code>
+is_security_enabled(X1::<a href="#type-t">t()</a>) -&gt; boolean()
+</code></pre>
+<br />
 
 <a name="is_shutting_down-1"></a>
 

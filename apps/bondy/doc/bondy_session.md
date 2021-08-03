@@ -86,7 +86,7 @@ session_opts() = #{roles =&gt; map()}
 
 
 <pre><code>
-t() = #session{id = <a href="#type-id">id()</a>, realm_uri = <a href="#type-uri">uri()</a>, node = atom(), pid = pid() | undefined, peer = <a href="#type-peer">peer()</a> | undefined, agent = binary(), seq = non_neg_integer(), roles = map() | undefined, authid = binary() | undefined, authrole = binary() | undefined, authmethod = binary() | undefined, created = <a href="calendar.md#type-date_time">calendar:date_time()</a>, expires_in = pos_integer() | infinity, rate = <a href="#type-rate_window">rate_window()</a>, quota = <a href="#type-quota_window">quota_window()</a>}
+t() = #session{id = <a href="#type-id">id()</a>, realm_uri = <a href="#type-uri">uri()</a>, node = atom(), pid = pid() | undefined, peer = <a href="#type-peer">peer()</a> | undefined, agent = binary(), seq = non_neg_integer(), roles = map() | undefined, security_enabled = boolean(), is_anonymous = boolean(), authid = binary() | undefined, authrole = binary() | undefined, authroles = [binary()], authmethod = binary() | undefined, created = <a href="calendar.md#type-date_time">calendar:date_time()</a>, expires_in = pos_integer() | infinity, rate = <a href="#type-rate_window">rate_window()</a>, quota = <a href="#type-quota_window">quota_window()</a>}
 </code></pre>
 
 <a name="index"></a>
@@ -95,7 +95,7 @@ t() = #session{id = <a href="#type-id">id()</a>, realm_uri = <a href="#type-uri"
 
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#agent-1">agent/1</a></td><td></td></tr><tr><td valign="top"><a href="#close-1">close/1</a></td><td></td></tr><tr><td valign="top"><a href="#created-1">created/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
-Retrieves the session identified by Id from the tuplespace.</td></tr><tr><td valign="top"><a href="#id-1">id/1</a></td><td></td></tr><tr><td valign="top"><a href="#incr_seq-1">incr_seq/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-1">list_peer_ids/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-2">list_peer_ids/2</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
+Retrieves the session identified by Id from the tuplespace.</td></tr><tr><td valign="top"><a href="#id-1">id/1</a></td><td></td></tr><tr><td valign="top"><a href="#incr_seq-1">incr_seq/1</a></td><td></td></tr><tr><td valign="top"><a href="#info-1">info/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-1">list_peer_ids/1</a></td><td></td></tr><tr><td valign="top"><a href="#list_peer_ids-2">list_peer_ids/2</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
 Retrieves the session identified by Id from the tuplespace or 'not_found'
 if it doesn't exist.</td></tr><tr><td valign="top"><a href="#new-3">new/3</a></td><td>Creates a new transient session (not persisted).</td></tr><tr><td valign="top"><a href="#new-4">new/4</a></td><td></td></tr><tr><td valign="top"><a href="#node-1">node/1</a></td><td>
 Returns the node of the process managing the transport that the session
@@ -106,7 +106,7 @@ Creates a new session provided the RealmUri exists or can be dynamically
 created.</td></tr><tr><td valign="top"><a href="#peer-1">peer/1</a></td><td></td></tr><tr><td valign="top"><a href="#peer_id-1">peer_id/1</a></td><td>Returns the identifier for the owner of this session.</td></tr><tr><td valign="top"><a href="#pid-1">pid/1</a></td><td>
 Returns the pid of the process managing the transport that the session
 identified by Id runs on.</td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td></td></tr><tr><td valign="top"><a href="#roles-1">roles/1</a></td><td></td></tr><tr><td valign="top"><a href="#size-0">size/0</a></td><td>
-Returns the number of sessions in the tuplespace.</td></tr><tr><td valign="top"><a href="#to_details_map-1">to_details_map/1</a></td><td></td></tr><tr><td valign="top"><a href="#update-1">update/1</a></td><td></td></tr></table>
+Returns the number of sessions in the tuplespace.</td></tr><tr><td valign="top"><a href="#to_external-1">to_external/1</a></td><td></td></tr><tr><td valign="top"><a href="#update-1">update/1</a></td><td></td></tr><tr><td valign="top"><a href="#user-1">user/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -167,6 +167,24 @@ id(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-id">id()</a>
 
 <pre><code>
 incr_seq(Session::<a href="#type-id">id()</a> | <a href="#type-t">t()</a>) -&gt; map()
+</code></pre>
+<br />
+
+<a name="info-1"></a>
+
+### info/1 ###
+
+<pre><code>
+info(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-details">details()</a>
+</code></pre>
+<br />
+
+<a name="is_security_enabled-1"></a>
+
+### is_security_enabled/1 ###
+
+<pre><code>
+is_security_enabled(Session::<a href="#type-t">t()</a>) -&gt; boolean()
 </code></pre>
 <br />
 
@@ -329,12 +347,12 @@ size() -&gt; non_neg_integer()
 
 Returns the number of sessions in the tuplespace.
 
-<a name="to_details_map-1"></a>
+<a name="to_external-1"></a>
 
-### to_details_map/1 ###
+### to_external/1 ###
 
 <pre><code>
-to_details_map(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-details">details()</a>
+to_external(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-details">details()</a>
 </code></pre>
 <br />
 
@@ -344,6 +362,15 @@ to_details_map(Session::<a href="#type-t">t()</a>) -&gt; <a href="#type-details"
 
 <pre><code>
 update(Session::<a href="#type-t">t()</a>) -&gt; ok
+</code></pre>
+<br />
+
+<a name="user-1"></a>
+
+### user/1 ###
+
+<pre><code>
+user(Session::<a href="#type-t">t()</a>) -&gt; <a href="bondy_rbac_user.md#type-t">bondy_rbac_user:t()</a>
 </code></pre>
 <br />
 

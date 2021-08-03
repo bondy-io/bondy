@@ -27,7 +27,7 @@ input to lowercase use [`string:casefold/1`](string.md#casefold-1).
 
 
 <pre><code>
-add_error() = no_such_realm | reserved_name | role_exists
+add_error() = no_such_realm | reserved_name | already_exists
 </code></pre>
 
 
@@ -75,8 +75,12 @@ t() = #{type =&gt; group, version =&gt; binary(), name =&gt; binary() | anonymou
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_or_update-2">add_or_update/2</a></td><td>Adds a new user or updates an existing one.</td></tr><tr><td valign="top"><a href="#exists-2">exists/2</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-2">fetch/2</a></td><td></td></tr><tr><td valign="top"><a href="#groups-1">groups/1</a></td><td>Returns the group names the user <code>User</code> is member of.</td></tr><tr><td valign="top"><a href="#is_member-2">is_member/2</a></td><td>Returns <code>true</code> if group <code>Group</code> is a member of the group named
-<code>Name</code>.</td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-2">list/2</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-2">lookup/2</a></td><td></td></tr><tr><td valign="top"><a href="#meta-1">meta/1</a></td><td>Returns the metadata map associated with the group <code>Group</code>.</td></tr><tr><td valign="top"><a href="#name-1">name/1</a></td><td>Returns the group names the user's username.</td></tr><tr><td valign="top"><a href="#new-1">new/1</a></td><td></td></tr><tr><td valign="top"><a href="#normalise_name-1">normalise_name/1</a></td><td></td></tr><tr><td valign="top"><a href="#remove-2">remove/2</a></td><td></td></tr><tr><td valign="top"><a href="#to_external-1">to_external/1</a></td><td>Returns the external representation of the user <code>User</code>.</td></tr><tr><td valign="top"><a href="#unknown-2">unknown/2</a></td><td>Takes a list of groupnames and returns any that can't be found.</td></tr><tr><td valign="top"><a href="#update-3">update/3</a></td><td>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-2">add/2</a></td><td></td></tr><tr><td valign="top"><a href="#add_group-3">add_group/3</a></td><td>Adds group named <code>Groupname</code> to gropus <code>Groups</code> in realm with uri
+<code>RealmUri</code>.</td></tr><tr><td valign="top"><a href="#add_groups-3">add_groups/3</a></td><td>Adds groups <code>Groupnames</code> to gropus <code>Groups</code> in realm with uri
+<code>RealmUri</code>.</td></tr><tr><td valign="top"><a href="#add_or_update-2">add_or_update/2</a></td><td>Adds a new user or updates an existing one.</td></tr><tr><td valign="top"><a href="#exists-2">exists/2</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-2">fetch/2</a></td><td></td></tr><tr><td valign="top"><a href="#groups-1">groups/1</a></td><td>Returns the group names the user <code>User</code> is member of.</td></tr><tr><td valign="top"><a href="#is_member-2">is_member/2</a></td><td>Returns <code>true</code> if group <code>Group</code> is a member of the group named
+<code>Name</code>.</td></tr><tr><td valign="top"><a href="#list-1">list/1</a></td><td></td></tr><tr><td valign="top"><a href="#list-2">list/2</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-2">lookup/2</a></td><td></td></tr><tr><td valign="top"><a href="#meta-1">meta/1</a></td><td>Returns the metadata map associated with the group <code>Group</code>.</td></tr><tr><td valign="top"><a href="#name-1">name/1</a></td><td>Returns the group names the user's username.</td></tr><tr><td valign="top"><a href="#new-1">new/1</a></td><td></td></tr><tr><td valign="top"><a href="#normalise_name-1">normalise_name/1</a></td><td></td></tr><tr><td valign="top"><a href="#remove-2">remove/2</a></td><td></td></tr><tr><td valign="top"><a href="#remove_group-3">remove_group/3</a></td><td>Removes groups <code>Groupnames</code> from gropus <code>Groups</code> in realm with uri
+<code>RealmUri</code>.</td></tr><tr><td valign="top"><a href="#remove_groups-3">remove_groups/3</a></td><td>Removes groups <code>Groupnames</code> from gropus <code>Groups</code> in realm with uri
+<code>RealmUri</code>.</td></tr><tr><td valign="top"><a href="#to_external-1">to_external/1</a></td><td>Returns the external representation of the user <code>User</code>.</td></tr><tr><td valign="top"><a href="#unknown-2">unknown/2</a></td><td>Takes a list of groupnames and returns any that can't be found.</td></tr><tr><td valign="top"><a href="#update-3">update/3</a></td><td>
 Name cannot be a reserved name.</td></tr></table>
 
 
@@ -92,6 +96,30 @@ Name cannot be a reserved name.</td></tr></table>
 add(RealmUri::<a href="#type-uri">uri()</a>, Group::<a href="#type-t">t()</a>) -&gt; {ok, <a href="#type-t">t()</a>} | {error, any()}
 </code></pre>
 <br />
+
+<a name="add_group-3"></a>
+
+### add_group/3 ###
+
+<pre><code>
+add_group(RealmUri::<a href="#type-uri">uri()</a>, Groups::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-name">name()</a> | [<a href="#type-name">name()</a>], Groupname::<a href="#type-name">name()</a>) -&gt; ok
+</code></pre>
+<br />
+
+Adds group named `Groupname` to gropus `Groups` in realm with uri
+`RealmUri`.
+
+<a name="add_groups-3"></a>
+
+### add_groups/3 ###
+
+<pre><code>
+add_groups(RealmUri::<a href="#type-uri">uri()</a>, Groups::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-name">name()</a> | [<a href="#type-name">name()</a>], Groupnames::[<a href="#type-name">name()</a>]) -&gt; ok
+</code></pre>
+<br />
+
+Adds groups `Groupnames` to gropus `Groups` in realm with uri
+`RealmUri`.
 
 <a name="add_or_update-2"></a>
 
@@ -221,6 +249,30 @@ normalise_name(Term::<a href="#type-name">name()</a>) -&gt; <a href="#type-name"
 remove(RealmUri::<a href="#type-uri">uri()</a>, Name::binary() | map()) -&gt; ok | {error, unknown_group | reserved_name}
 </code></pre>
 <br />
+
+<a name="remove_group-3"></a>
+
+### remove_group/3 ###
+
+<pre><code>
+remove_group(RealmUri::<a href="#type-uri">uri()</a>, Groups::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-name">name()</a> | [<a href="#type-name">name()</a>], Groupname::<a href="#type-name">name()</a>) -&gt; ok
+</code></pre>
+<br />
+
+Removes groups `Groupnames` from gropus `Groups` in realm with uri
+`RealmUri`.
+
+<a name="remove_groups-3"></a>
+
+### remove_groups/3 ###
+
+<pre><code>
+remove_groups(RealmUri::<a href="#type-uri">uri()</a>, Groups::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-name">name()</a> | [<a href="#type-name">name()</a>], Groupnames::[<a href="#type-name">name()</a>]) -&gt; ok
+</code></pre>
+<br />
+
+Removes groups `Groupnames` from gropus `Groups` in realm with uri
+`RealmUri`.
 
 <a name="to_external-1"></a>
 
