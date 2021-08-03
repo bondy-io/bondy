@@ -410,6 +410,8 @@ user_add(Config) ->
 
     ?assertEqual(
         #{
+            enabled => true,
+            sso_realm_uri => undefined,
             groups => [],
             has_authorized_keys => false,
             has_password => true,
