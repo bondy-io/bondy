@@ -73,6 +73,9 @@
 -define(BONDY_USER_CHANGE_AUTHORIZED_KEYS, <<"bondy.user.change_authorized_keys">>).
 -define(BONDY_USER_DELETE,         <<"bondy.user.delete">>).
 -define(BONDY_USER_GET,            <<"bondy.user.get">>).
+-define(BONDY_USER_IS_ENABLED,     <<"bondy.user.is_enabled">>).
+-define(BONDY_USER_ENABLE,         <<"bondy.user.enable">>).
+-define(BONDY_USER_DISABLE,        <<"bondy.user.disable">>).
 -define(BONDY_USER_LIST,           <<"bondy.user.list">>).
 -define(BONDY_USER_UPDATE,         <<"bondy.user.update">>).
 -define(BONDY_USER_ADD_GROUP,      <<"bondy.user.add_group">>).
