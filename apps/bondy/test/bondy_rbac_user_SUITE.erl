@@ -37,7 +37,8 @@ all() ->
         invalid_sso_realm,
         resolve,
         add_sso_user_to_realm,
-        update
+        update,
+        change_password
     ].
 
 
@@ -68,22 +69,14 @@ init_per_suite(Config) ->
             authorized_keys => PubKeys,
             groups => [],
             meta => #{fruit => <<"passion fruit">>},
-            sso_opts => #{
-                realm_uri => ?SSO_REALM_URI,
-                groups => [],
-                meta => #{fruit => <<"mango">>}
-            }
+            sso_realm_uri => ?SSO_REALM_URI
         },
         #{
             username => ?SSOU2,
             password => ?SSOU2,
             groups => [],
             meta => #{fruit => <<"orange">>},
-            sso_opts => #{
-                realm_uri => ?SSO_REALM_URI,
-                groups => [],
-                meta => #{fruit => <<"grapefruit">>}
-            }
+            sso_realm_uri => ?SSO_REALM_URI
         }
     ]),
     ok = add_realm(?REALM2_URI, SSORealmUri, KeyPairs, []),
@@ -181,7 +174,7 @@ resolve(_) ->
     ?assertEqual(
         #{
             fruit => <<"passion fruit">>,
-            sso => #{fruit => <<"mango">>}
+            sso => #{}
         },
         maps:get(meta, Resolved)
     ).
@@ -198,11 +191,7 @@ invalid_sso_realm(Config) ->
         authorized_keys => PubKeys,
         groups => [],
         meta => #{fruit => <<"passion fruit">>},
-        sso_opts => #{
-            realm_uri => <<"com.wrong.uri">>,
-            groups => [],
-            meta => #{fruit => <<"mango">>}
-        }
+        sso_realm_uri => <<"com.wrong.uri">>
     },
     ?assertEqual(
         {error, already_exists},
@@ -223,11 +212,7 @@ add_sso_user_to_realm(_) ->
         password => <<"thisWillBeDroped">>,
         groups => [],
         meta => #{fruit => <<"passion fruit">>},
-        sso_opts => #{
-            realm_uri => ?SSO_REALM_URI,
-            groups => [],
-            meta => #{fruit => <<"not mango">>}
-        }
+        sso_realm_uri => ?SSO_REALM_URI
     },
 
     ?assertEqual(
@@ -260,15 +245,13 @@ update(_) ->
     Data0 = #{
         password => <<"newpassword">>,
         groups => [],
-        sso_opts => #{
-            realm_uri => ?SSO_REALM_URI
-        }
+        sso_realm_uri => ?SSO_REALM_URI
     },
 
     ?assertEqual(
         {ok, User0},
         bondy_rbac_user:update(
-            ?REALM2_URI, ?SSOU1, Data0, #{forward_credentials => false}
+            ?REALM2_URI, ?SSOU1, Data0, #{update_credentials => false}
         )
     ),
     ?assertEqual(
@@ -280,48 +263,59 @@ update(_) ->
     ?assertEqual(
         {ok, User0},
         bondy_rbac_user:update(
-            ?REALM2_URI, ?SSOU1, Data0, #{forward_credentials => true}
+            ?REALM2_URI, ?SSOU1, Data0, #{update_credentials => true}
         )
-    ),
-    ?assertEqual(
-        SSOUser0,
-        bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
     ),
 
-    ?assertEqual(
-        {ok, User0},
-        bondy_rbac_user:update(
-            ?REALM2_URI, ?SSOU1, Data0, #{
-                forward_credentials => true,
-                update_credentials => true
-            }
-        )
-    ),
     ?assertNotEqual(
         SSOUser0,
         bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
     ),
 
-
-
-    % ?assertError(
-    %     badarg,
-    %     bondy_rbac_user:update(?SSO_REALM_URI, ?SSOU1, Data)
-    % ),
-
-    % Data1 = #{
-    %     password => <<"newpassword">>,
-    %     groups => [],
-    %     meta => #{fruit => <<"not passion fruit">>},
-    %     sso_opts => #{
-    %         realm_uri => ?SSO_REALM_URI,
-    %         groups => [],
-    %         meta => #{fruit => <<"mango again">>}
-    %     }
-    % },
-    % {ok, New} = bondy_rbac_user:update(?REALM2_URI, ?SSOU1, Data),
-    % ?assertEqual(
-    %     SSOU1,
-    %     maps:get(meta, )
-    % ),
     ok.
+
+
+
+change_password(_) ->
+    SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+    % User0 = bondy_rbac_user:fetch(?REALM2_URI, ?SSOU1),
+    P1 = <<"newpassword">>,
+
+    ?assertEqual(
+        true,
+        bondy_password:verify_string(P1, bondy_rbac_user:password(SSOUser0))
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:change_password(
+            ?REALM2_URI, ?SSOU1, <<"123456">>, <<"newpassword">>
+        )
+    ),
+
+    ?assertEqual(
+        true,
+        bondy_password:verify_string(
+            <<"123456">>,
+            bondy_rbac_user:password(
+                bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+            )
+        )
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:change_password(
+            ?REALM2_URI, ?SSOU1, <<"987654321">>
+        )
+    ),
+
+    ?assertEqual(
+        true,
+        bondy_password:verify_string(
+            <<"987654321">>,
+            bondy_rbac_user:password(
+                bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+            )
+        )
+    ).

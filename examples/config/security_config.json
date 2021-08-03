@@ -296,11 +296,33 @@
                 "meta" : {}
             }
         ],
+        "groups" : [
+            {
+                "name" : "local_group",
+                "groups" : []
+            }
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match": "prefix",
+                "roles" : ["local_group"]
+            }
+        ],
         "users" : [
             {
                 "username": "amanda",
-                "password": "123456",
-                "groups": [],
+                "password": "changethispassword",
+                "groups": ["local_group"],
                 "meta": {
                     "band": "Depeche Mode"
                 },

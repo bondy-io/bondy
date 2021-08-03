@@ -40,8 +40,6 @@
         alias => username,
 		key => username,
         required => true,
-        allow_null => false,
-        allow_undefined => false,
         datatype => binary,
         validator => fun bondy_data_validators:strict_username/1
     },
@@ -49,8 +47,6 @@
         alias => password,
 		key => password,
         required => false,
-        allow_null => false,
-        allow_undefined => false,
         datatype => [binary, {function, 0}, map],
         validator => fun bondy_data_validators:password/1
     },
@@ -58,26 +54,36 @@
         alias => authorized_keys,
 		key => authorized_keys,
         required => false,
-        allow_null => false,
-        allow_undefined => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:authorized_key/1}
     },
     <<"groups">> => #{
         alias => groups,
 		key => groups,
-        allow_null => false,
-        allow_undefined => false,
         required => true,
         default => [],
         datatype => {list, binary},
         validator => fun bondy_data_validators:groupnames/1
     },
+    <<"sso_realm_uri">> => #{
+        alias => sso_realm_uri,
+        key => sso_realm_uri,
+        required => true,
+        datatype => binary,
+        allow_undefined => true,
+        default => undefined,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
+    <<"enabled">> => #{
+        alias => enabled,
+		key => enabled,
+        required => true,
+        datatype => boolean,
+        default => true
+    },
     <<"meta">> => #{
         alias => meta,
 		key => meta,
-        allow_null => false,
-        allow_undefined => false,
         required => true,
         datatype => map,
         default => #{}
@@ -90,8 +96,6 @@
         alias => password,
 		key => password,
         required => false,
-        allow_null => false,
-        allow_undefined => false,
         datatype => [binary, {function, 0}, map],
         validator => fun bondy_data_validators:password/1
     },
@@ -99,8 +103,6 @@
         alias => authorized_keys,
 		key => authorized_keys,
         required => false,
-        allow_null => false,
-        allow_undefined => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:authorized_key/1}
     },
@@ -108,16 +110,18 @@
         alias => groups,
 		key => groups,
         required => false,
-        allow_null => false,
-        allow_undefined => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:groupname/1}
+    },
+    <<"enabled">> => #{
+        alias => enabled,
+		key => enabled,
+        required => false,
+        datatype => boolean
     },
     <<"meta">> => #{
         alias => meta,
 		key => meta,
-        allow_null => false,
-        allow_undefined => false,
         required => false,
         datatype => map
     }
@@ -125,13 +129,6 @@
 
 
 -define(OPTS_VALIDATOR, #{
-    <<"sso_opts">> => #{
-        alias => sso_opts,
-        key => sso_opts,
-        required => false,
-        datatype => map,
-        validator => ?SSO_OPTS_VALIDATOR
-    },
     <<"password_opts">> => #{
         alias => password_opts,
         key => password_opts,
@@ -141,51 +138,6 @@
     }
 }).
 
--define(SSO_OPTS_VALIDATOR, #{
-    <<"realm_uri">> => #{
-        alias => realm_uri,
-        key => realm_uri,
-        required => true,
-        datatype => binary,
-        allow_undefined => true,
-        default => undefined,
-        validator => fun bondy_data_validators:realm_uri/1
-    },
-    <<"password">> => #{
-        alias => password,
-		key => password,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => [binary, {function, 0}, map],
-        validator => fun bondy_data_validators:password/1
-    },
-    <<"authorized_keys">> => #{
-        alias => authorized_keys,
-		key => authorized_keys,
-        required => false,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => {list, binary},
-        validator => {list, fun bondy_data_validators:authorized_key/1}
-    },
-    <<"groups">> => #{
-        alias => groups,
-		key => groups,
-        allow_null => false,
-        allow_undefined => false,
-        required => false,
-        datatype => {list, binary},
-        validator => fun bondy_data_validators:groupnames/1
-    },
-    <<"meta">> => #{
-        alias => meta,
-		key => meta,
-        allow_null => false,
-        allow_undefined => false,
-        datatype => map
-    }
-}).
 
 
 -define(ANONYMOUS, type_and_version(#{
@@ -209,7 +161,6 @@
     sso_realm_uri       =>  maybe(uri()),
     meta                =>  #{binary() => any()},
     %% Transient will not be stored
-    sso_opts            =>  sso_opts(),
     password_opts       =>  bondy_password:opts()
 }.
 
@@ -229,21 +180,11 @@
     password_opts       => bondy_password:opts()
 }.
 -type add_opts()        ::  #{
-    sso_opts            =>  sso_opts(),
     password_opts       =>  bondy_password:opts()
 }.
 -type update_opts()        ::  #{
-    forward_credentials     =>  boolean(),
     update_credentials      =>  boolean(),
-    sso_opts                =>  sso_opts(),
     password_opts           =>  bondy_password:opts()
-}.
--type sso_opts()        ::  #{
-    realm_uri           =>  uri(),
-    password            =>  bondy_password:future() | bondy_password:t(),
-    authorized_keys     =>  [binary()],
-    groups              =>  [binary()],
-    meta                =>  #{binary() => any()}
 }.
 -type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type update_error()    ::  no_such_realm
@@ -259,7 +200,6 @@
 -export_type([t/0]).
 -export_type([external/0]).
 -export_type([new_opts/0]).
--export_type([sso_opts/0]).
 -export_type([add_opts/0]).
 -export_type([update_opts/0]).
 
@@ -279,6 +219,10 @@
 -export([has_authorized_keys/1]).
 -export([has_password/1]).
 -export([is_member/2]).
+-export([is_enabled/1]).
+-export([is_enabled/2]).
+-export([enable/2]).
+-export([disable/2]).
 -export([is_sso_user/1]).
 -export([list/1]).
 -export([list/2]).
@@ -325,7 +269,6 @@ new(Data) ->
 new(Data, Opts) ->
     User = type_and_version(maps_utils:validate(Data, ?VALIDATOR)),
     maybe_apply_password(User, Opts).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -383,6 +326,34 @@ sso_realm_uri(#{type := ?TYPE}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns `true' if user `User' is active. Otherwise returns `false'.
+%% A user that is not active cannot establish a session.
+%% See {@link enable/3} and {@link disable/3}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_enabled(User :: t()) -> boolean().
+
+is_enabled(#{type := ?TYPE, enabled := Val}) ->
+    Val;
+
+is_enabled(#{type := ?TYPE}) ->
+    true.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if user identified with `Username' is enabled. Otherwise
+%% returns `false'.
+%% A user that is not enabled cannot establish a session.
+%% See {@link enable/2} and {@link disable/3}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_enabled(RealmUri :: uri(), Username :: binary()) -> boolean().
+
+is_enabled(RealmUri, Username) ->
+    is_enabled(fetch(RealmUri, Username)).
+
+
+%% -----------------------------------------------------------------------------
 %% @doc If the user `User' is no sso-managed, returns `User' unmodified.
 %% Otherwise, fetches the user's credentials and additional metadata from the
 %% SSO Realm and merges it into `User' using the following procedure:
@@ -397,9 +368,10 @@ sso_realm_uri(#{type := ?TYPE}) ->
 %% -----------------------------------------------------------------------------
 -spec resolve(User :: t()) -> Resolved :: t() | no_return().
 
-resolve(#{type := ?TYPE, sso_realm_uri := Uri, username := Username} = User0) ->
-    SSOUser = fetch(Uri, Username),
+resolve(#{type := ?TYPE, sso_realm_uri := Uri} = User0) when is_binary(Uri) ->
+    SSOUser = fetch(Uri, maps:get(username, User0)),
     User = maps:merge(User0, maps:with([password, authorized_keys], SSOUser)),
+
     case maps:find(meta, SSOUser) of
         {ok, Meta} ->
             maps_utils:put_path([meta, sso], Meta, User);
@@ -455,7 +427,7 @@ password(#{type := ?TYPE}) ->
 has_authorized_keys(#{type := ?TYPE, authorized_keys := Val}) ->
     length(Val) > 0;
 
-has_authorized_keys(#{type := user}) ->
+has_authorized_keys(#{type := ?TYPE}) ->
     false.
 
 
@@ -481,7 +453,7 @@ meta(#{type := ?TYPE, meta := Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc Adds a new user to the RBAC store. `User' MUST have been
-%% created using {@link new/1,2}.
+%% created using {@link new/1} or {@link new/2}.
 %% This record is globally replicated.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -583,6 +555,9 @@ remove(RealmUri, #{type := ?TYPE, username := Username}) ->
     remove(RealmUri, Username);
 
 remove(RealmUri, Username0) ->
+    %% TODO do not allow remove when this is an SSO realm and user exists in
+    %% other realms (we need a reverse index - array with the list of realms
+    %% this user belongs to.
     try
         Username = normalise_username(Username0),
 
@@ -713,6 +688,7 @@ change_password(RealmUri, Username, New) when is_binary(New) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
         {error, not_found} = Error ->
@@ -733,6 +709,35 @@ change_password(RealmUri, Username, New, Old) ->
             update_credentials(RealmUri, Username, #{password => New})
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets the value of the `enabled' property to `true'.
+%% See {@link is_enabled/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec enable(RealmUri :: uri(), User :: t()) ->
+    ok | {error, any()}.
+
+enable(RealmUri, #{type := ?TYPE} = User) ->
+    case update(RealmUri, User, #{enabled => true}) of
+        {ok, _} -> ok;
+        Error -> Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Sets the value of the `enabled' property to `false'.
+%% See {@link is_enabled/2}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec disable(RealmUri :: uri(), User :: t()) ->
+    ok | {error, any()}.
+
+disable(RealmUri, #{type := ?TYPE} = User) ->
+    case update(RealmUri, User, #{enabled => false}) of
+        {ok, _} -> ok;
+        Error -> Error
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the external representation of the user `User'.
@@ -878,8 +883,7 @@ normalise_username(_) ->
 %% -----------------------------------------------------------------------------
 -spec do_add(RealmUri :: binary(), User :: t()) -> ok | no_return().
 
-do_add(RealmUri, #{sso_opts := #{realm_uri := SSOUri} = SSOOpts} = User0)
-when is_binary(SSOUri) ->
+do_add(RealmUri, #{sso_realm_uri := SSOUri} = User0) when is_binary(SSOUri) ->
     Username = maps:get(username, User0),
 
     %% Key validations first
@@ -887,20 +891,17 @@ when is_binary(SSOUri) ->
     ok = groups_exists_check(RealmUri, maps:get(groups, User0, [])),
 
     %% We split the user into LocalUser, SSOUser and Opts
-    {Opts, User1} = maps_utils:split([sso_opts, password_opts], User0),
+    {Opts, User1} = maps_utils:split([password_opts], User0),
     User2 = apply_password(User1, password_opts(RealmUri, Opts)),
-    {SSOUser0, LocalUser0} = maps_utils:split(
+
+    {SSOUser0, LocalUser} = maps_utils:split(
         [password, authorized_keys], User2
     ),
 
-    LocalUser = LocalUser0#{
-        sso_realm_uri => SSOUri
-    },
-
     SSOUser = type_and_version(SSOUser0#{
         username => Username,
-        groups => maps:get(groups, SSOOpts, []),
-        meta => maps:get(meta, SSOOpts, #{})
+        groups => [],
+        meta => #{}
     }),
 
     ok = maybe_add_sso_user(
@@ -929,6 +930,7 @@ maybe_add_sso_user(true, RealmUri, SSOUri, SSOUser) ->
 
     bondy_realm:is_allowed_sso_realm(RealmUri, SSOUri)
         orelse throw(invalid_sso_realm),
+
     ok = groups_exists_check(SSOUri, maps:get(groups, SSOUser, [])),
 
     %% We first add the user to the SSO realm
@@ -952,60 +954,33 @@ maybe_add_sso_user(false, _, _, _) ->
     Opts :: update_opts()) ->
     ok | no_return().
 
-do_update(
-    RealmUri,
-    User,
-    #{sso_opts := #{realm_uri := SSOUri} = SSOOpts} = Data0,
-    Opts
-) when is_map(User) ->
+do_update(RealmUri, #{sso_realm_uri := SSOUri} = User, Data0, Opts)
+when is_binary(SSOUri) ->
     Username = maps:get(username, User),
 
     case lookup(SSOUri, Username) of
         {error, not_found} ->
             throw(not_such_user);
-
         SSOUser ->
-            Keys = case maps:find(forward_credentials, Opts) of
-                {ok, true} ->
-                    [sso_opts];
-                _ ->
-                    [
-                        sso_opts,
-                        password_opts,
-                        password,
-                        authorized_keys
-                    ]
-            end,
-
-            {SSOData0, LocalData} = maps_utils:split(
-                [password_opts, password, authorized_keys],
-                maps:without(Keys, Data0)
+            {SSOData, LocalData} = maps_utils:split(
+                [password_opts, password, authorized_keys], Data0
             ),
-
-            SSOData1 = case maps:find(groups, SSOOpts) of
-                {ok, Groups} ->
-                    maps:put(groups, Groups, SSOData0);
-                _ ->
-                    SSOData0
-            end,
-
-            SSOData = case maps:find(meta, SSOOpts) of
-                {ok, Meta} ->
-                    maps:put(meta, Meta, SSOData1);
-                _ ->
-                    SSOData1
-            end,
 
             _ = maybe_throw(
-                do_update(SSOUri, SSOUser, SSOData, Opts)
+                do_local_update(SSOUri, SSOUser, SSOData, Opts)
             ),
-            do_update(RealmUri, User, LocalData, Opts)
+            do_local_update(RealmUri, User, LocalData, Opts)
     end;
 
-do_update(RealmUri, User, Data0, Opts0) when is_map(User) ->
+do_update(RealmUri, User, Data, Opts) when is_map(User) ->
+    do_local_update(RealmUri, User, Data, Opts).
+
+
+%% @private
+do_local_update(RealmUri, User, Data0, Opts0) ->
     ok = groups_exists_check(RealmUri, maps:get(groups, Data0, [])),
-    %% We split the user into LocalUser and Opts
-    {UserOpts, Data} = maps_utils:split([sso_opts, password_opts], Data0),
+    %% We split the data into LocalUser and Opts
+    {UserOpts, Data} = maps_utils:split([password_opts], Data0),
     Opts = maps:merge(UserOpts, Opts0),
     NewUser = merge(RealmUri, User, Data, Opts),
     store(RealmUri, NewUser, fun on_update/2).
@@ -1013,11 +988,8 @@ do_update(RealmUri, User, Data0, Opts0) when is_map(User) ->
 
 %% @private
 update_credentials(RealmUri, Username, Data) ->
-    %% We force credentials to be updated and forwarded to the SSO realm if
-    %% defined
     Opts = #{
-        update_credentials => true,
-        forward_credentials => true
+        update_credentials => true
     },
     case update(RealmUri, Username, Data, Opts) of
         {ok, User} ->
@@ -1025,7 +997,6 @@ update_credentials(RealmUri, Username, Data) ->
         Error ->
             Error
     end.
-
 
 
 %% @private
@@ -1067,8 +1038,6 @@ update_groups(RealmUri, Username, Groupnames, Fun) when is_binary(Username) ->
     update_groups(RealmUri, fetch(RealmUri, Username), Groupnames, Fun).
 
 
-
-
 %% @private
 store(RealmUri, #{username := Username} = User, Fun) ->
     case plum_db:put(?PLUMDB_PREFIX(RealmUri), Username, User) of
@@ -1078,7 +1047,6 @@ store(RealmUri, #{username := Username} = User, Fun) ->
         Error ->
             Error
     end.
-
 
 
 %% @private
