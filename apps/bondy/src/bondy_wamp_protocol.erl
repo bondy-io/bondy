@@ -529,7 +529,7 @@ open_session(Extra, St0) ->
                 authprovider => Authprovider,
                 authmethod => Authmethod,
                 authrole => to_bin(Authrole),
-                'x_authroles' => [to_bin(R) || R <- bondy_auth:roles(AuthCtxt)],
+                'x_authroles' => [to_bin(R) || R <- Authroles],
                 authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
                 authextra => Extra
             }
