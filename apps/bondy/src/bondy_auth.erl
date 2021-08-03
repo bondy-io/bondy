@@ -442,8 +442,8 @@ valid_roles(_, undefined) ->
 valid_roles([], _) ->
     {undefined, []};
 
-valid_roles(undefined, _) ->
-    {undefined, []};
+valid_roles(undefined, User) ->
+    valid_roles(all, User);
 
 valid_roles(_, #{username := anonymous}) ->
     %% If anonymous (user) the only valid role (group) is anonymous
@@ -457,22 +457,23 @@ valid_roles(all, User) ->
     {undefined, bondy_rbac_user:groups(User)};
 
 valid_roles(Role, User) when is_binary(Role) ->
-    case lists:member(Role, bondy_rbac_user:groups(User)) of
+    All = bondy_rbac_user:groups(User),
+    case lists:member(Role, All) of
         true ->
             {Role, [Role]};
         false when Role =:= <<"default">> ->
             %% Some clients will send "default" as opposed to NULL (undefined).
             %% Yes, it is very nasty for them to do this.
-            {undefined, []};
+            {undefined, All};
         false ->
             throw(no_such_group)
     end;
 
 valid_roles(Roles, User) ->
     RolesSet = sets:from_list(Roles),
-    GroupsSet = sets:from_list(bondy_rbac_user:groups(User)),
+    AllSet = sets:from_list(bondy_rbac_user:groups(User)),
 
-    RolesSet =:= sets:intersection(RolesSet, GroupsSet)
+    RolesSet =:= sets:intersection(RolesSet, AllSet)
         orelse throw(no_such_group),
 
     {undefined, Roles}.
