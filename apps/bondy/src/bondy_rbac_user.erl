@@ -565,6 +565,7 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
             {error, Reason}
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -704,14 +705,11 @@ change_password(RealmUri, Username, New) when is_binary(New) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_password(RealmUri, Username, New, undefined) ->
-    update_credentials(RealmUri, Username, #{password => New});
-
 change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
         {error, not_found} = Error ->
             Error;
-        #{password := PW} ->
+        #{password := PW} when Old =/= undefined ->
             case bondy_password:verify_string(Old, PW) of
                 true when Old == New ->
                     ok;
@@ -721,7 +719,9 @@ change_password(RealmUri, Username, New, Old) ->
                     {error, bad_signature}
             end;
         _ ->
-            %% User did not have a password or it is an SSO user
+            %% User did not have a password or is an SSO user,
+            %% update_credentials knows how to forward the change to the
+            %% SSO realm
             update_credentials(RealmUri, Username, #{password => New})
     end.
 
@@ -975,6 +975,8 @@ do_update(RealmUri, User, Data0, Opts0) when is_map(User) ->
 
 %% @private
 update_credentials(RealmUri, Username, Data) ->
+    %% We force credentials to be updated and forwarded to the SSO realm if
+    %% defined
     Opts = #{
         update_credentials => true,
         forward_credentials => true
