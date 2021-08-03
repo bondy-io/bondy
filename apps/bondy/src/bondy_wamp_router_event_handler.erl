@@ -116,8 +116,8 @@ handle_event({rbac_user_deleted, RealmUri, Username}, State) ->
     ],
     {ok, State};
 
-handle_event({rbac_user_password_changed, RealmUri, Username}, State) ->
-    Uri = ?BONDY_USER_PASSWORD_CHANGED,
+handle_event({rbac_user_credentials_changed, RealmUri, Username}, State) ->
+    Uri = ?BONDY_USER_CREDENTIALS_CHANGED,
     _ = bondy:publish(
         #{}, Uri, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
     ),

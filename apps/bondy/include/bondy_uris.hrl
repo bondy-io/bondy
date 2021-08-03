@@ -115,7 +115,7 @@
 -define(BONDY_USER_ADDED,          <<"bondy.user.added">>).
 -define(BONDY_USER_DELETED,        <<"bondy.user.deleted">>).
 -define(BONDY_USER_LOGGED_IN,      <<"bondy.user.logged_in">>).
--define(BONDY_USER_PASSWORD_CHANGED, <<"bondy.user.password_changed">>).
+-define(BONDY_USER_CREDENTIALS_CHANGED, <<"bondy.user.credentials_changed">>).
 -define(BONDY_USER_UPDATED,        <<"bondy.user.updated">>).
 -define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
 -define(BONDY_REALM_DELETED,          <<"bondy.realm.deleted">>).
@@ -212,7 +212,7 @@
 -define(BONDY_USER_ADDED_OLD,           <<"bondy.security.user_added">>).
 -define(BONDY_USER_DELETED_OLD,         <<"bondy.security.user_deleted">>).
 -define(BONDY_USER_LOGGED_IN_OLD,       <<"bondy.security.user_logged_in">>).
--define(BONDY_USER_PASSWORD_CHANGED_OLD,     <<"bondy.security.password_changed">>).
+-define(BONDY_USER_CREDENTIALS_CHANGED_OLD,     <<"bondy.security.password_changed">>).
 -define(BONDY_USER_UPDATED_OLD,         <<"bondy.security.user_updated">>).
 -define(BONDY_REALM_CREATED_OLD,            <<"bondy.security.realm_created">>).
 -define(BONDY_REALM_DELETED_OLD,          <<"bondy.security.realm_deleted">>).

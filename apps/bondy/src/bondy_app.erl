@@ -250,7 +250,7 @@ setup_wamp_subscriptions() ->
     _ = bondy:subscribe(
         ?BONDY_PRIV_REALM_URI,
         Opts,
-        ?BONDY_USER_PASSWORD_CHANGED,
+        ?BONDY_USER_CREDENTIALS_CHANGED,
         fun bondy_wamp_http_gateway_api:handle_event/2
     ),
     ok.
