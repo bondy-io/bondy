@@ -691,7 +691,10 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
         Map -> jose_jwk:to_map(Map)
-    end.
+    end;
+
+get_public_key(Uri, Kid) when is_binary(Uri) ->
+    get_public_key(fetch(Uri), Kid).
 
 
 %% -----------------------------------------------------------------------------
@@ -700,7 +703,10 @@ get_public_key(#realm{public_keys = Keys}, Kid) ->
 %% -----------------------------------------------------------------------------
 get_random_kid(#realm{private_keys = Keys}) ->
     Kids = maps:keys(Keys),
-    lists:nth(rand:uniform(length(Kids)), Kids).
+    lists:nth(rand:uniform(length(Kids)), Kids);
+
+get_random_kid(Uri) when is_binary(Uri) ->
+    get_random_kid(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
