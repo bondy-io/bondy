@@ -57,7 +57,7 @@ init(Ctxt) ->
         User =/= undefined orelse throw(invalid_context),
 
         PWD = bondy_rbac_user:password(User),
-        User =/= undefined andalso bondy_password:protocol(PWD) == scram
+        PWD =/= undefined andalso bondy_password:protocol(PWD) == scram
         orelse throw(invalid_context),
 
         {ok, maps:new()}
