@@ -70,7 +70,7 @@
         allow_undefined => false,
         required => false,
         datatype => {list, binary},
-        validator => {list, fun bondy_data_validators:groupname/1}
+        validator => fun bondy_data_validators:groupnames/1
     },
     <<"meta">> => #{
         alias => meta,

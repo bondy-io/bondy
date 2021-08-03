@@ -55,7 +55,9 @@
 -type requirements()    ::  #{
     identification := boolean,
     password := {true, #{protocols := [cra | scram]}} | boolean(),
-    authorized_keys := boolean()
+    authorized_keys := boolean(),
+    any => requirements(),
+    all => requirements()
 }.
 
 -export_type([context/0]).
@@ -455,8 +457,16 @@ valid_roles(all, User) ->
     {undefined, bondy_rbac_user:groups(User)};
 
 valid_roles(Role, User) when is_binary(Role) ->
-    {undefined, Roles} = valid_roles([Role], User),
-    {Role, Roles};
+    case lists:member(Role, bondy_rbac_user:groups(User)) of
+        true ->
+            {Role, [Role]};
+        false when Role =:= <<"default">> ->
+            %% Some clients will send "default" as opposed to NULL (undefined).
+            %% Yes, it is very nasty for them to do this.
+            {undefined, []};
+        false ->
+            throw(no_such_group)
+    end;
 
 valid_roles(Roles, User) ->
     RolesSet = sets:from_list(Roles),
@@ -466,6 +476,7 @@ valid_roles(Roles, User) ->
         orelse throw(no_such_group),
 
     {undefined, Roles}.
+
 
 %% @private
 casefold(anonymous) ->
@@ -548,21 +559,25 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
 
     lists:all(
         fun
-            ({identification, false}) ->
+            Match({identification, false}) ->
                 %% The special case. If the client provided an auth_id /=
                 %% anonymous then the anonymous method is not allowed.
                 UserId == anonymous;
-            ({_, false}) ->
+            Match({_, false}) ->
                 true;
-            ({identification, true}) ->
+            Match({identification, true}) ->
                 UserId =/= anonymous;
-            ({authorized_keys, true}) ->
+            Match({authorized_keys, true}) ->
                 bondy_rbac_user:has_authorized_keys(User);
-            ({password, true}) ->
+            Match({password, true}) ->
                 Password =/= undefined;
-            ({password, {true, #{protocols := Ps}}}) ->
+            Match({password, {true, #{protocols := Ps}}}) ->
                 Password =/= undefined
-                andalso lists:member(bondy_password:protocol(Password), Ps)
+                andalso lists:member(bondy_password:protocol(Password), Ps);
+            Match({any, Any}) ->
+                lists:any(Match, maps:to_list(Any));
+            Match({all, All}) ->
+                lists:any(Match, maps:to_list(All))
         end,
         Requirements
     ).
