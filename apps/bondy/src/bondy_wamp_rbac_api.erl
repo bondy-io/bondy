@@ -193,6 +193,17 @@ handle_call(?BONDY_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
+handle_call(?BONDY_USER_CHANGE_AUTHORIZED_KEYS, #call{} = M, Ctxt) ->
+    %% L is either [Uri, Username, New] or [Uri, Username, New, Old]
+    L = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+
+    case erlang:apply(bondy_rbac_user, change_authorized_keys, L) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{});
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
 handle_call(_, #call{} = M, _) ->
     bondy_wamp_utils:no_such_procedure_error(M).
 
