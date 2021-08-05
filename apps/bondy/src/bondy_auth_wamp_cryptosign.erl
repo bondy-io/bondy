@@ -107,9 +107,7 @@ challenge(Details, Ctxt, State) ->
 
         case lists:member(Key, Keys) of
             true ->
-                % Message = enacl:randombytes(32),
-                Message = <<187,172,178,156,100,104,78,221,32,249,69,117,86,248,250,66,113,22,86,98,229,238,44,121,191,227,190,84,187,131,183,38>>,
-
+                Message = enacl:randombytes(32),
                 NewState = State#{
                     pubkey => Key,
                     message => Message
