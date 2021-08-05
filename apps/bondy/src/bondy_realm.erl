@@ -421,6 +421,7 @@
 -export([lookup/1]).
 -export([password_opts/1]).
 -export([public_keys/1]).
+-export([private_keys/1]).
 -export([security_status/1]).
 -export([sso_realm_uri/1]).
 -export([is_allowed_sso_realm/2]).
@@ -662,6 +663,16 @@ disable_security(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec private_keys(t()) -> [map()].
+
+private_keys(#realm{private_keys = Keys}) ->
+    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)].
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec public_keys(t()) -> [map()].
 
 public_keys(#realm{public_keys = Keys}) ->
@@ -678,7 +689,10 @@ get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
         Map -> jose_jwk:to_map(Map)
-    end.
+    end;
+
+get_private_key(Uri, Kid) when is_binary(Uri) ->
+    get_private_key(fetch(Uri), Kid).
 
 
 %% -----------------------------------------------------------------------------
