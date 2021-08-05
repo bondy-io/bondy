@@ -53,8 +53,8 @@
 ).
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_MSECS, 2 * 60). % 2 mins
--define(EXPIRY_TIME_MSECS(Ts, MSecs), Ts + MSecs + ?LEEWAY_MSECS).
+-define(LEEWAY_SECS, 2 * 60). % 2 mins
+-define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 
 
 
@@ -206,7 +206,7 @@ refresh_token(RealmUri, Issuer, Token) ->
 
     case lookup_token(RealmUri, Issuer, Token) of
         #bondy_oauth2_token{issued_at = Ts}
-        when ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now  ->
+        when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
             {error, oauth2_invalid_grant};
@@ -710,7 +710,7 @@ maybe_cache(Error, _) ->
 %% @private
 cache(Claims, AccessToken) when is_map(Claims) ->
     #{<<"aud">> := RealmUri, <<"exp">> := Secs} = Claims,
-    Opts = #{exp => ?EXPIRY_TIME_MSECS(?NOW, Secs)},
+    Opts = #{exp => ?EXPIRY_TIME_SECS(?NOW, Secs)},
     _ = bondy_cache:put(RealmUri, AccessToken, Claims, Opts),
     ok.
 
@@ -718,7 +718,7 @@ cache(Claims, AccessToken) when is_map(Claims) ->
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
     Now = ?NOW,
-    case ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now of
+    case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
         true ->
             %% ok = bondy_cache:remove(RealmUri, JWT),
             {error, oauth2_invalid_grant};
