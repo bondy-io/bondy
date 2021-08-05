@@ -57,7 +57,7 @@
 -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
 -record(state, {
-    start_time = calendar:local_time()  :: calendar:datetime()
+    start_time = calendar:universal_time()  :: calendar:datetime()
 }).
 
 

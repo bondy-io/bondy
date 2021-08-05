@@ -181,7 +181,7 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
         peer = Peer,
         realm_uri = RealmUri,
         node = bondy_peer_service:mynode(),
-        created = calendar:local_time()
+        created = calendar:universal_time()
     },
     parse_details(Opts, S0).
 
@@ -254,7 +254,7 @@ close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
     Agent = S#session.agent,
     Peer = S#session.peer,
-    Secs = calendar:datetime_to_gregorian_seconds(calendar:local_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
+    Secs = calendar:datetime_to_gregorian_seconds(calendar:universal_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
     ok = bondy_event_manager:notify(
         {session_closed, Id, Realm, Agent, Peer, Secs}),
     true = ets:delete(table(Id), Id),
