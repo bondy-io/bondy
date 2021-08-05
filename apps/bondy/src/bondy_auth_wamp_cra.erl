@@ -123,7 +123,9 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             authmethod => ?WAMP_CRA_AUTH,
             authprovider => ?BONDY_AUTH_PROVIDER,
             nonce => bondy_password_cra:nonce(),
-            timestamp => bondy_utils:iso8601(Microsecs),
+            timestamp => bondy_utils:system_time_to_rfc3339(
+                Microsecs, [{offset, "Z"}, {unit, microsecond}]
+            ),
             session => bondy_auth:session_id(Ctxt)
         }),
         ExpectedSignature = base64:encode(

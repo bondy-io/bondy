@@ -89,7 +89,7 @@
     authroles = []                  ::  [binary()],
     authmethod                      ::  binary() | undefined,
     %% Expiration and Limits
-    created                         ::  calendar:date_time(),
+    created                         ::  pos_integer(),
     expires_in                      ::  pos_integer() | infinity,
     rate = ?DEFAULT_RATE            ::  rate_window(),
     quota = ?DEFAULT_QUOTA          ::  quota_window()
@@ -181,7 +181,7 @@ new(Id, Peer, Realm, Opts) when is_map(Opts) ->
         peer = Peer,
         realm_uri = RealmUri,
         node = bondy_peer_service:mynode(),
-        created = calendar:universal_time()
+        created = erlang:system_time(seconds)
     },
     parse_details(Opts, S0).
 
@@ -254,7 +254,7 @@ close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
     Agent = S#session.agent,
     Peer = S#session.peer,
-    Secs = calendar:datetime_to_gregorian_seconds(calendar:universal_time()) - calendar:datetime_to_gregorian_seconds(S#session.created),
+    Secs = erlang:system_time(seconds) - S#session.created,
     ok = bondy_event_manager:notify(
         {session_closed, Id, Realm, Agent, Peer, Secs}),
     true = ets:delete(table(Id), Id),
@@ -357,10 +357,11 @@ node(Id) when is_integer(Id) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the time at which the session was created, Its value is a
+%% timestamp in seconds.
 %% @end
 %% -----------------------------------------------------------------------------
--spec created(t()) -> calendar:date_time().
+-spec created(t()) -> pos_integer().
 
 created(#session{created = Val}) ->
     Val;
