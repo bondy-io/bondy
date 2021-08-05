@@ -119,7 +119,7 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
         pid = Pid,
         uri = Uri,
         match_policy = MatchPolicy,
-        created = calendar:local_time(),
+        created = calendar:universal_time(),
         options = parse_options(Type, Options)
     }.
 
