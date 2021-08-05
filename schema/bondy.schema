@@ -391,6 +391,12 @@ hidden
 ]}.
 
 
+{mapping, "wamp.uri.strictness", "wamp.uri_strictness", [
+  {default, loose},
+  {datatype, {enum, [loose, strict]}}
+]}.
+
+
 
 %% =============================================================================
 %% OVERLOAD PROTECTION AND LOAD REGULATION
