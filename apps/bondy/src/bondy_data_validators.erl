@@ -330,7 +330,7 @@ authorized_key(_) ->
 -spec permission(Term :: binary()) -> boolean().
 
 permission(Term) ->
-    wamp_uri:is_valid(Term, strict).
+    wamp_uri:is_valid(Term, loose).
 
 
 %% -----------------------------------------------------------------------------
