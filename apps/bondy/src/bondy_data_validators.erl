@@ -376,4 +376,4 @@ existing_atom(_) ->
 -spec realm_uri(Term :: binary()) -> boolean().
 
 realm_uri(Term) ->
-    wamp_uri:is_valid(Term, strict).
+    wamp_uri:is_valid(Term, wamp_config:get(uri_strictness)).
