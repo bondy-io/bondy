@@ -515,10 +515,14 @@ authmethods(Uri) when is_binary(Uri) ->
 %% `Realm'. Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_authmethod(Realm :: t(), Method :: binary()) -> boolean().
+-spec is_allowed_authmethod(Realm :: t() | uri(), Method :: binary()) ->
+    boolean().
 
-is_authmethod(#realm{authmethods = L}, Method) ->
-    lists:member(Method, L).
+is_allowed_authmethod(#realm{authmethods = L}, Method) ->
+    lists:member(Method, L);
+
+is_allowed_authmethod(Uri, Method) when is_binary(Uri) ->
+    is_allowed_authmethod(fetch(Uri), Method).
 
 
 %% -----------------------------------------------------------------------------
