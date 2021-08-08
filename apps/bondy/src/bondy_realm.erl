@@ -468,12 +468,12 @@ apply_config(Filename) ->
                 "Loading configuration file; path=~p",
                 [Filename]
             ),
-            %% Becuase realms can have the sso_realm_uri property wnhich
+            %% Because realms can have the sso_realm_uri property, which
             %% defines another realm where authentication and credential
-            %% management is delegated, we need to ensure all realms in the
+            %% management is delegated to, we need to ensure all realms in the
             %% file are processed based on a precedence graph, so that SSO
             %% realms are created before the realms targetting them.
-            SortedRealms = sort(Realms),
+            SortedRealms = topsort(Realms),
 
             %% We add the realm and allow an update if it
             %% already exists by setting IsStrict argument
@@ -1243,8 +1243,7 @@ gen_private_keys() ->
     ].
 
 
-%% @private
-sort(Realms) ->
+topsort(Realms) ->
     try
         Graph = precedence_graph(Realms),
 
@@ -1286,7 +1285,7 @@ precedence_graph([H|T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
     case maps:find(<<"sso_realm_uri">>, Realm) of
         {ok, SSOUri} ->
-            ok = maybe_add_edge(Graph, SSOUri, H),
+            ok = precedence_graph_add_edge(Graph, SSOUri, H),
             precedence_graph(T, Graph);
         error ->
             precedence_graph(T, Graph)
@@ -1297,7 +1296,7 @@ precedence_graph([], Graph) ->
 
 
 %% @private
-maybe_add_edge(Graph, A, B) ->
+precedence_graph_add_edge(Graph, A, B) ->
     case digraph:vertex(Graph, A) of
         {A, _} ->
             case digraph:add_edge(Graph, A, B) of
