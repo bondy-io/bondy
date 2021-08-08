@@ -28,6 +28,8 @@
 %% module are case sensitice so when using the functions in this module make
 %% sure the inputs you provide are in lowercase to. If you need to convert your
 %% input to lowercase use {@link string:casefold/1}.
+%%
+
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_user).
@@ -37,6 +39,10 @@
 -define(TYPE, user).
 -define(VERSION, <<"1.1">>).
 -define(PLUMDB_PREFIX(RealmUri), {security_users, RealmUri}).
+
+%% TODO resolver function to reconcile sso_realm_uri, meta, groups,
+%% password and authorized_keys. In the case of sso_realm_uri and groups
+%% checking whether they exist.
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 -define(VALIDATOR, ?OPTS_VALIDATOR#{
@@ -210,6 +216,10 @@
 -export([add_or_update/3]).
 -export([authorized_keys/1]).
 -export([change_authorized_keys/3]).
+%% TODO new API
+%% -export([add_authorized_key/2]).
+%% -export([remove_authorized_key/2]).
+%% -export([is_authorized_key/2]).
 -export([change_password/3]).
 -export([change_password/4]).
 -export([disable/2]).
@@ -530,10 +540,22 @@ update(RealmUri, Username, Data) ->
 %% -----------------------------------------------------------------------------
 -spec update(
     RealmUri :: uri(),
-    Username :: binary(),
+    UserOrUsername :: t() | binary(),
     Data :: map(),
     Opts :: update_opts()) ->
     {ok, NewUser :: t()} | {error, any()}.
+
+update(RealmUri, #{type := ?TYPE} = User, Data0, Opts) ->
+    try
+
+        Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
+        do_update(RealmUri, User, Data, Opts)
+    catch
+        error:no_such_user ->
+            {error, no_such_user};
+        throw:Reason ->
+            {error, Reason}
+    end;
 
 update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
     try
@@ -787,14 +809,20 @@ add_group(RealmUri, Users, Groupname) ->
 
 add_groups(RealmUri, Users, Groupnames)  ->
     Fun = fun(Current, ToAdd) ->
-         sets:to_list(
-            sets:union(
-                sets:from_list(Current),
-                sets:from_list(ToAdd)
+        ordsets:to_list(
+            ordsets:union(
+                ordsets:from_list(Current),
+                ordsets:from_list(ToAdd)
             )
         )
     end,
-    update_groups(RealmUri, Users, Groupnames, Fun).
+
+    try
+        update_groups(RealmUri, Users, Groupnames, Fun)
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -825,7 +853,13 @@ remove_groups(RealmUri, Users, Groupnames) ->
     Fun = fun(Current, ToRemove) ->
         Current -- ToRemove
     end,
-    update_groups(RealmUri, Users, Groupnames, Fun).
+
+    try
+        update_groups(RealmUri, Users, Groupnames, Fun)
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -1012,7 +1046,7 @@ update_credentials(RealmUri, Username, Data) ->
     Users :: all | t() | list(t()) | username() | list(username()),
     Groupnames :: [bondy_rbac_group:name()],
     Fun :: fun((list(), list()) -> list())
-) -> ok.
+) -> ok | no_return().
 
 update_groups(RealmUri, all, Groupnames, Fun) ->
     plum_db:fold(fun
