@@ -499,16 +499,15 @@ apply_config(Filename) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the list of supported authentication methods for Realm.
-%% If the
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authmethods(Realm :: t() | uri()) -> [binary()].
 
-authmethods(Uri) when is_binary(Uri) ->
-    authmethods(fetch(Uri));
-
 authmethods(#realm{authmethods = Val}) ->
-    Val.
+    Val;
+
+authmethods(Uri) when is_binary(Uri) ->
+    authmethods(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -532,11 +531,11 @@ is_authmethod(#realm{authmethods = L}, Method) ->
 %% -----------------------------------------------------------------------------
 -spec sso_realm_uri(Realm :: t() | uri()) -> maybe(uri()).
 
-sso_realm_uri(Uri) when is_binary(Uri) ->
-    sso_realm_uri(fetch(Uri));
-
 sso_realm_uri(#realm{sso_realm_uri = Val}) ->
-    Val.
+    Val;
+
+sso_realm_uri(Uri) when is_binary(Uri) ->
+    sso_realm_uri(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -550,12 +549,12 @@ sso_realm_uri(#realm{sso_realm_uri = Val}) ->
 -spec is_allowed_sso_realm(
     Realm :: t() | uri(), SSORealmUri :: uri()) -> boolean().
 
-is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
-    is_allowed_sso_realm(fetch(Uri), SSORealmUri);
-
 is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
     %% TODO change sso_realm_uri to allowd_sso_realms
-    Val =:= SSORealmUri.
+    Val =:= SSORealmUri;
+
+is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
+    is_allowed_sso_realm(fetch(Uri), SSORealmUri).
 
 
 
@@ -568,11 +567,11 @@ is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec is_sso_realm(Realm :: t() | uri()) -> boolean().
 
-is_sso_realm(Uri) when is_binary(Uri) ->
-    is_sso_realm(fetch(Uri));
-
 is_sso_realm(#realm{is_sso_realm = Val}) ->
-    Val.
+    Val;
+
+is_sso_realm(Uri) when is_binary(Uri) ->
+    is_sso_realm(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -586,11 +585,10 @@ is_sso_realm(#realm{is_sso_realm = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec allow_connections(Realm :: t() | uri()) -> boolean().
 
-allow_connections(Uri) when is_binary(Uri) ->
-    allow_connections(fetch(Uri));
-
 allow_connections(#realm{allow_connections = Val}) ->
-    Val.
+    Val;
+allow_connections(Uri) when is_binary(Uri) ->
+    allow_connections(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -623,7 +621,7 @@ security_status(Term) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec enable_security(t()) -> ok.
+-spec enable_security(t() | uri()) -> ok.
 
 enable_security(#realm{uri = Uri} = Realm) ->
     _ = update(Realm, #{
@@ -640,7 +638,7 @@ enable_security(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(t()) -> ok | {error, forbidden}.
+-spec disable_security(t() | uri()) -> ok | {error, forbidden}.
 
 disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, forbidden};
@@ -663,27 +661,33 @@ disable_security(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec private_keys(t()) -> [map()].
+-spec private_keys(t() | uri()) -> [map()].
 
 private_keys(#realm{private_keys = Keys}) ->
-    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)].
+    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
+
+private_keys(Uri) when is_binary(Uri) ->
+    private_keys(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec public_keys(t()) -> [map()].
+-spec public_keys(t() | uri()) -> [map()].
 
 public_keys(#realm{public_keys = Keys}) ->
-    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)].
+    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
+
+public_keys(Uri) when is_binary(Uri) ->
+    public_keys(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_private_key(t(), Kid :: integer()) -> map() | undefined.
+-spec get_private_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
@@ -699,7 +703,7 @@ get_private_key(Uri, Kid) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_public_key(t(), Kid :: integer()) -> map() | undefined.
+-spec get_public_key(t() | uri(), Kid :: binary()) -> map() | undefined.
 
 get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
@@ -715,6 +719,8 @@ get_public_key(Uri, Kid) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec get_random_kid(t() | uri()) -> binary().
+
 get_random_kid(#realm{private_keys = Keys}) ->
     Kids = maps:keys(Keys),
     lists:nth(rand:uniform(length(Kids)), Kids);
@@ -851,12 +857,6 @@ add(Map0) ->
 %% -----------------------------------------------------------------------------
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
-update(?BONDY_PRIV_REALM_URI, _) ->
-    error(forbidden);
-
-update(Uri, Data) when is_binary(Uri) ->
-    do_update(fetch(Uri), Data);
-
 update(#realm{uri = ?BONDY_PRIV_REALM_URI}, _) ->
     error(forbidden);
 
@@ -868,7 +868,13 @@ update(#realm{uri = ?BONDY_REALM_URI} = Realm, Data0) ->
 update(#realm{uri = Uri} = Realm, Data0) ->
     Data1 = maps:put(<<"uri">>, Uri, Data0),
     Data = maps_utils:validate(Data1, ?REALM_UPDATE_VALIDATOR),
-    do_update(Realm, Data).
+    do_update(Realm, Data);
+
+update(?BONDY_PRIV_REALM_URI, _) ->
+    error(forbidden);
+
+update(Uri, Data) when is_binary(Uri) ->
+    do_update(fetch(Uri), Data).
 
 
 
@@ -877,6 +883,10 @@ update(#realm{uri = Uri} = Realm, Data0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec delete(t() | uri()) -> ok | {error, forbidden | active_users}.
+
+
+delete(#realm{uri = Uri}) ->
+    delete(Uri);
 
 delete(?BONDY_PRIV_REALM_URI) ->
     {error, forbidden};
@@ -895,10 +905,7 @@ delete(Uri) when is_binary(Uri) ->
             ok;
         L when length(L) > 0 ->
             {error, active_users}
-    end;
-
-delete(#realm{uri = Uri}) ->
-    delete(Uri).
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -1189,6 +1196,9 @@ do_lookup(Uri) ->
         #realm{} = Realm ->
             Realm;
         undefined ->
+            {error, not_found};
+        Data ->
+            _ = lager:warning("Invalid realm data; data=~p", [Data]),
             {error, not_found}
     end.
 
@@ -1282,6 +1292,7 @@ precedence_graph([], Graph) ->
     Graph.
 
 
+%% @private
 maybe_add_edge(Graph, A, B) ->
     case digraph:vertex(Graph, A) of
         {A, _} ->
