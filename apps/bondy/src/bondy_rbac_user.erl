@@ -1034,7 +1034,7 @@ update_groups(RealmUri, Users, Groupnames, Fun) when is_list(Users) ->
     ok;
 
 update_groups(RealmUri, #{type := ?TYPE} = User, Groupnames, Fun)
-when is_function(2, Fun) ->
+when is_function(Fun, 2) ->
     Update = #{groups => Fun(maps:get(groups, User), Groupnames)},
     case update(RealmUri, User, Update) of
         {ok, _} -> ok;
