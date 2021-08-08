@@ -38,7 +38,10 @@ all() ->
         resolve,
         add_sso_user_to_realm,
         update,
-        change_password
+        change_password,
+        update_groups,
+        add_group,
+        remove_group
     ].
 
 
@@ -94,7 +97,15 @@ add_sso_realm(RealmUri) ->
         authmethods => [?WAMP_CRA_AUTH, ?WAMP_CRYPTOSIGN_AUTH],
         security_enabled => true,
         is_sso_realm => true,
-        allow_connections => false
+        allow_connections => false,
+        groups => [
+            #{
+                name => <<"sso_g1">>
+            },
+            #{
+                name => <<"sso_g2">>
+            }
+        ]
     },
     _ = bondy_realm:add(Config),
     ok.
@@ -124,6 +135,14 @@ add_realm(RealmUri, SSORealmUri, _KeyPairs, Users) ->
                 uri => <<"">>,
                 match => <<"prefix">>,
                 roles => <<"all">>
+            }
+        ],
+        groups => [
+            #{
+                name => <<"a">>
+            },
+            #{
+                name => <<"b">>
             }
         ],
         sources => [
@@ -318,4 +337,106 @@ change_password(_) ->
                 bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
             )
         )
+    ).
+
+
+update_groups(_) ->
+    User0 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
+    SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+
+    ?assertEqual(
+        [],
+        bondy_rbac_user:groups(User0)
+    ),
+
+    ?assertEqual(
+        [],
+        bondy_rbac_user:groups(SSOUser0)
+    ),
+
+    ?assertMatch(
+        {ok, #{groups := [<<"a">>]}},
+        bondy_rbac_user:update(
+            ?REALM1_URI, ?SSOU1, #{<<"groups">> => [<<"a">>]}
+        )
+    ),
+
+    ?assertMatch(
+        {ok, #{groups := [<<"sso_g1">>]}},
+        bondy_rbac_user:update(
+            ?SSO_REALM_URI,
+            ?SSOU1,
+            #{<<"groups">> => [<<"sso_g1">>]}
+        )
+    ).
+
+add_group(_) ->
+    User0 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
+    SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+
+    ?assertEqual(
+        [<<"a">>],
+        bondy_rbac_user:groups(User0)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:add_group(?REALM1_URI, ?SSOU1, <<"b">>)
+    ),
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1))
+    ),
+    ?assertEqual(
+        {error, {no_such_groups, [<<"c">>]}},
+        bondy_rbac_user:add_group(?REALM1_URI, ?SSOU1, <<"c">>)
+    ),
+
+
+    ?assertEqual(
+        [<<"sso_g1">>],
+        bondy_rbac_user:groups(SSOUser0)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:add_group(?SSO_REALM_URI, ?SSOU1, <<"sso_g2">>)
+    ),
+    ?assertEqual(
+        [<<"sso_g1">>, <<"sso_g2">>],
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1))
+    ),
+    ?assertEqual(
+        {error, {no_such_groups, [<<"sso_g3">>]}},
+        bondy_rbac_user:add_group(?SSO_REALM_URI, ?SSOU1, <<"sso_g3">>)
+    ).
+
+
+
+remove_group(_) ->
+    User0 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
+    SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+
+    ?assertEqual(
+        [<<"a">>, <<"b">>],
+        bondy_rbac_user:groups(User0)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:remove_group(?REALM1_URI, ?SSOU1, <<"b">>)
+    ),
+    ?assertEqual(
+        [<<"a">>],
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1))
+    ),
+
+    ?assertEqual(
+        [<<"sso_g1">>, <<"sso_g2">>],
+        bondy_rbac_user:groups(SSOUser0)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:remove_group(?SSO_REALM_URI, ?SSOU1, <<"sso_g2">>)
+    ),
+    ?assertEqual(
+        [<<"sso_g1">>],
+        bondy_rbac_user:groups(bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1))
     ).
