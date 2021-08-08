@@ -414,7 +414,8 @@
 -export([get_private_key/2]).
 -export([get_public_key/2]).
 -export([get_random_kid/1]).
--export([is_authmethod/2]).
+-export([is_allowed_sso_realm/2]).
+-export([is_allowed_authmethod/2]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
 -export([list/0]).
@@ -424,7 +425,6 @@
 -export([private_keys/1]).
 -export([security_status/1]).
 -export([sso_realm_uri/1]).
--export([is_allowed_sso_realm/2]).
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
