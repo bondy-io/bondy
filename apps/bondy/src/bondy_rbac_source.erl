@@ -411,7 +411,6 @@ when Keyword == all orelse Keyword == anonymous ->
     Masked = bondy_cidr:anchor_mask(maps:get(cidr, Source)),
     %% TODO check if there are already 'user' sources for this CIDR
     %% with the same source
-    %% TODO
     Authmethod = maps:get(authmethod, Source),
     ok = plum_db:put(Prefix, {Keyword, Masked, Authmethod}, Source),
     ok;
