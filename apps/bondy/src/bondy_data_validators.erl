@@ -25,8 +25,6 @@
 -export([groupname/1]).
 -export([groupnames/1]).
 -export([password/1]).
--export([permission/1]).
--export([policy_resource/1]).
 -export([realm_uri/1]).
 -export([rolename/1]).
 -export([rolenames/1]).
@@ -173,7 +171,7 @@ groupnames(L) when is_list(L) ->
             [],
             L
         ),
-        {ok, Valid}
+        {ok, lists:reverse(Valid)}
     catch
         throw:abort ->
             false
@@ -321,31 +319,6 @@ authorized_key(Term) when is_binary(Term) ->
 
 authorized_key(_) ->
     false.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec permission(Term :: binary()) -> boolean().
-
-permission(Term) ->
-    wamp_uri:is_valid(Term, loose).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec policy_resource(Term :: uri() | any) -> {ok, term()} | boolean().
-
-policy_resource(any) ->
-    {ok, any};
-policy_resource(<<"any">>) ->
-    {ok, any};
-policy_resource(Term) ->
-    %% We need to know the match strategy to validate the URI
-    is_binary(Term).
 
 
 %% -----------------------------------------------------------------------------

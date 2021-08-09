@@ -986,7 +986,7 @@ validate_rbac_config(Realm, Map) ->
         || Data <- maps:get(<<"sources">>, Map, [])
     ],
     Grants = [
-        bondy_rbac_policy:new(Data)
+        bondy_rbac:request(Data)
         || Data <- maps:get(<<"grants">>, Map, [])
     ],
     #{
@@ -1042,7 +1042,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_policy:grant(Uri, Grant))
+        ok = maybe_error(bondy_rbac:grant(Uri, Grant))
         || Grant <- Grants
     ],
 

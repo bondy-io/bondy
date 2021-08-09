@@ -347,7 +347,7 @@ remove(RealmUri, Name) ->
 
         %% delete any associated grants, so if a group with the same name
         %% is added again, they don't pick up these grants
-        ok = bondy_rbac_policy:revoke_group(RealmUri, Name),
+        ok = bondy_rbac:revoke_group(RealmUri, Name),
 
         %% Delete the group out of any user or group's `groups` property.
         %% This is very slow as we have to iterate over all the roles (users and
