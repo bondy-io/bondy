@@ -598,7 +598,7 @@ remove(RealmUri, Username0) ->
 
         %% delete any associated grants, so if a user with the same name
         %% is added again, they don't pick up these grants
-        ok = bondy_rbac_policy:revoke_user(RealmUri, Username),
+        ok = bondy_rbac:revoke_user(RealmUri, Username),
 
         %% We finally delete the user
         ok = plum_db:delete(?PLUMDB_PREFIX(RealmUri), Username),
