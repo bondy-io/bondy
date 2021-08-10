@@ -303,6 +303,27 @@
   end
 }.
 
+%% -----------------------------------------------------------------------------
+%% @doc The default expiration time on or after which authentication ticket
+%% MUST NOT be accepted for processing.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.expiry_time", "bondy.security.ticket.expiry_time_secs",[
+  {default, "30d"},
+  {datatype, {duration, s}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximum expiration time on or after which authentication ticket MUST NOT be
+%% accepted for processing.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.max_expiry_time", "bondy.security.ticket.max_expiry_time_secs",[
+{default, "30d"},
+{datatype, {duration, s}}
+]}.
 
 
 %% -----------------------------------------------------------------------------
