@@ -48,32 +48,34 @@
 %% @doc @throws wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
-validate_call_args(Call, Ctxt, Min) ->
-    validate_call_args(Call, Ctxt, Min, Min).
+validate_call_args(Msg, Ctxt, Min) ->
+    validate_call_args(Msg, Ctxt, Min, Min).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc @throws wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
-validate_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, false).
+validate_call_args(Msg, Ctxt, Min, Max) ->
+    Len = args_len(Msg#call.arguments),
+    do_validate_call_args(Msg, Ctxt, Min, Max, Len, false).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc @throws wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
-validate_admin_call_args(Call, Ctxt, Min) ->
-    validate_admin_call_args(Call, Ctxt, Min, Min).
+validate_admin_call_args(Msg, Ctxt, Min) ->
+    validate_admin_call_args(Msg, Ctxt, Min, Min).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc @throws wamp_message:error()
 %% @end
 %% -----------------------------------------------------------------------------
-validate_admin_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, true).
+validate_admin_call_args(Msg, Ctxt, Min, Max) ->
+    Len = args_len(Msg#call.arguments),
+    do_validate_call_args(Msg, Ctxt, Min, Max, Len, true).
 
 
 
@@ -82,10 +84,10 @@ validate_admin_call_args(Call, Ctxt, Min, Max) ->
 %% @end
 %% -----------------------------------------------------------------------------
 maybe_error(ok, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [], #{});
+    wamp_message:result(M#call.request_id, #{});
 
 maybe_error({ok, Val}, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{});
+    wamp_message:result(M#call.request_id, #{}, [Val]);
 
 maybe_error({'EXIT', {Reason, _}}, M) ->
     maybe_error({error, Reason}, M);
@@ -107,7 +109,7 @@ maybe_error({error, Reason}, #call{} = M) ->
     );
 
 maybe_error(Val, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{}).
+    wamp_message:result(M#call.request_id, #{}, [Val]).
 
 
 %% -----------------------------------------------------------------------------
@@ -190,114 +192,119 @@ no_such_session_error(SessionId) when is_integer(SessionId) ->
 -spec do_validate_call_args(
     wamp_call(),
     bondy_context:t(),
-    MinArity :: integer(),
-    MaxArity :: integer(),
+    MinArity :: pos_integer(),
+    MaxArity :: pos_integer(),
+    Len :: pos_integer(),
     AdminOnly :: boolean()) -> Args :: list() | no_return().
 
-do_validate_call_args(#call{arguments = L} = M, _, Min, _, _)
-when length(L) + 1 < Min ->
+do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
     E = wamp_message:error(
         ?CALL,
-        M#call.request_id,
+        Msg#call.request_id,
         #{},
         ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of arguments.">>],
+        [<<"Invalid number of positional arguments.">>],
         #{
             description =>
             <<"The procedure requires at least ",
             (integer_to_binary(Min))/binary,
-            " arguments.">>
+            " positional arguments.">>
         }
     ),
     error(E);
 
-do_validate_call_args(#call{arguments = L} = M, _, _, Max, _)
-when length(L) > Max ->
+do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
     E = wamp_message:error(
         ?CALL,
-        M#call.request_id,
+        Msg#call.request_id,
         #{},
         ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of arguments.">>],
+        [<<"Invalid number of positional arguments.">>],
         #{
             description =>
             <<"The procedure accepts at most ",
             (integer_to_binary(Max))/binary,
-            " arguments.">>
+            " positional arguments.">>
         }
     ),
     error(E);
 
-do_validate_call_args(#call{arguments = []} = M, Ctxt, Min, _, AdminOnly) ->
+do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     %% We are missing the RealmUri argument, we default to the session's Realm
-    case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
-        {false, Uri} ->
+    case bondy_context:realm_uri(Ctxt) of
+        Uri when AdminOnly == false ->
             [Uri];
-        {true, ?BONDY_REALM_URI} when Min == 0 ->
+        ?BONDY_REALM_URI when AdminOnly == true andalso Min == 0 ->
             [];
-        {true, ?BONDY_REALM_URI} ->
+        ?BONDY_REALM_URI when AdminOnly == true ->
             [?BONDY_REALM_URI];
-        {_, _} ->
-            error(unauthorized(M))
+        _ ->
+            error(unauthorized(Msg, Ctxt))
     end;
 
 do_validate_call_args(
-    #call{arguments = [Uri|_] = L} = M, Ctxt, Min, _, AdminOnly)
-    when length(L) >= Min ->
-    %% A call can only proceed if the session's Realm is the one being
-    %% modified, unless the session's Realm is the Root Realm in which
-    %% case any Realm can be modified
-    case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
-        {false, Uri} ->
+    #call{arguments = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
+    when Len >= Min ->
+    %% A call can only proceed if the session's Realm matches the one passed in
+    %% the arguments, unless the session's Realm is the Root Realm which allows
+    %% operations on other realms
+    case bondy_context:realm_uri(Ctxt) of
+        Uri when AdminOnly == false ->
             %% Matches arg URI
-            L;
-        {_, ?BONDY_REALM_URI} ->
+            to_list(Msg#call.arguments);
+        ?BONDY_REALM_URI ->
             %% Users logged in root realm can operate on any realm
-            L;
-        {_, _} ->
-            error(unauthorized(M))
+            to_list(Msg#call.arguments);
+        _ ->
+            error(unauthorized(Msg, Ctxt))
     end;
 
-do_validate_call_args(
-    #call{arguments = L} = M, Ctxt, Min, _, AdminOnly)
-    when length(L) + 1 >= Min ->
+do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     %% We are missing the RealmUri argument, we default to the session's Realm
-    %% A call can only proceed if the session's Realm is the one being
-    %% modified, unless the session's Realm is the Root Realm in which
-    %% case any Realm can be modified
+    %% A call can only proceed if the session's Realm matches the one passed in
+    %% the arguments, unless the session's Realm is the Root Realm which allows
+    %% operations on other realms
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            [Uri|L];
+            [Uri | to_list(Msg#call.arguments)];
         {_, ?BONDY_REALM_URI} ->
-            [?BONDY_REALM_URI|L];
+            [?BONDY_REALM_URI | to_list(Msg#call.arguments)];
         {_, _} ->
-            error(unauthorized(M))
+            error(unauthorized(Msg, Ctxt))
     end.
 
 
 %% @private
-unauthorized(#subscribe{} = M) ->
-    unauthorized(?SUBSCRIBE, M#subscribe.request_id);
-unauthorized(#unsubscribe{} = M) ->
-    unauthorized(?UNSUBSCRIBE, M#unsubscribe.request_id);
-unauthorized(#register{} = M) ->
-    unauthorized(?REGISTER, M#register.request_id);
-unauthorized(#unregister{} = M) ->
-    unauthorized(?REGISTER, M#unregister.request_id);
-unauthorized(#call{} = M) ->
-    unauthorized(?CALL, M#call.request_id);
-unauthorized(#cancel{} = M) ->
-    unauthorized(?CANCEL, M#cancel.request_id).
+unauthorized(#subscribe{} = M, Ctxt) ->
+    unauthorized(?SUBSCRIBE, M#subscribe.request_id, Ctxt);
+
+unauthorized(#unsubscribe{} = M, Ctxt) ->
+    unauthorized(?UNSUBSCRIBE, M#unsubscribe.request_id, Ctxt);
+
+unauthorized(#register{} = M, Ctxt) ->
+    unauthorized(?REGISTER, M#register.request_id, Ctxt);
+
+unauthorized(#unregister{} = M, Ctxt) ->
+    unauthorized(?REGISTER, M#unregister.request_id), Ctxt;
+
+unauthorized(#call{} = M, Ctxt) ->
+    unauthorized(?CALL, M#call.request_id, Ctxt);
+
+unauthorized(#cancel{} = M, Ctxt) ->
+    unauthorized(?CANCEL, M#cancel.request_id, Ctxt).
 
 
-unauthorized(Type, ReqId) ->
+%% @private
+unauthorized(Type, ReqId, Ctxt) ->
+    Uri = bondy_context:realm_uri(Ctxt),
     Mssg = <<
         "You have no authorisation to perform this operation on this realm."
     >>,
     Description = <<
-        "The operation you've requested is a targeting a Realm "
-        "that is not your session's realm or the operation is only "
-        "supported when you are logged into the Bondy realm",
+        "The operation you've requested is targeting a realm ",
+        $\s, $(, $", Uri/binary, $", $), $,,
+        " that is not your session's realm or the operation is only "
+        "supported when performed by a session on the Bondy Master Realm.",
         $\s, $(, $", (?BONDY_REALM_URI)/binary, $", $), $.
     >>,
     wamp_message:error(
@@ -309,3 +316,12 @@ unauthorized(Type, ReqId) ->
         #{description => Description}
     ).
 
+
+%% @private
+args_len(undefined) -> 0;
+args_len(L) when is_list(L) -> length(L).
+
+
+%% @private
+to_list(undefined) -> [];
+to_list(L) when is_list(L) -> L.
