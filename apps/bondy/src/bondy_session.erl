@@ -127,6 +127,7 @@
 -export([list_peer_ids/1]).
 -export([list_peer_ids/2]).
 -export([lookup/1]).
+-export([lookup/2]).
 -export([new/3]).
 -export([new/4]).
 -export([open/3]).
@@ -465,6 +466,25 @@ lookup(Id) ->
     case do_lookup(Id) of
         #session{} = Session ->
             Session;
+        Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Retrieves the session identified by Id from the tuplespace or 'not_found'
+%% if it doesn't exist.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(uri(), id()) -> t() | {error, not_found}.
+
+lookup(RealmUri, Id) ->
+    case do_lookup(Id) of
+        #session{realm_uri = RealmUri} = Session ->
+            Session;
+        #session{} ->
+            {error, not_found};
         Error ->
             Error
     end.
