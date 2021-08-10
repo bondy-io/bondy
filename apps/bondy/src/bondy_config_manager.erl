@@ -96,6 +96,7 @@
             {security_users, ram_disk},
             %% disk
             {api_gateway, disk},
+            {bondy_auth_ticket, disk},
             {oauth2_refresh_tokens, disk}
         ]}
     ]},
@@ -234,7 +235,14 @@ do_init() ->
     State = undefined,
     ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS),
+    ok = setup_mods(),
     apply_private_config(prepare_private_config(), State).
+
+
+%% @private
+setup_mods() ->
+    ok = bondy_json:setup(),
+    ok.
 
 
 %% @private
