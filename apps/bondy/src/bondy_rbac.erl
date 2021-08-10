@@ -197,8 +197,11 @@
 %% @doc Returns 'ok' or an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec authorize(binary(), binary(), bondy_context:t()) ->
+-spec authorize(binary(), binary(), bondy_context:t() | context()) ->
     ok | no_return().
+
+authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
+    do_authorize(Permission, Resource, Ctxt);
 
 authorize(Permission, Resource, Ctxt) ->
     case bondy_context:is_security_enabled(Ctxt) of
@@ -660,18 +663,18 @@ validate(Data) ->
 validate_v1(Data) ->
     Req0 = maps_utils:validate(Data, ?GRANT_REQ_VALIDATOR_V1),
     {Resource, Req1} = maps_utils:split([uri, match], Req0),
-    Req2 = maps:put(resources, [validate_resource(Resource)], Req1),
+    Req2 = maps:put(resources, [validate_resources([Resource])], Req1),
     maps:put(type, request, Req2).
 
 validate_v2(Data) ->
     Req0 = maps_utils:validate(Data, ?GRANT_REQ_VALIDATOR_V2),
-    Req1 = maps:update_with(resources, fun validate_resource/1, Req0),
+    Req1 = maps:update_with(resources, fun validate_resources/1, Req0),
     maps:put(type, request, Req1).
 
 
 %% @private
-validate_resource(Resource) ->
-    validate_uri_match(normalise_resource(Resource)).
+validate_resources(Resources) ->
+    [validate_uri_match(normalise_resource(R)) || R <- Resources].
 
 
 %% @private
