@@ -125,6 +125,10 @@
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
       {security,[
+          {ticket, [
+              {expiry_time_secs, 300},
+              {max_expiry_time_secs, 600}
+            ]},
           {password,
                [{cra,[{kdf,pbkdf2}]},
                 {scram,[{kdf,pbkdf2}]},

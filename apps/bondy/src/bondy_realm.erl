@@ -106,6 +106,7 @@
         datatype => boolean,
         default => false
     },
+    %% TODO change sso_realm_uri to allowed_sso_realms
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
         key => <<"sso_realm_uri">>,
@@ -147,10 +148,15 @@
         alias => private_keys,
         key => <<"private_keys">>,
         required => true,
-        allow_undefined => false,
-        allow_null => false,
-        default => fun gen_private_keys/0,
-        validator => fun validate_private_keys/1
+        default => fun gen_keys/0,
+        validator => fun validate_keys/1
+    },
+    <<"encryption_keys">> => #{
+        alias => encryption_keys,
+        key => <<"encryption_keys">>,
+        required => true,
+        default => fun gen_encryption_keys/0,
+        validator => fun validate_encryption_keys/1
     }
 }).
 
@@ -195,6 +201,7 @@
         required => false,
         datatype => boolean
     },
+    %% TODO change sso_realm_uri to allowed_sso_realms
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
         key => <<"sso_realm_uri">>,
@@ -232,7 +239,13 @@
         alias => private_keys,
         key => <<"private_keys">>,
         required => false,
-        validator => fun validate_private_keys/1
+        validator => fun validate_keys/1
+    },
+    <<"encryption_keys">> => #{
+        alias => encryption_keys,
+        key => <<"encryption_keys">>,
+        required => false,
+        validator => fun validate_encryption_keys/1
     }
 }).
 
@@ -259,6 +272,7 @@
         ?TRUST_AUTH,
         ?WAMP_ANON_AUTH,
         ?WAMP_CRA_AUTH,
+        % ?WAMP_SCRAM_AUTH,
         ?PASSWORD_AUTH
     ],
     security_enabled => true, % but we allow anonymous access
@@ -380,13 +394,18 @@
     security_enabled = true         ::  boolean(),
     is_sso_realm = false            ::  boolean(),
     allow_connections = true        ::  boolean(),
+    %% TODO change sso_realm_uri to allowed_sso_realms
     sso_realm_uri                   ::  maybe(uri()),
-    private_keys = #{}              ::  map(),
-    public_keys = #{}               ::  map(),
-    password_opts                   ::  bondy_password:opts() | undefined
+    private_keys = #{}              ::  keyset(),
+    public_keys = #{}               ::  keyset(),
+    password_opts                   ::  bondy_password:opts() | undefined,
+    encryption_keys = #{}           ::  keyset(),
+    info = #{}                      ::  map()
 }).
 
 -type t()                           ::  #realm{}.
+-type kid()                         ::  binary().
+-type keyset()                      ::  #{kid() => map()}.
 -type external()                    ::  #{
     uri := uri(),
     description :=  binary(),
@@ -409,12 +428,15 @@
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
+-export([encryption_keys/1]).
 -export([exists/1]).
 -export([fetch/1]).
 -export([get/1]).
 -export([get/2]).
+-export([get_encryption_key/2]).
 -export([get_private_key/2]).
 -export([get_public_key/2]).
+-export([get_random_encryption_kid/1]).
 -export([get_random_kid/1]).
 -export([is_allowed_sso_realm/2]).
 -export([is_allowed_authmethod/2]).
@@ -423,8 +445,8 @@
 -export([list/0]).
 -export([lookup/1]).
 -export([password_opts/1]).
--export([public_keys/1]).
 -export([private_keys/1]).
+-export([public_keys/1]).
 -export([security_status/1]).
 -export([sso_realm_uri/1]).
 -export([to_external/1]).
@@ -733,6 +755,55 @@ get_random_kid(#realm{private_keys = Keys}) ->
 
 get_random_kid(Uri) when is_binary(Uri) ->
     get_random_kid(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec encryption_keys(t() | uri()) -> [map()].
+
+encryption_keys(#realm{encryption_keys = Keys} = Realm0)
+when map_size(Keys) == 0 ->
+    Data = #{<<"encryption_keys">> => gen_encryption_keys()},
+    Realm = merge_and_store(Realm0, Data),
+    encryption_keys(Realm);
+
+encryption_keys(#realm{encryption_keys = Keys}) ->
+    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
+
+encryption_keys(Uri) when is_binary(Uri) ->
+    encryption_keys(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_encryption_key(t() | uri(), Kid :: binary()) -> map() | undefined.
+
+get_encryption_key(#realm{encryption_keys = Keys}, Kid) ->
+    case maps:get(Kid, Keys, undefined) of
+        undefined -> undefined;
+        Map -> jose_jwk:to_map(Map)
+    end;
+
+get_encryption_key(Uri, Kid) when is_binary(Uri) ->
+    get_encryption_key(fetch(Uri), Kid).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_random_encryption_kid(t() | uri()) ->  map().
+
+get_random_encryption_kid(#realm{encryption_keys = Keys}) ->
+    Kids = maps:keys(Keys),
+    lists:nth(rand:uniform(length(Kids)), Kids);
+
+get_random_encryption_kid(Uri) when is_binary(Uri) ->
+    get_random_encryption_kid(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1094,26 +1165,22 @@ do_update(Realm0, Map) ->
 
 %% @private
 merge_and_store(Realm0, Map) ->
-    Realm1 = maps:fold(fun fold_props/3, Realm0, Map),
-    Realm2 = Realm1#realm{
-        %% TODO derive password options based on authmethods
-        password_opts = get_password_opts(Realm1#realm.authmethods)
-    },
+    Realm = maps:fold(fun fold_props/3, Realm0, Map),
 
+    ok = check_integrity_constraints(Realm),
+    ok = check_sso_realm_exists(Realm#realm.sso_realm_uri),
 
-    ok = check_integrity_constraints(Realm2),
-    ok = check_sso_realm_exists(Realm2#realm.sso_realm_uri),
-
-    Uri = Realm2#realm.uri,
-    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm2),
+    Uri = Realm#realm.uri,
+    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
 
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
     %% elements have been validated.
-    RBACData = validate_rbac_config(Realm2, Map),
-    ok = apply_rbac_config(Realm2, RBACData),
+    RBACData = validate_rbac_config(Realm, Map),
+    ok = apply_rbac_config(Realm, RBACData),
 
-    Realm2.
+    Realm.
+
 
 
 %% @private
@@ -1121,7 +1188,11 @@ fold_props(<<"allow_connections">>, V, Realm) ->
     Realm#realm{allow_connections = V};
 
 fold_props(<<"authmethods">>, V, Realm) ->
-    Realm#realm{authmethods = V};
+    Realm#realm{
+        authmethods = V,
+        %% TODO derive password options based on authmethods
+        password_opts = get_password_opts(V)
+    };
 
 fold_props(<<"description">>, V, Realm) ->
     Realm#realm{description = V};
@@ -1145,6 +1216,9 @@ fold_props(<<"sso_realm_uri">>, V, Realm) ->
 
 fold_props(<<"private_keys">>, V, Realm) ->
     set_keys(Realm, V);
+
+fold_props(<<"encryption_keys">>, V, Realm) ->
+    set_encryption_keys(Realm, V);
 
 fold_props(_, _, Realm) ->
     %% We ignote the rest of the properties.
@@ -1174,24 +1248,39 @@ on_delete(Uri) ->
 set_keys(Realm, undefined) ->
     Realm;
 
-set_keys(#realm{private_keys = Keys} = Realm, KeyList) ->
-    PrivateKeys = maps:from_list([
-        begin
-            Kid = list_to_binary(integer_to_list(erlang:phash2(Priv))),
-            case maps:get(Kid, Keys, undefined) of
-                undefined ->
-                    Fields = #{<<"kid">> => Kid},
-                    {Kid, jose_jwk:merge(Priv, Fields)};
-                Existing ->
-                    {Kid, Existing}
-            end
-        end || Priv <- KeyList
-    ]),
+set_keys(#realm{private_keys = Old} = Realm, New) ->
+    PrivateKeys = keys_to_jwts(Old, New),
     PublicKeys = maps:map(fun(_, V) -> jose_jwk:to_public(V) end, PrivateKeys),
     Realm#realm{
         private_keys = PrivateKeys,
         public_keys = PublicKeys
     }.
+
+
+%% @private
+set_encryption_keys(Realm, undefined) ->
+    Realm;
+
+set_encryption_keys(#realm{encryption_keys = Old} = Realm, New) ->
+    Realm#realm{
+        encryption_keys = keys_to_jwts(Old, New)
+    }.
+
+
+%% @private
+keys_to_jwts(Old, New) ->
+    maps:from_list([
+        begin
+            Kid = list_to_binary(integer_to_list(erlang:phash2(Key))),
+            case maps:get(Kid, Old, undefined) of
+                undefined ->
+                    Fields = #{<<"kid">> => Kid},
+                    {Kid, jose_jwk:merge(Key, Fields)};
+                Existing ->
+                    {Kid, Existing}
+            end
+        end || Key <- New
+    ]).
 
 
 %% @private
@@ -1210,13 +1299,46 @@ do_lookup(Uri) ->
 
 
 %% private
-validate_private_keys([]) ->
-    {ok, gen_private_keys()};
+validate_keys([]) ->
+    {ok, gen_keys()};
 
-validate_private_keys(Pems) when length(Pems) < 3 ->
-    false;
+validate_keys(L) when is_list(L) ->
+    do_validate_keys(L);
 
-validate_private_keys(Pems) ->
+validate_keys(_) ->
+    false.
+
+
+%% @private
+%% We generate the keys for signing
+gen_keys() ->
+    [
+        jose_jwk:generate_key({namedCurve, secp256r1})
+        || _ <- lists:seq(1, 3)
+    ].
+
+
+%% private
+validate_encryption_keys([]) ->
+    {ok, gen_encryption_keys()};
+
+validate_encryption_keys(L) when is_list(L) ->
+    do_validate_keys(L);
+
+validate_encryption_keys(_) ->
+    false.
+
+
+%% @private
+gen_encryption_keys() ->
+    [
+        jose_jwk:generate_key({rsa, 2048, 65537})
+        || _ <- lists:seq(1, 3)
+    ].
+
+
+%% @private
+do_validate_keys(L) when is_list(L) ->
     try
         Keys = lists:map(
             fun
@@ -1228,7 +1350,7 @@ validate_private_keys(Pems) ->
                         _ -> false
                     end
             end,
-            Pems
+            L
         ),
         {ok, Keys}
     catch
@@ -1238,13 +1360,6 @@ validate_private_keys(Pems) ->
 
 
 %% @private
-gen_private_keys() ->
-    [
-        jose_jwk:generate_key({namedCurve, secp256r1})
-        || _ <- lists:seq(1, 3)
-    ].
-
-
 topsort(Realms) ->
     try
         Graph = precedence_graph(Realms),
@@ -1373,4 +1488,3 @@ check_integrity_constraints(#realm{is_sso_realm = true} = Realm) ->
 
 check_integrity_constraints(#realm{is_sso_realm = false}) ->
     ok.
-

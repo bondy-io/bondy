@@ -142,6 +142,8 @@
 -export([info/1]).
 -export([update/1]).
 -export([user/1]).
+-export([authid/1]).
+-export([authmethod/1]).
 -export([is_security_enabled/1]).
 % -export([stats/0]).
 
@@ -398,6 +400,32 @@ peer(#session{peer = Val}) ->
 peer(Id) when is_integer(Id) ->
     #session{peer = Val} = fetch(Id),
     Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authid(t()) -> bondy_rbac_user:username().
+
+authid(#session{authid = Val}) ->
+    Val;
+
+authid(Id) when is_integer(Id) ->
+    authid(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authmethod(t()) -> binary().
+
+authmethod(#session{authmethod = Val}) ->
+    Val;
+
+authmethod(Id) when is_integer(Id) ->
+    authmethod(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------

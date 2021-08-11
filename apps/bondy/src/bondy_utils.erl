@@ -42,6 +42,7 @@
 -export([pid_to_bin/1]).
 -export([timeout/1]).
 -export([to_binary_keys/1]).
+-export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([system_time_to_rfc3339/2]).
 
@@ -140,8 +141,34 @@ to_binary_keys(Map) when is_map(Map) ->
 %% @private
 maybe_to_binary_keys(T) when is_map(T) ->
     to_binary_keys(T);
+
 maybe_to_binary_keys(T) ->
     T.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_existing_atom_keys(Map) when is_map(Map) ->
+    F = fun
+        (K, V, Acc) when is_binary(K) andalso is_map(V) ->
+            maps:put(
+                binary_to_existing_atom(K, utf8),
+                to_existing_atom_keys(V),
+                Acc
+            );
+
+        (K, V, Acc) when is_binary(K) ->
+            maps:put(binary_to_existing_atom(K, utf8), V, Acc);
+
+        (K, V, Acc) when is_atom(K) andalso is_map(V) ->
+            maps:put(K, to_existing_atom_keys(V), Acc);
+
+        (K, V, Acc) when is_atom(K) ->
+            maps:put(K, V, Acc)
+    end,
+    maps:fold(F, #{}, Map).
 
 
 %% -----------------------------------------------------------------------------

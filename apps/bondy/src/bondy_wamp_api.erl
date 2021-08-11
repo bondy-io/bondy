@@ -105,6 +105,9 @@ handle(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
 handle(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
 	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
 
+handle(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+
 % handle(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
 % bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
 

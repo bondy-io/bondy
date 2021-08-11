@@ -54,6 +54,11 @@
 -define(BONDY_OAUTH2_TOKEN_REVOKE_ALL,  <<"bondy.oauth2.token.revoke_all">>).
 -define(BONDY_OAUTH2_TOKEN_REFRESH,     <<"bondy.oauth2.token.refresh">>).
 
+-define(BONDY_TICKET_ISSUE,             <<"bondy.ticket.issue">>).
+-define(BONDY_TICKET_VERIFY,            <<"bondy.ticket.verify">>).
+-define(BONDY_TICKET_REVOKE,            <<"bondy.ticket.revoke">>).
+-define(BONDY_TICKET_REVOKE_ALL,        <<"bondy.ticket.revoke_all">>).
+
 -define(BONDY_GROUP_ADD,           <<"bondy.group.add">>).
 -define(BONDY_GROUP_ADD_GROUP,     <<"bondy.group.add_group">>).
 -define(BONDY_GROUP_ADD_GROUPS,    <<"bondy.group.add_groups">>).
