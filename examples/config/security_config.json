@@ -89,6 +89,12 @@
                 "meta" : {}
             },
             {
+                "username" : "test@example.com",
+                "password" : "changethispassword",
+                "groups" : ["applications"],
+                "meta" : {}
+            },
+            {
                 "username" : "peer1",
                 "password" : "changethispassword",
                 "groups" : ["microservices"],
@@ -119,6 +125,11 @@
                 "meta" : {}
             },
             {
+                "name" : "applications",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
                 "name" : "devices",
                 "groups" : [],
                 "meta" : {}
@@ -130,11 +141,6 @@
             },
             {
                 "name" : "account_user",
-                "groups" : [],
-                "meta" : {}
-            },
-            {
-                "name" : "application",
                 "groups" : [],
                 "meta" : {}
             }
@@ -167,6 +173,12 @@
             {
                 "usernames" : ["device1"],
                 "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "ticket",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
             }
@@ -215,7 +227,7 @@
                 "roles" : ["peer1", "peer2"]
             },
             {
-                "roles" : ["application"],
+                "roles" : ["applications"],
                 "permissions" : [
                     "wamp.call"
                 ],

@@ -305,6 +305,29 @@ handle_call(?BONDY_USER_REMOVE_GROUPS, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
+handle_call(?BONDY_TICKET_ISSUE, #call{} = M, Ctxt) ->
+    [_Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 0),
+    Session = bondy_context:session(Ctxt),
+
+    Opts = case M#call.arguments_kw of
+        undefined -> maps:new();
+        Map -> Map
+    end,
+
+    case bondy_ticket:issue(Session, Opts) of
+        {ok, Ticket, Claims} ->
+            Resp0 = maps:with(
+                [id, expires_at, issued_at, scope], Claims
+            ),
+            Resp = maps:put(ticket, Ticket, Resp0),
+            wamp_message:result(M#call.request_id, #{}, [Resp]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end;
+
+%% TODO TICKET REVOKE
+
+
 handle_call(_, #call{} = M, _) ->
     bondy_wamp_utils:no_such_procedure_error(M).
 
