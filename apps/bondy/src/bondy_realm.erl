@@ -80,7 +80,9 @@
             ?WAMP_ANON_AUTH,
             ?PASSWORD_AUTH,
             ?OAUTH2_AUTH,
-            ?WAMP_CRA_AUTH
+            ?WAMP_CRA_AUTH,
+            % ?WAMP_SCRAM_AUTH,
+            ?WAMP_TICKET_AUTH
         ]
     },
     <<"security_enabled">> => #{
@@ -554,7 +556,7 @@ sso_realm_uri(Uri) when is_binary(Uri) ->
     Realm :: t() | uri(), SSORealmUri :: uri()) -> boolean().
 
 is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
-    %% TODO change sso_realm_uri to allowd_sso_realms
+    %% TODO change sso_realm_uri to allowed_sso_realms
     Val =:= SSORealmUri;
 
 is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
