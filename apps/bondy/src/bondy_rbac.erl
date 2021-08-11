@@ -663,7 +663,7 @@ validate(Data) ->
 validate_v1(Data) ->
     Req0 = maps_utils:validate(Data, ?GRANT_REQ_VALIDATOR_V1),
     {Resource, Req1} = maps_utils:split([uri, match], Req0),
-    Req2 = maps:put(resources, [validate_resources([Resource])], Req1),
+    Req2 = maps:put(resources, validate_resources([Resource]), Req1),
     maps:put(type, request, Req2).
 
 validate_v2(Data) ->
