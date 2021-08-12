@@ -22,7 +22,7 @@
 %% The ticket is a binary  that has the following claims:
 %%
 %% * id: provides a unique identifier for the ticket.
-%% * "iss" (issuer): identifies the principal that issued the ticket. Most
+%% * issued_by: identifies the principal that issued the ticket. Most
 %% of the time this is an application identifier (a.k.asl username or client_id)
 %% but sometimes can be the WAMP session's username (a.k.a `authid').
 %% * "sub" (subject): identifies the principal that is the subject of the ticket.
@@ -545,7 +545,7 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri) when is_binary(Ticket) ->
             %% Nested tickets not allowed
             throw(invalid_request);
 
-        {ok, #{authid := Authid}} ->
+        {ok, #{issued_by := Authid}} ->
             %% A client is requesting a ticket issued to itself using its own
             %% self-issued ticket.
             throw(invalid_request);
