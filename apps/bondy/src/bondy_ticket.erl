@@ -285,7 +285,7 @@ lookup(RealmUri, Authid, Scope) ->
             case lists:keyfind(LKey, 1, List) of
                 {LKey, Claims} ->
                     {ok, Claims};
-                error ->
+                false ->
                     {error, not_found}
             end
     end.
