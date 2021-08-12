@@ -183,7 +183,12 @@
 
 issue(Session, Opts0) ->
     Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
-    do_issue(Session, Opts).
+    try
+        do_issue(Session, Opts)
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -536,12 +541,16 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri) when is_binary(Ticket) ->
     VerifyOpts = #{not_found_ok => false, self_signed => true},
 
     case verify(Ticket, VerifyOpts) of
-        {ok, #{scope := #{client_id := Authid}}} ->
-            %% A client is requesting a ticket issued to itself using it own
+        {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
+            %% Nested tickets not allowed
+            throw(invalid_request);
+
+        {ok, #{authid := Authid}} ->
+            %% A client is requesting a ticket issued to itself using its own
             %% self-issued ticket.
             throw(invalid_request);
 
-        {ok, #{scope := #{client_id := ClientId}}} ->
+        {ok, #{authid := ClientId}} ->
             #{
                 realm => Uri,
                 client_id => ClientId,
