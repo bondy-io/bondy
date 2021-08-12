@@ -80,6 +80,7 @@
 -export([peer/1]).
 -export([peer_id/1]).
 -export([peername/1]).
+-export([rbac_context/1]).
 -export([realm_uri/1]).
 -export([request_details/1]).
 -export([request_id/1]).
@@ -372,6 +373,21 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
 session_id(#{session := S}) ->
     bondy_session:id(S);
 session_id(#{}) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the sessionId of the provided context or 'undefined'
+%% if there is none.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rbac_context(t()) -> bondy_rbac:context() | undefined.
+
+rbac_context(#{session := S}) ->
+    bondy_session:rbac_context(S);
+
+rbac_context(#{}) ->
     undefined.
 
 

@@ -167,17 +167,19 @@
 -export_type([request_data/0]).
 -export_type([resource/0]).
 
+-export([authorize/2]).
 -export([authorize/3]).
 -export([get_anonymous_context/1]).
 -export([get_anonymous_context/2]).
 -export([get_context/1]).
 -export([get_context/2]).
+-export([grant/2]).
+-export([grants/3]).
+-export([group_grants/2]).
 -export([is_reserved_name/1]).
 -export([normalize_name/1]).
--export([grant/2]).
--export([group_grants/2]).
+-export([refresh_context/1]).
 -export([request/1]).
--export([grants/3]).
 -export([revoke/2]).
 -export([revoke_group/2]).
 -export([revoke_user/2]).
@@ -192,12 +194,22 @@
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Returns 'ok' or an exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authorize(binary(), bondy_context:t() | context()) ->
+    ok | no_return().
+
+authorize(Permission, Ctxt) ->
+    authorize(Permission, any, Ctxt).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns 'ok' or an exception.
 %% @end
 %% -----------------------------------------------------------------------------
--spec authorize(binary(), binary(), bondy_context:t() | context()) ->
+-spec authorize(binary(), binary() | any, bondy_context:t() | context()) ->
     ok | no_return().
 
 authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
@@ -229,6 +241,34 @@ get_context(Ctxt) ->
             AuthId = bondy_context:authid(Ctxt),
             RealmUri = bondy_context:realm_uri(Ctxt),
             get_context(RealmUri, AuthId)
+    end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
+
+refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
+    %% TODO replace this with a cluster metadata hash check, or something
+    Epoch = erlang:timestamp(),
+    Diff = timer:now_diff(Epoch, Context#bondy_rbac_context.epoch),
+
+    case Diff < ?CTXT_REFRESH_TIME of
+        false when Context#bondy_rbac_context.is_anonymous ->
+            %% context has expired
+            Ctxt = get_anonymous_context(
+                Uri, Context#bondy_rbac_context.username
+            ),
+            {true, Ctxt};
+        false ->
+            %% context has expired
+            Ctxt = get_context(Uri, Context#bondy_rbac_context.username),
+            {true, Ctxt};
+        _ ->
+            {false, Context}
     end.
 
 
@@ -477,9 +517,8 @@ group_grants(RealmUri, Name) ->
 -spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
 
-check_permission(
-    {Permission}, #bondy_rbac_context{realm_uri = Uri} = Context0) ->
-    Context = maybe_refresh_context(Uri, Context0),
+check_permission({Permission, any}, #bondy_rbac_context{} = Context0) ->
+    {_, Context} = refresh_context(Context0),
     %% The user needs to have this permission applied *globally*
     %% This is for things with undetermined inputs or
     %% permissions that don't tie to a particular resource, like 'ping' and
@@ -494,9 +533,8 @@ check_permission(
             {false, Mssg, Context}
     end;
 
-check_permission(
-    {Permission, Resource}, #bondy_rbac_context{realm_uri = Uri} = Ctxt0) ->
-    Ctxt = maybe_refresh_context(Uri, Ctxt0),
+check_permission({Permission, Resource}, #bondy_rbac_context{} = Ctxt0) ->
+    {_, Ctxt} = refresh_context(Ctxt0),
     MatchG = match_grants(Resource, Ctxt#bondy_rbac_context.grants),
     case lists:member(Permission, MatchG) of
         true ->
@@ -524,26 +562,6 @@ do_authorize(Permission, Resource, SecCtxt) ->
             ok;
         {false, Mssg, _SecCtxt1} ->
             error({not_authorized, Mssg})
-    end.
-
-
-%% @private
-maybe_refresh_context(RealmUri, Context) ->
-    %% TODO replace this with a cluster metadata hash check, or something
-    Epoch = erlang:timestamp(),
-    Diff = timer:now_diff(Epoch, Context#bondy_rbac_context.epoch),
-
-    case Diff < ?CTXT_REFRESH_TIME of
-        false when Context#bondy_rbac_context.is_anonymous ->
-            %% context has expired
-            get_anonymous_context(
-                RealmUri, Context#bondy_rbac_context.username
-            );
-        false ->
-            %% context has expired
-            get_context(RealmUri, Context#bondy_rbac_context.username);
-        _ ->
-            Context
     end.
 
 
@@ -600,12 +618,20 @@ resource_to_iolist(Bucket) ->
 permission_denied_message(
     Permission, Resource, #bondy_rbac_context{is_anonymous = false} = Ctxt) ->
     Username = to_bin(Ctxt#bondy_rbac_context.username),
+    Tail = case Resource == any of
+        true ->
+            ["'"];
+        false ->
+            ["' on '", resource_to_iolist(Resource), "'"]
+    end,
+
     unicode:characters_to_binary(
         [
             "Permission denied. ",
             "User '", Username,
             "' does not have permission '",
-            Permission, "' on '", resource_to_iolist(Resource), "'"
+            Permission
+            | Tail
         ],
         utf8,
         utf8
@@ -614,12 +640,19 @@ permission_denied_message(
 permission_denied_message(
     Permission, Resource, #bondy_rbac_context{is_anonymous = true} = Ctxt) ->
     Username = to_bin(Ctxt#bondy_rbac_context.username),
+    Tail = case Resource == any of
+        true ->
+            ["'"];
+        false ->
+            ["' on '", resource_to_iolist(Resource), "'"]
+    end,
     unicode:characters_to_binary(
         [
             "Permission denied. ",
             "Anonymous user '", Username,
             "' does not have permission '",
-            Permission, "' on '", resource_to_iolist(Resource), "'"
+            Permission
+            | Tail
         ],
         utf8,
         utf8

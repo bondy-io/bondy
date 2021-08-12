@@ -19,6 +19,52 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% The ticket is a binary  that has the following claims:
+%%
+%% * id: provides a unique identifier for the ticket.
+%% * "iss" (issuer): identifies the principal that issued the ticket. Most
+%% of the time this is an application identifier (a.k.asl username or client_id)
+%% but sometimes can be the WAMP session's username (a.k.a `authid').
+%% * "sub" (subject): identifies the principal that is the subject of the ticket.
+%% The Claims in a ticket are normally statements. This is the WAMP session's
+%% username (a.k.a `authid').
+%% * "aud" (audience): identifies the recipients that the ticket is intended for.
+%% The value is `RealmUri'. Notice that if `RealmUri' is the uri of an SSO
+%% Realm, this ticket grants access to all realms the user has access to i.e.
+%% those realms using `RealmUri' as SSO realm.
+%% * "exp" (expiration time): identifies the expiration time on or after which
+%% the ticket MUST NOT be accepted for processing.  The processing of the "exp"
+%% claim requires that the current date/time MUST be before the expiration date/
+%% time listed in the "exp" claim. Bondy considers a small leeway of 2 mins by
+%% default.
+%% * "iat" (issued at): identifies the time at which the ticket was issued.
+%% This claim can be used to determine the age of the ticket. Its value is a
+%% timestamp in seconds.
+%% * auth_time -- Time when the End-User authentication occurred. Its value is
+%% a JSON number representing the number of seconds from 1970-01-01T0:0:0Z as
+%% measured in UTC until the date/time.
+%%
+%% ## Ticket Storage
+%% * Tickets for a user are stored on the
+%% `{bondy_ticket, AuthRealm ++ Username}` prefix
+%% * "User" is either a human user or application.
+%% * Both humans and application can issue self-issued tickets if they have
+%% been granted the `bondy.ticket.self_issue` permission.
+%%
+%% ## Ticket
+%%
+%% * `uri()` in the following table refers to the scope realm (not the
+%% Authentication realm which is used in the prefix)
+%%
+%% |SCOPE NAME|Realm|Client Ticket|Client Instance ID|Key|Value|
+%% |---|---|---|---|---|---|
+%% |1. User|no|no|no|`username()`|`claims()`|
+%% |2. User-Realm|yes|no|no|`uri()`|`claims()`|
+%% |3. Client-User|yes|yes|yes|`client_id()`|`[{{uri(), instance_id()}, claims()}]`|
+%% |4. Client-User|no|yes|no|`client_id()`|`[{undefined, claims()}]`|
+%% |5. Client-User|no|yes|no|`client_id()`|`[{undefined, claims()}]`|
+%% |6. Client-User|yes|yes|no|`client_id()`|`[{uri(), claims()}]`|
+
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_ticket).
@@ -79,11 +125,6 @@
                             client_id           :=  maybe(authid()),
                             client_instance_id  :=  maybe(binary())
                         }.
-% -type pattern()     ::  #{
-%                             realm               :=  '_' | maybe(uri()),
-%                             client_id           :=  '_' | maybe(authid()),
-%                             client_instance_id  :=  '_' | maybe(binary())
-%                         }.
 -type claims()      ::  #{
                             id                  :=  ticket_id(),
                             authrealm           :=  uri(),
@@ -111,11 +152,8 @@
 
 -export([verify/1]).
 -export([issue/2]).
--export([lookup/2]).
-% -export([match/1]).
-% -export([match/2]).
+-export([lookup/3]).
 -export([revoke/1]).
--export([revoke/2]).
 -export([revoke_all/2]).
 -export([revoke_all/3]).
 
@@ -124,34 +162,17 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc Generates a ticket to be used with the WAMP Ticket authentication
-%% method.
-%% The ticket is a ticket that has the following claims:
+%% method. The function stores the ticket and a set of secondary indices in the
+%% store (which replicates the data across the cluster).
 %%
-%% * "jti" (ticket ID): provides a unique identifier for the ticket.
-%% * "iss" (issuer): identifies the principal that issued the ticket. Most
-%% of the time this is an application identifier (a.k.asl username or client_id)
-%% but sometimes can be the WAMP session's username (a.k.a `authid').
-%% * "sub" (subject): identifies the principal that is the subject of the ticket.
-%% The Claims in a ticket are normally statements. This is the WAMP session's
-%% username (a.k.a `authid').
-%% * "aud" (audience): identifies the recipients that the ticket is intended for.
-%% The value is `RealmUri'. Notice that if `RealmUri' is the uri of an SSO
-%% Realm, this ticket grants access to all realms the user has access to i.e.
-%% those realms using `RealmUri' as SSO realm.
-%% * "exp" (expiration time): identifies the expiration time on or after which
-%% the ticket MUST NOT be accepted for processing.  The processing of the "exp"
-%% claim requires that the current date/time MUST be before the expiration date/
-%% time listed in the "exp" claim. Bondy considers a small leeway of 2 mins by
-%% default.
-%% * "iat" (issued at): identifies the time at which the ticket was issued.
-%% This claim can be used to determine the age of the ticket. Its value is a
-%% timestamp in seconds.
-%% * auth_time -- Time when the End-User authentication occurred. Its value is
-%% a JSON number representing the number of seconds from 1970-01-01T0:0:0Z as
-%% measured in UTC until the date/time.
+%% The keys used to store the ticket and indices are controlled by the scope of
+%% the ticket. The scope is controlled by the options `Opts'.
 %%
-%% The function stores the ticket in the store and replicates it across the
-%% cluster.
+%% * **User scope**: the ticket was self-issued by the user without restricting
+%% the scope to any realm. The ticket is scoped to the session's realm unless
+%% the realm and user have SSO enabled in which case the ticket is scoped to
+%% the SSO Realm, allowing the ticket to authenticate in any realm the user has
+%% access to through the SSO Realm.
 %%
 %% @end
 %% -----------------------------------------------------------------------------
@@ -174,6 +195,7 @@ issue(Session, Opts0) ->
 verify(Ticket) ->
     verify(Ticket, #{not_found_ok => true}).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -187,15 +209,16 @@ verify(Ticket, Opts) ->
         Claims = bondy_utils:to_existing_atom_keys(Claims0),
 
         #{
-            id := Id,
             authrealm := AuthRealmUri,
+            authid := Authid,
             issued_at := IssuedAt,
             expires_at := ExpiresAt,
             % issued_on := Node,
-            % scope := Scope,
+            scope := Scope,
             kid := Kid
         } = Claims,
 
+        %% TODO remove and use lookup
         is_expired(Claims) andalso throw(expired),
         ExpiresAt > IssuedAt orelse throw(invalid),
 
@@ -209,7 +232,7 @@ verify(Ticket, Opts) ->
 
         NotFoundOK = maps:get(not_found_ok, Opts, false),
 
-        case lookup(AuthRealmUri, Id) of
+        case lookup(AuthRealmUri, Authid, Scope) of
             {ok, Claims} = OK ->
                 OK;
             {ok, _Other} ->
@@ -226,6 +249,7 @@ verify(Ticket, Opts) ->
     catch
         error:{badkey, _} ->
             {error, invalid};
+
         throw:Reason ->
             {error, Reason}
     end.
@@ -235,23 +259,32 @@ verify(Ticket, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(RealmUri :: uri(), Id :: ticket_id()) ->
-    {ok, Claims :: claims()} | {error, no_found}.
+-spec lookup(
+    RealmUri :: uri(),
+    Authid :: bondy_rbac_user:username(),
+    Scope :: scope()) -> {ok, Claims :: claims()} | {error, no_found}.
 
-lookup(RealmUri, Id) ->
+lookup(RealmUri, Authid, Scope) ->
+    Key = store_key(Authid, normalise_scope(Scope)),
+    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
     Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
-    case plum_db:get(?PDB_PREFIX([RealmUri]), Id, Opts) of
+
+    case plum_db:get(Prefix, Key, Opts) of
         undefined ->
             {error, not_found};
-        Value ->
-            case is_expired(Value) of
-                true ->
-                    ok = plum_db:delete(?PDB_PREFIX([RealmUri]), Id),
-                    {error, not_found};
-                false ->
-                    {ok, Value}
+        Claims when is_map(Claims) ->
+            {ok, Claims};
+        List when is_list(List) ->
+            %% List :: [claims()]
+            LKey = list_key(Scope),
+            case lists:keyfind(LKey, 1, List) of
+                {LKey, Claims} ->
+                    {ok, Claims};
+                error ->
+                    {error, not_found}
             end
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -284,16 +317,6 @@ revoke(Claims) when is_map(Claims) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec revoke(RealmUri :: uri(), Id :: binary()) -> ok | {error, any()}.
-
-revoke(RealmUri, Id) ->
-    Opts = [{resolver, lww}],
-    revoke(plum_db:get(?PDB_PREFIX([RealmUri]), Id, Opts)).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc Revokes all tickets issued to user with `Username' in realm `RealmUri'.
@@ -301,18 +324,18 @@ revoke(RealmUri, Id) ->
 %% application.
 %% @end
 %% -----------------------------------------------------------------------------
--spec revoke_all(RealmUri :: uri(), Username :: bondy_rbac_user:username()) ->
+-spec revoke_all(RealmUri :: uri(), Authid :: bondy_rbac_user:username()) ->
     ok.
 
-revoke_all(RealmUri, Username) ->
-    Opts = [{resolver, fun index_resolver/2}],
-
-    case plum_db:get(?PDB_PREFIX([RealmUri, Username]), Username, Opts) of
-        undefined ->
+revoke_all(RealmUri, Authid) ->
+    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    Fun = fun
+        ({_, ?TOMBSTONE}) ->
             ok;
-        _Index ->
-            error(not_implemented)
-    end.
+        ({Key, _}) ->
+            plum_db:delete(Prefix, Key)
+    end,
+    plum_db:foreach(Fun, Prefix, [{resolver, lww}]).
 
 
 %% -----------------------------------------------------------------------------
@@ -326,7 +349,33 @@ revoke_all(RealmUri, Username) ->
     Scope :: scope()) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
-    error(no_implemented).
+    % Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    % Key = store_key(Authid, Scope),
+    % Realm = maps:get(realm, Scope, undefined),
+    % InstanceId = maps:get(client_instance_id, Scope, undefined),
+
+    % Fun = fun
+    %     ({_, ?TOMBSTONE}) ->
+    %         ok;
+    %     ({K, Claims}) when K == Key andalso is_map(Claims)->
+    %         plum_db:delete(Prefix, Key);
+    %     ({K, L0}) when K == Key andalso is_list(L0) ->
+    %         %% List :: [claims()]
+    %         LKey = list_key(Scope),
+    %         case lists:keyfind(LKey, 1, List) of
+    %             {LKey, Claims} ->
+    %                 {ok, Claims};
+    %             error ->
+    %                 {error, not_found}
+    %         end
+    %         plum_db:update(Prefix, Key, L1);
+    %     (_) ->
+    %         ok
+    % end,
+    % %% We use ticket resolver as we want to preserve the per client ticket list
+    % plum_db:foreach(Fun, Prefix, [{resolver, ticket_resolver/2}]).
+    error(not_implemented).
+
 
 
 %% =============================================================================
@@ -337,6 +386,9 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
 
 %% @private
 do_issue(Session, Opts) ->
+    %% Disabled for the time being
+    %% ok = authorize(Session, Opts),
+
     RealmUri = bondy_session:realm_uri(Session),
     Authid = bondy_session:authid(Session),
     User = bondy_session:user(Session),
@@ -352,15 +404,15 @@ do_issue(Session, Opts) ->
     end,
 
     Scope = scope(Session, Opts, ScopeUri),
+
     AuthRealm = bondy_realm:fetch(AuthUri),
     Kid = bondy_realm:get_random_kid(AuthRealm),
 
     IssuedAt = ?NOW,
     ExpiresAt = IssuedAt + expiry_time_secs(Opts),
-    Id = bondy_utils:uuid(),
 
     Claims = #{
-        id => Id,
+        id => bondy_utils:uuid(),
         authrealm => AuthUri,
         authid => Authid,
         authmethod => bondy_session:authmethod(Session),
@@ -379,40 +431,88 @@ do_issue(Session, Opts) ->
     PrivKey = bondy_realm:get_private_key(AuthRealm, Kid),
     {_, Ticket} = jose_jws:compact(jose_jwt:sign(PrivKey, JWT)),
 
-    ok = store_ticket(AuthUri, Authid, Id, Claims),
+    ok = store_ticket(AuthUri, Authid, Claims),
 
     {ok, Ticket, Claims}.
 
 
 %% @private
-store_ticket(RealmUri, Username, Id, #{scope := Scope} = Claims) ->
-    ok = plum_db:put(?PDB_PREFIX([RealmUri]), Id, Claims),
+% authorize(Session, Opts) ->
+%     RBACCtxt = bondy_session:rbac_context(Session),
+%     ok = bondy_rbac:authorize(<<"bondy.ticket.issue">>, RBACCtxt),
 
-    %% We conditionally update the user index
-    ok = case get_index(RealmUri, Username) of
+%     case maps:get(client_ticket, Opts, undefined) of
+%         undefined ->
+%             %% Requesting to issue a self-issued ticket
+%             ok = bondy_rbac:authorize(<<"bondy.ticket.self_issue">>, RBACCtxt);
+%         _ ->
+%             ok
+%     end.
+
+%% @private
+normalise_scope(Scope) ->
+    Default = #{
+        realm => undefined,
+        client_id => undefined,
+        client_instance_id => undefined
+    },
+    maps:merge(Default, Scope).
+
+
+%% @private
+store_key(Authid, #{realm := undefined, client_id := undefined}) ->
+    %% Self-issued noscope ticket.
+    Authid;
+
+store_key(_, #{realm := Uri, client_id := undefined}) ->
+    %% Self-issued w/realm-scope ticket.
+    Uri;
+
+store_key(_, #{client_id := ClientId}) ->
+    %% Ticket issued by client with or without scope
+    %% We have to update the value, so first we fetch it.
+    ClientId.
+
+
+%% @private
+list_key(#{realm := Uri, client_instance_id := Id}) ->
+    {Uri, Id}.
+
+
+
+%% @private
+store_ticket(RealmUri, Authid, Claims) ->
+    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    Scope = maps:get(scope, Claims),
+    Key = store_key(Authid, Scope),
+
+    case maps:get(client_id, Scope) of
         undefined ->
-            ok;
-        UserIndex0 ->
-            UserIndex = index_update(Scope, Id, UserIndex0),
-            ok = plum_db:put(
-                ?PDB_PREFIX([RealmUri, Username]), Username, UserIndex
-            )
-    end,
+            %% Self-issued noscope ticket or w/realm-scope ticket.
+            %% We just replace any existing ticket in this location
+            ok = plum_db:put(Prefix, Key, Claims);
 
-    #{client_id := ClientId} = Scope,
+        Key ->
+            %% Ticket issued by client with or without scope
+            %% We have to update the value, so first we fetch it.
+            Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
+            Tickets0 = plum_db:get(Prefix, Key, Opts),
+            Tickets = update_tickets(Scope, Claims, Tickets0),
+            ok = plum_db:put(Prefix, Key, Tickets)
+    end.
 
-    %% We conditionally update the client index
-    ok = case get_index(RealmUri, ClientId) of
-        undefined ->
-            ok;
-        ClientIndex0 ->
-            ClientIndex = index_update(Scope, Id, ClientIndex0),
-            ok = plum_db:put(
-                ?PDB_PREFIX([RealmUri, ClientId]), ClientId, ClientIndex
-            )
-    end,
 
-    ok.
+%% @private
+update_tickets(_, Claims, undefined) ->
+    [Claims];
+
+update_tickets(Scope, Claims, Tickets) when is_map(Scope) ->
+    update_tickets(list_key(Scope), Claims, Tickets);
+
+update_tickets({_, _} = Key, Claims, Tickets) ->
+    lists:sort(
+        lists:keystore(Key, 1, Tickets, {Key, Claims})
+    ).
 
 
 %% @private
@@ -436,16 +536,18 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri) when is_binary(Ticket) ->
     VerifyOpts = #{not_found_ok => false, self_signed => true},
 
     case verify(Ticket, VerifyOpts) of
-        {ok, #{client_id := Authid}} ->
+        {ok, #{scope := #{client_id := Authid}}} ->
             %% A client is requesting a ticket issued to itself using it own
             %% self-issued ticket.
             throw(invalid_request);
 
-        {ok, #{client_id := ClientId}} ->
+        {ok, #{scope := #{client_id := ClientId}}} ->
             #{
                 realm => Uri,
                 client_id => ClientId,
-                client_instance_id => maps:get(client_instance_id, Opts)
+                client_instance_id => maps:get(
+                    client_instance_id, Opts, undefined
+                )
             };
         {error, _Reason} ->
             %% TODO implement new Error standard
@@ -473,14 +575,6 @@ scope(_, _, Uri) ->
         client_instance_id => undefined
     }.
 
-scope_to_tuple(Scope) ->
-    #{
-        realm := Uri,
-        client_id := ClientId,
-        client_instance_id := InstanceId
-    } = Scope,
-    {Uri, ClientId, InstanceId}.
-
 
 %% @private
 issuer(Authid, #{client_id := undefined}) ->
@@ -491,58 +585,34 @@ issuer(_, #{client_id := ClientId}) ->
 
 
 %% @private
-get_index(_, undefined) ->
-    undefined;
-
-get_index(RealmUri, Username) ->
-    Opts = [{resolver, fun index_resolver/2}],
-    case plum_db:get(?PDB_PREFIX([RealmUri, Username]), Username, Opts) of
-        undefined -> [];
-        Index -> Index
-    end.
-
-
-%% @private
-index_update(_, _, undefined) ->
-    undefined;
-
-index_update(Scope, Id, Index) when is_map(Scope) ->
-    index_update(scope_to_tuple(Scope), Id, Index);
-
-index_update({_, _, _} = Key, Id, Index) ->
-    lists:sort(lists:keystore(Key, 1, Index, {Key, Id})).
-
-
-%% @private
 is_expired(#{expires_at := Exp}) ->
     Exp =< ?NOW + ?LEEWAY_SECS.
 
 
 %% @private
-index_resolver(?TOMBSTONE, L) ->
+ticket_resolver(?TOMBSTONE, L) when is_list(L) ->
     maybe_tombstone(remove_expired(L));
 
-index_resolver(L, ?TOMBSTONE) ->
+ticket_resolver(L, ?TOMBSTONE) when is_list(L) ->
     maybe_tombstone(remove_expired(L));
 
-index_resolver(L1, L2) when is_list(L1) andalso is_list(L2) ->
+ticket_resolver(L1, L2) when is_list(L1) andalso is_list(L2) ->
     %% Lists are sorted already as we sort them every time we put
     maybe_tombstone(
         remove_expired(lists:umerge(L1, L2))
-    ).
+    );
 
-
-%% @private
-ticket_resolver(?TOMBSTONE, Ticket) ->
+ticket_resolver(?TOMBSTONE, Ticket) when is_map(Ticket) ->
     case is_expired(Ticket) of
         true -> ?TOMBSTONE;
         Ticket -> Ticket
     end;
 
-ticket_resolver(Ticket, ?TOMBSTONE) ->
+ticket_resolver(Ticket, ?TOMBSTONE) when is_map(Ticket) ->
     ticket_resolver(?TOMBSTONE, Ticket);
 
-ticket_resolver(TicketA, TicketB) ->
+ticket_resolver(TicketA, TicketB)
+when is_map(TicketA) andalso is_map(TicketB) ->
     case {is_expired(TicketA), is_expired(TicketB)} of
         {true, true} -> ?TOMBSTONE;
         {false, true} -> TicketA;

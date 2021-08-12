@@ -24,6 +24,7 @@
 
 -define(U1, <<"user_1">>).
 -define(U2, <<"user_2">>).
+-define(APP, <<"app_1">>).
 -define(P1, <<"aWe11KeptSecret">>).
 -define(P2, <<"An0therWe11KeptSecret">>).
 
@@ -31,22 +32,30 @@
 
 all() ->
     [
-        test_1
+        test_self_issue,
+        test_client_issue
     ].
 
 
 init_per_suite(Config) ->
     common:start_bondy(),
+    KeyPairs = [enacl:crypto_sign_ed25519_keypair() || _ <- lists:seq(1, 3)],
     RealmUri = <<"com.example.test.auth_ticket">>,
-    ok = add_realm(RealmUri),
-    [{realm_uri, RealmUri}|Config].
+    ok = add_realm(RealmUri, KeyPairs),
+    [{realm_uri, RealmUri}, {keypairs, KeyPairs} | Config].
 
 end_per_suite(Config) ->
     % common:stop_bondy(),
     {save_config, Config}.
 
 
-add_realm(RealmUri) ->
+add_realm(RealmUri, KeyPairs) ->
+    %% We use the same keys for both users (not to be done in real life)
+    PubKeys = [
+        maps:get(public, KeyPair)
+        || KeyPair <- KeyPairs
+    ],
+
     Config = #{
         uri => RealmUri,
         description => <<"A test realm">>,
@@ -68,25 +77,40 @@ add_realm(RealmUri) ->
                 uri => <<"">>,
                 match => <<"prefix">>,
                 roles => <<"all">>
+            },
+            #{
+                permissions => [
+                    <<"bondy.ticket.issue">>
+                ],
+                uri => <<"any">>,
+                roles => [?U1]
             }
         ],
         users => [
             #{
                 username => ?U1,
                 password => ?P1,
-                groups => [],
-                meta => #{}
+                groups => []
             },
             #{
                 username => ?U2,
                 password => ?P1,
-                groups => [],
-                meta => #{}
+                groups => []
+            },
+            #{
+                username => ?APP,
+                authorized_keys => PubKeys,
+                groups => []
             }
         ],
         sources => [
             #{
                 usernames => [?U1],
+                authmethod => ?WAMP_TICKET_AUTH,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => [?APP],
                 authmethod => ?WAMP_TICKET_AUTH,
                 cidr => <<"0.0.0.0/0">>
             },
@@ -101,11 +125,12 @@ add_realm(RealmUri) ->
     ok.
 
 
-test_1(Config) ->
+test_self_issue(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 
+    %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(Peer, RealmUri, #{
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
@@ -115,7 +140,9 @@ test_1(Config) ->
             caller => #{}
         }
     }),
+    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
 
+    %% We issue a self-issued ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
     %% We simulate a new session
@@ -132,3 +159,58 @@ test_1(Config) ->
         bondy_auth:authenticate(?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt1)
     ).
 
+
+
+test_client_issue(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Roles = [],
+    Peer = {{127, 0, 0, 1}, 10000},
+
+    %% We simulate APP has logged in using cryptosign
+    AppSession = bondy_session:new(Peer, RealmUri, #{
+        authid => ?U1,
+        authmethod => ?WAMP_CRYPTOSIGN_AUTH,
+        security_enabled => true,
+        authroles => Roles,
+        roles => #{
+            caller => #{}
+        }
+    }),
+    ets:insert(bondy_session:table(bondy_session:id(AppSession)), AppSession),
+
+    %% We issue a self-issued ticket
+    {ok, AppTicket, _} = bondy_ticket:issue(AppSession, #{
+        expiry_time_secs => 300
+    }),
+
+    %% We simulate U1 has logged in using wampcra
+    UserSession = bondy_session:new(Peer, RealmUri, #{
+        authid => ?U1,
+        authmethod => ?WAMP_CRA_AUTH,
+        security_enabled => true,
+        authroles => Roles,
+        roles => #{
+            caller => #{}
+        }
+    }),
+    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+
+    %% We issue a self-issued ticket
+    {ok, Ticket, _} = bondy_ticket:issue(UserSession, #{
+        client_ticket => AppTicket,
+        expiry_time_secs => 300
+    }),
+
+    %% We simulate a new session
+    SessionId = 1,
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+
+    ?assertEqual(
+        true,
+        lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt1))
+    ),
+
+    ?assertMatch(
+        {ok, _, _},
+        bondy_auth:authenticate(?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt1)
+    ).
