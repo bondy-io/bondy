@@ -157,6 +157,12 @@ test_self_issue(Config) ->
     ?assertMatch(
         {ok, _, _},
         bondy_auth:authenticate(?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt1)
+    ),
+
+    ?assertEqual(
+        {error, invalid_request},
+        bondy_ticket:issue(Session, #{client_ticket => Ticket}),
+        "Nested self-issued tickets not allowed"
     ).
 
 
@@ -168,7 +174,7 @@ test_client_issue(Config) ->
 
     %% We simulate APP has logged in using cryptosign
     AppSession = bondy_session:new(Peer, RealmUri, #{
-        authid => ?U1,
+        authid => ?APP,
         authmethod => ?WAMP_CRYPTOSIGN_AUTH,
         security_enabled => true,
         authroles => Roles,
@@ -196,7 +202,7 @@ test_client_issue(Config) ->
     ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
-    {ok, Ticket, _} = bondy_ticket:issue(UserSession, #{
+    {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
         client_ticket => AppTicket,
         expiry_time_secs => 300
     }),
@@ -212,5 +218,5 @@ test_client_issue(Config) ->
 
     ?assertMatch(
         {ok, _, _},
-        bondy_auth:authenticate(?WAMP_TICKET_AUTH, Ticket, undefined, Ctxt1)
+        bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
     ).
