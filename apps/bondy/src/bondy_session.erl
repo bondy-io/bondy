@@ -88,6 +88,7 @@
     authrole                        ::  binary() | undefined,
     authroles = []                  ::  [binary()],
     authmethod                      ::  binary() | undefined,
+    rbac_context                    ::  bondy_rbac:context() | undefined,
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_in                      ::  pos_integer() | infinity,
@@ -116,12 +117,15 @@
 
 
 -export([agent/1]).
+-export([authid/1]).
+-export([authmethod/1]).
 -export([close/1]).
 -export([created/1]).
--export([node/1]).
 -export([fetch/1]).
 -export([id/1]).
 -export([incr_seq/1]).
+-export([info/1]).
+-export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
 -export([list_peer_ids/1]).
@@ -130,26 +134,24 @@
 -export([lookup/2]).
 -export([new/3]).
 -export([new/4]).
+-export([node/1]).
 -export([open/3]).
 -export([open/4]).
 -export([peer/1]).
 -export([peer_id/1]).
 -export([pid/1]).
+-export([rbac_context/1]).
 -export([realm_uri/1]).
 -export([roles/1]).
 -export([size/0]).
 -export([to_external/1]).
--export([info/1]).
 -export([update/1]).
 -export([user/1]).
--export([authid/1]).
--export([authmethod/1]).
--export([is_security_enabled/1]).
-% -export([stats/0]).
 
-%% -export([features/1]).
-%% -export([subscriptions/1]).
-%% -export([registrations/1]).
+-ifdef(TEST).
+-export([table/1]).
+-else.
+-endif.
 
 
 
@@ -445,6 +447,38 @@ user(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec rbac_context(id() | t()) -> bondy_rbac:context().
+
+rbac_context(#session{id = Id} = Session) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+
+    case ets:lookup_element(Tab, Id, #session.rbac_context) of
+        undefined ->
+            RealmUri = Session#session.realm_uri,
+            Authid = Session#session.authid,
+            NewCtxt = bondy_rbac:get_context(RealmUri, Authid),
+            ok = update_context(Id, NewCtxt),
+            NewCtxt;
+        Ctxt ->
+            refresh_context(Id, Ctxt)
+    end;
+
+rbac_context(Id) when is_integer(Id) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+
+    case ets:lookup_element(Tab, Id, #session.rbac_context) of
+        undefined ->
+            rbac_context(fetch(Id));
+        Ctxt ->
+            refresh_context(Id, Ctxt)
+    end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec incr_seq(id() | t()) -> map().
 
 incr_seq(#session{id = Id}) ->
@@ -715,6 +749,23 @@ do_lookup(Id) ->
             {error, not_found}
     end.
 
+
+%% @private
+refresh_context(Id, Ctxt) ->
+    case bondy_rbac:refresh_context(Ctxt) of
+        {true, NewCtxt} ->
+            ok = update_context(Id, NewCtxt),
+            NewCtxt;
+        {false, Ctxt} ->
+            Ctxt
+    end.
+
+
+%% @private
+update_context(Id, Context) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    _ = ets:update_element(Tab, Id, {#session.rbac_context, Context}),
+    ok.
 
 
 %% @private

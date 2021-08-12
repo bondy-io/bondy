@@ -233,7 +233,7 @@
                 ],
                 "resources" : [
                     {"uri" : "bondy.ticket.issue", "match": "exact"},
-                    {"uri" : "bondy.ticket.self_issue", "match": "exact"}
+                    {"uri" : "bondy.ticket.revoke", "match": "exact"}
                 ]
             },
             {
