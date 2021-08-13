@@ -84,7 +84,7 @@
 -define(OPTS_VALIDATOR, #{
     <<"expiry_time_secs">> => #{
         alias => expiry_time_secs,
-		key => expiry_time_secs,
+        key => expiry_time_secs,
         required => false,
         datatype => pos_integer
     },
@@ -109,7 +109,7 @@
     }
 }).
 
--type t()           ::   binary().
+-type t()           ::  binary().
 -type opts()        ::  #{
                             expiry_time_secs    =>  pos_integer(),
                             sso_ticket          =>  boolean(),
@@ -223,7 +223,6 @@ verify(Ticket, Opts) ->
             kid := Kid
         } = Claims,
 
-        %% TODO remove and use lookup
         is_expired(Claims) andalso throw(expired),
         ExpiresAt > IssuedAt orelse throw(invalid),
 
