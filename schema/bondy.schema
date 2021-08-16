@@ -315,14 +315,27 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
-%% @doc The maximum expiration time on or after which authentication ticket MUST NOT be
-%% accepted for processing.
+%% @doc The maximum expiration time on or after which authentication ticket
+%% MUST NOT be accepted for processing.
 %% @end
 %% -----------------------------------------------------------------------------
 %%
 {mapping, "security.ticket.max_expiry_time", "bondy.security.ticket.max_expiry_time_secs",[
 {default, "30d"},
 {datatype, {duration, s}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy will allow a valid ticket to be used for
+%% authentication when a local copy of the ticket has not been found in
+%% storage. This might happen if the ticket data has not yet been syncrhonised
+%% to the node handling the authentication request.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.allow_not_found", "bondy.security.ticket.allow_not_found",[
+{default, on},
+{datatype, flag}
 ]}.
 
 
