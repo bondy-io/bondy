@@ -101,7 +101,7 @@
 %% tickets.
 %% * Clients cannot login using tickets.
 %%
-%%
+%% ### Scope Summary
 %% * `uri()' in the following table refers to the scope realm (not the
 %% Authentication realm which is used in the prefix)
 %%
@@ -113,6 +113,15 @@
 %% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, claims()}]'|
 %% |Client-SSO|yes|yes|no|`client_id()'|`[{undefined, claims()}]'|
 %% |Client-SSO|yes|yes|yes|`client_id()'|`[{{undefined, instance_id()}, claims()}]'|
+%%
+%% ### Permissions Summary
+%% Issuing tickets requires the user to be granted certain permissions beyond the WAMP permission required to call the procedures.
+%% |Scope|Permission|Resource|
+%% |---|---|---|
+%% |Local|`bondy.issue'|`bondy.ticket.scope.local'|
+%% |SSO|`bondy.issue'|`bondy.ticket.scope.sso'|
+%% |Client-Local|`bondy.issue'|`bondy.ticket.scope.client_local'|
+%% |Client-SSO|`bondy.issue'|`bondy.ticket.scope.client_sso'|
 %%
 %% @end
 %% -----------------------------------------------------------------------------
@@ -236,6 +245,14 @@
 issue(Session, Opts0) ->
     Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
     try
+        Authmethod = bondy_session:authmethod(Session),
+
+        (Authmethod == ?WAMP_TICKET_AUTH orelse Authmethod == ?WAMP_ANON_AUTH)
+            andalso throw({
+                not_authorized,
+                <<"You are no authorized to issue a ticket because your session was opened using the '", Authmethod/binary, "' authentication method.">>
+            }),
+
         do_issue(Session, Opts)
     catch
         throw:Reason ->
@@ -564,14 +581,7 @@ scope(_, _, Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 authorize(Session, Scope) ->
-    Authmethod = bondy_session:authmethod(Session),
     RBAC = bondy_session:rbac_context(Session),
-
-    (Authmethod == ?WAMP_TICKET_AUTH orelse Authmethod == ?WAMP_ANON_AUTH)
-        andalso throw({
-            not_authorized,
-            <<"You are no authorized to issue a ticket because your session was opened using the '", Authmethod/binary, "' authentication method.">>
-        }),
 
     case Scope of
         #{realm := undefined, client_id := undefined} ->
