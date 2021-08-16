@@ -35,6 +35,8 @@
 -export([validate_call_args/3]).
 -export([validate_call_args/4]).
 
+-compile({no_auto_import, [error/2]}).
+
 
 
 %% =============================================================================
@@ -94,19 +96,12 @@ maybe_error({'EXIT', {Reason, _}}, M) ->
 
 maybe_error(#error{} = Error, _) ->
     Error;
+
 maybe_error({error, #error{} = Error}, _) ->
     Error;
 
 maybe_error({error, Reason}, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
-    Mssg = maps:get(<<"message">>, Map, <<>>),
-    wamp_message:error_from(
-        M,
-        #{},
-        bondy_error:code_to_uri(Code),
-        [Mssg],
-        Map
-    );
+    error(Reason, M);
 
 maybe_error(Val, #call{} = M) ->
     wamp_message:result(M#call.request_id, #{}, [Val]).
@@ -116,14 +111,25 @@ maybe_error(Val, #call{} = M) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-error(Reason, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+error({not_authorized, Reason}, #call{} = M) ->
+    Map = bondy_error:map(Reason),
 
     wamp_message:error_from(
         M,
         #{},
-        bondy_error:code_to_uri(Code),
+        ?WAMP_NOT_AUTHORIZED,
         [Map]
+    );
+
+error(Reason, #call{} = M) ->
+    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    Mssg = maps:get(<<"message">>, Map, <<>>),
+    wamp_message:error_from(
+        M,
+        #{},
+        bondy_error:code_to_uri(Code),
+        [Mssg],
+        Map
     ).
 
 

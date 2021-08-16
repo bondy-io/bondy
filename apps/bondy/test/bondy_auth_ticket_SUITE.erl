@@ -32,8 +32,10 @@
 
 all() ->
     [
-        test_self_issue,
-        test_client_issue
+        anon_auth_not_allowed,
+        ticket_auth_not_allowed,
+        local_scope,
+        client_scope
     ].
 
 
@@ -60,7 +62,7 @@ add_realm(RealmUri, KeyPairs) ->
         uri => RealmUri,
         description => <<"A test realm">>,
         authmethods => [
-            ?WAMP_TICKET_AUTH
+            ?WAMP_TICKET_AUTH, ?WAMP_ANON_AUTH, ?WAMP_CRA_AUTH
         ],
         security_enabled => true,
         grants => [
@@ -80,9 +82,27 @@ add_realm(RealmUri, KeyPairs) ->
             },
             #{
                 permissions => [
-                    <<"bondy.ticket.issue">>
+                    <<"bondy.issue">>
                 ],
-                uri => <<"any">>,
+                resources => [
+                    #{uri => <<"bondy.ticket.scope.local">>, match => <<"exact">>}
+                ],
+                roles => [?APP]
+            },
+            #{
+                permissions => [
+                    <<"bondy.issue">>
+                ],
+                resources => [
+                    #{
+                        uri => <<"bondy.ticket.scope.client_local">>,
+                        match => <<"exact">>
+                    },
+                    #{
+                        uri => <<"bondy.ticket.scope.client_sso">>,
+                        match => <<"exact">>
+                    }
+                ],
                 roles => [?U1]
             }
         ],
@@ -125,7 +145,51 @@ add_realm(RealmUri, KeyPairs) ->
     ok.
 
 
-test_self_issue(Config) ->
+anon_auth_not_allowed(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Peer = {{127, 0, 0, 1}, 10000},
+
+    %% We simulate U1 has logged in using wampcra
+    Session = bondy_session:new(Peer, RealmUri, #{
+        authid => <<"foo">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => true,
+        authroles => [<<"anonymous">>],
+        roles => #{
+            caller => #{}
+        }
+    }),
+    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+
+    ?assertException(
+        error, no_such_user,
+        bondy_ticket:issue(Session, #{})
+    ).
+
+ticket_auth_not_allowed(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Roles = [],
+    Peer = {{127, 0, 0, 1}, 10000},
+
+    %% We simulate U1 has logged in using wampcra
+    Session = bondy_session:new(Peer, RealmUri, #{
+        authid => ?U1,
+        authmethod => ?WAMP_TICKET_AUTH,
+        security_enabled => true,
+        authroles => Roles,
+        roles => #{
+            caller => #{}
+        }
+    }),
+    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+
+    ?assertMatch(
+        {error, {not_authorized, _}},
+        bondy_ticket:issue(Session, #{})
+    ).
+
+local_scope(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
@@ -142,7 +206,25 @@ test_self_issue(Config) ->
     }),
     ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
 
+    ?assertError(
+        {not_authorized, _},
+        bondy_ticket:issue(Session, #{})
+    ),
+
     %% We issue a self-issued ticket
+    ok = bondy_rbac:grant(
+        RealmUri,
+        bondy_rbac:request(#{
+            roles => [?U1],
+            permissions => [<<"bondy.issue">>],
+            resources => [#{
+                uri => <<"bondy.ticket.scope.local">>,
+                match => <<"exact">>
+            }]
+        })
+    ),
+
+    %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
     %% We simulate a new session
@@ -167,7 +249,7 @@ test_self_issue(Config) ->
 
 
 
-test_client_issue(Config) ->
+client_scope(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},

@@ -95,7 +95,7 @@
 ]).
 
 -define(BONDY_PERMISSIONS, [
-    <<"bondy.ticket.issue">>,
-    <<"bondy.ticket.revoke">>,
-    <<"bondy.ticket.self_issue">>
+    <<"bondy.issue">>,
+    <<"bondy.revoke">>,
+    <<"bondy.authenticate">>
 ]).

@@ -127,7 +127,8 @@
       {security,[
           {ticket, [
               {expiry_time_secs, 300},
-              {max_expiry_time_secs, 600}
+              {max_expiry_time_secs, 600},
+              {allow_not_found, true}
             ]},
           {password,
                [{cra,[{kdf,pbkdf2}]},

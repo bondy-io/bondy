@@ -16,55 +16,104 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
-%% @doc
-%% The ticket is a binary  that has the following claims:
+%% @doc This module implements the functions to issue and manage authentication
+%% tickets.
+%%
+%% An authentication ticket (**ticket**) is a signed (and possibly encrypted)
+%% assertion of a user's identity, that a client can use to authenticate the
+%% user without the need to ask it to re-enter its credentials.
+%%
+%% Tickets MUST be issued by a session that was opened using an authentication
+%% method that is neither `ticket' nor `anonymous' authentication.
+%%
+%% ### Claims
 %%
 %% * id: provides a unique identifier for the ticket.
 %% * issued_by: identifies the principal that issued the ticket. Most
 %% of the time this is an application identifier (a.k.asl username or client_id)
 %% but sometimes can be the WAMP session's username (a.k.a `authid').
-%% * "sub" (subject): identifies the principal that is the subject of the ticket.
+%% * authid: identifies the principal that is the subject of the ticket.
 %% The Claims in a ticket are normally statements. This is the WAMP session's
 %% username (a.k.a `authid').
-%% * "aud" (audience): identifies the recipients that the ticket is intended for.
-%% The value is `RealmUri'. Notice that if `RealmUri' is the uri of an SSO
-%% Realm, this ticket grants access to all realms the user has access to i.e.
-%% those realms using `RealmUri' as SSO realm.
-%% * "exp" (expiration time): identifies the expiration time on or after which
+%% * authrealm: identifies the recipients that the ticket is intended for.
+%% The value is `RealmUri'.
+%% * expires_at: identifies the expiration time on or after which
 %% the ticket MUST NOT be accepted for processing.  The processing of the "exp"
 %% claim requires that the current date/time MUST be before the expiration date/
 %% time listed in the "exp" claim. Bondy considers a small leeway of 2 mins by
 %% default.
-%% * "iat" (issued at): identifies the time at which the ticket was issued.
+%% * issued_at: identifies the time at which the ticket was issued.
 %% This claim can be used to determine the age of the ticket. Its value is a
 %% timestamp in seconds.
+%% * issued_on: the bondy nodename in which the ticket was issued.
 %% * auth_time -- Time when the End-User authentication occurred. Its value is
 %% a JSON number representing the number of seconds from 1970-01-01T0:0:0Z as
 %% measured in UTC until the date/time.
+%% * scope: the scope of the ticket, consisting of
+%%     * realm: If `undefined' the ticket grants access to all realms the user
+%% has access to by the authrealm (an SSO realm). Otherwise, the value is the
+%% realm this ticket is valid on.
 %%
-%% ## Ticket Storage
-%% * Tickets for a user are stored on the
-%% `{bondy_ticket, AuthRealm ++ Username}` prefix
-%% * "User" is either a human user or application.
-%% * Both humans and application can issue self-issued tickets if they have
-%% been granted the `bondy.ticket.self_issue` permission.
+%% ## Claims Storage
 %%
-%% ## Ticket
+%% Claims for a ticket are stored in PlumDB using the prefix
+%% `{bondy_ticket, Suffix :: binary()}' where Suffix is the concatenation of
+%% the authentication realm's URI and the user's username (a.k.a `authid') and
+%% a key which is derived by the ticket's scope. The scope itself is the result
+%% of the combination of the different options provided by the {@link issue/2}
+%% function.
 %%
-%% * `uri()` in the following table refers to the scope realm (not the
+%% Thes decision to use this key as opposed to the ticket's unique identifier
+%% is to bounds the number of tickets a user can have at any point in time in
+%% order to reduce data storage and traffic.
+%%
+%% ### Ticket Scopes
+%% A ticket can be issued using different scopes. The scope is determined based
+%% on the options used to issue the ticket.
+%%
+%% #### Local scope
+%% The ticket was issued with `allow_sso' option set to `false' or when set to
+%% `true' the user did not have SSO credentials, and the option `client_ticket'
+%% was not provided.
+%% The ticket can be used to authenticate on teh session's realm only.
+%%
+%% **Authorization**
+%% To be able to issue this ticket, the session must have been granted the
+%% permission `<<"bondy.ticket.issue">>' on the `<<"bondy.ticket.scope.local">>'
+%% resource.
+%%
+%% #### SSO Scope
+%% The ticket was issued with `allow_sso' option set to `true' and the user has
+%% SSO credentials, and the option `client_ticket' was not provided.
+%% The ticket can be used to authenticate  on any realm the user has access to
+%% through SSO.
+%%
+%% **Authorization**
+%% To be able to issue this ticket, the session must have been granted the
+%% permission `<<"bondy.ticket.issue">>' on the `<<"bondy.ticket.scope.sso">>'
+%% resource.
+%%
+%% #### Client-Local scope
+%% #### Client-SSO scope
+%%
+%% * Clients can issue open-scoped and realm-scoped but not client-scoped
+%% tickets.
+%% * Clients cannot login using tickets.
+%%
+%%
+%% * `uri()' in the following table refers to the scope realm (not the
 %% Authentication realm which is used in the prefix)
 %%
-%% |SCOPE NAME|Realm|Client Ticket|Client Instance ID|Key|Value|
+%% |SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value|
 %% |---|---|---|---|---|---|
-%% |1. User|no|no|no|`username()`|`claims()`|
-%% |2. User-Realm|yes|no|no|`uri()`|`claims()`|
-%% |3. Client-User|yes|yes|yes|`client_id()`|`[{{uri(), instance_id()}, claims()}]`|
-%% |4. Client-User|no|yes|no|`client_id()`|`[{undefined, claims()}]`|
-%% |5. Client-User|no|yes|no|`client_id()`|`[{undefined, claims()}]`|
-%% |6. Client-User|yes|yes|no|`client_id()`|`[{uri(), claims()}]`|
-
+%% |Local|no|no|no|`uri()'|`claims()'|
+%% |SSO|yes|no|no|`username()'|`claims()'|
+%% |Client-Local|no|yes|no|`client_id()'|`[{uri(), claims()}]'|
+%% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, claims()}]'|
+%% |Client-SSO|yes|yes|no|`client_id()'|`[{undefined, claims()}]'|
+%% |Client-SSO|yes|yes|yes|`client_id()'|`[{{undefined, instance_id()}, claims()}]'|
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_ticket).
@@ -88,12 +137,12 @@
         required => false,
         datatype => pos_integer
     },
-    <<"sso_ticket">> => #{
-        alias => sso_ticket,
-        key => sso_ticket,
+    <<"allow_sso">> => #{
+        alias => allow_sso,
+        key => allow_sso,
         required => true,
         datatype => boolean,
-        default => false
+        default => true
     },
     <<"client_ticket">> => #{
         alias => client_ticket,
@@ -112,13 +161,12 @@
 -type t()           ::  binary().
 -type opts()        ::  #{
                             expiry_time_secs    =>  pos_integer(),
-                            sso_ticket          =>  boolean(),
+                            allow_sso           =>  boolean(),
                             client_ticket       =>  t(),
                             client_instance_id  =>  binary()
                         }.
 -type verify_opts() ::  #{
-                            not_found_ok        =>  boolean(),
-                            self_signed         =>  boolean()
+                            allow_not_found     =>  boolean()
                         }.
 -type scope()       ::  #{
                             realm               :=  maybe(uri()),
@@ -161,19 +209,23 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Generates a ticket to be used with the WAMP Ticket authentication
-%% method. The function stores the ticket and a set of secondary indices in the
-%% store (which replicates the data across the cluster).
+%% @doc Issues a ticket to be used with the WAMP Ticket authentication
+%% method. The function stores the ticket claims data and replicates it across
+%% all nodes in the cluster.
 %%
-%% The keys used to store the ticket and indices are controlled by the scope of
-%% the ticket. The scope is controlled by the options `Opts'.
+%% The session `Session' must have been opened using an authentication
+%% method that is neither `ticket' nor `anonymous' authentication.
 %%
-%% * **User scope**: the ticket was self-issued by the user without restricting
-%% the scope to any realm. The ticket is scoped to the session's realm unless
-%% the realm and user have SSO enabled in which case the ticket is scoped to
-%% the SSO Realm, allowing the ticket to authenticate in any realm the user has
-%% access to through the SSO Realm.
-%%
+%% The function takes an options map `opts()' that can contain the following
+%% keys:
+%% * `expiry_time_secs': the expiration time on or after which the ticket MUST
+%% NOT be accepted for processing. This is a request that might not be honoured
+%% by the router as it depends on the router configuration, so the returned
+%% value might defer.
+%% To issue a client-scoped ticket, the options `client_ticket' must be present
+%% and its value must be a valid ticket issued by a different user (normally a
+%% client). Otherwise the call will return the error tuple with reason
+%% `invalid_request'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec issue(Session :: bondy_session:t(), Opts :: opts()) ->
@@ -198,7 +250,7 @@ issue(Session, Opts0) ->
 -spec verify(Ticket :: binary()) -> {ok, claims()} | {error, expired | invalid}.
 
 verify(Ticket) ->
-    verify(Ticket, #{not_found_ok => true}).
+    verify(Ticket, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -234,14 +286,14 @@ verify(Ticket, Opts) ->
         {Verified, _, _} = jose_jwt:verify(Key, Ticket),
         Verified == true orelse throw(invalid),
 
-        NotFoundOK = maps:get(not_found_ok, Opts, false),
+        AllowNotFound = allow_not_found(Opts),
 
         case lookup(AuthRealmUri, Authid, Scope) of
             {ok, Claims} = OK ->
                 OK;
             {ok, _Other} ->
                 throw(no_match);
-            {error, not_found} when NotFoundOK == true ->
+            {error, not_found} when AllowNotFound == true ->
                 %% We trust the signed JWT
                 {ok, Claims};
             {error, not_found} ->
@@ -318,7 +370,7 @@ revoke(Claims) when is_map(Claims) ->
 
     %% TODO find ID and delete
     %% TODO delete entry in authid index and maybe in client index depending on scope
-    ok.
+    error(not_implemented).
 
 
 
@@ -390,24 +442,25 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
 
 %% @private
 do_issue(Session, Opts) ->
-    %% Disabled for the time being
-    %% ok = authorize(Session, Opts),
-
     RealmUri = bondy_session:realm_uri(Session),
     Authid = bondy_session:authid(Session),
     User = bondy_session:user(Session),
     SSORealmUri = bondy_rbac_user:sso_realm_uri(User),
 
-    {AuthUri, ScopeUri} = case maps:get(sso_ticket, Opts) of
-        true when SSORealmUri == undefined ->
-            {SSORealmUri, RealmUri};
-        true ->
-            {SSORealmUri, SSORealmUri};
-        false ->
+    {AuthUri, ScopeUri} = case maps:get(allow_sso, Opts) of
+        true when SSORealmUri =/= undefined ->
+            %% The ticket can be used to authenticate on all user realms
+            %% connected to this SSORealmUri
+            {SSORealmUri, undefined};
+        _ ->
+            %% SSORealmUri is undefined or SSO was not allowed,
+            %% the scope realm can only be the session realm
             {RealmUri, RealmUri}
     end,
 
     Scope = scope(Session, Opts, ScopeUri),
+
+    ok = authorize(Session, Scope),
 
     AuthRealm = bondy_realm:fetch(AuthUri),
     Kid = bondy_realm:get_random_kid(AuthRealm),
@@ -441,19 +494,6 @@ do_issue(Session, Opts) ->
 
 
 %% @private
-% authorize(Session, Opts) ->
-%     RBACCtxt = bondy_session:rbac_context(Session),
-%     ok = bondy_rbac:authorize(<<"bondy.ticket.issue">>, RBACCtxt),
-
-%     case maps:get(client_ticket, Opts, undefined) of
-%         undefined ->
-%             %% Requesting to issue a self-issued ticket
-%             ok = bondy_rbac:authorize(<<"bondy.ticket.self_issue">>, RBACCtxt);
-%         _ ->
-%             ok
-%     end.
-
-%% @private
 normalise_scope(Scope) ->
     Default = #{
         realm => undefined,
@@ -464,24 +504,114 @@ normalise_scope(Scope) ->
 
 
 %% @private
+scope(Session, #{client_ticket := Ticket} = Opts, Uri)
+when is_binary(Ticket) ->
+    Authid = bondy_session:authid(Session),
+
+    %% We are strict here and we requiere the client ticket to be present
+    %% locally, so gossip or AAE replication must have happened.
+    VerifyOpts = #{allow_not_found => false},
+
+    case verify(Ticket, VerifyOpts) of
+        {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
+            %% Nested tickets are not allowed
+            throw(invalid_request);
+
+        {ok, #{issued_by := Authid}} ->
+            %% A client is requesting a ticket issued to itself using its own
+            %% open scope ticket.
+            throw(invalid_request);
+
+        {ok, #{authid := ClientId}} ->
+            #{
+                realm => Uri,
+                client_id => ClientId,
+                client_instance_id => maps:get(
+                    client_instance_id, Opts, undefined
+                )
+            };
+        {error, _Reason} ->
+            %% TODO implement new Error standard
+            error(#{
+                code => invalid_value,
+                description => <<"The value for 'client_ticket' did not pass the validator.">>,
+                key => client_ticket,
+                message => <<"The value for 'client_ticket' is not valid.">>
+            })
+    end;
+
+scope(_, #{client_instance_id := _}, _) ->
+    %% TODO implement new Error standard
+    error(#{
+        code => missing_required_value,
+        description => <<"A value for 'client_instance_id' was defined but a value for 'client_ticket' was missing.">>,
+        key => client_ticket,
+        message => <<"A value for 'client_ticket' is required when a value for 'client_instance_id' is provided.">>
+    });
+
+scope(_, _, Uri) ->
+    #{
+        realm => Uri,
+        client_id => undefined,
+        client_instance_id => undefined
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% %% @private
+%% @doc Clients can issue open-scoped and realm-scoped but not client-scoped tickets.  Clients cannot login using tickets.
+% User cannot issue self-issue ticekkt
+%% @end
+%% -----------------------------------------------------------------------------
+authorize(Session, Scope) ->
+    Authmethod = bondy_session:authmethod(Session),
+    RBAC = bondy_session:rbac_context(Session),
+
+    (Authmethod == ?WAMP_TICKET_AUTH orelse Authmethod == ?WAMP_ANON_AUTH)
+        andalso throw({
+            not_authorized,
+            <<"You are no authorized to issue a ticket because your session was opened using the '", Authmethod/binary, "' authentication method.">>
+        }),
+
+    case Scope of
+        #{realm := undefined, client_id := undefined} ->
+            %% realm == undefined happens only when using SSO
+            ok = bondy_rbac:authorize(
+                <<"bondy.issue">>, <<"bondy.ticket.scope.sso">>, RBAC
+            );
+        #{realm := undefined, client_id := _} ->
+            %% realm == undefined happens only when using SSO
+            ok = bondy_rbac:authorize(
+                <<"bondy.issue">>, <<"bondy.ticket.scope.client_sso">>, RBAC
+            );
+        #{client_id := undefined} ->
+            ok = bondy_rbac:authorize(
+                <<"bondy.issue">>, <<"bondy.ticket.scope.local">>, RBAC
+            );
+        #{client_id := _} ->
+            ok = bondy_rbac:authorize(
+                <<"bondy.issue">>, <<"bondy.ticket.scope.client_local">>, RBAC
+            )
+    end.
+
+
+%% @private
 store_key(Authid, #{realm := undefined, client_id := undefined}) ->
-    %% Self-issued noscope ticket.
+    %% open scope
     Authid;
 
 store_key(_, #{realm := Uri, client_id := undefined}) ->
-    %% Self-issued w/realm-scope ticket.
+    %% realm-scope ticket.
     Uri;
 
 store_key(_, #{client_id := ClientId}) ->
-    %% Ticket issued by client with or without scope
-    %% We have to update the value, so first we fetch it.
+    %% client scope or client_realm scope ticket
     ClientId.
 
 
 %% @private
 list_key(#{realm := Uri, client_instance_id := Id}) ->
     {Uri, Id}.
-
 
 
 %% @private
@@ -534,62 +664,19 @@ expiry_time_secs(Val) when is_integer(Val) ->
 
 
 %% @private
-scope(Session, #{client_ticket := Ticket} = Opts, Uri) when is_binary(Ticket) ->
-    Authid = bondy_session:authid(Session),
-
-    VerifyOpts = #{not_found_ok => false, self_signed => true},
-
-    case verify(Ticket, VerifyOpts) of
-        {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
-            %% Nested tickets not allowed
-            throw(invalid_request);
-
-        {ok, #{issued_by := Authid}} ->
-            %% A client is requesting a ticket issued to itself using its own
-            %% self-issued ticket.
-            throw(invalid_request);
-
-        {ok, #{authid := ClientId}} ->
-            #{
-                realm => Uri,
-                client_id => ClientId,
-                client_instance_id => maps:get(
-                    client_instance_id, Opts, undefined
-                )
-            };
-        {error, _Reason} ->
-            %% TODO implement new Error standard
-            error(#{
-                code => invalid_value,
-                description => <<"The value for 'client_ticket' did not pass the validator.">>,
-                key => client_ticket,
-                message => <<"The value for 'client_ticket' is not valid.">>
-            })
-    end;
-
-scope(_, #{client_instance_id := _}, _) ->
-    %% TODO implement new Error standard
-    error(#{
-        code => missing_required_value,
-        description => <<"A value for 'client_instance_id' was defined but a value for 'client_ticket' was missing.">>,
-        key => client_ticket,
-        message => <<"A value for 'client_ticket' is required.">>
-    });
-
-scope(_, _, Uri) ->
-    #{
-        realm => Uri,
-        client_id => undefined,
-        client_instance_id => undefined
-    }.
-
-
-%% @private
 issuer(Authid, #{client_id := undefined}) ->
     Authid;
 
 issuer(_, #{client_id := ClientId}) ->
     ClientId.
+
+
+%% @private
+allow_not_found(#{allow_not_found := Value}) ->
+    Value;
+
+allow_not_found(_) ->
+    bondy_config:get([security, ticket, allow_not_found]).
 
 
 %% @private

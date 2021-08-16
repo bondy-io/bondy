@@ -325,8 +325,13 @@ handle_call(?BONDY_TICKET_ISSUE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-%% TODO TICKET REVOKE
+handle_call(?BONDY_TICKET_REVOKE_ALL, #call{} = M, Ctxt) ->
+    [Uri, Authid] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    ok = bondy_ticket:revoke_all(Uri, Authid),
+    wamp_message:result(M#call.request_id, #{});
 
+%% TODO BONDY_TICKET_VERIFY
+%% TODO BONDY_TICKET_REVOKE
 
 handle_call(_, #call{} = M, _) ->
     bondy_wamp_utils:no_such_procedure_error(M).
