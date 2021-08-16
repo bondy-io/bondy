@@ -14,10 +14,9 @@ desired TimeUnit.</td></tr><tr><td valign="top"><a href="#foreach-2">foreach/2</
 IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
 distribution_ over the complete range [0, 2^53].</td></tr><tr><td valign="top"><a href="#get_nonce-0">get_nonce/0</a></td><td>Returns a base64 encoded random string.</td></tr><tr><td valign="top"><a href="#get_nonce-1">get_nonce/1</a></td><td>Returns a base64 encoded random string.</td></tr><tr><td valign="top"><a href="#get_random_string-2">get_random_string/2</a></td><td>
 borrowed from
-http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/.</td></tr><tr><td valign="top"><a href="#is_uuid-1">is_uuid/1</a></td><td></td></tr><tr><td valign="top"><a href="#iso8601-1">iso8601/1</a></td><td>Convert a <code>util:timestamp()</code> or a calendar-style <code>{date(), time()}</code>
-tuple to an ISO 8601 formatted string.</td></tr><tr><td valign="top"><a href="#json_consult-1">json_consult/1</a></td><td></td></tr><tr><td valign="top"><a href="#json_consult-2">json_consult/2</a></td><td></td></tr><tr><td valign="top"><a href="#log-5">log/5</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_encode-2">maybe_encode/2</a></td><td></td></tr><tr><td valign="top"><a href="#merge_map_flags-2">merge_map_flags/2</a></td><td>
+http://blog.teemu.im/2009/11/07/generating-random-strings-in-erlang/.</td></tr><tr><td valign="top"><a href="#is_uuid-1">is_uuid/1</a></td><td></td></tr><tr><td valign="top"><a href="#json_consult-1">json_consult/1</a></td><td></td></tr><tr><td valign="top"><a href="#json_consult-2">json_consult/2</a></td><td></td></tr><tr><td valign="top"><a href="#log-5">log/5</a></td><td></td></tr><tr><td valign="top"><a href="#maybe_encode-2">maybe_encode/2</a></td><td></td></tr><tr><td valign="top"><a href="#merge_map_flags-2">merge_map_flags/2</a></td><td>
 The call will fail with a {badkey, any()} exception is any key found in M1
-is not present in M2.</td></tr><tr><td valign="top"><a href="#pid_to_bin-1">pid_to_bin/1</a></td><td></td></tr><tr><td valign="top"><a href="#timeout-1">timeout/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_binary_keys-1">to_binary_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#uuid-0">uuid/0</a></td><td></td></tr></table>
+is not present in M2.</td></tr><tr><td valign="top"><a href="#pid_to_bin-1">pid_to_bin/1</a></td><td></td></tr><tr><td valign="top"><a href="#system_time_to_rfc3339-2">system_time_to_rfc3339/2</a></td><td></td></tr><tr><td valign="top"><a href="#timeout-1">timeout/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_binary_keys-1">to_binary_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#to_existing_atom_keys-1">to_existing_atom_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#uuid-0">uuid/0</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -106,21 +105,6 @@ is_uuid(Term::any()) -&gt; boolean()
 </code></pre>
 <br />
 
-<a name="iso8601-1"></a>
-
-### iso8601/1 ###
-
-<pre><code>
-iso8601(SystemTime::integer()) -&gt; binary()
-</code></pre>
-<br />
-
-Convert a `util:timestamp()` or a calendar-style `{date(), time()}`
-tuple to an ISO 8601 formatted string. Note that this function always
-returns a string with no offset (i.e., ending in "Z").
-Borrowed from
-https://github.com/inaka/erlang_iso8601/blob/master/src/iso8601.erl
-
 <a name="json_consult-1"></a>
 
 ### json_consult/1 ###
@@ -169,6 +153,12 @@ is not present in M2.
 
 `pid_to_bin(Pid) -> any()`
 
+<a name="system_time_to_rfc3339-2"></a>
+
+### system_time_to_rfc3339/2 ###
+
+`system_time_to_rfc3339(Value, Opts) -> any()`
+
 <a name="timeout-1"></a>
 
 ### timeout/1 ###
@@ -180,6 +170,12 @@ is not present in M2.
 ### to_binary_keys/1 ###
 
 `to_binary_keys(Map) -> any()`
+
+<a name="to_existing_atom_keys-1"></a>
+
+### to_existing_atom_keys/1 ###
+
+`to_existing_atom_keys(Map) -> any()`
 
 <a name="uuid-0"></a>
 
