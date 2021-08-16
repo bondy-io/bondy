@@ -9,7 +9,7 @@
 ## Function Index ##
 
 
-<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#authorized_key-1">authorized_key/1</a></td><td></td></tr><tr><td valign="top"><a href="#cidr-1">cidr/1</a></td><td></td></tr><tr><td valign="top"><a href="#existing_atom-1">existing_atom/1</a></td><td></td></tr><tr><td valign="top"><a href="#groupname-1">groupname/1</a></td><td></td></tr><tr><td valign="top"><a href="#groupnames-1">groupnames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#password-1">password/1</a></td><td></td></tr><tr><td valign="top"><a href="#permission-1">permission/1</a></td><td></td></tr><tr><td valign="top"><a href="#policy_resource-1">policy_resource/1</a></td><td></td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td></td></tr><tr><td valign="top"><a href="#rolename-1">rolename/1</a></td><td></td></tr><tr><td valign="top"><a href="#rolenames-1">rolenames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#strict_groupname-1">strict_groupname/1</a></td><td></td></tr><tr><td valign="top"><a href="#strict_username-1">strict_username/1</a></td><td>Does not allow reserved namess.</td></tr><tr><td valign="top"><a href="#username-1">username/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#usernames-1">usernames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr></table>
+<table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#authorized_key-1">authorized_key/1</a></td><td></td></tr><tr><td valign="top"><a href="#cidr-1">cidr/1</a></td><td></td></tr><tr><td valign="top"><a href="#existing_atom-1">existing_atom/1</a></td><td></td></tr><tr><td valign="top"><a href="#groupname-1">groupname/1</a></td><td></td></tr><tr><td valign="top"><a href="#groupnames-1">groupnames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#password-1">password/1</a></td><td></td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td></td></tr><tr><td valign="top"><a href="#rolename-1">rolename/1</a></td><td></td></tr><tr><td valign="top"><a href="#rolenames-1">rolenames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#strict_groupname-1">strict_groupname/1</a></td><td></td></tr><tr><td valign="top"><a href="#strict_username-1">strict_username/1</a></td><td>Does not allow reserved namess.</td></tr><tr><td valign="top"><a href="#username-1">username/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr><tr><td valign="top"><a href="#usernames-1">usernames/1</a></td><td>Allows reserved names like "all", "anonymous", etc.</td></tr></table>
 
 
 <a name="functions"></a>
@@ -69,24 +69,6 @@ Allows reserved names like "all", "anonymous", etc
 
 <pre><code>
 password(Term::binary() | fun(() -&gt; binary()) | map()) -&gt; {ok, <a href="bondy_password.md#type-future">bondy_password:future()</a>} | boolean()
-</code></pre>
-<br />
-
-<a name="permission-1"></a>
-
-### permission/1 ###
-
-<pre><code>
-permission(Term::binary()) -&gt; boolean()
-</code></pre>
-<br />
-
-<a name="policy_resource-1"></a>
-
-### policy_resource/1 ###
-
-<pre><code>
-policy_resource(Term::<a href="#type-uri">uri()</a> | any) -&gt; {ok, term()} | boolean()
 </code></pre>
 <br />
 

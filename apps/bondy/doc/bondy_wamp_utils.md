@@ -54,7 +54,7 @@ Creates a wamp_error() based on a wamp_call().
 
 ### validate_admin_call_args/3 ###
 
-`validate_admin_call_args(Call, Ctxt, Min) -> any()`
+`validate_admin_call_args(Msg, Ctxt, Min) -> any()`
 
 @throws wamp_message:error()
 
@@ -62,7 +62,7 @@ Creates a wamp_error() based on a wamp_call().
 
 ### validate_admin_call_args/4 ###
 
-`validate_admin_call_args(Call, Ctxt, Min, Max) -> any()`
+`validate_admin_call_args(Msg, Ctxt, Min, Max) -> any()`
 
 @throws wamp_message:error()
 
@@ -70,7 +70,7 @@ Creates a wamp_error() based on a wamp_call().
 
 ### validate_call_args/3 ###
 
-`validate_call_args(Call, Ctxt, Min) -> any()`
+`validate_call_args(Msg, Ctxt, Min) -> any()`
 
 @throws wamp_message:error()
 
@@ -78,7 +78,7 @@ Creates a wamp_error() based on a wamp_call().
 
 ### validate_call_args/4 ###
 
-`validate_call_args(Call, Ctxt, Min, Max) -> any()`
+`validate_call_args(Msg, Ctxt, Min, Max) -> any()`
 
 @throws wamp_message:error()
 

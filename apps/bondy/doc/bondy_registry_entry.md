@@ -83,11 +83,12 @@ Returns the uri this entry is about i.e.</td></tr></table>
 ### created/1 ###
 
 <pre><code>
-created(Entry::<a href="#type-t">t()</a>) -&gt; <a href="calendar.md#type-date_time">calendar:date_time()</a>
+created(Entry::<a href="#type-t">t()</a>) -&gt; pos_integer()
 </code></pre>
 <br />
 
-Returns the time when this entry was created.
+Returns the time when this entry was created. Its value is a timestamp in
+seconds.
 
 <a name="get_option-3"></a>
 

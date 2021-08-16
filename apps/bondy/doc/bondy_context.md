@@ -63,7 +63,9 @@ Returns true if bondy is shutting down.</td></tr><tr><td valign="top"><a href="#
 Initialises a new context.</td></tr><tr><td valign="top"><a href="#new-2">new/2</a></td><td></td></tr><tr><td valign="top"><a href="#node-1">node/1</a></td><td>
 Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#peer-1">peer/1</a></td><td>
 Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#peer_id-1">peer_id/1</a></td><td></td></tr><tr><td valign="top"><a href="#peername-1">peername/1</a></td><td>
-Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td>
+Returns the peer of the provided context.</td></tr><tr><td valign="top"><a href="#rbac_context-1">rbac_context/1</a></td><td>
+Returns the sessionId of the provided context or 'undefined'
+if there is none.</td></tr><tr><td valign="top"><a href="#realm_uri-1">realm_uri/1</a></td><td>
 Returns the realm uri of the provided context.</td></tr><tr><td valign="top"><a href="#request_details-1">request_details/1</a></td><td>
 Returns the current request details.</td></tr><tr><td valign="top"><a href="#request_id-1">request_id/1</a></td><td>
 Returns the current request id.</td></tr><tr><td valign="top"><a href="#request_timeout-1">request_timeout/1</a></td><td>
@@ -300,6 +302,18 @@ peername(X1::<a href="#type-t">t()</a>) -&gt; binary()
 <br />
 
 Returns the peer of the provided context.
+
+<a name="rbac_context-1"></a>
+
+### rbac_context/1 ###
+
+<pre><code>
+rbac_context(X1::<a href="#type-t">t()</a>) -&gt; <a href="bondy_rbac.md#type-context">bondy_rbac:context()</a> | undefined
+</code></pre>
+<br />
+
+Returns the sessionId of the provided context or 'undefined'
+if there is none.
 
 <a name="realm_uri-1"></a>
 

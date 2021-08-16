@@ -41,6 +41,7 @@
 <tr><td><a href="bondy_http_gateway_rest_handler.md" class="module">bondy_http_gateway_rest_handler</a></td></tr>
 <tr><td><a href="bondy_http_gateway_utils.md" class="module">bondy_http_gateway_utils</a></td></tr>
 <tr><td><a href="bondy_http_utils.md" class="module">bondy_http_utils</a></td></tr>
+<tr><td><a href="bondy_json.md" class="module">bondy_json</a></td></tr>
 <tr><td><a href="bondy_logger_formatter.md" class="module">bondy_logger_formatter</a></td></tr>
 <tr><td><a href="bondy_oauth2.md" class="module">bondy_oauth2</a></td></tr>
 <tr><td><a href="bondy_oauth2_client.md" class="module">bondy_oauth2_client</a></td></tr>
@@ -60,7 +61,6 @@
 <tr><td><a href="bondy_prometheus_cowboy_collector.md" class="module">bondy_prometheus_cowboy_collector</a></td></tr>
 <tr><td><a href="bondy_rbac.md" class="module">bondy_rbac</a></td></tr>
 <tr><td><a href="bondy_rbac_group.md" class="module">bondy_rbac_group</a></td></tr>
-<tr><td><a href="bondy_rbac_policy.md" class="module">bondy_rbac_policy</a></td></tr>
 <tr><td><a href="bondy_rbac_source.md" class="module">bondy_rbac_source</a></td></tr>
 <tr><td><a href="bondy_rbac_user.md" class="module">bondy_rbac_user</a></td></tr>
 <tr><td><a href="bondy_realm.md" class="module">bondy_realm</a></td></tr>
@@ -78,6 +78,7 @@
 <tr><td><a href="bondy_subscriber.md" class="module">bondy_subscriber</a></td></tr>
 <tr><td><a href="bondy_subscribers_sup.md" class="module">bondy_subscribers_sup</a></td></tr>
 <tr><td><a href="bondy_sup.md" class="module">bondy_sup</a></td></tr>
+<tr><td><a href="bondy_ticket.md" class="module">bondy_ticket</a></td></tr>
 <tr><td><a href="bondy_utils.md" class="module">bondy_utils</a></td></tr>
 <tr><td><a href="bondy_wamp_api.md" class="module">bondy_wamp_api</a></td></tr>
 <tr><td><a href="bondy_wamp_backup_api.md" class="module">bondy_wamp_backup_api</a></td></tr>

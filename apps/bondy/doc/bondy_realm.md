@@ -54,11 +54,31 @@ external() = #{uri =&gt; <a href="#type-uri">uri()</a>, description =&gt; binary
 
 
 
+### <a name="type-keyset">keyset()</a> ###
+
+
+<pre><code>
+keyset() = #{<a href="#type-kid">kid()</a> =&gt; map()}
+</code></pre>
+
+
+
+
+### <a name="type-kid">kid()</a> ###
+
+
+<pre><code>
+kid() = binary()
+</code></pre>
+
+
+
+
 ### <a name="type-t">t()</a> ###
 
 
 <pre><code>
-t() = #realm{uri = <a href="#type-uri">uri()</a>, description = binary(), authmethods = [binary()], security_enabled = boolean(), is_sso_realm = boolean(), allow_connections = boolean(), sso_realm_uri = <a href="#type-maybe">maybe</a>(<a href="#type-uri">uri()</a>), private_keys = map(), public_keys = map(), password_opts = <a href="bondy_password.md#type-opts">bondy_password:opts()</a> | undefined}
+t() = #realm{uri = <a href="#type-uri">uri()</a>, description = binary(), authmethods = [binary()], security_enabled = boolean(), is_sso_realm = boolean(), allow_connections = boolean(), sso_realm_uri = <a href="#type-maybe">maybe</a>(<a href="#type-uri">uri()</a>), private_keys = <a href="#type-keyset">keyset()</a>, public_keys = <a href="#type-keyset">keyset()</a>, password_opts = <a href="bondy_password.md#type-opts">bondy_password:opts()</a> | undefined, encryption_keys = <a href="#type-keyset">keyset()</a>, info = map()}
 </code></pre>
 
 <a name="index"></a>
@@ -68,12 +88,12 @@ t() = #realm{uri = <a href="#type-uri">uri()</a>, description = binary(), authme
 
 <table width="100%" border="1" cellspacing="0" cellpadding="2" summary="function index"><tr><td valign="top"><a href="#add-1">add/1</a></td><td></td></tr><tr><td valign="top"><a href="#allow_connections-1">allow_connections/1</a></td><td>Returns <code>true</code> if the Realm is allowing connections.</td></tr><tr><td valign="top"><a href="#apply_config-0">apply_config/0</a></td><td>Loads a security config file from
 <code>bondy_config:get([security, config_file])</code> if defined and applies its
-definitions.</td></tr><tr><td valign="top"><a href="#apply_config-1">apply_config/1</a></td><td>Loads a security config file from <code>Filename</code>.</td></tr><tr><td valign="top"><a href="#authmethods-1">authmethods/1</a></td><td>Returns the list of supported authentication methods for Realm.</td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#disable_security-1">disable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#enable_security-1">enable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#exists-1">exists/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
+definitions.</td></tr><tr><td valign="top"><a href="#apply_config-1">apply_config/1</a></td><td>Loads a security config file from <code>Filename</code>.</td></tr><tr><td valign="top"><a href="#authmethods-1">authmethods/1</a></td><td>Returns the list of supported authentication methods for Realm.</td></tr><tr><td valign="top"><a href="#delete-1">delete/1</a></td><td></td></tr><tr><td valign="top"><a href="#disable_security-1">disable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#enable_security-1">enable_security/1</a></td><td></td></tr><tr><td valign="top"><a href="#encryption_keys-1">encryption_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#exists-1">exists/1</a></td><td></td></tr><tr><td valign="top"><a href="#fetch-1">fetch/1</a></td><td>
 Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get-1">get/1</a></td><td>Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get-2">get/2</a></td><td>
-Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get_private_key-2">get_private_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_public_key-2">get_public_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_kid-1">get_random_kid/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_allowed_sso_realm-2">is_allowed_sso_realm/2</a></td><td>Returns the same sign on (SSO) realm URI used by the realm.</td></tr><tr><td valign="top"><a href="#is_authmethod-2">is_authmethod/2</a></td><td>Returs <code>true</code> if Method is an authentication method supported by realm
-<code>Realm</code>.</td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_sso_realm-1">is_sso_realm/1</a></td><td>Returns <code>true</code> if the Realm is enabled as a Same Sign-on (SSO) realm.</td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
+Retrieves the realm identified by Uri from the tuplespace.</td></tr><tr><td valign="top"><a href="#get_encryption_key-2">get_encryption_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_private_key-2">get_private_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_public_key-2">get_public_key/2</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_encryption_kid-1">get_random_encryption_kid/1</a></td><td></td></tr><tr><td valign="top"><a href="#get_random_kid-1">get_random_kid/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_allowed_authmethod-2">is_allowed_authmethod/2</a></td><td>Returs <code>true</code> if Method is an authentication method supported by realm
+<code>Realm</code>.</td></tr><tr><td valign="top"><a href="#is_allowed_sso_realm-2">is_allowed_sso_realm/2</a></td><td>Returns the same sign on (SSO) realm URI used by the realm.</td></tr><tr><td valign="top"><a href="#is_security_enabled-1">is_security_enabled/1</a></td><td></td></tr><tr><td valign="top"><a href="#is_sso_realm-1">is_sso_realm/1</a></td><td>Returns <code>true</code> if the Realm is enabled as a Same Sign-on (SSO) realm.</td></tr><tr><td valign="top"><a href="#list-0">list/0</a></td><td></td></tr><tr><td valign="top"><a href="#lookup-1">lookup/1</a></td><td>
 Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}'
-if it doesn't exist.</td></tr><tr><td valign="top"><a href="#password_opts-1">password_opts/1</a></td><td></td></tr><tr><td valign="top"><a href="#public_keys-1">public_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#security_status-1">security_status/1</a></td><td></td></tr><tr><td valign="top"><a href="#sso_realm_uri-1">sso_realm_uri/1</a></td><td>Returns the same sign on (SSO) realm URI used by the realm.</td></tr><tr><td valign="top"><a href="#to_external-1">to_external/1</a></td><td></td></tr><tr><td valign="top"><a href="#update-2">update/2</a></td><td></td></tr><tr><td valign="top"><a href="#uri-1">uri/1</a></td><td></td></tr></table>
+if it doesn't exist.</td></tr><tr><td valign="top"><a href="#password_opts-1">password_opts/1</a></td><td></td></tr><tr><td valign="top"><a href="#private_keys-1">private_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#public_keys-1">public_keys/1</a></td><td></td></tr><tr><td valign="top"><a href="#security_status-1">security_status/1</a></td><td></td></tr><tr><td valign="top"><a href="#sso_realm_uri-1">sso_realm_uri/1</a></td><td>Returns the same sign on (SSO) realm URI used by the realm.</td></tr><tr><td valign="top"><a href="#to_external-1">to_external/1</a></td><td></td></tr><tr><td valign="top"><a href="#update-2">update/2</a></td><td></td></tr><tr><td valign="top"><a href="#uri-1">uri/1</a></td><td></td></tr></table>
 
 
 <a name="functions"></a>
@@ -139,14 +159,13 @@ authmethods(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&
 <br />
 
 Returns the list of supported authentication methods for Realm.
-If the
 
 <a name="delete-1"></a>
 
 ### delete/1 ###
 
 <pre><code>
-delete(Uri::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; ok | {error, forbidden | active_users}
+delete(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; ok | {error, forbidden | active_users}
 </code></pre>
 <br />
 
@@ -155,7 +174,7 @@ delete(Uri::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; ok 
 ### disable_security/1 ###
 
 <pre><code>
-disable_security(Realm::<a href="#type-t">t()</a>) -&gt; ok | {error, forbidden}
+disable_security(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; ok | {error, forbidden}
 </code></pre>
 <br />
 
@@ -164,7 +183,16 @@ disable_security(Realm::<a href="#type-t">t()</a>) -&gt; ok | {error, forbidden}
 ### enable_security/1 ###
 
 <pre><code>
-enable_security(Realm::<a href="#type-t">t()</a>) -&gt; ok
+enable_security(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; ok
+</code></pre>
+<br />
+
+<a name="encryption_keys-1"></a>
+
+### encryption_keys/1 ###
+
+<pre><code>
+encryption_keys(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; [map()]
 </code></pre>
 <br />
 
@@ -217,12 +245,21 @@ Retrieves the realm identified by Uri from the tuplespace. If the realm
 does not exist and automatic creation of realms is enabled, it will create a
 new one for Uri with configuration options `Opts`.
 
+<a name="get_encryption_key-2"></a>
+
+### get_encryption_key/2 ###
+
+<pre><code>
+get_encryption_key(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>, Kid::binary()) -&gt; map() | undefined
+</code></pre>
+<br />
+
 <a name="get_private_key-2"></a>
 
 ### get_private_key/2 ###
 
 <pre><code>
-get_private_key(Realm::<a href="#type-t">t()</a>, Kid::integer()) -&gt; map() | undefined
+get_private_key(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>, Kid::binary()) -&gt; map() | undefined
 </code></pre>
 <br />
 
@@ -231,7 +268,16 @@ get_private_key(Realm::<a href="#type-t">t()</a>, Kid::integer()) -&gt; map() | 
 ### get_public_key/2 ###
 
 <pre><code>
-get_public_key(Realm::<a href="#type-t">t()</a>, Kid::integer()) -&gt; map() | undefined
+get_public_key(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>, Kid::binary()) -&gt; map() | undefined
+</code></pre>
+<br />
+
+<a name="get_random_encryption_kid-1"></a>
+
+### get_random_encryption_kid/1 ###
+
+<pre><code>
+get_random_encryption_kid(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; map()
 </code></pre>
 <br />
 
@@ -239,7 +285,22 @@ get_public_key(Realm::<a href="#type-t">t()</a>, Kid::integer()) -&gt; map() | u
 
 ### get_random_kid/1 ###
 
-`get_random_kid(Realm) -> any()`
+<pre><code>
+get_random_kid(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; binary()
+</code></pre>
+<br />
+
+<a name="is_allowed_authmethod-2"></a>
+
+### is_allowed_authmethod/2 ###
+
+<pre><code>
+is_allowed_authmethod(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>, Method::binary()) -&gt; boolean()
+</code></pre>
+<br />
+
+Returs `true` if Method is an authentication method supported by realm
+`Realm`. Otherwise returns `false`.
 
 <a name="is_allowed_sso_realm-2"></a>
 
@@ -254,18 +315,6 @@ Returns the same sign on (SSO) realm URI used by the realm.
 If a value is set, then all authentication and user creation will be done on
 the Realm represented by the SSO Realm.
 Groups, Permissions and Sources are still managed by this realm.
-
-<a name="is_authmethod-2"></a>
-
-### is_authmethod/2 ###
-
-<pre><code>
-is_authmethod(Realm::<a href="#type-t">t()</a>, Method::binary()) -&gt; boolean()
-</code></pre>
-<br />
-
-Returs `true` if Method is an authentication method supported by realm
-`Realm`. Otherwise returns `false`.
 
 <a name="is_security_enabled-1"></a>
 
@@ -317,12 +366,21 @@ if it doesn't exist.
 
 `password_opts(Realm) -> any()`
 
+<a name="private_keys-1"></a>
+
+### private_keys/1 ###
+
+<pre><code>
+private_keys(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; [map()]
+</code></pre>
+<br />
+
 <a name="public_keys-1"></a>
 
 ### public_keys/1 ###
 
 <pre><code>
-public_keys(Realm::<a href="#type-t">t()</a>) -&gt; [map()]
+public_keys(Realm::<a href="#type-t">t()</a> | <a href="#type-uri">uri()</a>) -&gt; [map()]
 </code></pre>
 <br />
 
