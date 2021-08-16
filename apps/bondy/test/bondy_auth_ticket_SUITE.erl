@@ -162,8 +162,8 @@ anon_auth_not_allowed(Config) ->
     }),
     ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
 
-    ?assertException(
-        error, no_such_user,
+    ?assertMatch(
+        {error, {not_authorized, <<"You are no authorized to issue a ticket because your session was opened using", _/binary>>}},
         bondy_ticket:issue(Session, #{})
     ).
 
