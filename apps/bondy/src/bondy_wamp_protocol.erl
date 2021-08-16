@@ -638,7 +638,7 @@ authroles(Details) ->
                     %% empty string
                     undefined;
                 Role ->
-                    [Role]
+                    Role
             end;
         List when is_list(List) ->
             List;
