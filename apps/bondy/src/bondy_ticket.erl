@@ -47,15 +47,13 @@
 %% This claim can be used to determine the age of the ticket. Its value is a
 %% timestamp in seconds.
 %% * issued_on: the bondy nodename in which the ticket was issued.
-%% * auth_time -- Time when the End-User authentication occurred. Its value is
-%% a JSON number representing the number of seconds from 1970-01-01T0:0:0Z as
-%% measured in UTC until the date/time.
 %% * scope: the scope of the ticket, consisting of
 %%     * realm: If `undefined' the ticket grants access to all realms the user
 %% has access to by the authrealm (an SSO realm). Otherwise, the value is the
 %% realm this ticket is valid on.
 %%
 %% ## Claims Storage
+%%
 %%
 %% Claims for a ticket are stored in PlumDB using the prefix
 %% `{bondy_ticket, Suffix :: binary()}' where Suffix is the concatenation of
@@ -76,12 +74,14 @@
 %% The ticket was issued with `allow_sso' option set to `false' or when set to
 %% `true' the user did not have SSO credentials, and the option `client_ticket'
 %% was not provided.
-%% The ticket can be used to authenticate on teh session's realm only.
+%% The ticket can be used to authenticate on the session's realm only.
+%%
 %%
 %% **Authorization**
 %% To be able to issue this ticket, the session must have been granted the
-%% permission `<<"bondy.ticket.issue">>' on the `<<"bondy.ticket.scope.local">>'
+%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.local">>'
 %% resource.
+%%
 %%
 %% #### SSO Scope
 %% The ticket was issued with `allow_sso' option set to `true' and the user has
@@ -91,10 +91,17 @@
 %%
 %% **Authorization**
 %% To be able to issue this ticket, the session must have been granted the
-%% permission `<<"bondy.ticket.issue">>' on the `<<"bondy.ticket.scope.sso">>'
+%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.sso">>'
 %% resource.
 %%
 %% #### Client-Local scope
+%%
+%% **Authorization**
+%% To be able to issue this ticket, the session must have been granted the
+%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
+%% resource.
+%%
+%%
 %% #### Client-SSO scope
 %%
 %% * Clients can issue open-scoped and realm-scoped but not client-scoped
@@ -136,8 +143,6 @@
 -define(PDB_PREFIX(L),
     {bondy_ticket, binary_utils:join(L, <<",">>)}
 ).
-
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -define(OPTS_VALIDATOR, #{
     <<"expiry_time_secs">> => #{
@@ -303,20 +308,25 @@ verify(Ticket, Opts) ->
         {Verified, _, _} = jose_jwt:verify(Key, Ticket),
         Verified == true orelse throw(invalid),
 
-        AllowNotFound = allow_not_found(Opts),
+        case is_persistent(scope_type(Scope)) of
+            true ->
+                AllowNotFound = allow_not_found(Opts),
 
-        case lookup(AuthRealmUri, Authid, Scope) of
-            {ok, Claims} = OK ->
-                OK;
-            {ok, _Other} ->
-                throw(no_match);
-            {error, not_found} when AllowNotFound == true ->
-                %% We trust the signed JWT
-                {ok, Claims};
-            {error, not_found} ->
-                %% TODO Try to retrieve from Claims.node
-                %% or use Scope to lookup indices
-                throw(invalid)
+                case lookup(AuthRealmUri, Authid, Scope) of
+                    {ok, Claims} = OK ->
+                        OK;
+                    {ok, _Other} ->
+                        throw(no_match);
+                    {error, not_found} when AllowNotFound == true ->
+                        %% We trust the signed JWT
+                        {ok, Claims};
+                    {error, not_found} ->
+                        %% TODO Try to retrieve from Claims.node
+                        %% or use Scope to lookup indices
+                        throw(invalid)
+                end;
+            false ->
+                {ok, Claims}
         end
 
     catch
@@ -476,8 +486,10 @@ do_issue(Session, Opts) ->
     end,
 
     Scope = scope(Session, Opts, ScopeUri),
+    ScopeType = scope_type(Scope),
+    AuthCtxt = bondy_session:rbac_context(Session),
 
-    ok = authorize(Session, Scope),
+    ok = authorize(ScopeType, AuthCtxt),
 
     AuthRealm = bondy_realm:fetch(AuthUri),
     Kid = bondy_realm:get_random_kid(AuthRealm),
@@ -505,7 +517,12 @@ do_issue(Session, Opts) ->
     PrivKey = bondy_realm:get_private_key(AuthRealm, Kid),
     {_, Ticket} = jose_jws:compact(jose_jwt:sign(PrivKey, JWT)),
 
-    ok = store_ticket(AuthUri, Authid, Claims),
+    case is_persistent(ScopeType) of
+        true ->
+            ok = store_ticket(AuthUri, Authid, Claims);
+        false ->
+            ok
+    end,
 
     {ok, Ticket, Claims}.
 
@@ -525,9 +542,8 @@ scope(Session, #{client_ticket := Ticket} = Opts, Uri)
 when is_binary(Ticket) ->
     Authid = bondy_session:authid(Session),
 
-    %% We are strict here and we requiere the client ticket to be present
-    %% locally, so gossip or AAE replication must have happened.
-    VerifyOpts = #{allow_not_found => false},
+    %% We are relaxed here as these are signed by us.
+    VerifyOpts = #{allow_not_found => true},
 
     case verify(Ticket, VerifyOpts) of
         {ok, #{scope := #{client_id := Val}}} when Val =/= undefined ->
@@ -573,42 +589,71 @@ scope(_, Opts, Uri) ->
 % User cannot issue self-issue ticekkt
 %% @end
 %% -----------------------------------------------------------------------------
-authorize(Session, Scope) ->
-    RBAC = bondy_session:rbac_context(Session),
+authorize(ScopeType, AuthCtxt) ->
 
-    case Scope of
-        #{realm := undefined, client_id := undefined} ->
+    case ScopeType of
+        sso ->
             %% realm == undefined happens only when using SSO
             ok = bondy_rbac:authorize(
-                <<"bondy.issue">>, <<"bondy.ticket.scope.sso">>, RBAC
+                <<"bondy.issue">>, <<"bondy.ticket.scope.sso">>, AuthCtxt
             );
-        #{realm := undefined, client_id := _} ->
+        client_sso ->
             %% realm == undefined happens only when using SSO
             ok = bondy_rbac:authorize(
-                <<"bondy.issue">>, <<"bondy.ticket.scope.client_sso">>, RBAC
+                <<"bondy.issue">>, <<"bondy.ticket.scope.client_sso">>, AuthCtxt
             );
-        #{client_id := undefined} ->
+        local ->
             ok = bondy_rbac:authorize(
-                <<"bondy.issue">>, <<"bondy.ticket.scope.local">>, RBAC
+                <<"bondy.issue">>, <<"bondy.ticket.scope.local">>, AuthCtxt
             );
-        #{client_id := _} ->
+        client_local ->
             ok = bondy_rbac:authorize(
-                <<"bondy.issue">>, <<"bondy.ticket.scope.client_local">>, RBAC
+                <<"bondy.issue">>, <<"bondy.ticket.scope.client_local">>,
+                AuthCtxt
             )
     end.
 
 
+scope_type(#{realm := undefined, client_id := undefined}) ->
+    sso;
+
+scope_type(#{realm := undefined, client_id := _}) ->
+    client_sso;
+
+scope_type(#{client_id := undefined}) ->
+    local;
+
+scope_type(#{client_id := _}) ->
+    client_local.
+
+
+
+is_persistent(Type) ->
+    bondy_config:get([security, ticket, Type, persistence], true).
+
+
+
 %% @private
-store_key(Authid, #{realm := undefined, client_id := undefined}) ->
-    %% open scope
+store_key(Authid, Scope) ->
+    store_key(Authid, Scope, scope_type(Scope)).
+
+
+%% @private
+store_key(Authid, #{client_instance_id := undefined}, sso) ->
     Authid;
 
-store_key(_, #{realm := Uri, client_id := undefined}) ->
-    %% realm-scope ticket.
+store_key(Authid, #{client_instance_id := Id}, sso) ->
+    <<Authid/binary, $,, Id/binary>>;
+
+store_key(_, #{realm := Uri, client_instance_id := undefined}, local) ->
     Uri;
 
-store_key(_, #{client_id := ClientId}) ->
+store_key(_, #{realm := Uri, client_instance_id := Id}, local) ->
+    <<Uri/binary, $,, Id/binary>>;
+
+store_key(_, #{client_id := ClientId}, _) ->
     %% client scope or client_realm scope ticket
+    %% client_instance_id handled internally by list_key
     ClientId.
 
 
