@@ -326,6 +326,59 @@
 ]}.
 
 %% -----------------------------------------------------------------------------
+%% @doc Controls whether local scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.local.persistence", "bondy.security.ticket.local.persistence",[
+  {default, on},
+  {datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether SSO scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.sso.persistence", "bondy.security.ticket.sso.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether client-local scope tickets are persistent. If enabled
+%% the ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.client_local.persistence", "bondy.security.ticket.client_local.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether client-SSO scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.client_sso.persistence", "bondy.security.ticket.client_sso.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Defines whether Bondy will allow a valid ticket to be used for
 %% authentication when a local copy of the ticket has not been found in
 %% storage. This might happen if the ticket data has not yet been syncrhonised
@@ -1645,7 +1698,7 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% Controls wether the active anti-entropy subsystem is enabled.
+%% Controls whether the active anti-entropy subsystem is enabled.
 {mapping, "aae.enabled", "plum_db.aae_enabled", [
   {datatype, {flag, on, off}},
   {default, on}
