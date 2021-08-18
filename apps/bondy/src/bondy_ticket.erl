@@ -557,20 +557,13 @@ when is_binary(Ticket) ->
             })
     end;
 
-% scope(_, #{client_instance_id := _}, _) ->
-%     %% TODO implement new Error standard
-%     error(#{
-%         code => missing_required_value,
-%         description => <<"A value for 'client_instance_id' was defined but a value for 'client_ticket' was missing.">>,
-%         key => client_ticket,
-%         message => <<"A value for 'client_ticket' is required when a value for 'client_instance_id' is provided.">>
-%     });
-
-scope(_, _, Uri) ->
+scope(_, Opts, Uri) ->
     #{
         realm => Uri,
         client_id => undefined,
-        client_instance_id => undefined
+        client_instance_id => maps:get(
+            client_instance_id, Opts, undefined
+        )
     }.
 
 
