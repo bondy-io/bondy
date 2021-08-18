@@ -54,7 +54,6 @@
 %%
 %% ## Claims Storage
 %%
-%%
 %% Claims for a ticket are stored in PlumDB using the prefix
 %% `{bondy_ticket, Suffix :: binary()}' where Suffix is the concatenation of
 %% the authentication realm's URI and the user's username (a.k.a `authid') and
@@ -76,7 +75,6 @@
 %% was not provided.
 %% The ticket can be used to authenticate on the session's realm only.
 %%
-%%
 %% **Authorization**
 %% To be able to issue this ticket, the session must have been granted the
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.local">>'
@@ -95,6 +93,11 @@
 %% resource.
 %%
 %% #### Client-Local scope
+%% The ticket was issued with `allow_sso' option set to `false' or when set to
+%% `true' the user did not have SSO credentials, and the option `client_ticket'
+%% was provided having a valid ticket issued by a client
+%% (a local or sso ticket).
+%% The ticket can be used to authenticate on the session's realm only.
 %%
 %% **Authorization**
 %% To be able to issue this ticket, the session must have been granted the
@@ -103,10 +106,16 @@
 %%
 %%
 %% #### Client-SSO scope
+%% The ticket was issued with `allow_sso' option set to `true' and the user has
+%% SSO credentials, and the option `client_ticket' was provided having a valid
+%% ticket issued by a client ( a local or sso ticket).
+%% The ticket can be used to authenticate on any realm the user has access to
+%% through SSO.
 %%
-%% * Clients can issue open-scoped and realm-scoped but not client-scoped
-%% tickets.
-%% * Clients cannot login using tickets.
+%% **Authorization**
+%% To be able to issue this ticket, the session must have been granted the
+%% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
+%% resource.
 %%
 %% ### Scope Summary
 %% * `uri()' in the following table refers to the scope realm (not the
