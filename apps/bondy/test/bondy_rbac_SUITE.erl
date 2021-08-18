@@ -30,7 +30,8 @@
 
 all() ->
     [
-        test_1
+        test_1,
+        test_grants
     ].
 
 
@@ -167,5 +168,158 @@ test_1(Config) ->
         "U3 can register"
     ).
 
+
+test_grants(_) ->
+    Uri = <<"com.example.foo">>,
+    Data = #{
+        uri  => Uri,
+        authmethods => [
+            <<"wampcra">>, <<"anonymous">>, <<"password">>, <<"cryptosign">>
+        ],
+        security_enabled => true,
+        users => [
+            #{
+                username => <<"urn:user:admin">>,
+                authorized_keys =>[
+                    <<"1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd">>
+                ],
+                groups => [
+                    <<"urn:group:system:admin">>
+                ]
+            },
+            #{
+                username => <<"urn:user:device_registry">>,
+                authorized_keys => [
+                    <<"1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd">>
+                ],
+                groups => [
+                    <<"urn:group:system:service:device_registry">>
+                ]
+            },
+            #{
+                username => <<"urn:user:account">>,
+                authorized_keys => [
+                    <<"1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd">>
+                ],
+                groups => [
+                    <<"urn:group:system:service:account">>
+                ]
+            },
+            #{
+                username => <<"device_registry_test">>,
+                password => <<"Password123">>,
+                authorized_keys => [
+                    <<"1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd">>
+                ],
+                groups => [
+                    <<"urn:group:device_manager">>,
+                    <<"urn:group:system:admin">>
+                ]
+            }
+        ],
+        groups => [
+            #{
+                name => <<"urn:group:system:admin">>,
+                groups => []
+            },
+            #{
+                name => <<"urn:group:system:service">>,
+                groups => []
+            },
+            #{
+                name => <<"urn:group:system:service:device_registry">>,
+                groups => [
+                    <<"urn:group:system:service">>
+                ]
+            },
+            #{
+                name => <<"urn:group:system:service:account">>,
+                groups => [
+                    <<"urn:group:system:service">>
+                ]
+            },
+            #{
+                name => <<"urn:group:device_manager">>,
+                groups => []
+            },
+            #{
+                name => <<"urn:group:system:admin">>,
+                groups => []
+            }
+        ],
+        sources => [
+            #{
+                usernames => <<"all">>,
+                authmethod => <<"wampcra">>,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => <<"all">>,
+                authmethod => <<"cryptosign">>,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => <<"all">>,
+                authmethod => <<"trust">>,
+                cidr => <<"0.0.0.0/0">>
+            },
+            #{
+                usernames => [<<"anonymous">>],
+                authmethod => <<"anonymous">>,
+                cidr => <<"0.0.0.0/0">>
+            }
+        ],
+        grants => [
+            #{
+                permissions => [
+                    <<"wamp.call">>,
+                    <<"wamp.cancel">>,
+                    <<"wamp.subscribe">>,
+                    <<"wamp.unsubscribe">>
+                ],
+                resources => [
+                    #{uri => <<"bondy.">>, match => <<"prefix">>},
+                    #{uri => <<"wamp.">>, match => <<"prefix">>}
+                ],
+                roles => [
+                    <<"urn:group:system:admin">>,
+                    <<"urn:group:device_manager">>
+                ]
+            },
+            #{
+                permissions => [
+                    <<"wamp.call">>,
+                    <<"wamp.cancel">>,
+                    <<"wamp.subscribe">>,
+                    <<"wamp.unsubscribe">>
+                ],
+                resources => [
+                    #{uri => <<"bondy.">>, match => <<"prefix">>},
+                    #{uri => <<"wamp.">>, match => <<"prefix">>}
+                ],
+                roles => [
+                    <<"urn:group:system:service">>
+                ]
+            },
+            #{
+                permissions => [
+                    <<"wamp.call">>
+                ],
+                resources => [
+                    #{uri => <<"bondy.">>, match => <<"prefix">>}
+                ],
+                roles => [<<"anonymous">>]
+            }
+        ]
+    },
+    _ = bondy_realm:add(Data),
+    C = bondy_rbac:get_context(Uri, <<"device_registry_test">>),
+
+    % dbg:tracer(), dbg:p(all,c), dbg:tpl(bondy_rbac, '_', x),
+
+    ?assertMatch(
+        ok,
+        bondy_rbac:authorize(<<"wamp.call">>, <<"bondy.realm.list">>, C)
+    ).
 
 
