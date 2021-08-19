@@ -460,7 +460,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Format = iolist_to_binary([
         Prefix,
         <<
-            " session_id=~p, peername=~s, agent=~p"
+            " realm=~p, session_id=~p, peername=~s, agent=~p"
             ", protocol=wamp, transport=websocket, frame_type=~p, encoding=~p"
         >>
     ]),
@@ -468,6 +468,7 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
     Ctxt = bondy_wamp_protocol:context(St#state.protocol_state),
 
     Tail = [
+        bondy_wamp_protocol:realm_uri(St#state.protocol_state),
         bondy_wamp_protocol:session_id(St#state.protocol_state),
         bondy_context:peername(Ctxt),
         bondy_wamp_protocol:agent(St#state.protocol_state),
