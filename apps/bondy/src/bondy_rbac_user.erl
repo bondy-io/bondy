@@ -198,7 +198,7 @@
 -type add_error()       ::  no_such_realm | reserved_name | already_exists.
 -type update_error()    ::  no_such_realm
                             | reserved_name
-                            | no_such_user
+                            | {no_such_user, username()}
                             | {no_such_groups, [bondy_rbac_group:name()]}.
 
 
@@ -551,8 +551,8 @@ update(RealmUri, #{type := ?TYPE} = User, Data0, Opts) ->
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
         do_update(RealmUri, User, Data, Opts)
     catch
-        error:no_such_user ->
-            {error, no_such_user};
+        error:{no_such_user, _} = Reason ->
+            {error, Reason};
         throw:Reason ->
             {error, Reason}
     end;
@@ -566,8 +566,8 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
         User = fetch(RealmUri, Username),
         do_update(RealmUri, User, Data, Opts)
     catch
-        error:no_such_user ->
-            {error, no_such_user};
+        error:{no_such_user, _} = Reason ->
+            {error, Reason};
         throw:Reason ->
             {error, Reason}
     end.
@@ -578,7 +578,7 @@ update(RealmUri, Username0, Data0, Opts) when is_binary(Username0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec remove(uri(), binary() | map()) ->
-    ok | {error, no_such_user | reserved_name}.
+    ok | {error, {no_such_user, username()} | reserved_name}.
 
 remove(RealmUri, #{type := ?TYPE, username := Username}) ->
     remove(RealmUri, Username);
@@ -651,7 +651,7 @@ exists(RealmUri, Username0) ->
 fetch(RealmUri, Username) ->
     case lookup(RealmUri, Username) of
         {error, not_found} ->
-            error(no_such_user);
+            error({no_such_user, Username});
         User ->
             User
     end.
@@ -1163,7 +1163,7 @@ maybe_throw(Term) ->
 %% @private
 exists_check(RealmUri, Username) ->
     case plum_db:get(?PLUMDB_PREFIX(RealmUri), Username) of
-        undefined -> throw(no_such_user);
+        undefined -> throw({no_such_user, Username});
         _ -> ok
     end.
 

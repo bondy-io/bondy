@@ -133,7 +133,7 @@
     Roles :: all | binary() | [binary()] | undefined,
     Peer :: {inet:ip_address(), inet:port_number()}) ->
     {ok, context()}
-    | {error, no_such_user | no_such_realm | no_such_group}
+    | {error, {no_such_user, binary()} | no_such_realm | no_such_group}
     | no_return().
 
 init(SessionId, Uri, UserId, Roles, Peer) when is_binary(Uri) ->
@@ -591,7 +591,7 @@ get_user(_, undefined) ->
 get_user(RealmUri, UserId) ->
     case bondy_rbac_user:lookup(RealmUri, UserId) of
         {error, not_found} ->
-            throw(no_such_user);
+            throw({no_such_user, UserId});
         User ->
             bondy_rbac_user:is_enabled(User) orelse throw(user_disabled),
             %% We call resolve so that we merge the local user to the SSO user

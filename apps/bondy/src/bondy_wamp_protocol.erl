@@ -763,9 +763,9 @@ abort_message(no_such_group) ->
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 
-abort_message(no_such_user) ->
+abort_message({no_such_user, Username}) ->
     Details = #{
-        message => <<"User does not exist.">>
+        message => <<"User '", Username/binary, "' does not exist.">>
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
 
@@ -790,9 +790,9 @@ abort_message({authentication_failed, no_such_group}) ->
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_ROLE);
 
-abort_message({authentication_failed, no_such_user}) ->
+abort_message({authentication_failed, {no_such_user, Username}}) ->
     Details = #{
-        message => <<"The user requested (via 'authid') does not exist.">>
+        message => <<"User '", Username/binary, "' does not exist.">>
     },
     wamp_message:abort(Details, ?WAMP_NO_SUCH_PRINCIPAL);
 

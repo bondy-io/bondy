@@ -54,7 +54,7 @@ init(Ctxt) ->
 
         User = bondy_auth:user(Ctxt),
         undefined =/= User andalso anonymous =/= bondy_rbac_user:username(User)
-        orelse throw(no_such_user),
+        orelse throw({no_such_user, bondy_auth:user_id(Ctxt)}),
         {ok, undefined}
 
     catch
