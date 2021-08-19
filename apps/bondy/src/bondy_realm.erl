@@ -880,7 +880,6 @@ get(Uri) ->
 %% Retrieves the realm identified by Uri from the tuplespace. If the realm
 %% does not exist and automatic creation of realms is enabled, it will create a
 %% new one for Uri with configuration options `Opts'.
-%% @throws no_such_realm
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get(uri(), map()) ->  t() | {error, not_found}.
@@ -1046,6 +1045,7 @@ add_bondy_realm() ->
 
 %% @private
 validate_rbac_config(Realm, Map) ->
+    %% TODO Compute dependency graph here and sort the rights
     Groups = [
         bondy_rbac_group:new(Data)
         || Data <- maps:get(<<"groups">>, Map, [])
