@@ -557,9 +557,9 @@ load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
             {{error, {invalid_specification_format, Reason}}, State};
         {error, Reason} ->
             _ = lager:error(
-                "Error processing configuration file. "
-                "reason=~p, filename=~p",
-                [Reason, FName]
+                "Error while parsing JSON configuration file. "
+                "filename=~p, reason=~p, ",
+                [FName, Reason]
             ),
             exit(badarg)
     end;

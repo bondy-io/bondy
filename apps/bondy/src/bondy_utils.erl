@@ -412,8 +412,8 @@ json_consult(File, Opts) when is_list(Opts) ->
             case jsone:try_decode(JSONBin, Opts) of
                 {ok, Term, _} ->
                     {ok, Term};
-                {error, {badarg, [{_, Reason, _}]}} ->
-                    {error, {badarg, Reason}}
+                {error, {Reason, _}} ->
+                    {error, Reason}
             end;
         {error, _} = Error ->
             Error
