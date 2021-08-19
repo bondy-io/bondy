@@ -293,8 +293,9 @@ roles(Ctxt) ->
 %% Returns the realm uri of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t()) -> uri().
-realm_uri(#{realm_uri := Val}) -> Val.
+-spec realm_uri(t()) -> maybe(uri()).
+realm_uri(#{realm_uri := Val}) -> Val;
+realm_uri(_) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
