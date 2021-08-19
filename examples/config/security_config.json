@@ -4,6 +4,10 @@
         "authmethods" : ["wampcra", "anonymous", "password", "trust"],
         "security_enabled" : true,
         "users" : [
+            {
+                "username" : "urn:user:1",
+                "password": "123456"
+            }
         ],
         "groups" : [
             {
@@ -395,6 +399,7 @@
                     "bondy.issue"
                 ],
                 "resources": [
+                    {"uri" : "bondy.ticket.scope.sso", "match": "exact"},
                     {"uri" : "bondy.ticket.scope.client_sso", "match": "exact"}
                 ],
                 "roles" : ["linda"]

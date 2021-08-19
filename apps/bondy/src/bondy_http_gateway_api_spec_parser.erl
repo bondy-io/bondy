@@ -986,15 +986,13 @@ from_file(Filename) ->
             {ok, parse(Spec, get_context_proxy())};
         {ok, _} ->
             {error, invalid_specification_format};
-        {error, {badarg, _}} ->
-            {error, invalid_specification_format};
         {error, Reason} ->
             _ = lager:error(
-                "Error processing API Gateway Specification file; "
-                "reason=~p, filename=~p",
-                [Reason, Filename]
+                "Error while parsing API Gateway Specification file; "
+                "filename=~p, reason=~p",
+                [Filename, Reason]
             ),
-            {error, Reason}
+            {error, invalid_json_format}
     end.
 
 

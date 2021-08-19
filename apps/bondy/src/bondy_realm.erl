@@ -507,16 +507,17 @@ apply_config(Filename) ->
 
         {error, enoent} ->
             _ = lager:warning(
-                "No configuration file found; path=~p",
-                [Filename]
+                "Error while parsing configuration file; path=~p, reason=~p",
+                [Filename, file:format_error(enoent)]
             ),
             ok;
 
-        {error, {badarg, Reason}} ->
-            error({invalid_config, Reason});
-
         {error, Reason} ->
-            error(Reason)
+            _ = lager:warning(
+                "Error while parsing configuration file; path=~p, reason=~p",
+                [Filename, Reason]
+            ),
+            error(invalid_config)
     end.
 
 

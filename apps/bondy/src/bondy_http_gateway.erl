@@ -563,15 +563,13 @@ do_apply_config(FName) ->
                     [FName]
                 ),
                 ok;
-            {error, {badarg, Reason}} ->
-                error({invalid_specification_format, Reason});
             {error, Reason} ->
                 _ = lager:error(
                     "Error while loading API specification; "
                     "filename=~p, reason=~p",
                     [FName, Reason]
                 ),
-                ok
+                error({invalid_json_format, Reason})
         end
     catch
         Class:EReason:Stacktrace ->
@@ -608,18 +606,12 @@ load_spec(FName) ->
             rebuild_dispatch_tables();
         {ok, []} ->
             ok;
-        {error, {badarg, Reason}} ->
-            _ = lager:error(
-                "Error while loading API specification; reason=~p, filename=~p",
-                [Reason, FName]
-            ),
-            throw(invalid_specification_format);
         {error, Reason} ->
             _ = lager:error(
-                "Error while loading API specification; reason=~p, filename=~p",
-                [Reason, FName]
+                "Error while parsing API specification; filename=~p, reason=~p",
+                [FName, Reason]
             ),
-            throw(invalid_specification_format)
+            throw(invalid_json_format)
     end.
 
 
@@ -900,21 +892,20 @@ admin_spec() ->
     case bondy_utils:json_consult(File) of
         {ok, Spec} ->
             Spec;
-        {error, {badarg, Reason}} ->
+        {error, enoent} ->
             _ = lager:error(
                 "Error processing API Gateway Specification file. "
-                "File not found or invalid specification format, "
-                "reason=~p, filename=~p",
-                [Reason, File]
+                "filename=~p, reason=~p",
+                [File, file:format_error(enoent)]
             ),
-            exit(badarg);
+            exit(enoent);
         {error, Reason} ->
             _ = lager:error(
-                "Error processing API Gateway Specification file. "
-                "reason=~p, filename=~p",
-                [Reason, File]
+                "Error while parsing API Gateway Specification file; "
+                "filename=~p, reason=~p",
+                [File, Reason]
             ),
-            exit(badarg)
+            exit(invalid_json_format)
     end.
 
 
