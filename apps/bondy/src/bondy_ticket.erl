@@ -561,17 +561,21 @@ when is_binary(Ticket) ->
 
         {ok, #{issued_by := Authid}} ->
             %% A client is requesting a ticket issued to itself using its own
-            %% open scope ticket.
+            %% client_ticket.
             throw(invalid_request);
 
-        {ok, #{authid := ClientId}} ->
+        {ok, #{authid := ClientId, scope := Scope}} ->
+            Id0 = maps:get(client_instance_id, Scope),
+            Id = maps:get(client_instance_id, Opts, Id0),
+
+            undefined =:= Id0 orelse Id =:= Id0 orelse throw(invalid_request),
+
             #{
                 realm => Uri,
                 client_id => ClientId,
-                client_instance_id => maps:get(
-                    client_instance_id, Opts, undefined
-                )
+                client_instance_id => Id
             };
+
         {error, _Reason} ->
             %% TODO implement new Error standard
             error(#{
