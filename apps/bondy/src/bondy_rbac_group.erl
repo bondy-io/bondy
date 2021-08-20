@@ -132,6 +132,7 @@
 -export([remove_group/3]).
 -export([remove_groups/3]).
 -export([to_external/1]).
+-export([topsort/1]).
 -export([unknown/2]).
 -export([update/3]).
 
@@ -497,6 +498,55 @@ unknown(RealmUri, Names) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Creates a directed graph of the groups `Groups' by traversing the group
+%% membership relationship and computes the topological ordering of the
+%% groups if such ordering exists.  Otherwise returns `Groups' unmodified.
+%% Fails with `{cycle, Path :: [name()]}' exception if the graph directed graph
+%% has cycles of length two or more.
+%%
+%% This function does not fetch the definition of the groups in each group
+%% `groups' property.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec topsort([t()]) -> [t()].
+
+topsort(L) when length(L) =< 1 ->
+    L;
+
+topsort(Groups) ->
+    Graph = digraph:new([acyclic]),
+
+    try
+        _ = precedence_graph(Groups, Graph),
+
+        case digraph_utils:topsort(Graph) of
+            false ->
+                Groups;
+            Vertices ->
+                lists:reverse(
+                    lists:foldl(
+                        fun(V, Acc) ->
+                            case digraph:vertex(Graph, V) of
+                                {_, []} -> Acc;
+                                {_, #{type := ?TYPE} = G} -> [G|Acc]
+                            end
+                        end,
+                        [],
+                        Vertices
+                    )
+                )
+        end
+
+    catch
+        throw:{cycle, _} = Reason ->
+            error(Reason)
+    after
+        digraph:delete(Graph)
+    end.
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -664,4 +714,39 @@ on_delete(RealmUri, Name) ->
 
 
 
+%% =============================================================================
+%% PRIVATE: TOPSORT
+%% =============================================================================
 
+
+precedence_graph(Groups, Graph) ->
+    _ = [
+        digraph:add_vertex(Graph, N) || #{groups := Names} <- Groups, N <- Names
+    ],
+    precedence_graph_aux(Groups, Graph).
+
+
+precedence_graph_aux(
+    [#{type := ?TYPE, name := A, groups := Names} = H|T], Graph) ->
+    _ = digraph:add_vertex(Graph, A, H),
+    _ = [
+        begin
+            case digraph:add_edge(Graph, B, A) of
+                {error, {bad_edge, Path}} ->
+                    throw({cycle, Path});
+                {error, Reason} ->
+                    %% This should never occur
+                    error(Reason);
+                _Edge ->
+                    ok
+            end
+        end
+        || B <- Names
+    ],
+    precedence_graph_aux(T, Graph);
+
+precedence_graph_aux([#{type := ?TYPE}|T], Graph) ->
+    precedence_graph_aux(T, Graph);
+
+precedence_graph_aux([], Graph) ->
+    Graph.

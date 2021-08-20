@@ -31,7 +31,9 @@
 all() ->
     [
         test_1,
-        test_grants
+        test_grants,
+        group_topsort_error,
+        group_topsort
     ].
 
 
@@ -219,14 +221,6 @@ test_grants(_) ->
         ],
         groups => [
             #{
-                name => <<"urn:group:system:admin">>,
-                groups => []
-            },
-            #{
-                name => <<"urn:group:system:service">>,
-                groups => []
-            },
-            #{
                 name => <<"urn:group:system:service:device_registry">>,
                 groups => [
                     <<"urn:group:system:service">>
@@ -244,6 +238,14 @@ test_grants(_) ->
             },
             #{
                 name => <<"urn:group:system:admin">>,
+                groups => []
+            },
+            #{
+                name => <<"urn:group:system:admin">>,
+                groups => []
+            },
+            #{
+                name => <<"urn:group:system:service">>,
                 groups => []
             }
         ],
@@ -322,4 +324,48 @@ test_grants(_) ->
         bondy_rbac:authorize(<<"wamp.call">>, <<"bondy.realm.list">>, C)
     ).
 
+group_topsort_error(_) ->
+    Groups = [bondy_rbac_group:new(G) || G <- [
+        #{
+            name => <<"a">>,
+            groups => [<<"b">>],
+            meta => #{}
+        },
+        #{
+            name => <<"b">>,
+            groups => [<<"a">>],
+            meta => #{}
+        }
+    ]],
+    ?assertError(
+        {cycle, [<<"b">>,<<"a">>]},
+        [maps:get(name, G) || G <- bondy_rbac_group:topsort(Groups)]
+    ).
 
+group_topsort(_) ->
+    Groups = [bondy_rbac_group:new(G) || G <- [
+        #{
+            name => <<"a">>,
+            groups => [<<"z">>],
+            meta => #{}
+        },
+        #{
+            name => <<"b">>,
+            groups => [<<"a">>],
+            meta => #{}
+        },
+        #{
+            name => <<"c">>,
+            groups => [<<"d">>, <<"b">>],
+            meta => #{}
+        },
+        #{
+            name => <<"d">>,
+            groups => [<<"z">>],
+            meta => #{}
+        }
+    ]],
+    ?assertEqual(
+        [<<"a">>, <<"b">>, <<"d">>, <<"c">>],
+        [maps:get(name, G) || G <- bondy_rbac_group:topsort(Groups)]
+    ).
