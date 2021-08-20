@@ -266,112 +266,109 @@
 
 %% The default configuration for the admin realm
 -define(BONDY_REALM, #{
-    uri => ?BONDY_REALM_URI,
-    description => <<"The Bondy administrative realm">>,
-    authmethods => [
+    <<"uri">> => ?BONDY_REALM_URI,
+    <<"description">> => <<"The Bondy Master realm">>,
+    <<"authmethods">> => [
         ?TRUST_AUTH,
-        ?WAMP_ANON_AUTH,
-        ?WAMP_CRA_AUTH,
+        ?WAMP_CRYPTOSIGN_AUTH,
         % ?WAMP_SCRAM_AUTH,
-        ?PASSWORD_AUTH
+        ?WAMP_CRA_AUTH,
+        ?PASSWORD_AUTH,
+        ?WAMP_ANON_AUTH
     ],
-    security_enabled => true, % but we allow anonymous access
-    allow_connections => true,
-    sso_realm_uri => undefined,
-    users => [
+    <<"security_enabled">> => true,
+    <<"allow_connections">> => true,
+    <<"is_sso_realm">> => false,
+    <<"sso_realm_uri">> => undefined,
+    <<"users">> => [
         #{
-            username => <<"admin">>,
-            password => <<"bondy-admin">>,
-            groups => [<<"bondy.administrators">>],
-            meta => #{
-                description => <<"The default Bondy administrator user.">>
+            <<"username">> => <<"admin">>,
+            <<"password">> => <<"bondy-admin">>,
+            <<"groups">> => [<<"bondy.administrators">>],
+            <<"meta">> => #{
+                <<"description">> => <<"The default Bondy administrator user.">>
             }
         }
     ],
-    groups => [
+    <<"groups">> => [
         #{
-            name => <<"bondy.administrators">>,
-            groups => [
-
+            <<"name">> => <<"bondy.administrators">>,
+            <<"groups">> => [
             ],
-            meta => #{
-                description => <<"The Bondy administrators group">>
+            <<"meta">> => #{
+                <<"description">> => <<"The Bondy administrators group">>
             }
         }
     ],
-    grants => [
+    <<"grants">> => [
         #{
-            permissions => [
+            <<"permissions">> => [
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
                 <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
-                <<"wamp.disclose_publisher">>,
-                <<"wamp.disclose_session_info">>
+                <<"wamp.unsubscribe">>
             ],
-            uri => <<"">>,
-            match => <<"prefix">>,
-            roles => [<<"bondy.administrators">>],
-            meta => #{
-                description => <<"Allows the administrators users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
+            <<"uri">> => <<"">>,
+            <<"match">> => <<"prefix">>,
+            <<"roles">> => [<<"bondy.administrators">>],
+            <<"meta">> => #{
+                <<"description">> => <<"Allows the administrators users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
             }
         },
         #{
-            permissions => [
+            <<"permissions">> => [
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
                 <<"wamp.subscribe">>,
-                <<"wamp.unsubscribe">>,
-                <<"wamp.disclose_publisher">>,
-                <<"wamp.disclose_session_info">>
+                <<"wamp.unsubscribe">>
             ],
-            uri => <<"">>,
-            match => <<"prefix">>,
-            roles => [<<"anonymous">>],
-            meta => #{
-                description => <<"Allows anonymous users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
+            <<"uri">> => <<"">>,
+            <<"match">> => <<"prefix">>,
+            <<"roles">> => [<<"anonymous">>],
+            <<"meta">> => #{
+                <<"description">> => <<"Allows anonymous users to make RPC Calls to the Bondy Admin APIs and subscribe to all Bondy PubSub Event. This is too liberal and should be restricted.">>
             }
         }
     ],
-    sources => [
+    <<"sources">> => [
         #{
-            usernames => <<"all">>,
-            authmethod => ?PASSWORD_AUTH,
-            cidr => <<"0.0.0.0/0">>,
-            meta => #{
-                description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+            <<"usernames">> => <<"all">>,
+            <<"authmethod">> => ?PASSWORD_AUTH,
+            <<"cidr">> => <<"0.0.0.0/0">>,
+            <<"meta">> => #{
+                <<"description">> => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
             }
         },
         #{
-            usernames => <<"all">>,
-            authmethod => ?WAMP_CRA_AUTH,
-            cidr => <<"0.0.0.0/0">>,
-            meta => #{
-                description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+            <<"usernames">> => <<"all">>,
+            <<"authmethod">> => ?WAMP_CRA_AUTH,
+            <<"cidr">> => <<"0.0.0.0/0">>,
+            <<"meta">> => #{
+                <<"description">> => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
             }
         },
         % #{
-        %     usernames => <<"all">>,
-        %     authmethod => ?WAMP_SCRAM_AUTH,
-        %     cidr => <<"0.0.0.0/0">>,
-        %     meta => #{
-        %         description => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
+        %     <<"usernames">> => <<"all">>,
+        %     <<"authmethod">> => ?WAMP_SCRAM_AUTH,
+        %     <<"cidr">> => <<"0.0.0.0/0">>,
+        %     <<"meta">> => #{
+        %         <<"description">> => <<"Allows all users from any network authenticate using password credentials. This should ideally be restricted to your local administrative or DMZ network.">>
         %     }
         % },
         #{
-            usernames => [<<"admin">>],
-            authmethod => ?TRUST_AUTH,
-            cidr => <<"127.0.0.0/8">>,
-            meta => #{
-                description => <<"Allows the admin user to connect over the loopback interface (i.e. localhost) without presenting credentials .">>
+            <<"usernames">> => [<<"admin">>],
+            <<"authmethod">> => ?TRUST_AUTH,
+            <<"cidr">> => <<"127.0.0.0/8">>,
+            <<"meta">> => #{
+                <<"description">> => <<"Allows the admin user to connect over the loopback interface (i.e. localhost) without presenting credentials .">>
             }
         },
         #{
-            usernames => [<<"anonymous">>, <<"admin">>],
-            authmethod => ?WAMP_ANON_AUTH,
-            cidr => <<"127.0.0.0/8">>,
-            meta => #{
-                description => <<"Allows the anonymous user to connect over the loopback interface (i.e. localhost) only.">>
+            <<"usernames">> => [<<"anonymous">>, <<"admin">>],
+            <<"authmethod">> => ?WAMP_ANON_AUTH,
+            <<"cidr">> => <<"127.0.0.0/8">>,
+            <<"meta">> => #{
+                <<"description">> => <<"Allows the anonymous user to connect over the loopback interface (i.e. localhost) only.">>
             }
         }
     ]
@@ -496,7 +493,7 @@ apply_config(Filename) ->
             %% defines another realm where authentication and credential
             %% management is delegated to, we need to ensure all realms in the
             %% file are processed based on a precedence graph, so that SSO
-            %% realms are created before the realms targetting them.
+            %% realms are created before the realms targeting them.
             SortedRealms = topsort(Realms),
 
             %% We add the realm and allow an update if it
@@ -1046,7 +1043,6 @@ add_bondy_realm() ->
 
 %% @private
 validate_rbac_config(Realm, Map) ->
-    %% TODO Compute dependency graph here and sort the rights
     Groups = [
         bondy_rbac_group:new(Data)
         || Data <- maps:get(<<"groups">>, Map, [])
@@ -1086,11 +1082,13 @@ get_password_opts(Methods) when is_list(Methods) ->
 %% @private
 apply_rbac_config(#realm{uri = Uri}, Map) ->
     #{
-        groups := Groups,
+        groups := Groups0,
         users := Users,
         sources := SourcesAssignments,
         grants := Grants
     } = Map,
+
+    Groups = group_topsort(Uri, Groups0),
 
     _ = [
         ok = maybe_error(
@@ -1163,7 +1161,6 @@ do_update(Realm0, Map) ->
     Realm.
 
 
-
 %% @private
 merge_and_store(Realm0, Map) ->
     Realm = maps:fold(fun fold_props/3, Realm0, Map),
@@ -1181,7 +1178,6 @@ merge_and_store(Realm0, Map) ->
     ok = apply_rbac_config(Realm, RBACData),
 
     Realm.
-
 
 
 %% @private
@@ -1360,15 +1356,33 @@ do_validate_keys(L) when is_list(L) ->
     end.
 
 
+group_topsort(Uri, Groups) ->
+    try
+        bondy_rbac_group:topsort(Groups)
+    catch
+        error:{cycle, Path} ->
+            EReason = list_to_binary(
+                io_lib:format(
+                    <<"Bondy could not compute a precendece graph for the groups defined on the configuration file for in realm '~s' as they form a cycle with path ~p">>,
+                    [Uri, Path]
+                )
+            ),
+            error({invalid_config, EReason})
+    end.
+
+
 %% @private
 topsort(Realms) ->
+    Graph = digraph:new([acyclic]),
+
     try
-        Graph = precedence_graph(Realms),
+        _ = precedence_graph(Realms, Graph),
 
         case digraph_utils:topsort(Graph) of
             false ->
-                Reason = <<"Bondy could not compute a precendece graph for the realms defined on the configuration file.">>,
-                error({invalid_config, Reason});
+                %% Bondy could not compute a precendece graph for the realms
+                %% defined on the configuration file.
+                Realms;
             Vertices ->
                 [element(2, digraph:vertex(Graph, V)) || V <- Vertices]
         end
@@ -1382,12 +1396,14 @@ topsort(Realms) ->
                 )
             ),
             error({invalid_config, EReason})
+
+    after
+        digraph:delete(Graph)
     end.
 
 
 %% @private
-precedence_graph(Realms) ->
-    Graph = digraph:new([acyclic]),
+precedence_graph(Realms, Graph) ->
     Vertices = [
         begin
             R = validate_uris(R0),
@@ -1395,21 +1411,21 @@ precedence_graph(Realms) ->
             digraph:add_vertex(Graph, Uri, R)
         end || R0 <- Realms
     ],
-    precedence_graph(Vertices, Graph).
+    precedence_graph_aux(Vertices, Graph).
 
 
 %% @private
-precedence_graph([H|T], Graph) ->
+precedence_graph_aux([H|T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
     case maps:find(<<"sso_realm_uri">>, Realm) of
         {ok, SSOUri} ->
             ok = precedence_graph_add_edge(Graph, SSOUri, H),
-            precedence_graph(T, Graph);
+            precedence_graph_aux(T, Graph);
         error ->
-            precedence_graph(T, Graph)
+            precedence_graph_aux(T, Graph)
     end;
 
-precedence_graph([], Graph) ->
+precedence_graph_aux([], Graph) ->
     Graph.
 
 
@@ -1469,7 +1485,7 @@ check_sso_realm_exists(Uri) ->
             error(
                 {
                     invalid_config,
-                    <<"Property 'sso_realm_uri' refers to a realm that is not configured as a Same Sign-on Realm (its property 'is_sso_realm' has to be set to true).">>
+                    <<"Property 'sso_realm_uri' refers to a realm that is not configured as a Same Sign-on Realm (its property 'is_sso_realm' has to be set to false).">>
                 }
             ),
             ok
@@ -1482,7 +1498,7 @@ check_integrity_constraints(#realm{is_sso_realm = true} = Realm) ->
         orelse error(
             {
                 invalid_config,
-                <<"The realm is defined as a Same Sign-on (SSO) realm (the property 'is_sso_realm' is set to 'true') but also as using another realm for SSO (property 'sso_realm_uri' is defined. An SSO realm cannot itself use SSO.">>
+                <<"The realm is defined as a Same Sign-on (SSO) realm (the property 'is_sso_realm' is set to 'true') but also as using another realm for SSO (property 'sso_realm_uri' is defined). An SSO realm cannot itself use SSO.">>
             }
         ),
     ok;
