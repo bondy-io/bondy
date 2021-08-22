@@ -58,7 +58,7 @@ init(Ctxt) ->
 
         PWD = bondy_rbac_user:password(User),
         User =/= undefined
-            andalso lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS)
+        andalso lists:member(bondy_password:protocol(PWD), ?VALID_PROTOCOLS)
         orelse throw(invalid_context),
 
         {ok, #{password => PWD}}
