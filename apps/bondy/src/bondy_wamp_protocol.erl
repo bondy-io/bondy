@@ -433,9 +433,7 @@ handle_inbound_messages(
     when Name =/= challenging ->
     %% Client has not been sent a challenge
     ok = bondy_event_manager:notify({wamp, M, St#wamp_state.context}),
-    Reason = <<
-        "You need to request a session first by sending a HELLO message."
-    >>,
+    Reason = <<"You need to establish a session first.">>,
     stop({protocol_violation, Reason}, St);
 
 handle_inbound_messages(
@@ -598,8 +596,12 @@ when UserId =/= <<"anonymous">> ->
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
             ReqMethods = maps:get(authmethods, Details, []),
-            Methods = bondy_auth:available_methods(ReqMethods, AuthCtxt),
-            auth_challenge(Methods, St2);
+            case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
+                [] ->
+                    {error, {no_authmethod, ReqMethods}, St2};
+                [Method|_] ->
+                    auth_challenge(Method, St2)
+            end;
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St1}
     end;
@@ -620,7 +622,7 @@ maybe_auth_challenge(enabled, Details, Realm, St0) ->
     case bondy_auth:init(SessionId, Realm, anonymous, Roles, Peer) of
         {ok, AuthCtxt} ->
             St2 = St1#wamp_state{auth_context = AuthCtxt},
-            auth_challenge([?WAMP_ANON_AUTH], St2);
+            auth_challenge(?WAMP_ANON_AUTH, St2);
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St1}
     end;
@@ -661,13 +663,13 @@ authroles(Details) ->
 
 
 %% @private
-auth_challenge([H|T], St0) ->
+auth_challenge(Method, St0) ->
     Ctxt = St0#wamp_state.context,
     AuthCtxt0 = St0#wamp_state.auth_context,
 
     Details = bondy_context:request_details(Ctxt),
 
-    case bondy_auth:challenge(H, Details, AuthCtxt0) of
+    case bondy_auth:challenge(Method, Details, AuthCtxt0) of
         {ok, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
@@ -679,18 +681,10 @@ auth_challenge([H|T], St0) ->
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
-            {challenge, H, ChallengeExtra, St1};
+            {challenge, Method, ChallengeExtra, St1};
         {error, Reason} ->
-            _ = lager:debug(
-                "Authentication challenge step preparation failed; "
-                "reason=~s, authmethod=~p",
-                [Reason, H]
-            ),
-            auth_challenge(T, St0)
-    end;
-
-auth_challenge([], St) ->
-    {error, no_authmethod, St}.
+            {error, {authentication_failed, Reason}, St0}
+    end.
 
 
 
@@ -739,9 +733,15 @@ abort_message(invalid_message) ->
     },
     wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
 
-abort_message(no_authmethod) ->
+abort_message({no_authmethod, []}) ->
     Details = #{
-        message => <<"Router could not use the authmethod requested.">>
+        message => <<"No authentication method requested. At least one authentication method is required.">>
+    },
+    wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
+
+abort_message({no_authmethod, _Opts}) ->
+    Details = #{
+        message => <<"The requested authentication methods are not available for this user on this realm.">>
     },
     wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
