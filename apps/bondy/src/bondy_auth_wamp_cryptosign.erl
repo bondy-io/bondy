@@ -31,7 +31,9 @@
 -include("bondy_security.hrl").
 
 
--type state() :: map().
+-type state()           ::  map().
+-type challenge_error() ::  missing_pubkey | no_matching_pubkey.
+
 
 %% BONDY_AUTH CALLBACKS
 -export([init/1]).
@@ -57,9 +59,9 @@ init(Ctxt) ->
     try
 
         User = bondy_auth:user(Ctxt),
-        User =/= undefined orelse throw(invalid_context),
 
-        true == bondy_rbac_user:has_authorized_keys(User)
+        User =/= undefined
+        andalso true == bondy_rbac_user:has_authorized_keys(User)
         orelse throw(invalid_context),
 
         {ok, maps:new()}
@@ -91,7 +93,7 @@ requirements() ->
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
     {ok, Extra :: map(), NewState :: state()}
-    | {error, Reason :: any(), NewState :: state()}.
+    | {error, challenge_error(), NewState :: state()}.
 
 challenge(Details, Ctxt, State) ->
     try
