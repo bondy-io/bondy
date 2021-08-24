@@ -35,7 +35,8 @@ all() ->
         anon_auth_not_allowed,
         ticket_auth_not_allowed,
         local_scope,
-        client_scope
+        client_scope_with_ticket,
+        client_scope_with_id
     ].
 
 
@@ -249,7 +250,7 @@ local_scope(Config) ->
 
 
 
-client_scope(Config) ->
+client_scope_with_ticket(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
@@ -302,3 +303,44 @@ client_scope(Config) ->
         {ok, _, _},
         bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
     ).
+
+client_scope_with_id(Config) ->
+    RealmUri = ?config(realm_uri, Config),
+    Roles = [],
+    Peer = {{127, 0, 0, 1}, 10000},
+
+    %% We simulate U1 has logged in using wampcra
+    UserSession = bondy_session:new(Peer, RealmUri, #{
+        authid => ?U1,
+        authmethod => ?WAMP_CRA_AUTH,
+        security_enabled => true,
+        authroles => Roles,
+        roles => #{
+            caller => #{}
+        }
+    }),
+    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+
+    %% We issue a self-issued ticket
+    {ok, #{scope := #{client_id := ?APP}} = UserTicket, _} = bondy_ticket:issue(
+        UserSession,
+        #{
+            client_id => ?APP,
+            expiry_time_secs => 300
+        }
+    ),
+
+    %% We simulate a new session
+    SessionId = 1,
+    {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
+
+    ?assertEqual(
+        true,
+        lists:member(?WAMP_TICKET_AUTH, bondy_auth:available_methods(Ctxt1))
+    ),
+
+    ?assertMatch(
+        {ok, _, _},
+        bondy_auth:authenticate(?WAMP_TICKET_AUTH, UserTicket, undefined, Ctxt1)
+    ).
+

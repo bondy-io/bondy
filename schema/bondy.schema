@@ -391,6 +391,73 @@
 {datatype, flag}
 ]}.
 
+%% -----------------------------------------------------------------------------
+%% @doc Defines the a comma separated list of authentication methods that a
+%% user can use to establish a session that is allowed to issue tickets to be
+%% used with 'ticket' authentication.
+%%
+%% The possible values are the names of the authentication methods:
+%% - "cryptosign"
+%% - "password"
+%% - "ticket"
+%% - "tls"
+%% - "trust"
+%% - "wamp-scram"
+%% - "wampcra"
+%%
+%% The option also allows a single value "all" in which case all the methods
+%% above will be allowed.
+%%
+%% Notice that "anonymous" and "oauth2" methods are NOT allowed in this list as
+%% they are incompatible with the idea of tickets.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.ticket.authmethods", "bondy.security.ticket.authmethods",[
+  {default, "all"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.security.ticket.authmethods",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.ticket.authmethods", Conf) of
+        Value when is_list(Value) ->
+          Allowed = ordsets:from_list([
+            <<"cryptosign">>,
+            <<"password">>,
+            <<"ticket">>,
+            <<"tls">>,
+            <<"trust">>,
+            <<"wamp-scram">>,
+            <<"wampcra">>
+          ]),
+          try
+            Requested = ordsets:from_list([
+              list_to_binary(string:strip(Method))
+              || Method <- string:split(Value, ",")
+            ]),
+
+            case Requested of
+              [<<"all">>] ->
+                Allowed;
+              _ ->
+                Invalid = ordsets:subtract(Requested, Allowed),
+                ordsets:size(Invalid) == 0 orelse throw({invalid, Invalid}),
+                Requested
+            end
+
+          catch
+            throw:{invalid, List} ->
+              String = string:join(List, ", "),
+              cuttlefish:invalid("invalid authmethods " ++ String)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid authmethods e.g. \"cryptosign, wampcra, ticket\""
+            )
+    end
+  end
+}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Not currently working, leave the value as 'session'
@@ -726,12 +793,12 @@ hidden
           try
             [
               begin
-                case Version of
+                case string:strip(Version) of
                   "1.2" -> 'tlsv1.2';
                   "1.3" -> 'tlsv1.3';
                   _ -> throw({invalid_version, Version})
                 end
-              end || Version <- string:split(string:trim(Value), ",")
+              end || Version <- string:split(Value, ",")
             ]
           catch
             throw:{invalid_version, Version} ->
@@ -951,12 +1018,12 @@ hidden
           try
             [
               begin
-                case Version of
+                case string:strip(Version) of
                   "1.2" -> 'tlsv1.2';
                   "1.3" -> 'tlsv1.3';
                   _ -> throw({invalid_version, Version})
                 end
-              end || Version <- string:split(string:trim(Value), ",")
+              end || Version <- string:split(Value, ",")
             ]
           catch
             throw:{invalid_version, Version} ->
@@ -1415,12 +1482,12 @@ hidden
           try
             [
               begin
-                case Version of
+                case string:strip(Version) of
                   "1.2" -> 'tlsv1.2';
                   "1.3" -> 'tlsv1.3';
                   _ -> throw({invalid_version, Version})
                 end
-              end || Version <- string:split(string:trim(Value), ",")
+              end || Version <- string:split(Value, ",")
             ]
           catch
             throw:{invalid_version, Version} ->
@@ -1564,12 +1631,12 @@ end}.
           try
             [
               begin
-                case Version of
+                case string:strip(Version) of
                   "1.2" -> 'tlsv1.2';
                   "1.3" -> 'tlsv1.3';
                   _ -> throw({invalid_version, Version})
                 end
-              end || Version <- string:split(string:trim(Value), ",")
+              end || Version <- string:split(Value, ",")
             ]
           catch
             throw:{invalid_version, Version} ->

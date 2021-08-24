@@ -173,6 +173,12 @@
         required => false,
         datatype => binary
     },
+    <<"client_id">> => #{
+        alias => client_id,
+        key => client_id,
+        required => false,
+        datatype => binary
+    },
     <<"client_instance_id">> => #{
         alias => client_instance_id,
         key => client_instance_id,
@@ -186,6 +192,7 @@
                             expiry_time_secs    =>  pos_integer(),
                             allow_sso           =>  boolean(),
                             client_ticket       =>  t(),
+                            client_id           =>  binary(),
                             client_instance_id  =>  binary()
                         }.
 -type verify_opts() ::  #{
@@ -245,8 +252,9 @@
 %% NOT be accepted for processing. This is a request that might not be honoured
 %% by the router as it depends on the router configuration, so the returned
 %% value might defer.
-%% To issue a client-scoped ticket, the options `client_ticket' must be present
-%% and its value must be a valid ticket issued by a different user (normally a
+%% To issue a client-scoped ticket, either the option `client_ticket' or
+%% `client_id' must be present. The `client_ticket' option takes a valid ticket
+%% issued by a different user (normally a
 %% client). Otherwise the call will return the error tuple with reason
 %% `invalid_request'.
 %% @end
@@ -260,12 +268,12 @@ issue(Session, Opts0) ->
     Opts = maps_utils:validate(Opts0, ?OPTS_VALIDATOR),
     try
         Authmethod = bondy_session:authmethod(Session),
+        Allowed = bondy_config:get([security, ticket, authmethods]),
 
-        (Authmethod == ?WAMP_TICKET_AUTH orelse Authmethod == ?WAMP_ANON_AUTH)
-            andalso throw({
-                not_authorized,
-                <<"You are no authorized to issue a ticket because your session was opened using the '", Authmethod/binary, "' authentication method.">>
-            }),
+        lists:member(Authmethod, Allowed) orelse throw({
+            not_authorized,
+            <<"The authentication method '", Authmethod/binary, "' you used to establish this session is not in the list of methods allowed to issue tickets (configuration option 'security.ticket.authmethods').">>
+        }),
 
         do_issue(Session, Opts)
     catch
@@ -376,7 +384,6 @@ lookup(RealmUri, Authid, Scope) ->
                     {error, not_found}
             end
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -580,38 +587,40 @@ when is_binary(Ticket) ->
             %% TODO implement new Error standard
             error(#{
                 code => invalid_value,
-                description => <<"The value for 'client_ticket' did not pass the validator.">>,
+                description => <<"The value for 'client_ticket' is not valid.">>,
                 key => client_ticket,
-                message => <<"The value for 'client_ticket' is not valid.">>
+                message => <<"The value for 'client_ticket' is not either not a ticket, it has an invalid signature or it is expired.">>
             })
     end;
 
-scope(_, Opts, Uri) ->
+scope(Session, Opts, Uri) ->
+    Authid = bondy_session:authid(Session),
+    ClientId = maps:get(client_id, Opts, undefined),
+    InstanceId = maps:get(client_instance_id, Opts, undefined),
+
+    %% Throw exception if client is requesting a ticket issued to itself
+    Authid =/= ClientId orelse throw(invalid_request),
+
     #{
         realm => Uri,
-        client_id => undefined,
-        client_instance_id => maps:get(
-            client_instance_id, Opts, undefined
-        )
+        client_id => ClientId,
+        client_instance_id => InstanceId
     }.
 
 
 %% -----------------------------------------------------------------------------
 %% %% @private
-%% @doc Clients can issue open-scoped and realm-scoped but not client-scoped tickets.  Clients cannot login using tickets.
-% User cannot issue self-issue ticekkt
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 authorize(ScopeType, AuthCtxt) ->
 
     case ScopeType of
         sso ->
-            %% realm == undefined happens only when using SSO
             ok = bondy_rbac:authorize(
                 <<"bondy.issue">>, <<"bondy.ticket.scope.sso">>, AuthCtxt
             );
         client_sso ->
-            %% realm == undefined happens only when using SSO
             ok = bondy_rbac:authorize(
                 <<"bondy.issue">>, <<"bondy.ticket.scope.client_sso">>, AuthCtxt
             );
@@ -683,12 +692,12 @@ store_ticket(RealmUri, Authid, Claims) ->
 
     case maps:get(client_id, Scope) of
         undefined ->
-            %% Self-issued noscope ticket or w/realm-scope ticket.
+            %% local | sso ticket scope type
             %% We just replace any existing ticket in this location
             ok = plum_db:put(Prefix, Key, Claims);
 
-        Key ->
-            %% Ticket issued by client with or without scope
+        _ ->
+            %% client_local | client_sso scope type
             %% We have to update the value, so first we fetch it.
             Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
             Tickets0 = plum_db:get(Prefix, Key, Opts),
