@@ -1042,11 +1042,14 @@ add_bondy_realm() ->
 
 
 %% @private
-validate_rbac_config(Realm, Map) ->
-    Groups = [
+validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
+    Groups0 = [
         bondy_rbac_group:new(Data)
         || Data <- maps:get(<<"groups">>, Map, [])
     ],
+
+    Groups = group_topsort(Uri, Groups0),
+
     Users = [
         bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
         || Data <- maps:get(<<"users">>, Map, [])
@@ -1082,13 +1085,11 @@ get_password_opts(Methods) when is_list(Methods) ->
 %% @private
 apply_rbac_config(#realm{uri = Uri}, Map) ->
     #{
-        groups := Groups0,
+        groups := Groups,
         users := Users,
         sources := SourcesAssignments,
         grants := Grants
     } = Map,
-
-    Groups = group_topsort(Uri, Groups0),
 
     _ = [
         ok = maybe_error(
@@ -1168,13 +1169,14 @@ merge_and_store(Realm0, Map) ->
     ok = check_integrity_constraints(Realm),
     ok = check_sso_realm_exists(Realm#realm.sso_realm_uri),
 
-    Uri = Realm#realm.uri,
-    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
-
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
     %% elements have been validated.
     RBACData = validate_rbac_config(Realm, Map),
+
+    Uri = Realm#realm.uri,
+    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
+
     ok = apply_rbac_config(Realm, RBACData),
 
     Realm.
