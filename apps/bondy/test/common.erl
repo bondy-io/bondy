@@ -130,7 +130,7 @@
               {max_expiry_time_secs, 600},
               {allow_not_found, true},
               {authmethods, [
-                  <<"cryptosign">>,<<"password">>,<<"ticket">>,<<"tls">>,    <<"trust">>,<<"wamp-scram">>,<<"wampcra">>
+                <<"cryptosign">>, <<"password">>, <<"ticket">>, <<"tls">>, <<"trust">>,<<"wamp-scram">>, <<"wampcra">>
                 ]}
             ]},
           {password,

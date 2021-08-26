@@ -164,7 +164,10 @@ anon_auth_not_allowed(Config) ->
     ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
 
     ?assertMatch(
-        {error, {not_authorized, <<"You are no authorized to issue a ticket because your session was opened using", _/binary>>}},
+        {
+            error,
+            {not_authorized, <<"The authentication method 'anonymous' you used to establish this session is not in the list of methods allowed to issue tickets (configuration option 'security.ticket.authmethods').">>}
+        },
         bondy_ticket:issue(Session, #{})
     ).
 
@@ -172,6 +175,11 @@ ticket_auth_not_allowed(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
+
+    %% We disable ticket auth
+    ok = bondy_config:set([security, ticket, authmethods], [
+        <<"cryptosign">>, <<"wampcra">>
+    ]),
 
     %% We simulate U1 has logged in using wampcra
     Session = bondy_session:new(Peer, RealmUri, #{
@@ -188,7 +196,12 @@ ticket_auth_not_allowed(Config) ->
     ?assertMatch(
         {error, {not_authorized, _}},
         bondy_ticket:issue(Session, #{})
-    ).
+    ),
+
+     %% We re-enable authmethods
+     ok = bondy_config:set([security, ticket, authmethods], [
+        <<"cryptosign">>, <<"password">>, <<"ticket">>, <<"tls">>, <<"trust">>,<<"wamp-scram">>, <<"wampcra">>
+    ]).
 
 local_scope(Config) ->
     RealmUri = ?config(realm_uri, Config),
@@ -322,12 +335,17 @@ client_scope_with_id(Config) ->
     ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
-    {ok, #{scope := #{client_id := ?APP}} = UserTicket, _} = bondy_ticket:issue(
+    {ok, UserTicket, Details} = bondy_ticket:issue(
         UserSession,
         #{
             client_id => ?APP,
             expiry_time_secs => 300
         }
+    ),
+
+    ?assertMatch(
+        #{scope := #{client_id := ?APP}},
+        Details
     ),
 
     %% We simulate a new session
