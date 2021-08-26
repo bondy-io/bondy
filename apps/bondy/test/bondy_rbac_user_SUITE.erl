@@ -261,8 +261,10 @@ update(_) ->
     SSOUser0 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
     User0 = bondy_rbac_user:fetch(?REALM2_URI, ?SSOU1),
 
+    Password = <<"newpassword">>,
+
     Data0 = #{
-        password => <<"newpassword">>,
+        password => Password,
         groups => [],
         sso_realm_uri => ?SSO_REALM_URI
     },
@@ -286,9 +288,18 @@ update(_) ->
         )
     ),
 
+    SSOUser1 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+
     ?assertNotEqual(
         SSOUser0,
-        bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1)
+        SSOUser1
+    ),
+
+    ?assertEqual(
+        true,
+        bondy_password:verify_string(
+            Password, bondy_rbac_user:password(SSOUser1)
+        )
     ),
 
     ok.
@@ -303,6 +314,25 @@ change_password(_) ->
     ?assertEqual(
         true,
         bondy_password:verify_string(P1, bondy_rbac_user:password(SSOUser0))
+    ),
+
+    ?assertEqual(
+        false,
+        bondy_password:verify_string(
+            <<"wrongpassword">>, bondy_rbac_user:password(SSOUser0)
+        )
+    ),
+
+    ?assertEqual(
+        true,
+        bondy_rbac_user:has_password(SSOUser0)
+    ),
+
+    ?assertNotEqual(
+        ok,
+        bondy_rbac_user:change_password(
+            ?REALM2_URI, ?SSOU1, <<"123456">>, <<"wrongpassword">>
+        )
     ),
 
     ?assertEqual(
