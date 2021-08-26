@@ -350,6 +350,9 @@ verify(Ticket, Opts) ->
         error:{badkey, _} ->
             {error, invalid};
 
+        error:{badarg, _} ->
+            {error, invalid};
+
         throw:Reason ->
             {error, Reason}
     end.
