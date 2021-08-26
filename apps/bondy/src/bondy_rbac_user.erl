@@ -722,21 +722,28 @@ change_password(RealmUri, Username, New, Old) ->
     case lookup(RealmUri, Username) of
         {error, not_found} = Error ->
             Error;
-        #{password := PW} when Old =/= undefined ->
-            case bondy_password:verify_string(Old, PW) of
-                true when Old == New ->
-                    ok;
-                true ->
-                    update_credentials(RealmUri, Username, #{password => New});
-                false ->
-                    {error, bad_signature}
-            end;
-        _ ->
-            %% User did not have a password or is an SSO user,
-            %% update_credentials knows how to forward the change to the
-            %% SSO realm
-            update_credentials(RealmUri, Username, #{password => New})
+        #{} = User ->
+            do_change_password(RealmUri, resolve(User), New, Old)
     end.
+
+
+%% @private
+do_change_password(RealmUri, #{password := PW, username := Username}, New, Old)
+when Old =/= undefined ->
+    case bondy_password:verify_string(Old, PW) of
+        true when Old == New ->
+            ok;
+        true ->
+            update_credentials(RealmUri, Username, #{password => New});
+        false ->
+            {error, bad_signature}
+    end;
+
+do_change_password(RealmUri, #{username := Username}, New, _) ->
+        %% User did not have a password or is an SSO user,
+        %% update_credentials knows how to forward the change to the
+        %% SSO realm
+        update_credentials(RealmUri, Username, #{password => New}).
 
 
 %% -----------------------------------------------------------------------------
