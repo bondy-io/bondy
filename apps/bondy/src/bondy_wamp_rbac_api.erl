@@ -250,18 +250,8 @@ handle_call(?BONDY_USER_CHANGE_PASSWORD, #call{} = M, Ctxt) ->
             wamp_message:result(M#call.request_id, #{});
         {error, Reason} ->
             bondy_wamp_utils:error(Reason, M)
-    end;
 
-handle_call(?BONDY_USER_CHANGE_AUTHORIZED_KEYS, #call{} = M, Ctxt) ->
-    [Uri, Username, Keys] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-
-    case bondy_rbac_user:change_authorized_keys(Uri, Username, Keys) of
-        ok ->
-            wamp_message:result(M#call.request_id, #{});
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
-
+        end;
 
 handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
     [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),

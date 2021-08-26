@@ -75,7 +75,6 @@
 -define(BONDY_SOURCE_MATCH,        <<"bondy.source.match">>).
 -define(BONDY_USER_ADD,            <<"bondy.user.add">>).
 -define(BONDY_USER_CHANGE_PASSWORD, <<"bondy.user.change_password">>).
--define(BONDY_USER_CHANGE_AUTHORIZED_KEYS, <<"bondy.user.change_authorized_keys">>).
 -define(BONDY_USER_DELETE,         <<"bondy.user.delete">>).
 -define(BONDY_USER_GET,            <<"bondy.user.get">>).
 -define(BONDY_USER_IS_ENABLED,     <<"bondy.user.is_enabled">>).

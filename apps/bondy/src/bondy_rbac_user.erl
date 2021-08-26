@@ -215,7 +215,6 @@
 -export([add_or_update/2]).
 -export([add_or_update/3]).
 -export([authorized_keys/1]).
--export([change_authorized_keys/3]).
 %% TODO new API
 %% -export([add_authorized_key/2]).
 %% -export([remove_authorized_key/2]).
@@ -701,14 +700,6 @@ list(RealmUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-change_authorized_keys(RealmUri, Username, Keys) when is_list(Keys) ->
-    update_credentials(RealmUri, Username, #{authorized_keys => Keys}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 change_password(RealmUri, Username, New) when is_binary(New) ->
     change_password(RealmUri, Username, New, undefined).
 
@@ -1132,9 +1123,10 @@ merge(RealmUri, U1, U2, #{update_credentials := true} = Opts) ->
     end;
 
 merge(_, U1, U2, _) ->
-    %% We only allow updates to modify credentials if explicitely requested via
-    %% option update_credentials
-    maps:merge(U1, maps:without([password, authorized_keys], U2)).
+    %% We only allow updates to modify password if explicitely requested via
+    %% option update_credentials.
+    %% authorized_keys are allowed to be merge as the contain public keys.
+    maps:merge(U1, maps:without([password], U2)).
 
 
 %% @private
