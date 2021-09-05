@@ -144,7 +144,7 @@
         key => password_opts,
         required => false,
         datatype => map,
-        validator => fun bondy_password:opts_validator/1
+        validator => bondy_password:opts_validator()
     }
 }).
 
