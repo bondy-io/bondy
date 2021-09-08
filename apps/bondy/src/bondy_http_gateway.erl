@@ -458,7 +458,7 @@ subscribe(State) ->
     },
 
     {ok, Id} = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI, Opts, ?BONDY_REALM_DELETED
+        ?INTERNAL_REALM_URI, Opts, ?BONDY_REALM_DELETED
     ),
     Subs = maps:put(Id, ?BONDY_REALM_DELETED, State#state.subscriptions),
 
@@ -472,7 +472,7 @@ unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(object_update),
 
     Ids = maps:keys(State#state.subscriptions),
-    _ = [bondy_broker:unsubscribe(Id, ?BONDY_PRIV_REALM_URI) ||  Id <- Ids],
+    _ = [bondy_broker:unsubscribe(Id, ?INTERNAL_REALM_URI) ||  Id <- Ids],
     State#state{subscriptions = #{}}.
 
 

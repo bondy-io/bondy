@@ -375,7 +375,7 @@
 }).
 
 -define(BONDY_PRIV_REALM, #realm{
-    uri = ?BONDY_PRIV_REALM_URI,
+    uri = ?INTERNAL_REALM_URI,
     description = <<"The private realm used by bondy">>,
     authmethods = [],
     security_enabled = true,
@@ -669,7 +669,7 @@ enable_security(Uri) when is_binary(Uri) ->
 disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
     {error, forbidden};
 
-disable_security(#realm{uri = ?BONDY_PRIV_REALM_URI}) ->
+disable_security(#realm{uri = ?INTERNAL_REALM_URI}) ->
     {error, forbidden};
 
 disable_security(#realm{uri = Uri} = Realm) ->
@@ -849,7 +849,7 @@ lookup(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec fetch(uri()) -> t().
 
-fetch(?BONDY_PRIV_REALM_URI) ->
+fetch(?INTERNAL_REALM_URI) ->
     ?BONDY_PRIV_REALM;
 
 fetch(Uri) ->
@@ -905,7 +905,7 @@ get(Uri, Opts) ->
 %% -----------------------------------------------------------------------------
 -spec add(uri() | map()) -> t() | no_return().
 
-add(?BONDY_PRIV_REALM_URI) ->
+add(?INTERNAL_REALM_URI) ->
     error(forbidden);
 
 add(?BONDY_REALM_URI) ->
@@ -931,7 +931,7 @@ add(Map0) ->
 %% -----------------------------------------------------------------------------
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
-update(#realm{uri = ?BONDY_PRIV_REALM_URI}, _) ->
+update(#realm{uri = ?INTERNAL_REALM_URI}, _) ->
     error(forbidden);
 
 update(#realm{uri = ?BONDY_REALM_URI} = Realm, Data0) ->
@@ -944,7 +944,7 @@ update(#realm{uri = Uri} = Realm, Data0) ->
     Data = maps_utils:validate(Data1, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
-update(?BONDY_PRIV_REALM_URI, _) ->
+update(?INTERNAL_REALM_URI, _) ->
     error(forbidden);
 
 update(Uri, Data) when is_binary(Uri) ->
@@ -962,7 +962,7 @@ update(Uri, Data) when is_binary(Uri) ->
 delete(#realm{uri = Uri}) ->
     delete(Uri);
 
-delete(?BONDY_PRIV_REALM_URI) ->
+delete(?INTERNAL_REALM_URI) ->
     {error, forbidden};
 
 delete(?BONDY_REALM_URI) ->

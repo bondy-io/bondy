@@ -52,13 +52,13 @@ init([]) ->
 
 handle_event({realm_added, Uri}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({realm_deleted, Uri}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
@@ -67,7 +67,7 @@ handle_event({rbac_group_added, RealmUri, Name}, State) ->
         _ = bondy:publish(
             #{}, ?BONDY_GROUP_ADDED, [RealmUri, Name], #{}, R
         )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+        || R <- [RealmUri, ?INTERNAL_REALM_URI]
     ],
     {ok, State};
 
@@ -76,7 +76,7 @@ handle_event({rbac_group_updated, RealmUri, Name}, State) ->
         _ = bondy:publish(
             #{}, ?BONDY_GROUP_UPDATED, [RealmUri, Name], #{}, R
         )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+        || R <- [RealmUri, ?INTERNAL_REALM_URI]
     ],
     {ok, State};
 
@@ -85,17 +85,18 @@ handle_event({rbac_group_deleted, RealmUri, Name}, State) ->
         _ = bondy:publish(
             #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, R
         )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+        || R <- [RealmUri, ?INTERNAL_REALM_URI]
     ],
     {ok, State};
 
 handle_event({rbac_user_added, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_USER_ADDED, [RealmUri, Username], #{}, R
-        )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
-    ],
+    _ = bondy:publish(
+        #{}, ?BONDY_USER_ADDED, [Username], #{}, RealmUri
+    ),
+    _ = bondy:publish(
+        #{}, ?BONDY_USER_ADDED, [RealmUri, Username], #{},
+        ?INTERNAL_REALM_URI
+    ),
     {ok, State};
 
 handle_event({rbac_user_updated, RealmUri, Username}, State) ->
@@ -103,7 +104,7 @@ handle_event({rbac_user_updated, RealmUri, Username}, State) ->
         _ = bondy:publish(
             #{}, ?BONDY_USER_UPDATED, [RealmUri, Username], #{}, R
         )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+        || R <- [RealmUri, ?INTERNAL_REALM_URI]
     ],
     {ok, State};
 
@@ -112,14 +113,14 @@ handle_event({rbac_user_deleted, RealmUri, Username}, State) ->
         _ = bondy:publish(
             #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, R
         )
-        || R <- [RealmUri, ?BONDY_PRIV_REALM_URI]
+        || R <- [RealmUri, ?INTERNAL_REALM_URI]
     ],
     {ok, State};
 
 handle_event({rbac_user_credentials_changed, RealmUri, Username}, State) ->
     Uri = ?BONDY_USER_CREDENTIALS_CHANGED,
     _ = bondy:publish(
-        #{}, Uri, [RealmUri, Username], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, Uri, [RealmUri, Username], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
@@ -130,37 +131,37 @@ handle_event({rbac_user_logged_in, RealmUri, Username, Meta}, State) ->
 
 handle_event({backup_started, File}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_finished, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_failed, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_started, File}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_finished, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?BONDY_PRIV_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?INTERNAL_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_failed, Args}, State) ->
     Uri = ?BONDY_BACKUP_RESTORE_FAILED,
-    _ = bondy:publish(#{}, Uri, Args, #{}, ?BONDY_PRIV_REALM_URI),
+    _ = bondy:publish(#{}, Uri, Args, #{}, ?INTERNAL_REALM_URI),
     {ok, State};
 
 %% REGISTRATION META API
