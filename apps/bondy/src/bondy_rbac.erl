@@ -125,16 +125,16 @@
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 -ifdef(TEST).
--define(CTXT_REFRESH_TIME, 1).
+-define(CTXT_REFRESH_SECS, 1).
 -else.
--define(CTXT_REFRESH_TIME, 1000).
+-define(CTXT_REFRESH_SECS, 3600). % 1h
 -endif.
 
 -record(bondy_rbac_context, {
     realm_uri               ::  binary(),
     username                ::  binary(),
     grants                  ::  [grant()],
-    epoch                   ::  erlang:timestamp(),
+    epoch                   ::  integer(),
     is_anonymous = false    ::  boolean()
 }).
 
@@ -253,10 +253,10 @@ get_context(Ctxt) ->
 
 refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
     %% TODO replace this with a cluster metadata hash check, or something
-    Epoch = erlang:timestamp(),
-    Diff = timer:now_diff(Epoch, Context#bondy_rbac_context.epoch),
+    Now = erlang:system_time(second),
+    Diff = Now - Context#bondy_rbac_context.epoch,
 
-    case Diff < ?CTXT_REFRESH_TIME of
+    case Diff < ?CTXT_REFRESH_SECS of
         false when Context#bondy_rbac_context.is_anonymous ->
             %% context has expired
             Ctxt = get_anonymous_context(
@@ -302,7 +302,7 @@ when is_binary(Username) orelse Username == anonymous ->
         realm_uri = RealmUri,
         username = Username,
         grants = grants(RealmUri, Username, user),
-        epoch = erlang:timestamp(),
+        epoch = erlang:system_time(second),
         is_anonymous = Username == anonymous
     }.
 
@@ -316,7 +316,7 @@ get_anonymous_context(RealmUri, Username) ->
         realm_uri = RealmUri,
         username = Username,
         grants = grants(RealmUri, anonymous, group),
-        epoch = erlang:timestamp(),
+        epoch = erlang:system_time(second),
         is_anonymous = true
     }.
 
