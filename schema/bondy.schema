@@ -596,7 +596,7 @@ hidden
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
-  {default, 10000},
+  {default, 100000},
   {datatype, integer}
 ]}.
 
