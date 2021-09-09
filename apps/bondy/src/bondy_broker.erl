@@ -355,7 +355,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                 Pid = bondy_registry_entry:pid(Entry),
                 case bondy_registry_entry:session_id(Entry) of
                     undefined ->
-                        %% A bondy_subscriber
+                        %% An internal bondy_subscriber
                         Event = MakeEvent(SubsId),
                         ok = bondy_subscriber:handle_event(Pid, Event),
                         NodeAcc;

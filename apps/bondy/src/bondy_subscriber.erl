@@ -18,8 +18,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc This module implements a supervised process (gen_server) that acts as a
-%% local WAMP subscriber that when received an EVENT applies the user provided
-%% function.
+%% local (internal) WAMP subscriber that when received an EVENT applies the
+%% user provided function.
 %%
 %% It is used by bondy_broker:subscribe/4 and bondy_broker:unsubscribe/1.
 %% @end
@@ -55,6 +55,11 @@
 -export([code_change/3]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
+
+
+%% =============================================================================
+%% CALLBACK API
+%% =============================================================================
 
 
 
