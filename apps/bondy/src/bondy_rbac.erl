@@ -218,9 +218,10 @@ authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
 authorize(Permission, Resource, Ctxt) ->
     case bondy_context:is_security_enabled(Ctxt) of
         true ->
-            %% TODO We need to cache the RBAC Context in the Bondy Context
-            SecurityCtxt = get_context(Ctxt),
-            do_authorize(Permission, Resource, SecurityCtxt);
+            RBACCtxt = bondy_session:rbac_context(
+                bondy_context:session_id(Ctxt)
+            ),
+            do_authorize(Permission, Resource, RBACCtxt);
         false ->
             ok
     end.
