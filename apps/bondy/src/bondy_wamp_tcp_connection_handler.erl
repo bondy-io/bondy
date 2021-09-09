@@ -274,11 +274,9 @@ when Len > MaxLen ->
     ),
     {stop, maximum_message_length_exceeded, St};
 
-handle_data(<<0:5, 0:3, Len:24, Data/binary>>, St)
-when byte_size(Data) >= Len ->
+handle_data(<<0:5, 0:3, Len:24, Mssg:Len/binary, Rest/binary>>, St) ->
     %% We received a WAMP message
     %% Len is the number of octets after serialization
-    <<Mssg:Len/binary, Rest/binary>> = Data,
     case bondy_wamp_protocol:handle_inbound(Mssg, St#state.protocol_state) of
         {ok, PSt} ->
             handle_data(Rest, St#state{protocol_state = PSt});
@@ -305,16 +303,14 @@ when byte_size(Data) >= Len ->
             {stop, shutdown, St1}
     end;
 
-handle_data(<<0:5, 1:3, Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 1:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
     %% We received a PING, send a PONG
-    <<Payload:Len/binary, Rest/binary>> = Data,
     ok = send_frame(<<0:5, 2:3, Len:24, Payload/binary>>, St),
     handle_data(Rest, St);
 
-handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
+handle_data(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
     %% We received a PONG
     _ = log(debug, "Received pong;", [], St),
-    <<Payload:Len/binary, Rest/binary>> = Data,
     case St#state.ping_sent of
         {true, Payload, TimerRef} ->
             %% We reset the state
@@ -335,10 +331,10 @@ handle_data(<<0:5, 2:3, Len:24, Data/binary>>, St) ->
             handle_data(Rest, St)
     end;
 
-handle_data(<<0:5, R:3, Len:24, Data/binary>>, St) when R > 2 ->
+handle_data(<<0:5, R:3, Len:24, Mssg:Len/binary, Rest/binary>>, St)
+when R > 2 ->
     %% The three bits (R) encode the type of the transport message,
     %% values 3 to 7 are reserved
-    <<Mssg:Len, Rest/binary>> = Data,
     ok = send_frame(error_number(use_of_reserved_bits), St),
     _ = log(
         error,
