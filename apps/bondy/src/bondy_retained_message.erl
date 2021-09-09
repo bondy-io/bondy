@@ -1,5 +1,5 @@
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This is experimental and does not scale with high traffic at the moment.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_retained_message).
@@ -252,7 +252,17 @@ put(Realm, Topic, #event{} = Event, MatchOpts, TTL) ->
             Retained
     end,
 
-    %% plum_db:put(?DB_PREFIX(Realm), Topic, Retained).
+
+
+    %% TODO This will never scale as plumdb (due to replication and
+    %% multi-versioning) cannot scale to high-frequency writes.
+    %% We should either implement a partial replication mechanism and sessions
+    %% will need to find the replicas for this topic in the cluster or we carry
+    %% on replicating the messages in all the cluster but using a monotonic
+    %% queue with windowing in front of the put, so that we throttle puts.
+    %% This would be in effect a resolution parameter i.e. how many samples per
+    %% minute do we want as resolution.
+
     plum_db:put(?DB_PREFIX(Realm), Topic, Modifier).
 
 
