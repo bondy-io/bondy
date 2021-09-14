@@ -220,14 +220,34 @@ validate_subprotocol(_) ->
 handle_inbound(Data, St) ->
     try wamp_encoding:decode(St#wamp_state.subprotocol, Data) of
         {Messages, <<>>} ->
+            %% At the moment messages contain only one message as we do not yet
+            %% support batched encoding
             handle_inbound_messages(Messages, St)
     catch
         _:{unsupported_encoding, _} = Reason ->
             stop(Reason, St);
         _:badarg ->
             stop(decoding_error, St);
-        _:function_clause ->
-            stop(invalid_message, St)
+        _:{invalid_uri, Uri, ReqInfo} ->
+            #{request_type := ReqType, request_id := ReqId} = ReqInfo,
+            Error = wamp_message:error(
+                ReqType,
+                ReqId,
+                #{},
+                ?WAMP_INVALID_URI,
+                [<<"The URI '", Uri/binary, "' is not a valid WAMP URI.">>],
+                #{}
+            ),
+            Bin = wamp_encoding:encode(Error, encoding(St)),
+            %% At the moment messages contain only one message as we do not yet
+            %% support batched encoding, when/if we enable support for batched
+            %% we need to continue processing the additional messages
+            {reply, [Bin], St};
+        _:{validation_failed, _, _} = Reason ->
+            %% Validation of the message option or details failed
+            stop(Reason, St);
+        _:{invalid_message, _} = Reason ->
+            stop(Reason, St)
     end.
 
 
@@ -727,7 +747,7 @@ abort_message(decoding_error) ->
     },
     wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
 
-abort_message(invalid_message) ->
+abort_message({invalid_message, _M}) ->
     Details = #{
         message => <<"An invalid message was received.">>
     },
@@ -839,6 +859,9 @@ abort_message({unsupported_encoding, Encoding}) ->
             "'."
         >>
     },
+    wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
+
+abort_message({validation_failed, Details, _ReqInfo}) ->
     wamp_message:abort(Details, ?WAMP_PROTOCOL_VIOLATION);
 
 abort_message({invalid_options, missing_client_role}) ->
