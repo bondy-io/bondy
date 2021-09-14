@@ -454,9 +454,7 @@ rbac_context(#session{id = Id} = Session) ->
 
     case ets:lookup_element(Tab, Id, #session.rbac_context) of
         undefined ->
-            RealmUri = Session#session.realm_uri,
-            Authid = Session#session.authid,
-            NewCtxt = bondy_rbac:get_context(RealmUri, Authid),
+            NewCtxt = get_context(Session),
             ok = update_context(Id, NewCtxt),
             NewCtxt;
         Ctxt ->
@@ -472,7 +470,6 @@ rbac_context(Id) when is_integer(Id) ->
         Ctxt ->
             refresh_context(Id, Ctxt)
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -829,3 +826,11 @@ do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont}) ->
             end,
             {L, FunCont}
     end.
+
+
+%% @private
+get_context(#session{is_anonymous = true, realm_uri = Uri}) ->
+    bondy_rbac:get_context(Uri, anonymous);
+
+get_context(#session{authid = Authid, realm_uri = Uri}) ->
+    bondy_rbac:get_context(Uri, Authid).
