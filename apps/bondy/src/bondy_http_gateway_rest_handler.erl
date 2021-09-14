@@ -752,6 +752,7 @@ perform_action(
 %% @private
 wamp_context(RealmUri, Peer, St1) ->
     SessionOpts = #{
+        is_anonymous => maps:get(is_anonymous, St1),
         security_enabled => bondy_realm:is_security_enabled(RealmUri),
         roles => #{
             caller => #{

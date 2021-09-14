@@ -452,13 +452,17 @@ user(Id) when is_integer(Id) ->
 rbac_context(#session{id = Id} = Session) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
 
-    case ets:lookup_element(Tab, Id, #session.rbac_context) of
+    try ets:lookup_element(Tab, Id, #session.rbac_context) of
         undefined ->
             NewCtxt = get_context(Session),
             ok = update_context(Id, NewCtxt),
             NewCtxt;
         Ctxt ->
             refresh_context(Id, Ctxt)
+    catch
+        error:badarg ->
+            %% Session not in ets, the case for an HTTP session
+            get_context(Session)
     end;
 
 rbac_context(Id) when is_integer(Id) ->
@@ -471,7 +475,6 @@ rbac_context(Id) when is_integer(Id) ->
             refresh_context(Id, Ctxt)
     end.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -482,6 +485,7 @@ incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
 incr_seq(Id) when is_integer(Id), Id >= 0 ->
+    %% TODO Maybe use new counters module
     Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
     ets:update_counter(Tab, Id, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
 

@@ -219,7 +219,7 @@ authorize(Permission, Resource, Ctxt) ->
     case bondy_context:is_security_enabled(Ctxt) of
         true ->
             RBACCtxt = bondy_session:rbac_context(
-                bondy_context:session_id(Ctxt)
+                bondy_context:session(Ctxt)
             ),
             do_authorize(Permission, Resource, RBACCtxt);
         false ->
