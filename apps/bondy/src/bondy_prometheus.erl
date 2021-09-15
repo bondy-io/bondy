@@ -396,7 +396,7 @@ get_labels_values(Ctxt) ->
 %% @private
 get_realm_type(Ctxt) ->
     try bondy_context:realm_uri(Ctxt) of
-        ?BONDY_REALM_URI -> master;
+        ?MASTER_REALM_URI -> master;
         _ -> user
     catch
         _:_ ->
