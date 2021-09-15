@@ -313,10 +313,6 @@ handle_call(Event, From, State) ->
 
 handle_cast(#event{} = Event, State) ->
     %% We informally implement bondy_subscriber
-    %% TODO make bondy_subscriber into a behaviour we implement and change
-    %% bondy_registry_entry to contain Callback Mod, change bondy_broker to
-    %% call CallbackMod:handle_event/2 instead of
-    %% bondy_subscriber:handle_event/2
     Id = Event#event.subscription_id,
     Topic = maps:get(Id, State#state.subscriptions, undefined),
     NewState = case {Topic, Event#event.arguments} of
@@ -441,7 +437,7 @@ code_change(_OldVsn, State, _Extra) ->
 subscribe(State) ->
     %% We subscribe to change notifications in plum_db_events, we are
     %% interested in updates to API Specs coming from another node so that we
-    %% recompile them and generate the Cowboy dispatch tables
+    %% recompile them and generate this node's Cowboy dispatch tables
     ok = plum_db_events:subscribe(exchange_started),
     ok = plum_db_events:subscribe(exchange_finished),
     MS = [{
@@ -452,13 +448,13 @@ subscribe(State) ->
 
     %% We subscribe to WAMP events
     %% We will handle then in handle_cast/2
-    Opts = #{
-        subscription_id => bondy_utils:get_id(global),
-        match => <<"exact">>
-    },
-
     {ok, Id} = bondy:subscribe(
-        ?INTERNAL_REALM_URI, Opts, ?BONDY_REALM_DELETED
+        ?INTERNAL_REALM_URI,
+        #{
+            subscription_id => bondy_utils:get_id(global),
+            match => <<"exact">>
+        },
+        ?BONDY_REALM_DELETED
     ),
     Subs = maps:put(Id, ?BONDY_REALM_DELETED, State#state.subscriptions),
 
@@ -471,8 +467,11 @@ unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(exchange_finished),
     _ = plum_db_events:unsubscribe(object_update),
 
-    Ids = maps:keys(State#state.subscriptions),
-    _ = [bondy_broker:unsubscribe(Id, ?INTERNAL_REALM_URI) ||  Id <- Ids],
+    _ = [
+        bondy_broker:unsubscribe(Id, ?INTERNAL_REALM_URI)
+        ||  Id <- maps:keys(State#state.subscriptions)
+    ],
+
     State#state{subscriptions = #{}}.
 
 
