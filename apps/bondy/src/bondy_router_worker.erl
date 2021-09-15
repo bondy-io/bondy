@@ -82,8 +82,9 @@ cast(Fun) when is_function(Fun, 0) ->
             ok;
         {ok, _} ->
             ok;
-        overload ->
-            {error, overload}
+        {error, overload} = Error ->
+            Error
+
     end.
 
 
@@ -198,7 +199,10 @@ do_start_pool() ->
 do_cast(permanent, PoolName, Mssg) ->
     %% We send a request to an existing permanent worker
     %% using bondy_router acting as a sidejob_worker
-    sidejob:cast(PoolName, Mssg);
+    case sidejob:cast(PoolName, Mssg) of
+        ok -> ok;
+        overload -> {error, overload}
+    end;
 
 do_cast(transient, PoolName, Mssg) ->
     %% We spawn a transient worker using sidejob_supervisor
