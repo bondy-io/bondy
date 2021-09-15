@@ -69,7 +69,13 @@
         key => <<"description">>,
         required => true,
         datatype => binary,
-        default => <<>>
+        default => <<>>,
+        validator => fun
+            (X) when byte_size(X) =< 512 ->
+                true;
+            (_) ->
+                false
+        end
     },
     <<"authmethods">> => #{
         alias => authmethods,
