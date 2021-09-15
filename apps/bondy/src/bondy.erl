@@ -379,15 +379,16 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
 
 %% @private
 maybe_enqueue(true, _SessionId, _M, _) ->
-    %% TODO Enqueue for session resumption
+    %% TODO Enqueue events only for session resumption
     ok;
 
-maybe_enqueue(false, SessionId, M, Reason) ->
-    _ = lager:info(
-        "Could not deliver message to WAMP peer; "
-        "reason=~p, session_id=~p, message_type=~p",
-        [Reason, SessionId, element(1, M)]
-    ),
+maybe_enqueue(false, _SessionId, _M, _Reason) ->
+    % _ = lager:debug(
+    %     "Could not deliver message to WAMP peer; "
+    %     "reason=~p, session_id=~p, message_type=~p",
+    %     [Reason, SessionId, element(1, M)]
+    % ),
+    %% TODO add stats
     ok.
 
 
