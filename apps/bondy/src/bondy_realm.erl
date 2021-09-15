@@ -263,7 +263,7 @@
     )
 ).
 
--define(BONDY_REALM_UPDATE_VALIDATOR,
+-define(MASTER_REALM_UPDATE_VALIDATOR,
     maps:without(
         [<<"allow_connections">>, <<"sso_realm_uri">>], ?REALM_UPDATE_VALIDATOR
     )
@@ -272,7 +272,7 @@
 
 %% The default configuration for the admin realm
 -define(BONDY_REALM, #{
-    <<"uri">> => ?BONDY_REALM_URI,
+    <<"uri">> => ?MASTER_REALM_URI,
     <<"description">> => <<"The Bondy Master realm">>,
     <<"authmethods">> => [
         ?TRUST_AUTH,
@@ -672,7 +672,7 @@ enable_security(Uri) when is_binary(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec disable_security(t() | uri()) -> ok | {error, forbidden}.
 
-disable_security(#realm{uri = ?BONDY_REALM_URI}) ->
+disable_security(#realm{uri = ?MASTER_REALM_URI}) ->
     {error, forbidden};
 
 disable_security(#realm{uri = ?INTERNAL_REALM_URI}) ->
@@ -892,7 +892,7 @@ get(Uri, Opts) ->
     case lookup(Uri) of
         #realm{} = Realm ->
             Realm;
-        {error, not_found} when Uri == ?BONDY_REALM_URI ->
+        {error, not_found} when Uri == ?MASTER_REALM_URI ->
             %% We always create the Bondy admin realm if not found
             add_bondy_realm();
         {error, not_found} ->
@@ -914,7 +914,7 @@ get(Uri, Opts) ->
 add(?INTERNAL_REALM_URI) ->
     error(forbidden);
 
-add(?BONDY_REALM_URI) ->
+add(?MASTER_REALM_URI) ->
     error(forbidden);
 
 add(Uri) when is_binary(Uri) ->
@@ -940,9 +940,9 @@ add(Map0) ->
 update(#realm{uri = ?INTERNAL_REALM_URI}, _) ->
     error(forbidden);
 
-update(#realm{uri = ?BONDY_REALM_URI} = Realm, Data0) ->
-    Data1 = maps:put(<<"uri">>, ?BONDY_REALM_URI, Data0),
-    Data = maps_utils:validate(Data1, ?BONDY_REALM_UPDATE_VALIDATOR),
+update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
+    Data1 = maps:put(<<"uri">>, ?MASTER_REALM_URI, Data0),
+    Data = maps_utils:validate(Data1, ?MASTER_REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
 update(#realm{uri = Uri} = Realm, Data0) ->
@@ -971,7 +971,7 @@ delete(#realm{uri = Uri}) ->
 delete(?INTERNAL_REALM_URI) ->
     {error, forbidden};
 
-delete(?BONDY_REALM_URI) ->
+delete(?MASTER_REALM_URI) ->
     {error, forbidden};
 
 delete(Uri) when is_binary(Uri) ->

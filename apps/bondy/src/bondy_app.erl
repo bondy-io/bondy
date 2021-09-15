@@ -195,7 +195,7 @@ setup_env(Args) ->
 setup_bondy_realm() ->
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
-    _ = bondy_realm:get(?BONDY_REALM_URI),
+    _ = bondy_realm:get(?MASTER_REALM_URI),
     ok.
 
 

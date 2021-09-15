@@ -15,7 +15,7 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
--define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
+-define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
 -define(INTERNAL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
 -define(BONDY_PEER_REQUEST, '$bondy_request').
