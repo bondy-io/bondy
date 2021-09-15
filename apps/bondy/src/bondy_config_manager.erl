@@ -82,6 +82,7 @@
 ]).
 
 -define(CONFIG, [
+    %% Distributed globally replicated storage
     {plum_db, [
         {prefixes, [
             %% ram
@@ -107,6 +108,7 @@
     {plumtree, [
         {broadcast_mods, [plum_db]}
     ]},
+    %% Local in-memory storage
     {tuplespace, [
     %% {ring_size, 32},
         {static_tables, [
