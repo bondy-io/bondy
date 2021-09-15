@@ -31,7 +31,7 @@
 %% ## Bondy Admin Realm
 %% When you start Bondy for the first time it creates the Bondy Admin realm
 %% a.k.a `com.leapsight.bondy'. This realm is the root or master realm which
-%% allows and administror user to create, list, modify and delete realms.
+%% allows an admin user to create, list, modify and delete realms.
 %%
 %% ## Same Sign-on (SSO)
 %% Bondy SSO (Same Sign-on) is a feature that allows users to access multiple
@@ -76,6 +76,22 @@
             (_) ->
                 false
         end
+    },
+    <<"is_prototype">> => #{
+        alias => is_prototype,
+        key => <<"is_prototype">>,
+        required => true,
+        datatype => boolean,
+        default => false
+    },
+    <<"prototype_uri">> => #{
+        alias => type_uri,
+        key => <<"type_uri">>,
+        required => true,
+        datatype => binary,
+        allow_undefined => true,
+        default => undefined,
+        validator => fun bondy_data_validators:realm_uri/1
     },
     <<"authmethods">> => #{
         alias => authmethods,
@@ -183,6 +199,20 @@
         required => false,
         datatype => binary
     },
+    <<"is_prototype">> => #{
+        alias => is_prototype,
+        key => <<"is_prototype">>,
+        required => false,
+        datatype => boolean
+    },
+    <<"prototype_uri">> => #{
+        alias => prototype_uri,
+        key => <<"prototype_uri">>,
+        required => false,
+        datatype => binary,
+        allow_undefined => true,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
     <<"authmethods">> => #{
         alias => authmethods,
         key => <<"authmethods">>,
@@ -259,13 +289,22 @@
 %% BONDY realm can only use the local default provider
 -define(BONDY_REALM_VALIDATOR,
     maps:without(
-        [<<"allow_connections">>, <<"sso_realm_uri">>], ?REALM_VALIDATOR
+        [
+            <<"prototype_uri">>,
+            <<"allow_connections">>,
+            <<"sso_realm_uri">>
+        ], ?REALM_VALIDATOR
     )
 ).
 
 -define(MASTER_REALM_UPDATE_VALIDATOR,
     maps:without(
-        [<<"allow_connections">>, <<"sso_realm_uri">>], ?REALM_UPDATE_VALIDATOR
+        [
+            <<"is_prototype">>,
+            <<"prototype_uri">>,
+            <<"allow_connections">>,
+            <<"sso_realm_uri">>
+        ], ?REALM_UPDATE_VALIDATOR
     )
 ).
 
@@ -393,6 +432,8 @@
 -record(realm, {
     uri                             ::  uri(),
     description                     ::  binary(),
+    prototype_uri                   ::  maybe(uri()),
+    is_prototype = false            ::  boolean(),
     authmethods                     ::  [binary()], % a wamp property
     security_enabled = true         ::  boolean(),
     is_sso_realm = false            ::  boolean(),
@@ -410,13 +451,15 @@
 -type kid()                         ::  binary().
 -type keyset()                      ::  #{kid() => map()}.
 -type external()                    ::  #{
-    uri := uri(),
-    description :=  binary(),
-    authmethods :=  [binary()],
-    is_sso_realm :=  boolean(),
-    allow_connections :=  boolean(),
-    public_keys :=  [term()],
-    security_status :=  enabled | disabled
+    uri                     :=  uri(),
+    is_prototype            :=  boolean(),
+    prototype_uri           :=  maybe(uri()),
+    description             :=  binary(),
+    authmethods             :=  [binary()],
+    is_sso_realm            :=  boolean(),
+    allow_connections       :=  boolean(),
+    public_keys             :=  [term()],
+    security_status         :=  enabled | disabled
 }.
 
 -export_type([t/0]).
@@ -455,6 +498,9 @@
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
+
+-export([is_prototype/1]).
+-export([prototype_uri/1]).
 
 
 
@@ -495,11 +541,12 @@ apply_config(Filename) ->
                 "Loading configuration file; path=~p",
                 [Filename]
             ),
-            %% Because realms can have the sso_realm_uri property, which
-            %% defines another realm where authentication and credential
-            %% management is delegated to, we need to ensure all realms in the
-            %% file are processed based on a precedence graph, so that SSO
-            %% realms are created before the realms targeting them.
+
+            %% Because realms can have the sso_realm_uri and prototype
+            %% properties whcih point to other realms, we need to ensure all
+            %% realms in the file are processed based on a precedence graph, so
+            %% that SSO amnd prototype realms are created before the realms
+            %% targeting them.
             SortedRealms = topsort(Realms),
 
             %% We add the realm and allow an update if it
@@ -523,6 +570,34 @@ apply_config(Filename) ->
             error(invalid_config)
     end.
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if realm `Realm' is a prototype. Otherwise, returns
+%% `false'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_prototype(Realm :: t() | uri()) -> boolean().
+
+is_prototype(#realm{is_prototype = Val}) ->
+    Val;
+
+is_prototype(Uri) when is_binary(Uri) ->
+    is_prototype(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the uri of realm `Realm' prototype if defined. Otherwise
+%% returns `undefined'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prototype_uri(Realm :: t() | uri()) -> maybe(uri()).
+
+prototype_uri(#realm{prototype_uri = Val}) ->
+    Val;
+
+prototype_uri(Uri) when is_binary(Uri) ->
+    prototype_uri(fetch(Uri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -617,8 +692,12 @@ is_sso_realm(Uri) when is_binary(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec allow_connections(Realm :: t() | uri()) -> boolean().
 
+allow_connections(#realm{is_prototype = true}) ->
+    false;
+
 allow_connections(#realm{allow_connections = Val}) ->
     Val;
+
 allow_connections(Uri) when is_binary(Uri) ->
     allow_connections(fetch(Uri)).
 
@@ -921,7 +1000,7 @@ add(Uri) when is_binary(Uri) ->
     add(#{<<"uri">> => Uri});
 
 add(Map0) ->
-    #{<<"uri">> := Uri} = Map1 = maps_utils:validate(Map0, ?REALM_VALIDATOR),
+    #{<<"uri">> := Uri} = Map1 = validate(Map0, ?REALM_VALIDATOR),
 
     case exists(Uri) of
         true ->
@@ -947,7 +1026,7 @@ update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
 
 update(#realm{uri = Uri} = Realm, Data0) ->
     Data1 = maps:put(<<"uri">>, Uri, Data0),
-    Data = maps_utils:validate(Data1, ?REALM_UPDATE_VALIDATOR),
+    Data = validate(Data1, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
 update(?INTERNAL_REALM_URI, _) ->
@@ -1043,8 +1122,20 @@ to_external(#realm{} = R) ->
 
 %% @private
 add_bondy_realm() ->
-    Data = maps_utils:validate(?BONDY_REALM, ?BONDY_REALM_VALIDATOR),
+    Data = validate(?BONDY_REALM, ?BONDY_REALM_VALIDATOR),
     do_add(Data).
+
+
+validate(Map0, Spec) ->
+    Map1 = maps_utils:validate(Map0, Spec),
+    Proto = maps:get(<<"prototype_uri">>, Map1, undefined),
+
+    case  maps:get(<<"is_prototype">>, Map1) of
+        true when Proto =/= undefined ->
+            error({inconsistency_error, [<<"prototype_uri">>, <<"is_prototype">>]});
+        _ ->
+            Map1
+    end.
 
 
 %% @private
@@ -1143,10 +1234,10 @@ maybe_error(ok) ->
 add_or_update(#{<<"uri">> := Uri} = Data0) ->
     case lookup(Uri) of
         #realm{} = Realm ->
-            Data = maps_utils:validate(Data0, ?REALM_UPDATE_VALIDATOR),
+            Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
             do_update(Realm, Data);
         {error, not_found} ->
-            Data = maps_utils:validate(Data0, ?REALM_VALIDATOR),
+            Data = validate(Data0, ?REALM_VALIDATOR),
             do_add(Data)
     end.
 
@@ -1425,13 +1516,14 @@ precedence_graph(Realms, Graph) ->
 %% @private
 precedence_graph_aux([H|T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
-    case maps:find(<<"sso_realm_uri">>, Realm) of
-        {ok, SSOUri} ->
-            ok = precedence_graph_add_edge(Graph, SSOUri, H),
-            precedence_graph_aux(T, Graph);
-        error ->
-            precedence_graph_aux(T, Graph)
-    end;
+    Uris = maps:values(
+        maps:with([<<"prototype_uri">>, <<"sso_realm_uri">>], Realm)
+    ),
+    _ = [
+        precedence_graph_add_edge(Graph, Uri, H)
+        || Uri <- Uris, Uri =/= undefined
+    ],
+    precedence_graph_aux(T, Graph);
 
 precedence_graph_aux([], Graph) ->
     Graph.
