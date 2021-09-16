@@ -41,30 +41,6 @@
 
 -define(SESSION_SPACE_NAME, ?MODULE).
 -define(SESSION_SEQ_POS, #session.seq).
--define(DEFAULT_RATE, #rate_window{limit = 1000, duration = 1}).
--define(DEFAULT_QUOTA, #quota_window{limit = 1000, duration = 1}).% TODO
-
-
--record(quota_window, {
-    limit                           ::  pos_integer(),
-    %% time when the quota resets in secs
-    renews                          ::  pos_integer(),
-    %% number of requests remaining in quota
-    remaining                       ::  pos_integer(),
-    %% time in seconds during which quota is valid e.g.
-    %% the length of the window
-    duration                        ::  pos_integer()
-}).
--type quota_window()                ::  #quota_window{}.
-
--record(rate_window, {
-    %% max number of messages allowed during window
-    limit                           ::  pos_integer(),
-    %% duration of window in seconds
-    duration                        ::  pos_integer()
-}).
--type rate_window()                 ::  #rate_window{}.
-
 
 -record(session, {
     id                              ::  id(),
@@ -92,8 +68,7 @@
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_in                      ::  pos_integer() | infinity,
-    rate = ?DEFAULT_RATE            ::  rate_window(),
-    quota = ?DEFAULT_QUOTA          ::  quota_window()
+    meta = #{}                      ::  map()
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
