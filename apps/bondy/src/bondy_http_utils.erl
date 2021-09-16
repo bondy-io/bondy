@@ -29,6 +29,7 @@
 -export([set_meta_headers/1]).
 -export([meta_headers/0]).
 
+-on_load(on_load/0).
 
 
 
@@ -91,13 +92,20 @@ set_meta_headers(Req) ->
 -spec meta_headers() -> map().
 
 meta_headers() ->
-    case persistent_term:get({?MODULE, meta_headers}, undefined) of
-        undefined ->
-            Meta = #{
-                <<"server">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
-            },
-            _ = persistent_term:put({?MODULE, meta_headers}, Meta),
-            Meta;
-        Meta ->
-            Meta
-    end.
+    persistent_term:get({?MODULE, meta_headers}).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+on_load() ->
+    Meta = #{
+        <<"server">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
+    },
+    ok = persistent_term:put({?MODULE, meta_headers}, Meta),
+    ok.

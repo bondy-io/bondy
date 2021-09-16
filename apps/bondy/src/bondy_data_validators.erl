@@ -33,6 +33,7 @@
 -export([username/1]).
 -export([usernames/1]).
 
+-on_load(on_load/0).
 
 
 %% =============================================================================
@@ -213,23 +214,8 @@ rolename(<<"anonymous">>) ->
 
 rolename(Bin0) when is_binary(Bin0) ->
     Bin = string:casefold(Bin0),
-
-    Key = {?MODULE, illegal_regex},
-
-    case persistent_term:get(Key, undefined) of
-        undefined ->
-            %% Avoid whitespace, control characters, comma, semi-colon,
-            %% non-standard Windows-only characters, other misc
-            %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
-            %% [Bin] =/= string:tokens(Bin, Illegal).
-            {ok, Regex} = re:compile(
-                "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
-            ),
-            ok = persistent_term:put(Key, Regex),
-            nomatch =:= re:run(Bin, Regex) andalso {ok, Bin};
-        Regex ->
-            nomatch =:= re:run(Bin, Regex) andalso {ok, Bin}
-    end;
+    Regex = persistent_term:get({?MODULE, illegal_rolename_regex}),
+    nomatch =:= re:run(Bin, Regex) andalso {ok, Bin};
 
 rolename(_) ->
     false.
@@ -350,3 +336,26 @@ existing_atom(_) ->
 
 realm_uri(Term) ->
     wamp_uri:is_valid(Term, wamp_config:get(uri_strictness)).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+
+on_load() ->
+    %% We persist the rolename regex
+    %% -----------------------------
+    %% Avoid whitespace, control characters, comma, semi-colon,
+    %% non-standard Windows-only characters, other misc
+    %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
+    %% [Bin] =/= string:tokens(Bin, Illegal).
+    {ok, Regex} = re:compile(
+        "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
+    ),
+    ok = persistent_term:put({?MODULE, illegal_rolename_regex}, Regex),
+    ok.
