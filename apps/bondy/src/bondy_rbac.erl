@@ -123,9 +123,13 @@
 ).
 
 -ifdef(TEST).
+
 -define(CTXT_REFRESH_SECS, 1).
+
 -else.
+
 -define(CTXT_REFRESH_SECS, 3600). % 1h
+
 -endif.
 
 -record(bondy_rbac_context, {
