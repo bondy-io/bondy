@@ -110,6 +110,8 @@
 -export([verify_string/2]).
 -export([opts_validator/0]).
 
+-on_load(on_load/0).
+
 
 
 %% =============================================================================
@@ -424,6 +426,19 @@ upgrade(Term, #{version := Version} = BP) ->
 
 
 %% @private
+on_load() ->
+    %% Avoid whitespace, control characters, comma, semi-colon,
+    %% non-standard Windows-only characters, other misc
+    %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
+    %% [Bin] =/= string:tokens(Bin, Illegal).
+    {ok, Regex} = re:compile(
+        "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
+    ),
+    ok = persistent_term:put({?MODULE, regex}, Regex),
+    ok.
+
+
+%% @private
 maybe_add_version(#{version := _} = Pass) ->
     Pass;
 
@@ -547,27 +562,10 @@ new_scram(Password, Params) ->
 
 validate_string(Password) ->
     Size = byte_size(Password),
+    Regex = persistent_term:get({?MODULE, regex}),
 
     Size >= 6 andalso Size =< 256
-    andalso nomatch =:= re:run(Password, regex())
+    andalso nomatch =:= re:run(Password, Regex)
     orelse error(invalid_password),
 
     ok.
-
-
-regex() ->
-    Key = {?MODULE, regex},
-    case persistent_term:get(Key, undefined) of
-        undefined ->
-            %% Avoid whitespace, control characters, comma, semi-colon,
-            %% non-standard Windows-only characters, other misc
-            %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
-            %% [Bin] =/= string:tokens(Bin, Illegal).
-            {ok, Regex} = re:compile(
-                "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
-            ),
-            ok = persistent_term:put(Key, Regex),
-            Regex;
-        Regex ->
-            Regex
-    end.

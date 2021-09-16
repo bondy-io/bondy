@@ -81,6 +81,7 @@
                                         authmethod => binary(),
                                         authprovider => binary(),
                                         transport => #{
+                                            agent => binary(),
                                             peername => binary()
                                         }
                                     }.
@@ -128,11 +129,14 @@
 -else.
 -endif.
 
+-on_load(on_load/0).
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a new transient session (not persisted)
@@ -601,6 +605,7 @@ to_external(#session{} = S) ->
         authprovider => <<"com.leapsight.bondy">>,
         'x_authroles' => S#session.authroles,
         transport => #{
+            agent => S#session.agent,
             peername => inet_utils:peername_to_binary(S#session.peer)
         }
     }.
@@ -627,6 +632,16 @@ info(#session{is_anonymous = false} = S) ->
 %% PRIVATE
 %% =============================================================================
 
+
+%% @private
+%% @doc Called by -on_load() directive.
+%% @end
+on_load() ->
+    Pattern = erlang:make_tuple(
+        record_info(size, session), '_', [{1, session}]
+    ),
+    persistent_term:put({?MODULE, pattern}, Pattern),
+    ok.
 
 
 %% @private
@@ -750,25 +765,12 @@ do_list_peer_ids([], _, _) ->
 
 do_list_peer_ids([Tab | Tabs], RealmUri, N)
 when is_binary(RealmUri) orelse RealmUri == '_' ->
-    Pattern = #session{
+    Pattern0 = persistent_term:get({?MODULE, pattern}),
+    Pattern = Pattern0#session{
         id = '$3',
         realm_uri = '$1',
         node = '$2',
-        pid = '$4',
-        peer = '_',
-        agent = '_',
-        seq = '_',
-        roles = '_',
-        security_enabled = '_',
-        is_anonymous = '_',
-        authid = '_',
-        authrole = '_',
-        authroles = '_',
-        authmethod = '_',
-        created = '_',
-        expires_in = '_',
-        rate = '_',
-        quota = '_'
+        pid = '$4'
     },
     Conds = case RealmUri of
         '_' -> [];
