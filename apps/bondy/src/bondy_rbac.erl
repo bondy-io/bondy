@@ -113,7 +113,6 @@
     }
 }).
 
--define(VERSION, <<"1.1">>).
 -define(USER_GRANTS_PREFIX(RealmUri),   {security_user_grants, RealmUri}).
 -define(GROUP_GRANTS_PREFIX(RealmUri),  {security_group_grants, RealmUri}).
 -define(PLUMDB_PREFIX(RealmUri, Type),
@@ -122,12 +121,15 @@
         group -> ?GROUP_GRANTS_PREFIX(RealmUri)
     end
 ).
--define(FOLD_OPTS, [{resolver, lww}]).
 
 -ifdef(TEST).
+
 -define(CTXT_REFRESH_SECS, 1).
+
 -else.
+
 -define(CTXT_REFRESH_SECS, 3600). % 1h
+
 -endif.
 
 -record(bondy_rbac_context, {

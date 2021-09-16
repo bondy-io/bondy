@@ -85,9 +85,12 @@
     {plum_db, [
         {prefixes, [
             %% ram
+            %% ------------------------------------------
+            %% used by bondy_registry.erl
             {bondy_registry_registrations, ram},
             {bondy_registry_subscriptions, ram},
             %% ram_disk
+            %% ------------------------------------------
             {bondy_realm, ram_disk},
             {security_group_grants, ram_disk},
             {security_groups, ram_disk},
@@ -95,6 +98,7 @@
             {security_user_grants, ram_disk},
             {security_users, ram_disk},
             %% disk
+            %% ------------------------------------------
             {api_gateway, disk},
             {bondy_auth_ticket, disk},
             {oauth2_refresh_tokens, disk}
@@ -111,6 +115,7 @@
     {tuplespace, [
     %% {ring_size, 32},
         {static_tables, [
+            %% Used by bondy_session.erl
             {bondy_session, [
                 set,
                 {keypos, 2},
@@ -119,6 +124,7 @@
                 {read_concurrency, true},
                 {write_concurrency, true}
             ]},
+            %% Used by bondy_registry.erl
             {bondy_registry_state, [
                 set,
                 {keypos, 2},

@@ -39,8 +39,7 @@
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--define(SESSION_SPACE_NAME, ?MODULE).
--define(SESSION_SEQ_POS, #session.seq).
+-define(SESSION_SPACE, ?MODULE).
 
 -record(session, {
     id                              ::  id(),
@@ -125,8 +124,9 @@
 -export([user/1]).
 
 -ifdef(TEST).
+
 -export([table/1]).
--else.
+
 -endif.
 
 -on_load(on_load/0).
@@ -152,6 +152,10 @@ new(Peer, Realm, Opts) when is_map(Opts) ->
     new(bondy_utils:get_id(global), Peer, Realm, Opts).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec new(id(), peer(), uri() | bondy_realm:t(), session_opts()) ->
     t() | no_return().
 
@@ -205,8 +209,9 @@ open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     Agent = S1#session.agent,
 
     Pid = self(),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
-    case ets:insert_new(table(Id), S1) of
+    case ets:insert_new(Tab, S1) of
         true ->
             Pid = self(),
             true = gproc:reg_other({n, l, {session, RealmUri, Id}}, Pid),
@@ -224,7 +229,8 @@ open(Id, Peer, Realm, Opts) when is_map(Opts) ->
 %% -----------------------------------------------------------------------------
 -spec update(t()) -> ok.
 update(#session{id = Id} = S) ->
-    true = ets:insert(table(Id), S),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    true = ets:insert(Tab, S),
     ok.
 
 
@@ -239,10 +245,16 @@ close(#session{id = Id} = S) ->
     Agent = S#session.agent,
     Peer = S#session.peer,
     Secs = erlang:system_time(seconds) - S#session.created,
+
     ok = bondy_event_manager:notify(
-        {session_closed, Id, Realm, Agent, Peer, Secs}),
-    true = ets:delete(table(Id), Id),
+        {session_closed, Id, Realm, Agent, Peer, Secs}
+    ),
+
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    true = ets:delete(Tab, Id),
+
     _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
+
     ok;
 
 close(Id) ->
@@ -429,7 +441,7 @@ user(Id) when is_integer(Id) ->
 -spec rbac_context(id() | t()) -> bondy_rbac:context().
 
 rbac_context(#session{id = Id} = Session) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
     try ets:lookup_element(Tab, Id, #session.rbac_context) of
         undefined ->
@@ -445,7 +457,7 @@ rbac_context(#session{id = Id} = Session) ->
     end;
 
 rbac_context(Id) when is_integer(Id) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
     case ets:lookup_element(Tab, Id, #session.rbac_context) of
         undefined ->
@@ -465,19 +477,19 @@ incr_seq(#session{id = Id}) ->
 
 incr_seq(Id) when is_integer(Id), Id >= 0 ->
     %% TODO Maybe use new counters module
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
-    ets:update_counter(Tab, Id, {?SESSION_SEQ_POS, 1, ?MAX_ID, 0}).
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0}).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the number of sessions in the tuplespace.
+%% @doc Returns the number of sessions in the tuplespace.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec size() -> non_neg_integer().
 
 size() ->
-    tuplespace:size(?SESSION_SPACE_NAME).
+    %% TODO replace with CRDT Counter
+    tuplespace:size(?SESSION_SPACE).
 
 
 
@@ -491,7 +503,7 @@ is_security_enabled(#session{security_enabled = Val}) ->
     Val;
 
 is_security_enabled(Id) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     ets:lookup_element(Tab, Id, #session.security_enabled).
 
 
@@ -564,11 +576,11 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 list(#{return := details_map}) ->
-    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE),
     [to_external(X) || T <- Tabs, X <- ets:tab2list(T)];
 
 list(_) ->
-    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
 
@@ -585,7 +597,7 @@ list_peer_ids(N) ->
 %% @end
 %% -----------------------------------------------------------------------------
 list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
-    Tabs = tuplespace:tables(?SESSION_SPACE_NAME),
+    Tabs = tuplespace:tables(?SESSION_SPACE),
     do_list_peer_ids(Tabs, RealmUri, N).
 
 
@@ -723,16 +735,12 @@ parse_roles([publisher|T], Roles) ->
 parse_roles([_|T], Roles) ->
     parse_roles(T, Roles).
 
-%% @private
-table(Id) ->
-    tuplespace:locate_table(?SESSION_SPACE_NAME, Id).
-
 
 %% @private
 -spec do_lookup(id()) -> t() | {error, not_found}.
 
 do_lookup(Id) ->
-    Tab = table(Id),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     case ets:lookup(Tab, Id)  of
         [#session{} = Session] ->
             Session;
@@ -754,7 +762,7 @@ refresh_context(Id, Ctxt) ->
 
 %% @private
 update_context(Id, Context) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE_NAME, Id),
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     _ = ets:update_element(Tab, Id, {#session.rbac_context, Context}),
     ok.
 
@@ -815,3 +823,12 @@ get_context(#session{is_anonymous = true, realm_uri = Uri}) ->
 
 get_context(#session{authid = Authid, realm_uri = Uri}) ->
     bondy_rbac:get_context(Uri, Authid).
+
+
+-ifdef(TEST).
+
+table(Id) ->
+    tuplespace:locate_table(?SESSION_SPACE, Id).
+
+-else.
+-endif.
