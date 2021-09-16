@@ -136,20 +136,45 @@ add_realm(RealmUri) ->
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
+    Peer = {{127,0,0,0}, 52000},
+    SessionOpts = #{
+        is_anonymous => false,
+        security_enabled => bondy_realm:is_security_enabled(RealmUri),
+        roles => #{
+            caller => #{
+                features => #{
+                    call_timeout => true,
+                    caller_identification => true,
+                    call_trustlevels => true,
+                    call_canceling => true,
+                    progressive_call_results => false
+                }
+            }
+        }
+    },
     U1Ctxt = #{
         realm_uri => RealmUri,
         security_enabled => true,
-        authid => ?U1
+        authid => ?U1,
+        session => bondy_session:new(
+            Peer, RealmUri, SessionOpts#{authid => ?U1}
+        )
     },
     U2Ctxt = #{
         realm_uri => RealmUri,
         security_enabled => true,
-        authid => ?U2
+        authid => ?U2,
+        session => bondy_session:new(
+            Peer, RealmUri, SessionOpts#{authid => ?U2}
+        )
     },
     U3Ctxt = #{
         realm_uri => RealmUri,
         security_enabled => true,
-        authid => ?U3
+        authid => ?U3,
+        session => bondy_session:new(
+            Peer, RealmUri, SessionOpts#{authid => ?U3}
+        )
     },
 
     ?assertEqual(
