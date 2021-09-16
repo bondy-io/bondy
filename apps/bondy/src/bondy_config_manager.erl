@@ -26,7 +26,6 @@
 -behaviour(gen_server).
 -include("bondy.hrl").
 
--define(PRIVATE_CONFIG, "private.config").
 -define(WAMP_EXT_OPTIONS, [
     {call, [
         'x_routing_key'
