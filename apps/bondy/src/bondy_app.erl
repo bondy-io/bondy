@@ -123,7 +123,7 @@ start_phase(configure_features, normal, []) ->
     ok;
 
 start_phase(init_registry, normal, []) ->
-    bondy_registry:init();
+    bondy_registry:init_tries();
 
 start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
