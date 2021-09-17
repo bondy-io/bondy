@@ -81,6 +81,7 @@
 -export([entries/5]).
 -export([info/0]).
 -export([info/1]).
+-export([init_tries/0]).
 -export([lookup/1]).
 -export([lookup/3]).
 -export([lookup/4]).
@@ -94,16 +95,15 @@
 -export([remove_all/3]).
 -export([remove_all/4]).
 -export([start_link/0]).
--export([init/0]).
 
 
 %% GEN_SERVER CALLBACKS
--export([init/1]).
--export([handle_info/2]).
--export([terminate/2]).
 -export([code_change/3]).
 -export([handle_call/3]).
 -export([handle_cast/2]).
+-export([handle_info/2]).
+-export([init/1]).
+-export([terminate/2]).
 
 
 
@@ -126,7 +126,7 @@ start_link() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-init() ->
+init_tries() ->
     gen_server:call(?MODULE, init_tries, 10*60*1000).
 
 
@@ -165,7 +165,9 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     Type = subscription,
 
     Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, Node, undefined, Uri, Opts),
+        Type, RealmUri, Node, undefined, Uri, Opts
+    ),
+
     TrieKey = trie_key(Pattern),
     Trie = trie(Type),
 
@@ -266,7 +268,8 @@ add(Type, Uri, Options, Ctxt) ->
         [{_, EntryKey} | _] when Type == registration ->
             EOpts = bondy_registry_entry:options(EntryKey),
             SharedEnabled = bondy_context:is_feature_enabled(
-                Ctxt, callee, shared_registration),
+                Ctxt, callee, shared_registration
+            ),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
             %% Shared Registration (RFC 13.3.9)
@@ -285,7 +288,8 @@ add(Type, Uri, Options, Ctxt) ->
             case Flag of
                 true ->
                     NewEntry = bondy_registry_entry:new(
-                        Type, PeerId, Uri, Options),
+                        Type, PeerId, Uri, Options
+                    ),
                     do_add(NewEntry);
                 false ->
                     FullPrefix = full_prefix(Type, RealmUri),
