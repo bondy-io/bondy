@@ -127,21 +127,6 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init() ->
-    %% We first validate the config
-    [
-        begin
-            case plum_db:prefix_type(Prefix) of
-                disk ->
-                    Message = iolist_to_binary(io_lib:format(
-                        "Registry prefix ~p must be configured as ram or ram_disk in plum_db",
-                        [Prefix]
-                    )),
-                    exit(Message);
-                _ ->
-                    ok
-            end
-        end || Prefix <- ?PREFIXES
-    ],
     gen_server:call(?MODULE, init_tries, 10*60*1000).
 
 
