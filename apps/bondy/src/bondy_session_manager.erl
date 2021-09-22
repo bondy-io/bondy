@@ -56,7 +56,7 @@ start_link() ->
 
 open(Id, Peer, RealmOrUri, Opts) ->
     Session = bondy_session:open(Id, Peer, RealmOrUri, Opts),
-    case gen_server:call(?MODULE, {monitor, Session}, 5000) of
+    case gen_server:call(?MODULE, {open, Session}, 5000) of
         ok ->
             Session;
         Error ->
@@ -73,7 +73,7 @@ open(Id, Peer, RealmOrUri, Opts) ->
 close(Session) ->
 
     ok = bondy_session:close(Session),
-    gen_server:cast(?MODULE, {demonitor, Session}).
+    gen_server:cast(?MODULE, {close, Session}).
 
 
 
@@ -87,7 +87,7 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call({monitor, Session}, _From, State) ->
+handle_call({open, Session}, _From, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
     ok = gproc_monitor:subscribe({n, l, {session, Uri, Id}}),
@@ -99,7 +99,7 @@ handle_call(Event, From, State) ->
     ),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-handle_cast({demonitor, Session}, State) ->
+handle_cast({close, Session}, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
     ok = gproc_monitor:unsubscribe({n, l, {session, Uri, Id}}),
