@@ -238,6 +238,9 @@ local_scope(Config) ->
         })
     ),
 
+    %% Re-insert session so that we cleanup the rbac_ctxt
+    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+
     %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
