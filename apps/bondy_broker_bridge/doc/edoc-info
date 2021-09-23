@@ -1,5 +1,0 @@
-%% encoding: UTF-8
-{application,bondy_broker_bridge}.
-{modules,[bondy_broker_bridge,bondy_broker_bridge_app,
-          bondy_broker_bridge_event,bondy_broker_bridge_manager,
-          bondy_broker_bridge_sup,bondy_kafka_bridge]}.
