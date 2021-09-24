@@ -71,7 +71,13 @@ cidr(Term)  ->
 username(Term) when is_binary(Term) ->
     %% 3..254 is the range of an email.
     Size = byte_size(Term),
-    Size >= 3 andalso Size =< 254 andalso rolename(Term);
+
+    case Size =< 254 of
+        true ->
+            Size >= 3 andalso rolename(Term);
+        false ->
+            {error, <<"Value is too big (max. is 254 bytes).">>}
+    end;
 
 username(_) ->
     false.
@@ -108,7 +114,7 @@ usernames(L) when is_list(L) ->
         {ok, lists:reverse(Valid)}
     catch
         throw:abort ->
-            false
+            {error, <<"One or more values are not valid usernames.">>}
     end;
 
 usernames(_) ->
