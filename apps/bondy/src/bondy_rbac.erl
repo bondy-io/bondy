@@ -255,10 +255,13 @@ get_context(Ctxt) ->
 -spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
 
 refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
-    %% TODO replace this with a cluster metadata hash check, or something
     Now = erlang:system_time(second),
     Diff = Now - Context#bondy_rbac_context.epoch,
 
+    %% TODO Replace this with configurable value of 'session' so never
+    %% refreshed during a session or an integer value.
+    %% Also, consider refreshing it based on update events (expensice unless we
+    %% use forward chaining algorithm like RETE).
     case Diff < ?CTXT_REFRESH_SECS of
         false when Context#bondy_rbac_context.is_anonymous ->
             %% context has expired
