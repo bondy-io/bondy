@@ -69,6 +69,24 @@
 %% connected to any realm
 %%
 %% ## Realm Prototypes
+%% A **Prototype Realm** is a realm that acts as a prototype for the
+%% construction of other realms. A prototype realm is a normal realm whose
+%% property `is_prototype' has been set to true.
+%%
+%% Prototypical inheritance allows us to reuse the properties
+%% (including RBAC definitions) from one realm to another through a
+%% reference URI configured on the `prototype_uri' property.
+%%
+%% Prototypical inheritance is a form of single inheritance as realms are only
+%% related to a single prototype.
+%%
+%% The `prototype_uri' property is defined as an *irreflexive property*
+%% i.e. a realm cannot have itself as prototype. In addition
+%% *a prototype cannot inherit from another prototype*. This means the
+%% inheritance chain is bounded to one level.
+%%
+%% ### Inherited properties
+%% The following is the list of properties which a realm would inherit from
 %%
 %%
 %% @end
@@ -104,7 +122,7 @@
             (X) when byte_size(X) =< 512 ->
                 true;
             (_) ->
-                false
+                {error, <<"Value is too big (max. is 512 bytes).">>}
         end
     },
     %% Determines whether the realm is a prototype. Protoype realms cannot be
@@ -119,8 +137,8 @@
     },
     %% The URI of the prototype this realm inherits from.
     <<"prototype_uri">> => #{
-        alias => type_uri,
-        key => <<"type_uri">>,
+        alias => prototype_uri,
+        key => <<"prototype_uri">>,
         required => true,
         datatype => binary,
         allow_undefined => true,
@@ -517,14 +535,14 @@
 -record(realm, {
     uri                             ::  uri(),
     description                     ::  binary(),
-    prototype_uri                   ::  maybe(uri()),
     is_prototype = false            ::  boolean(),
-    authmethods                     ::  [binary()], % a wamp property
-    security_enabled = true         ::  boolean(),
+    prototype_uri                   ::  maybe(uri()),
     is_sso_realm = false            ::  boolean(),
-    allow_connections = true        ::  boolean(),
     %% TODO change sso_realm_uri to allowed_sso_realms
     sso_realm_uri                   ::  maybe(uri()),
+    allow_connections = true        ::  boolean(),
+    authmethods                     ::  [binary()], % a wamp property
+    security_enabled = true         ::  boolean(),
     password_opts                   ::  maybe(bondy_password:opts()),
     private_keys = #{}              ::  keyset(),
     public_keys = #{}               ::  keyset(),
@@ -550,6 +568,7 @@
 -export_type([t/0]).
 -export_type([uri/0]).
 -export_type([external/0]).
+
 
 -export([add/1]).
 -export([allow_connections/1]).
@@ -585,6 +604,12 @@
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
+-export([is_property_value_inherited/2]).
+
+% -export([groups/2]).
+% -export([users/2]).
+% -export([sources/2]).
+% -export([grants/2]).
 
 
 
@@ -701,41 +726,31 @@ prototype_uri(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the list of supported authentication methods for Realm.
-%% See {@link is_allowed_authmethod} for more information about how this
-%% affects the methods available for an authenticating user.
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authmethods(Realm :: t() | uri()) -> [binary()].
+-spec is_property_value_inherited(Realm :: t() | uri(), Property :: atom()) ->
+    boolean() | no_return().
 
-authmethods(#realm{authmethods = Val}) ->
-    Val;
+is_property_value_inherited(#realm{prototype_uri = undefined}, Property) ->
+    lists:member(Property, record_info(fields, realm)) orelse error(badarg),
+    false;
 
-authmethods(Uri) when is_binary(Uri) ->
-    authmethods(fetch(Uri)).
+is_property_value_inherited(#realm{authmethods = Val}, authmethods) ->
+    Val =/= [];
 
+is_property_value_inherited(#realm{sso_realm_uri = Val}, sso_realm_uri) ->
+    Val =/= undefined;
 
-%% -----------------------------------------------------------------------------
-%% @doc Returs `true' if Method is an authentication method supported by realm
-%% `Realm'. Otherwise returns `false'.
-%%
-%% The fact that method `Method' is included in the realm's `authmethods'
-%% (See {3link authmethods/1}) is no guarantee that the method will be
-%% available for a particular user.
-%%
-%% The availability is also affected by the source rules defined for the realm
-%% and the capabilities of each user e.g. if the user has no password then
-%% the password-based authentication methods in this list will not be available.
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_allowed_authmethod(Realm :: t() | uri(), Method :: binary()) ->
-    boolean().
+is_property_value_inherited(#realm{password_opts = Val}, password_opts) ->
+    Val =/= undefined;
 
-is_allowed_authmethod(#realm{authmethods = L}, Method) ->
-    lists:member(Method, L);
+is_property_value_inherited(#realm{}, Property) ->
+    lists:member(Property, record_info(fields, realm)) orelse error(badarg),
+    false;
 
-is_allowed_authmethod(Uri, Method) when is_binary(Uri) ->
-    is_allowed_authmethod(fetch(Uri), Method).
+is_property_value_inherited(Uri, Property) when is_binary(Uri) ->
+    is_property_value_inherited(fetch(Uri), Property).
 
 
 %% -----------------------------------------------------------------------------
@@ -763,8 +778,8 @@ sso_realm_uri(Uri) when is_binary(Uri) ->
 %% identified by uri `SSORealmUri`. Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_allowed_sso_realm(
-    Realm :: t() | uri(), SSORealmUri :: uri()) -> boolean().
+-spec is_allowed_sso_realm(Realm :: t() | uri(), SSORealmUri :: uri()) ->
+    boolean().
 
 is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
     %% TODO change sso_realm_uri to allowed_sso_realms
@@ -808,6 +823,43 @@ allow_connections(#realm{allow_connections = Val}) ->
 
 allow_connections(Uri) when is_binary(Uri) ->
     allow_connections(fetch(Uri)).
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of supported authentication methods for Realm.
+%% See {@link is_allowed_authmethod} for more information about how this
+%% affects the methods available for an authenticating user.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authmethods(Realm :: t() | uri()) -> [binary()].
+
+authmethods(#realm{authmethods = Val}) ->
+    Val;
+
+authmethods(Uri) when is_binary(Uri) ->
+    authmethods(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returs `true' if Method is an authentication method supported by realm
+%% `Realm'. Otherwise returns `false'.
+%%
+%% The fact that method `Method' is included in the realm's `authmethods'
+%% (See {3link authmethods/1}) is no guarantee that the method will be
+%% available for a particular user.
+%%
+%% The availability is also affected by the source rules defined for the realm
+%% and the capabilities of each user e.g. if the user has no password then
+%% the password-based authentication methods in this list will not be available.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_allowed_authmethod(Realm :: t() | uri(), Method :: binary()) ->
+    boolean().
+
+is_allowed_authmethod(#realm{authmethods = L}, Method) ->
+    lists:member(Method, L);
+
+is_allowed_authmethod(Uri, Method) when is_binary(Uri) ->
+    is_allowed_authmethod(fetch(Uri), Method).
 
 
 %% -----------------------------------------------------------------------------
@@ -857,13 +909,13 @@ enable_security(Uri) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(t() | uri()) -> ok | {error, forbidden}.
+-spec disable_security(t() | uri()) -> ok | {error, badarg}.
 
 disable_security(#realm{uri = ?MASTER_REALM_URI}) ->
-    {error, forbidden};
+    {error, badarg};
 
 disable_security(#realm{uri = ?INTERNAL_REALM_URI}) ->
-    {error, forbidden};
+    {error, badarg};
 
 disable_security(#realm{uri = Uri} = Realm) ->
     _ = update(Realm, #{
@@ -1071,15 +1123,9 @@ get(Uri, Opts) ->
         #realm{} = Realm ->
             Realm;
         {error, not_found} when Uri == ?MASTER_REALM_URI ->
-            %% We always create the Bondy admin realm if not found
-            add_bondy_realm();
+            add_master_realm();
         {error, not_found} ->
-            case bondy_config:get([security, automatically_create_realms]) of
-                true ->
-                    add(Opts#{<<"uri">> => Uri});
-                false ->
-                    {error, not_found}
-            end
+            maybe_add(Uri, Opts)
     end.
 
 
@@ -1090,10 +1136,10 @@ get(Uri, Opts) ->
 -spec add(uri() | map()) -> t() | no_return().
 
 add(?INTERNAL_REALM_URI) ->
-    error(forbidden);
+    error(badarg);
 
 add(?MASTER_REALM_URI) ->
-    error(forbidden);
+    error(badarg);
 
 add(Uri) when is_binary(Uri) ->
     add(#{<<"uri">> => Uri});
@@ -1116,7 +1162,7 @@ add(Map0) ->
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
 update(#realm{uri = ?INTERNAL_REALM_URI}, _) ->
-    error(forbidden);
+    error(badarg);
 
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
     Data1 = maps:put(<<"uri">>, ?MASTER_REALM_URI, Data0),
@@ -1129,25 +1175,23 @@ update(#realm{uri = Uri} = Realm, Data0) ->
     do_update(Realm, Data);
 
 update(?INTERNAL_REALM_URI, _) ->
-    error(forbidden);
+    error(badarg);
 
 update(Uri, Data) when is_binary(Uri) ->
     do_update(fetch(Uri), Data).
-
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(t() | uri()) -> ok | {error, not_found | forbidden | active_users}.
-
+-spec delete(t() | uri()) -> ok | {error, not_found | badarg | active_users}.
 
 delete(?INTERNAL_REALM_URI) ->
-    {error, forbidden};
+    {error, badarg};
 
 delete(?MASTER_REALM_URI) ->
-    {error, forbidden};
+    {error, badarg};
 
 delete(Uri) when is_binary(Uri) ->
     case lookup(Uri) of
@@ -1209,9 +1253,11 @@ password_opts(RealmUri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the external map representation of the realm.
 %% @end
 %% -----------------------------------------------------------------------------
+-spec to_external(t() | uri()) -> external().
+
 to_external(#realm{} = R) ->
     #{
         <<"uri">> => R#realm.uri,
@@ -1227,7 +1273,10 @@ to_external(#realm{} = R) ->
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
         ]
-    }.
+    };
+
+to_external(RealmUri) ->
+    to_external(fetch(RealmUri)).
 
 
 
@@ -1238,11 +1287,12 @@ to_external(#realm{} = R) ->
 
 
 %% @private
-add_bondy_realm() ->
+add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
     do_add(Data).
 
 
+%% @private
 validate(Map0, Spec) ->
     Map = maps_utils:validate(Map0, Spec),
 
@@ -1369,6 +1419,16 @@ maybe_error(ok) ->
 
 
 %% @private
+maybe_add(Uri, Opts) ->
+    case bondy_config:get([security, automatically_create_realms]) of
+        true ->
+            add(Opts#{<<"uri">> => Uri});
+        false ->
+            {error, not_found}
+    end.
+
+
+%% @private
 add_or_update(#{<<"uri">> := Uri} = Data0) ->
     case lookup(Uri) of
         #realm{} = Realm ->
@@ -1380,14 +1440,12 @@ add_or_update(#{<<"uri">> := Uri} = Data0) ->
     end.
 
 
-
 %% @private
 do_add(#{<<"uri">> := Uri} = Map) ->
     Realm0 = #realm{uri = Uri},
     Realm = merge_and_store(Realm0, Map),
     ok = on_add(Realm),
     Realm.
-
 
 
 %% @private
@@ -1408,9 +1466,11 @@ merge_and_store(Realm0, Map) ->
     %% elements have been validated.
     RBACData = validate_rbac_config(Realm, Map),
 
+    %% We then create the realm
     Uri = Realm#realm.uri,
     ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
 
+    %% We finally apply all the RBAC objects that have been validated
     ok = apply_rbac_config(Realm, RBACData),
 
     Realm.
@@ -1430,23 +1490,45 @@ fold_props(<<"authmethods">>, V, Realm) ->
 fold_props(<<"description">>, V, Realm) ->
     Realm#realm{description = V};
 
+fold_props(<<"is_prototype">>, true, #realm{is_prototype = false} = Realm) ->
+    Realm#realm{is_prototype = true};
+
+fold_props(<<"is_prototype">>, false, #realm{is_prototype = true}) ->
+    error(
+        {
+            badarg,
+            <<"Cannot set property 'is_prototype' to 'false' once it has been to 'true'.">>
+        }
+    );
+
+fold_props(<<"prototype_uri">>, V, #realm{prototype_uri = undefined} = Realm) ->
+    Realm#realm{prototype_uri = V};
+
+fold_props(<<"prototype_uri">>, V1, #realm{prototype_uri = V0})
+when V0 =/= V1 ->
+    error(
+        {
+            badarg,
+            <<"Cannot set update 'prototype_uri' once it has been set.">>
+        }
+    );
+
 fold_props(<<"is_sso_realm">>, true, #realm{is_sso_realm = false} = Realm) ->
     Realm#realm{is_sso_realm = true};
 
 fold_props(<<"is_sso_realm">>, false, #realm{is_sso_realm = true}) ->
     error(
         {
-            forbidden,
-            <<"Cannot set property 'is_sso_realm' to 'false' once it was set to 'true'.">>
+            badarg,
+            <<"Cannot set property 'is_sso_realm' to 'false' once it has been to 'true'.">>
         }
     );
-
-fold_props(<<"security_enabled">>, V, Realm) ->
-    Realm#realm{security_enabled = V};
 
 fold_props(<<"sso_realm_uri">>, V, Realm) ->
     Realm#realm{sso_realm_uri = V};
 
+fold_props(<<"security_enabled">>, V, Realm) ->
+    Realm#realm{security_enabled = V};
 fold_props(<<"private_keys">>, V, Realm) ->
     set_keys(Realm, V);
 
@@ -1601,7 +1683,7 @@ group_topsort(Uri, Groups) ->
                 io_lib:format(
                     <<
                         "Bondy could not compute a precendece graph for the "
-                        "groups defined on the configuration file for "
+                        "groups defined on the configuration provided for "
                         "realm '~s' as they form a cycle with path ~p"
                     >>,
                     [Uri, Path]
@@ -1633,7 +1715,7 @@ topsort(Realms) ->
                 io_lib:format(
                     <<
                         "Bondy could not compute a precendece graph for the "
-                        "realms defined on the configuration file as they "
+                        "realms defined on the configuration provided as they "
                         "form a cycle with path ~p"
                     >>,
                     [Path]
@@ -1727,13 +1809,15 @@ check_integrity_constraints(Realm) ->
 
 
 %% @private
+
 check_integrity_constraints(#realm{is_sso_realm = true, sso_realm_uri = undefined}, sso) ->
     ok;
 
 check_integrity_constraints(#realm{is_sso_realm = true}, sso) ->
     error(
         {
-            invalid_config,
+            inconsistency_error,
+            [is_sso_realm, sso_realm_uri],
             <<
                 "The realm is defined as a Same Sign-on (SSO) realm "
                 "(the property 'is_sso_realm' is set to 'true') but "
@@ -1743,20 +1827,37 @@ check_integrity_constraints(#realm{is_sso_realm = true}, sso) ->
         }
     );
 
-check_integrity_constraints(#realm{is_sso_realm = false, sso_realm_uri = Uri}, sso)
-when Uri =/= undefined ->
+check_integrity_constraints(#realm{uri = Uri, sso_realm_uri = Uri}, sso) ->
+    %% sso relationship is irreflexive
+    error(
+        {
+            inconsistency_error,
+            [uri, sso_realm_uri],
+            <<
+                "The value for property 'sso_realm_uri' in invalid. "
+                "It is equal to the realm's URI. "
+                "A realm cannot have itself as SSO realm."
+            >>
+        }
+    );
+
+check_integrity_constraints(
+    #realm{is_sso_realm = false, sso_realm_uri = Uri}, sso
+) when Uri =/= undefined ->
     check_realm_type(Uri, sso);
 
 check_integrity_constraints(_, sso) ->
     ok;
 
-check_integrity_constraints(#realm{is_prototype = true, prototype_uri = undefined}, prototype) ->
+check_integrity_constraints(
+    #realm{is_prototype = true, prototype_uri = undefined}, prototype) ->
     ok;
 
 check_integrity_constraints(#realm{is_prototype = true}, prototype) ->
     error(
         {
-            invalid_config,
+            badarg,
+            [is_prototype, prototype_uri],
             <<
                 "The realm is defined as a prototype "
                 "(the property 'is_prototype' is set to 'true') but "
@@ -1766,8 +1867,24 @@ check_integrity_constraints(#realm{is_prototype = true}, prototype) ->
         }
     );
 
-check_integrity_constraints(#realm{is_prototype = false, prototype_uri = Uri}, prototype)
-when Uri =/= undefined ->
+check_integrity_constraints(
+    #realm{uri = Uri, prototype_uri = Uri}, prototype) ->
+    %% prototype relationship is irreflexive
+    error(
+        {
+            badarg,
+            [uri, prototype_uri],
+            <<
+                "The value for property 'prototype_uri' in invalid. "
+                "It is equal to the realm's URI. "
+                "A realm cannot have itself as a prototype."
+            >>
+        }
+    );
+
+check_integrity_constraints(
+    #realm{is_prototype = false, prototype_uri = Uri}, prototype
+) when Uri =/= undefined ->
     check_realm_type(Uri, prototype);
 
 check_integrity_constraints(_, prototype) ->
@@ -1780,33 +1897,53 @@ check_realm_type(undefined, _) ->
 
 check_realm_type(Uri, Type) ->
     _ = case lookup(Uri) of
-        {error, not_found} ->
-            error(not_found_reason(Type));
+        {error, not_found = Reason} ->
+            error(badarg(Uri, Type, Reason));
         Realm when Type == sso ->
-            is_sso_realm(Realm) orelse error(invalid_type_reason(Type));
+            is_sso_realm(Realm) orelse error(badarg(Uri, Type, badtype));
         Realm when Type == prototype ->
-            is_prototype(Realm) orelse error(invalid_type_reason(Type))
+            is_prototype(Realm) orelse error(badarg(Uri, Type, badtype))
     end,
     ok.
 
 
 %% @private
-not_found_reason(prototype) ->
-    {invalid_config, <<"Property 'prototype_uri' refers to a realm that does not exist.">>};
-
-not_found_reason(sso) ->
-    {invalid_config, <<"Property 'sso_realm_uri' refers to a realm that does not exist.">>}.
-
-
-%% @private
-invalid_type_reason(prototype) ->
+badarg(Uri, prototype, not_found) ->
     {
-        invalid_config,
-        <<"Property 'prototype_uri' refers to a realm that is not a Prototype Realm.">>
+        badarg,
+        <<
+            "Property 'prototype_uri' refers to a realm ('",
+            Uri/binary,
+            "') that doesn't exist."
+        >>
     };
 
-invalid_type_reason(sso) ->
+badarg(Uri, sso, not_found) ->
     {
-        invalid_config,
-        <<"Property 'sso_realm_uri' refers to a realm that is not a Same Sign-on Realm.">>
+        badarg,
+        <<
+            "Property 'sso_realm_uri' refers to a realm ('",
+            Uri/binary,
+            "') that doesn't exist."
+        >>
+    };
+
+badarg(Uri, prototype, badtype) ->
+    {
+        badarg,
+        <<
+            "Property 'prototype_uri' refers to a realm ('",
+            Uri/binary,
+            "') that isn't a Prototype Realm."
+        >>
+    };
+
+badarg(Uri, sso, badtype) ->
+    {
+        badarg,
+        <<
+            "Property 'sso_realm_uri' refers to a realm ('",
+            Uri/binary,
+            "') that isn't a Same Sign-on Realm."
+        >>
     }.
