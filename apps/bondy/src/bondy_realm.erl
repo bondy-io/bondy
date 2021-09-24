@@ -525,9 +525,9 @@
     allow_connections = true        ::  boolean(),
     %% TODO change sso_realm_uri to allowed_sso_realms
     sso_realm_uri                   ::  maybe(uri()),
+    password_opts                   ::  maybe(bondy_password:opts()),
     private_keys = #{}              ::  keyset(),
     public_keys = #{}               ::  keyset(),
-    password_opts                   ::  bondy_password:opts() | undefined,
     encryption_keys = #{}           ::  keyset(),
     info = #{}                      ::  map()
 }).
@@ -1195,12 +1195,11 @@ list() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns theas password options to be used as default when adding users
+%% to this realm. If the options have not been defined returns atom `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
-
-password_opts(#realm{password_opts = undefined}) ->
-    #{};
+-spec password_opts(t() | uri()) -> maybe(bondy_password:opts()).
 
 password_opts(#realm{password_opts = Opts}) ->
     Opts;
