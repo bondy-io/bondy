@@ -296,6 +296,20 @@ get_anonymous_context(Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+get_anonymous_context(RealmUri, Username) ->
+    #bondy_rbac_context{
+        realm_uri = RealmUri,
+        username = Username,
+        grants = grants(RealmUri, anonymous, group),
+        epoch = erlang:system_time(second),
+        is_anonymous = true
+    }.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Contexts are only valid until the GRANT epoch changes, and it will
 %% change whenever a GRANT or a REVOKE is performed. This is a little coarse
 %% grained right now, but it'll do for the moment.
@@ -310,20 +324,6 @@ when is_binary(Username) orelse Username == anonymous ->
         grants = grants(RealmUri, Username, user),
         epoch = erlang:system_time(second),
         is_anonymous = Username == anonymous
-    }.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-get_anonymous_context(RealmUri, Username) ->
-    #bondy_rbac_context{
-        realm_uri = RealmUri,
-        username = Username,
-        grants = grants(RealmUri, anonymous, group),
-        epoch = erlang:system_time(second),
-        is_anonymous = true
     }.
 
 
