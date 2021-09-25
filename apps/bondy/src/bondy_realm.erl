@@ -106,7 +106,7 @@
     %% The Realm URI. It needs to be a valid WAMP Realm. Unmutable once created.
     <<"uri">> => #{
         alias => uri,
-        key => <<"uri">>,
+        key => uri,
         required => true,
         datatype => binary,
         validator => fun bondy_data_validators:realm_uri/1
@@ -114,7 +114,7 @@
     %% A textual description of the realm.
     <<"description">> => #{
         alias => description,
-        key => <<"description">>,
+        key => description,
         required => true,
         datatype => binary,
         default => <<>>,
@@ -130,7 +130,7 @@
     %% cannot be changed.
     <<"is_prototype">> => #{
         alias => is_prototype,
-        key => <<"is_prototype">>,
+        key => is_prototype,
         required => true,
         datatype => boolean,
         default => false
@@ -138,7 +138,7 @@
     %% The URI of the prototype this realm inherits from.
     <<"prototype_uri">> => #{
         alias => prototype_uri,
-        key => <<"prototype_uri">>,
+        key => prototype_uri,
         required => true,
         datatype => binary,
         allow_undefined => true,
@@ -149,7 +149,7 @@
     %% Prototype realms never allow connections.
     <<"allow_connections">> => #{
         alias => allow_connections,
-        key => <<"allow_connections">>,
+        key => allow_connections,
         required => true,
         datatype => boolean,
         default => true
@@ -158,7 +158,7 @@
     %% designated as an SSO realm it cannot be changed.
     <<"is_sso_realm">> => #{
         alias => is_sso_realm,
-        key => <<"is_sso_realm">>,
+        key => is_sso_realm,
         required => true,
         datatype => boolean,
         default => false
@@ -168,7 +168,7 @@
     %% TODO change sso_realm_uri to allowed_sso_realms
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
-        key => <<"sso_realm_uri">>,
+        key => sso_realm_uri,
         required => true,
         datatype => binary,
         allow_undefined => true,
@@ -179,7 +179,7 @@
     %% to this realm.
     <<"authmethods">> => #{
         alias => authmethods,
-        key => <<"authmethods">>,
+        key => authmethods,
         required => true,
         datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}},
         default => [
@@ -193,7 +193,7 @@
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
-        key => <<"security_enabled">>,
+        key => security_enabled,
         required => true,
         datatype => boolean,
         default => true
@@ -203,7 +203,7 @@
     %% This feature is used by the security config file see apply_config/1
     <<"users">> => #{
         alias => users,
-        key => <<"users">>,
+        key => users,
         required => true,
         default => [],
         datatype => {list, map}
@@ -214,7 +214,7 @@
     %% This feature is used by the security config file see apply_config/1
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>,
+        key => groups,
         required => true,
         default => [],
         datatype => {list, map}
@@ -225,7 +225,7 @@
     %% This feature is used by the security config file see apply_config/1
     <<"sources">> => #{
         alias => sources,
-        key => <<"sources">>,
+        key => sources,
         required => true,
         default => [],
         datatype => {list, map}
@@ -235,7 +235,7 @@
     %% This feature is used by the security config file see apply_config/1
     <<"grants">> => #{
         alias => grants,
-        key => <<"grants">>,
+        key => grants,
         required => true,
         default => [],
         datatype => {list, map}
@@ -243,7 +243,7 @@
     %% A set of keys used for signing
     <<"private_keys">> => #{
         alias => private_keys,
-        key => <<"private_keys">>,
+        key => private_keys,
         required => true,
         default => fun gen_keys/0,
         validator => fun validate_keys/1
@@ -251,7 +251,7 @@
     %% A set of keys used for encryption
     <<"encryption_keys">> => #{
         alias => encryption_keys,
-        key => <<"encryption_keys">>,
+        key => encryption_keys,
         required => true,
         default => fun gen_encryption_keys/0,
         validator => fun validate_encryption_keys/1
@@ -273,28 +273,21 @@
 %% The overriden maps_utils:validate/2 specification
 %% to make certain keys not required or not available during updates
 -define(REALM_UPDATE_VALIDATOR, #{
-    <<"uri">> => #{
-        alias => uri,
-        key => <<"uri">>,
-        required => true,
-        datatype => binary,
-        validator => fun bondy_data_validators:realm_uri/1
-    },
     <<"description">> => #{
         alias => description,
-        key => <<"description">>,
+        key => description,
         required => false,
         datatype => binary
     },
     <<"is_prototype">> => #{
         alias => is_prototype,
-        key => <<"is_prototype">>,
+        key => is_prototype,
         required => false,
         datatype => boolean
     },
     <<"prototype_uri">> => #{
         alias => prototype_uri,
-        key => <<"prototype_uri">>,
+        key => prototype_uri,
         required => false,
         datatype => binary,
         allow_undefined => true,
@@ -302,20 +295,20 @@
     },
     <<"allow_connections">> => #{
         alias => allow_connections,
-        key => <<"allow_connections">>,
+        key => allow_connections,
         required => false,
         datatype => boolean
     },
     <<"is_sso_realm">> => #{
         alias => is_sso_realm,
-        key => <<"is_sso_realm">>,
+        key => is_sso_realm,
         required => false,
         datatype => boolean
     },
     %% TODO change sso_realm_uri to allowed_sso_realms
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
-        key => <<"sso_realm_uri">>,
+        key => sso_realm_uri,
         required => false,
         datatype => binary,
         allow_undefined => true,
@@ -323,50 +316,50 @@
     },
     <<"authmethods">> => #{
         alias => authmethods,
-        key => <<"authmethods">>,
+        key => authmethods,
         required => false,
         datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}}
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
-        key => <<"security_enabled">>,
+        key => security_enabled,
         required => false,
         datatype => boolean
     },
     <<"users">> => #{
         alias => users,
-        key => <<"users">>,
+        key => users,
         required => false,
         datatype => {list, map}
     },
     <<"groups">> => #{
         alias => groups,
-        key => <<"groups">>,
+        key => groups,
         required => false,
         datatype => {list, map}
     },
     <<"sources">> => #{
         alias => sources,
-        key => <<"sources">>,
+        key => sources,
         required => false,
         datatype => {list, map}
     },
     <<"grants">> => #{
         alias => grants,
-        key => <<"grants">>,
+        key => grants,
         required => true,
         default => [],
         datatype => {list, map}
     },
     <<"private_keys">> => #{
         alias => private_keys,
-        key => <<"private_keys">>,
+        key => private_keys,
         required => false,
         validator => fun validate_keys/1
     },
     <<"encryption_keys">> => #{
         alias => encryption_keys,
-        key => <<"encryption_keys">>,
+        key => encryption_keys,
         required => false,
         validator => fun validate_encryption_keys/1
     }
@@ -386,9 +379,9 @@
 
 %% The default configuration for the master realm
 -define(MASTER_REALM, #{
-    <<"uri">> => ?MASTER_REALM_URI,
-    <<"description">> => <<"The Bondy Master realm">>,
-    <<"authmethods">> => [
+    uri => ?MASTER_REALM_URI,
+    description => <<"The Bondy Master realm">>,
+    authmethods => [
         ?TRUST_AUTH,
         ?WAMP_CRYPTOSIGN_AUTH,
         % ?WAMP_SCRAM_AUTH,
@@ -396,44 +389,44 @@
         ?PASSWORD_AUTH,
         ?WAMP_ANON_AUTH
     ],
-    <<"is_prototype">> => false,
-    <<"prototype_uri">> => undefined,
-    <<"is_sso_realm">> => false,
-    <<"sso_realm_uri">> => undefined,
-    <<"allow_connections">> => true,
-    <<"security_enabled">> => true,
-    <<"users">> => [
+    is_prototype => false,
+    prototype_uri => undefined,
+    is_sso_realm => false,
+    sso_realm_uri => undefined,
+    allow_connections => true,
+    security_enabled => true,
+    users => [
         #{
-            <<"username">> => <<"admin">>,
-            <<"password">> => <<"bondy-admin">>,
-            <<"groups">> => [<<"bondy.administrators">>],
-            <<"meta">> => #{
+            username => <<"admin">>,
+            password => <<"bondy-admin">>,
+            groups => [<<"bondy.administrators">>],
+            meta => #{
                 <<"description">> => <<"The default Bondy administrator user.">>
             }
         }
     ],
-    <<"groups">> => [
+    groups => [
         #{
-            <<"name">> => <<"bondy.administrators">>,
-            <<"groups">> => [
+            name => <<"bondy.administrators">>,
+            groups => [
             ],
-            <<"meta">> => #{
+            meta => #{
                 <<"description">> => <<"The Bondy administrators group">>
             }
         }
     ],
-    <<"grants">> => [
+    grants => [
         #{
-            <<"permissions">> => [
+            permissions => [
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>
             ],
-            <<"uri">> => <<"">>,
-            <<"match">> => <<"prefix">>,
-            <<"roles">> => [<<"bondy.administrators">>],
-            <<"meta">> => #{
+            uri => <<"">>,
+            match => <<"prefix">>,
+            roles => [<<"bondy.administrators">>],
+            meta => #{
                 <<"description">> => <<
                     "Allows the administrators users to make RPC Calls to "
                     "the Bondy Admin APIs and subscribe to all Bondy events. "
@@ -442,16 +435,16 @@
             }
         },
         #{
-            <<"permissions">> => [
+            permissions => [
                 <<"wamp.call">>,
                 <<"wamp.cancel">>,
                 <<"wamp.subscribe">>,
                 <<"wamp.unsubscribe">>
             ],
-            <<"uri">> => <<"">>,
-            <<"match">> => <<"prefix">>,
-            <<"roles">> => [<<"anonymous">>],
-            <<"meta">> => #{
+            uri => <<"">>,
+            match => <<"prefix">>,
+            roles => [<<"anonymous">>],
+            meta => #{
                 <<"description">> => <<
                     "Allows anonymous users to make RPC Calls to the "
                     "Bondy Admin APIs and subscribe to all Bondy events. "
@@ -460,12 +453,12 @@
             }
         }
     ],
-    <<"sources">> => [
+    sources => [
         #{
-            <<"usernames">> => <<"all">>,
-            <<"authmethod">> => ?PASSWORD_AUTH,
-            <<"cidr">> => <<"0.0.0.0/0">>,
-            <<"meta">> => #{
+            usernames => <<"all">>,
+            authmethod => ?PASSWORD_AUTH,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{
                 <<"description">> => <<
                     "Allows all users from any network authenticate using "
                     "password credentials. This should ideally be restricted "
@@ -474,10 +467,10 @@
             }
         },
         #{
-            <<"usernames">> => <<"all">>,
-            <<"authmethod">> => ?WAMP_CRA_AUTH,
-            <<"cidr">> => <<"0.0.0.0/0">>,
-            <<"meta">> => #{
+            usernames => <<"all">>,
+            authmethod => ?WAMP_CRA_AUTH,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{
                 <<"description">> => <<
                     "Allows all users from any network authenticate using "
                     "password credentials. This should ideally be restricted "
@@ -486,10 +479,10 @@
             }
         },
         % #{
-        %     <<"usernames">> => <<"all">>,
-        %     <<"authmethod">> => ?WAMP_SCRAM_AUTH,
-        %     <<"cidr">> => <<"0.0.0.0/0">>,
-        %     <<"meta">> => #{
+        %     usernames => <<"all">>,
+        %     authmethod => ?WAMP_SCRAM_AUTH,
+        %     cidr => <<"0.0.0.0/0">>,
+        %     meta => #{
         %         <<"description">> => <<"
         %             Allows all users from any network authenticate using "
         %             "password credentials. This should ideally be restricted "
@@ -498,10 +491,10 @@
         %     }
         % },
         #{
-            <<"usernames">> => [<<"admin">>],
-            <<"authmethod">> => ?TRUST_AUTH,
-            <<"cidr">> => <<"127.0.0.0/8">>,
-            <<"meta">> => #{
+            usernames => [<<"admin">>],
+            authmethod => ?TRUST_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
                 <<"description">> => <<
                     "Allows the admin user to connect over the loopback "
                     "interface (i.e. localhost) by presenting just its username."
@@ -509,10 +502,10 @@
             }
         },
         #{
-            <<"usernames">> => [<<"anonymous">>, <<"admin">>],
-            <<"authmethod">> => ?WAMP_ANON_AUTH,
-            <<"cidr">> => <<"127.0.0.0/8">>,
-            <<"meta">> => #{
+            usernames => [<<"anonymous">>, <<"admin">>],
+            authmethod => ?WAMP_ANON_AUTH,
+            cidr => <<"127.0.0.0/8">>,
+            meta => #{
                 <<"description">> => <<
                     "Allows the anonymous user to connect over the loopback "
                     "interface (i.e. localhost) only."
@@ -606,10 +599,14 @@
 -export([uri/1]).
 -export([is_property_value_inherited/2]).
 
-% -export([groups/2]).
-% -export([users/2]).
-% -export([sources/2]).
-% -export([grants/2]).
+-export([grants/1]).
+-export([grants/2]).
+-export([groups/1]).
+-export([groups/2]).
+-export([sources/1]).
+-export([sources/2]).
+-export([users/1]).
+-export([users/2]).
 
 
 
@@ -894,11 +891,8 @@ security_status(Term) ->
 %% -----------------------------------------------------------------------------
 -spec enable_security(t() | uri()) -> ok.
 
-enable_security(#realm{uri = Uri} = Realm) ->
-    _ = update(Realm, #{
-        <<"uri">> => Uri,
-        <<"security_enabled">> => true
-    }),
+enable_security(#realm{} = Realm) ->
+    _ = update(Realm, #{security_enabled => true}),
     ok;
 
 enable_security(Uri) when is_binary(Uri) ->
@@ -917,11 +911,8 @@ disable_security(#realm{uri = ?MASTER_REALM_URI}) ->
 disable_security(#realm{uri = ?INTERNAL_REALM_URI}) ->
     {error, badarg};
 
-disable_security(#realm{uri = Uri} = Realm) ->
-    _ = update(Realm, #{
-        <<"uri">> => Uri,
-        <<"security_enabled">> => false
-    }),
+disable_security(#realm{} = Realm) ->
+    _ = update(Realm, #{security_enabled => false}),
     ok;
 
 disable_security(Uri) when is_binary(Uri) ->
@@ -1008,7 +999,7 @@ get_random_kid(Uri) when is_binary(Uri) ->
 
 encryption_keys(#realm{encryption_keys = Keys} = Realm0)
 when map_size(Keys) == 0 ->
-    Data = #{<<"encryption_keys">> => gen_encryption_keys()},
+    Data = #{encryption_keys => gen_encryption_keys()},
     Realm = merge_and_store(Realm0, Data),
     encryption_keys(Realm);
 
@@ -1142,10 +1133,10 @@ add(?MASTER_REALM_URI) ->
     error(badarg);
 
 add(Uri) when is_binary(Uri) ->
-    add(#{<<"uri">> => Uri});
+    add(#{uri => Uri});
 
 add(Map0) ->
-    #{<<"uri">> := Uri} = Map1 = validate(Map0, ?REALM_VALIDATOR),
+    #{uri := Uri} = Map1 = validate(Map0, ?REALM_VALIDATOR),
 
     case exists(Uri) of
         true ->
@@ -1165,13 +1156,11 @@ update(#realm{uri = ?INTERNAL_REALM_URI}, _) ->
     error(badarg);
 
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
-    Data1 = maps:put(<<"uri">>, ?MASTER_REALM_URI, Data0),
-    Data = maps_utils:validate(Data1, ?MASTER_REALM_UPDATE_VALIDATOR),
+    Data = maps_utils:validate(Data0, ?MASTER_REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
-update(#realm{uri = Uri} = Realm, Data0) ->
-    Data1 = maps:put(<<"uri">>, Uri, Data0),
-    Data = validate(Data1, ?REALM_UPDATE_VALIDATOR),
+update(#realm{} = Realm, Data0) ->
+    Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
 update(?INTERNAL_REALM_URI, _) ->
@@ -1260,16 +1249,16 @@ password_opts(RealmUri) ->
 
 to_external(#realm{} = R) ->
     #{
-        <<"uri">> => R#realm.uri,
-        <<"description">> => R#realm.description,
-        <<"is_prototype">> => R#realm.is_prototype,
-        <<"prototype_uri">> => R#realm.prototype_uri,
-        <<"is_sso_realm">> => R#realm.is_sso_realm,
-        <<"sso_realm_uri">> => R#realm.sso_realm_uri,
-        <<"allow_connections">> => R#realm.allow_connections,
-        <<"authmethods">> => R#realm.authmethods,
-        <<"security_status">> => security_status(R),
-        <<"public_keys">> => [
+        uri => R#realm.uri,
+        description => R#realm.description,
+        is_prototype => R#realm.is_prototype,
+        prototype_uri => R#realm.prototype_uri,
+        is_sso_realm => R#realm.is_sso_realm,
+        sso_realm_uri => R#realm.sso_realm_uri,
+        allow_connections => R#realm.allow_connections,
+        authmethods => R#realm.authmethods,
+        security_status => security_status(R),
+        public_keys => [
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
         ]
@@ -1277,6 +1266,116 @@ to_external(#realm{} = R) ->
 
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
+
+
+%% =============================================================================
+%% AUTHZ
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of users belonging to realm `Realm'.
+%% Users are never inherited through prototypes.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec users(Realm :: t() | uri()) -> list(bondy_rbac_user:t()).
+
+users(Realm) ->
+    users(Realm, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of users belonging to realm `Realm'.
+%% Users are never inherited through prototypes.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec users(Realm :: t() | uri(), Opts :: map()) -> list(bondy_rbac_user:t()).
+
+users(#realm{uri = Uri}, Opts) ->
+    %% TODO change this with continuation return
+    bondy_rbac_user:list(Uri, Opts);
+
+users(Uri, Opts) when is_binary(Uri) ->
+    users(fetch(Uri), Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of users belonging to realm `Realm'.
+%% These includes the groups inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec groups(Realm :: t() | uri()) -> list(bondy_rbac_user:t()).
+
+groups(Realm) ->
+    groups(Realm, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of groups belonging to realm `Realm'.
+%% These includes the groups inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec groups(Realm :: t() | uri(), Opts :: map()) -> list(bondy_rbac_user:t()).
+
+groups(#realm{uri = Uri}, Opts) ->
+    %% TODO change this with continuation return
+    bondy_rbac_group:list(Uri, Opts);
+
+groups(Uri, Opts) when is_binary(Uri) ->
+    groups(fetch(Uri), Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of sources belonging to realm `Realm'.
+%% These includes the sources inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec sources(Realm :: t() | uri()) -> list(bondy_rbac_user:t()).
+
+sources(Realm) ->
+    sources(Realm, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of sources belonging to realm `Realm'.
+%% These includes the sources inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec sources(Realm :: t() | uri(), Opts :: map()) -> list(bondy_rbac_user:t()).
+
+sources(#realm{uri = Uri}, Opts) ->
+    %% TODO change this with continuation return
+    bondy_rbac_source:list(Uri, Opts);
+
+sources(Uri, Opts) when is_binary(Uri) ->
+    sources(fetch(Uri), Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of grants belonging to realm `Realm'.
+%% These includes the grants inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec grants(Realm :: t() | uri()) -> list(bondy_rbac_user:t()).
+
+grants(Realm) ->
+    grants(Realm, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the list of grants belonging to realm `Realm'.
+%% These includes the grants inherited from the prototype (if defined).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec grants(Realm :: t() | uri(), Opts :: map()) -> list(bondy_rbac_user:t()).
+
+grants(#realm{uri = Uri}, Opts) ->
+    %% TODO change this with continuation return
+    bondy_rbac:grants(Uri, Opts);
+
+grants(Uri, Opts) when is_binary(Uri) ->
+    grants(fetch(Uri), Opts).
 
 
 
@@ -1298,26 +1397,26 @@ validate(Map0, Spec) ->
 
     %% Preconditions
 
-    IsProto = maps:get(<<"is_prototype">>, Map, false),
-    Proto = maps:get(<<"prototype_uri">>, Map, undefined),
+    IsProto = maps:get(is_prototype, Map, false),
+    Proto = maps:get(prototype_uri, Map, undefined),
 
     ok = case {IsProto, Proto} of
         {true, undefined} ->
             ok;
         {true, _} ->
-            error({inconsistency_error, [<<"is_prototype">>, <<"prototype_uri">>]});
+            error({inconsistency_error, [is_prototype, prototype_uri]});
         _ ->
             ok
     end,
 
-    IsSSORealm = maps:get(<<"is_sso_realm">>, Map, false),
-    SSORealm = maps:get(<<"sso_realm_uri">>, Map, undefined),
+    IsSSORealm = maps:get(is_sso_realm, Map, false),
+    SSORealm = maps:get(sso_realm_uri, Map, undefined),
 
     ok = case {IsSSORealm, SSORealm} of
         {true, undefined} ->
             ok;
         {true, _} ->
-            error({inconsistency_error, [<<"is_sso_realm">>, <<"sso_realm_uri">>]});
+            error({inconsistency_error, [is_sso_realm, sso_realm_uri]});
         _ ->
             ok
     end,
@@ -1325,27 +1424,26 @@ validate(Map0, Spec) ->
     Map.
 
 
-
 %% @private
 validate_rbac_config(#realm{uri = Uri} = Realm, Map) ->
     Groups0 = [
         bondy_rbac_group:new(Data)
-        || Data <- maps:get(<<"groups">>, Map, [])
+        || Data <- maps:get(groups, Map, [])
     ],
 
     Groups = group_topsort(Uri, Groups0),
 
     Users = [
         bondy_rbac_user:new(Data, #{password_opts => password_opts(Realm)})
-        || Data <- maps:get(<<"users">>, Map, [])
+        || Data <- maps:get(users, Map, [])
     ],
     SourceAssignments = [
         bondy_rbac_source:new_assignment(Data)
-        || Data <- maps:get(<<"sources">>, Map, [])
+        || Data <- maps:get(sources, Map, [])
     ],
     Grants = [
         bondy_rbac:request(Data)
-        || Data <- maps:get(<<"grants">>, Map, [])
+        || Data <- maps:get(grants, Map, [])
     ],
     #{
         groups => Groups,
@@ -1441,7 +1539,7 @@ add_or_update(#{<<"uri">> := Uri} = Data0) ->
 
 
 %% @private
-do_add(#{<<"uri">> := Uri} = Map) ->
+do_add(#{uri := Uri} = Map) ->
     Realm0 = #realm{uri = Uri},
     Realm = merge_and_store(Realm0, Map),
     ok = on_add(Realm),
@@ -1464,47 +1562,50 @@ merge_and_store(Realm0, Map) ->
     %% We are going to call new on the respective modules so that we validate
     %% the data. This way we avoid adding anything to the database until all
     %% elements have been validated.
-    RBACData = validate_rbac_config(Realm, Map),
+    RBACConfig = validate_rbac_config(Realm, Map),
 
     %% We then create the realm
     Uri = Realm#realm.uri,
     ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
 
     %% We finally apply all the RBAC objects that have been validated
-    ok = apply_rbac_config(Realm, RBACData),
+    ok = apply_rbac_config(Realm, RBACConfig),
 
     Realm.
 
 
 %% @private
-fold_props(<<"allow_connections">>, V, Realm) ->
+fold_props(allow_connections, V, Realm) ->
     Realm#realm{allow_connections = V};
 
-fold_props(<<"authmethods">>, V, Realm) ->
+fold_props(authmethods, V, Realm) ->
     Realm#realm{
         authmethods = V,
         %% TODO derive password options based on authmethods
         password_opts = get_password_opts(V)
     };
 
-fold_props(<<"description">>, V, Realm) ->
+fold_props(description, V, Realm) ->
     Realm#realm{description = V};
 
-fold_props(<<"is_prototype">>, true, #realm{is_prototype = false} = Realm) ->
+fold_props(is_prototype, true, #realm{is_prototype = false} = Realm) ->
     Realm#realm{is_prototype = true};
 
-fold_props(<<"is_prototype">>, false, #realm{is_prototype = true}) ->
+fold_props(is_prototype, false, #realm{is_prototype = true}) ->
     error(
         {
             badarg,
-            <<"Cannot set property 'is_prototype' to 'false' once it has been to 'true'.">>
+            <<
+                "Cannot set property 'is_prototype' to 'false' "
+                "once it has been to 'true'."
+            >>
         }
     );
 
-fold_props(<<"prototype_uri">>, V, #realm{prototype_uri = undefined} = Realm) ->
+fold_props(prototype_uri, V, #realm{prototype_uri = undefined} = Realm) ->
     Realm#realm{prototype_uri = V};
 
-fold_props(<<"prototype_uri">>, V1, #realm{prototype_uri = V0})
+fold_props(prototype_uri, V1, #realm{prototype_uri = V0})
 when V0 =/= V1 ->
     error(
         {
@@ -1513,26 +1614,29 @@ when V0 =/= V1 ->
         }
     );
 
-fold_props(<<"is_sso_realm">>, true, #realm{is_sso_realm = false} = Realm) ->
+fold_props(is_sso_realm, true, #realm{is_sso_realm = false} = Realm) ->
     Realm#realm{is_sso_realm = true};
 
-fold_props(<<"is_sso_realm">>, false, #realm{is_sso_realm = true}) ->
+fold_props(is_sso_realm, false, #realm{is_sso_realm = true}) ->
     error(
         {
             badarg,
-            <<"Cannot set property 'is_sso_realm' to 'false' once it has been to 'true'.">>
+            <<
+                "Cannot set property 'is_sso_realm' to 'false' "
+                "once it has been to 'true'."
+            >>
         }
     );
 
-fold_props(<<"sso_realm_uri">>, V, Realm) ->
+fold_props(sso_realm_uri, V, Realm) ->
     Realm#realm{sso_realm_uri = V};
 
-fold_props(<<"security_enabled">>, V, Realm) ->
+fold_props(security_enabled, V, Realm) ->
     Realm#realm{security_enabled = V};
-fold_props(<<"private_keys">>, V, Realm) ->
+fold_props(private_keys, V, Realm) ->
     set_keys(Realm, V);
 
-fold_props(<<"encryption_keys">>, V, Realm) ->
+fold_props(encryption_keys, V, Realm) ->
     set_encryption_keys(Realm, V);
 
 fold_props(_, _, Realm) ->
@@ -1608,7 +1712,9 @@ do_lookup(Uri) ->
         undefined ->
             {error, not_found};
         Data ->
-            _ = lager:warning("Invalid realm data; data=~p", [Data]),
+            _ = lager:warning(
+                "Invalid realm data retrieved from store; data=~p", [Data]
+            ),
             {error, not_found}
     end.
 
@@ -1733,7 +1839,7 @@ precedence_graph(Realms, Graph) ->
     Vertices = [
         begin
             R = validate_uris(R0),
-            Uri = maps:get(<<"uri">>, R),
+            Uri = maps:get(uri, R),
             digraph:add_vertex(Graph, Uri, R)
         end || R0 <- Realms
     ],
@@ -1744,7 +1850,7 @@ precedence_graph(Realms, Graph) ->
 precedence_graph_aux([H|T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
     Uris = maps:values(
-        maps:with([<<"prototype_uri">>, <<"sso_realm_uri">>], Realm)
+        maps:with([prototype_uri, sso_realm_uri], Realm)
     ),
     _ = [
         precedence_graph_add_edge(Graph, Uri, H)
@@ -1782,16 +1888,12 @@ validate_uris(Data) ->
     %% We prevalidate the data
     Opts = #{keep_unknown => true},
     Validator = #{
-        <<"uri">> => #{
-            alias => uri,
-            key => <<"uri">>,
+        uri => #{
             required => true,
             datatype => binary,
             validator => fun bondy_data_validators:realm_uri/1
         },
-        <<"sso_realm_uri">> => #{
-            alias => sso_realm_uri,
-            key => <<"sso_realm_uri">>,
+        sso_realm_uri => #{
             required => false,
             datatype => binary,
             validator => fun bondy_data_validators:realm_uri/1
@@ -1810,7 +1912,8 @@ check_integrity_constraints(Realm) ->
 
 %% @private
 
-check_integrity_constraints(#realm{is_sso_realm = true, sso_realm_uri = undefined}, sso) ->
+check_integrity_constraints(
+    #realm{is_sso_realm = true, sso_realm_uri = undefined}, sso) ->
     ok;
 
 check_integrity_constraints(#realm{is_sso_realm = true}, sso) ->

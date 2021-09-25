@@ -71,7 +71,7 @@ invalid_description(_) ->
 
 prototype_inconsistency_error(_) ->
     ?assertError(
-        {inconsistency_error, [<<"is_prototype">>,<<"prototype_uri">>]},
+        {inconsistency_error, [is_prototype, prototype_uri]},
         bondy_realm:add(#{
             uri => bondy_utils:generate_fragment(6),
             is_prototype => true,
@@ -104,7 +104,7 @@ prototype_uri_not_found_error(_) ->
 
 sso_inconsistency_error(_) ->
     ?assertError(
-        {inconsistency_error, [<<"is_sso_realm">>,<<"sso_realm_uri">>]},
+        {inconsistency_error, [is_sso_realm, sso_realm_uri]},
         bondy_realm:add(#{
             uri => bondy_utils:generate_fragment(6),
             is_sso_realm => true,
