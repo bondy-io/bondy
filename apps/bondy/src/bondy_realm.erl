@@ -1888,12 +1888,16 @@ validate_uris(Data) ->
     %% We prevalidate the data
     Opts = #{keep_unknown => true},
     Validator = #{
-        uri => #{
+        <<"uri">> => #{
+            key => uri,
+            alias => uri,
             required => true,
             datatype => binary,
             validator => fun bondy_data_validators:realm_uri/1
         },
-        sso_realm_uri => #{
+        <<"sso_realm_uri">> => #{
+            key => sso_realm_uri,
+            alias => sso_realm_uri,
             required => false,
             datatype => binary,
             validator => fun bondy_data_validators:realm_uri/1
