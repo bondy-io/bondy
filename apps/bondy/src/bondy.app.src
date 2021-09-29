@@ -56,7 +56,6 @@
         runtime_tools,
         %% Third party
         cowboy,
-        erlang_term,
         hackney,
         jose,
         pbkdf2,
