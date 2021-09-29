@@ -1391,6 +1391,7 @@ to_external(#realm{} = R) ->
         sso_realm_uri => R#realm.sso_realm_uri,
         allow_connections => R#realm.allow_connections,
         authmethods => R#realm.authmethods,
+        password_opts => R#realm.password_opts,
         security_status => security_status(R),
         public_keys => [
             begin {_, Map} = jose_jwk:to_map(K), Map end
