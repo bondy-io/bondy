@@ -102,7 +102,7 @@ add_realm(RealmUri) ->
         ]
     },
 
-    _ = bondy_realm:add(Config),
+    _ = bondy_realm:create(Config),
 
     ?assertEqual(
         scram,

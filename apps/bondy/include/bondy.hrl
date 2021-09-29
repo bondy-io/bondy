@@ -16,7 +16,7 @@
 %%  limitations under the License.
 %% =============================================================================
 -define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
--define(INTERNAL_REALM_URI, <<"com.leapsight.bondy.internal">>).
+-define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
 -define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').

@@ -148,7 +148,7 @@ This record is globally replicated.
 ### add_group/3 ###
 
 <pre><code>
-add_group(RealmUri::<a href="#type-uri">uri()</a>, Users::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-username">username()</a> | [<a href="#type-username">username()</a>], Groupname::<a href="bondy_rbac_group.md#type-name">bondy_rbac_group:name()</a>) -&gt; ok
+add_group(RealmUri::<a href="#type-uri">uri()</a>, Users::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-username">username()</a> | [<a href="#type-username">username()</a>], Groupname::<a href="bondy_rbac_group.md#type-name">bondy_rbac_group:name()</a>) -&gt; ok | {error, Reason::any()}
 </code></pre>
 <br />
 
@@ -160,7 +160,7 @@ Adds group named `Groupname` to users `Users` in realm with uri
 ### add_groups/3 ###
 
 <pre><code>
-add_groups(RealmUri::<a href="#type-uri">uri()</a>, Users::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-username">username()</a> | [<a href="#type-username">username()</a>], Groupnames::[<a href="bondy_rbac_group.md#type-name">bondy_rbac_group:name()</a>]) -&gt; ok
+add_groups(RealmUri::<a href="#type-uri">uri()</a>, Users::all | <a href="#type-t">t()</a> | [<a href="#type-t">t()</a>] | <a href="#type-username">username()</a> | [<a href="#type-username">username()</a>], Groupnames::[<a href="bondy_rbac_group.md#type-name">bondy_rbac_group:name()</a>]) -&gt; ok | {error, Reason::any()}
 </code></pre>
 <br />
 

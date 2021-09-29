@@ -24,10 +24,14 @@
 %% separately for each individual realm so sessions attached to a realm won’t
 %% see message and events occurring on another realm.
 %%
+%% ## Overview
+%%
 %% The realm is a central and fundamental concept in Bondy. It does not only
 %% serve as an authentication and authorization domain but also as a message
 %% routing domain. Bondy ensures no messages routed in one realm will leak into
 %% another realm.
+%%
+%% ## Security
 %%
 %% A realm's security may be checked, enabled, or disabled by an administrator
 %% through the WAMP and HTTP APIs. This allows an administrator to change
@@ -41,7 +45,7 @@
 %% configuration while security is disabled, and will be applied if and when
 %% security is re-enabled.
 %%
-%% A realm security is enabled by default.
+%% Realm security is enabled by default.
 %%
 %% ## Storage
 %%
@@ -54,7 +58,65 @@
 %% Master realm a.k.a `com.leapsight.bondy'. This realm is the root realm which
 %% allows an admin user to create, list, modify and delete other realms.
 %%
-%% ## Realm Characteristics
+%% ## Realm Properties
+%%
+%% * **uri** `uri()' *[required, immutable]* <br/>The realm identifier.
+%% * **description** `binary()' <br/>A textual description of the realm.
+%% * **is_prototype** `boolean()' *[immutable]*<br/>If `true' this realm is a
+%% realm used as a prototype.<br/>*Default*: `false'
+%% * **prototype_uri** `uri()' <br/>If present, this it the URI of the the realm
+%% prototype this realm inherits some of its behaviour and features from.
+%% * **sso_realm_uri** `uri()' <br/>If present, this it the URI of the SSO Realm
+%% this realm is connected to.
+%% * **is_sso_realm** `boolean()' *[immutable]*<br/>If `true' this realm is an SSO
+%% Realm.<br/>*Default*: `false'.
+%% * **allow_connections** `boolean()' <br/>If `true' this realm is allowing
+%% connections from clients. It is normally set to `false' when the realm is an
+%% SSO Realm.<br/>Default: `true'
+%% * **authmethods** `list(binary()' <br/>The list of the authentication methods
+%% allowed by this realm.<br/>*Default*:
+%% `[anonymous, password, ticket, oauth2, wampcra]'
+%% * **security_status** `binary()' <br/>The string `enabled' if security is
+%% enabled. Otherwise the string `disabled'.
+%% * **public_keys** `list()' <br/>A list of JWK values.
+%%
+%% ## Realm Prototypes
+%% A **Prototype Realm** is a realm that acts as a prototype for the
+%% construction of other realms. A prototype realm is a normal realm whose
+%% property `is_prototype' has been set to true.
+%%
+%% Prototypical inheritance allows us to reuse the properties (including RBAC
+%% definitions) from one realm to another through a reference URI configured on
+%% the `prototype_uri' property.
+%%
+%% Prototypical inheritance is a form of single inheritance as realms are can
+%% only be related to a single prototype.
+%%
+%% The `prototype_uri' property is defined as an *irreflexive property* i.e. a
+%% realm cannot have itself as prototype. In addition *a prototype cannot
+%% inherit from another prototype*. This means the inheritance chain is bounded
+%% to one level.
+%%
+%% ### Inherited properties
+%% The following is the list of properties which a realm inherits from a
+%% prototype when those properties have not been asigned a value. Setting a
+%% value to these properties is equivalente to overriding the prototype's.
+%%
+%% * **security_enabled**
+%% * **allow_connections**
+%%
+%% In addition realms inherit Groups, Sources and Grants from their prototype.
+%% The following are the inheritance rules:
+%%
+%% 1. Users cannot be defined at the prototype i.e. no user inheritance.
+%% 1. A realm has access to all groups defined in the prototype i.e. from a
+%% realm perspective the prototype groups operate in the same way as if they
+%% have been defined in the realm itself. This enables roles (users and groups)
+%% in a realm to be members of groups defined in the prototype.
+%% 1. A group defined in a realm overrides any homonymous group in the
+%% prototype. This works at all levels of the group membership chain.
+%% 1. The previous rule does not apply to the special group `all'. Permissions
+%% granted to `all' are merged between a realm and its prototype.
 %%
 %%
 %% ## Same Sign-on (SSO)
@@ -64,31 +126,9 @@
 %% It is enabled by setting the realm's `sso_realm_uri' property during realm
 %% creation or during an update operation.
 %%
-%% - It requires the user to authenticate when opening a session in a realm.
-%% - Changing credentials e.g. updating password can be performed while
-%% connected to any realm
-%%
-%% ## Realm Prototypes
-%% A **Prototype Realm** is a realm that acts as a prototype for the
-%% construction of other realms. A prototype realm is a normal realm whose
-%% property `is_prototype' has been set to true.
-%%
-%% Prototypical inheritance allows us to reuse the properties
-%% (including RBAC definitions) from one realm to another through a
-%% reference URI configured on the `prototype_uri' property.
-%%
-%% Prototypical inheritance is a form of single inheritance as realms are only
-%% related to a single prototype.
-%%
-%% The `prototype_uri' property is defined as an *irreflexive property*
-%% i.e. a realm cannot have itself as prototype. In addition
-%% *a prototype cannot inherit from another prototype*. This means the
-%% inheritance chain is bounded to one level.
-%%
-%% ### Inherited properties
-%% The following is the list of properties which a realm would inherit from
-%%
-%%
+%% * It requires the user to authenticate when opening a session in a realm.
+%% * Changing credentials e.g. updating password can be performed while
+%% connected to any realm.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
@@ -100,6 +140,15 @@
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
 -define(PDB_PREFIX(Uri), {bondy_realm, Uri}).
+
+-define(DEFAULT_AUTHMETHODS, [
+    ?WAMP_ANON_AUTH,
+    ?PASSWORD_AUTH,
+    ?OAUTH2_AUTH,
+    ?WAMP_CRA_AUTH,
+    % ?WAMP_SCRAM_AUTH,
+    ?WAMP_TICKET_AUTH
+]).
 
 %% The maps_utils:validate/2 specification used when creating realms.
 -define(REALM_VALIDATOR, #{
@@ -145,15 +194,6 @@
         default => undefined,
         validator => fun bondy_data_validators:realm_uri/1
     },
-    %% Determines whether the realm allows clients to establish sessions.
-    %% Prototype realms never allow connections.
-    <<"allow_connections">> => #{
-        alias => allow_connections,
-        key => allow_connections,
-        required => true,
-        datatype => boolean,
-        default => true
-    },
     %% Determines if this realm is an SSO Realm. Once a realm has been
     %% designated as an SSO realm it cannot be changed.
     <<"is_sso_realm">> => #{
@@ -166,6 +206,7 @@
     %% Determines if this realm has an SSO realm associated with it.
     %% Once a realm has been associated with an SSO realm it cannot be changed.
     %% TODO change sso_realm_uri to allowed_sso_realms
+    %% TODO make it inheritable????
     <<"sso_realm_uri">> => #{
         alias => sso_realm_uri,
         key => sso_realm_uri,
@@ -175,6 +216,16 @@
         default => undefined,
         validator => fun bondy_data_validators:realm_uri/1
     },
+    %% Determines whether the realm allows clients to establish sessions.
+    %% Prototype realms never allow connections.
+    <<"allow_connections">> => #{
+        alias => allow_connections,
+        key => allow_connections,
+        required => true,
+        datatype => boolean,
+        allow_undefined => true,
+        default => undefined
+    },
     %% Determines the authentication methods available for clients connecting
     %% to this realm.
     <<"authmethods">> => #{
@@ -182,21 +233,16 @@
         key => authmethods,
         required => true,
         datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}},
-        default => [
-            ?WAMP_ANON_AUTH,
-            ?PASSWORD_AUTH,
-            ?OAUTH2_AUTH,
-            ?WAMP_CRA_AUTH,
-            % ?WAMP_SCRAM_AUTH,
-            ?WAMP_TICKET_AUTH
-        ]
+        allow_undefined => true,
+        default => undefined
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
         key => security_enabled,
-        required => true,
+        required => false,
         datatype => boolean,
-        default => true
+        allow_undefined => true,
+        default => undefined
     },
     %% This is a way to atomically create users together with the realm
     %% creation. User can be added at any time using the bondy_rbac_user module.
@@ -241,6 +287,7 @@
         datatype => {list, map}
     },
     %% A set of keys used for signing
+    %% TODO if this is a property do not gen keys!!!!
     <<"private_keys">> => #{
         alias => private_keys,
         key => private_keys,
@@ -249,6 +296,7 @@
         validator => fun validate_keys/1
     },
     %% A set of keys used for encryption
+    %% TODO if this is a property do not gen keys!!!!
     <<"encryption_keys">> => #{
         alias => encryption_keys,
         key => encryption_keys,
@@ -293,12 +341,6 @@
         allow_undefined => true,
         validator => fun bondy_data_validators:realm_uri/1
     },
-    <<"allow_connections">> => #{
-        alias => allow_connections,
-        key => allow_connections,
-        required => false,
-        datatype => boolean
-    },
     <<"is_sso_realm">> => #{
         alias => is_sso_realm,
         key => is_sso_realm,
@@ -314,17 +356,26 @@
         allow_undefined => true,
         validator => fun bondy_data_validators:realm_uri/1
     },
+    <<"allow_connections">> => #{
+        alias => allow_connections,
+        key => allow_connections,
+        required => false,
+        datatype => boolean,
+        allow_undefined => true
+    },
     <<"authmethods">> => #{
         alias => authmethods,
         key => authmethods,
         required => false,
-        datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}}
+        datatype => {list, {in, ?BONDY_AUTH_METHOD_NAMES}},
+        allow_undefined => true
     },
     <<"security_enabled">> => #{
         alias => security_enabled,
         key => security_enabled,
         required => false,
-        datatype => boolean
+        datatype => boolean,
+        allow_undefined => true
     },
     <<"users">> => #{
         alias => users,
@@ -347,8 +398,7 @@
     <<"grants">> => #{
         alias => grants,
         key => grants,
-        required => true,
-        default => [],
+        required => false,
         datatype => {list, map}
     },
     <<"private_keys">> => #{
@@ -515,13 +565,18 @@
     ]
 }).
 
--define(BONDY_PRIV_REALM, #realm{
-    uri = ?INTERNAL_REALM_URI,
-    description = <<"The private realm used by bondy">>,
-    authmethods = [],
-    security_enabled = true,
+
+-define(CONTROL_REALM, #realm{
+    uri = ?CONTROL_REALM_URI,
+    description = <<
+        "A private realm used by bondy internally for control plane purposes"
+    >>,
+    is_prototype = false,
     is_sso_realm = false,
-    allow_connections = true
+    security_enabled = true,
+    allow_connections = false,
+    authmethods = []
+
 }).
 
 
@@ -533,9 +588,9 @@
     is_sso_realm = false            ::  boolean(),
     %% TODO change sso_realm_uri to allowed_sso_realms
     sso_realm_uri                   ::  maybe(uri()),
-    allow_connections = true        ::  boolean(),
-    authmethods                     ::  [binary()], % a wamp property
-    security_enabled = true         ::  boolean(),
+    allow_connections               ::  maybe(boolean()),
+    authmethods                     ::  maybe([binary()]),
+    security_enabled                ::  maybe(boolean()),
     password_opts                   ::  maybe(bondy_password:opts()),
     private_keys = #{}              ::  keyset(),
     public_keys = #{}               ::  keyset(),
@@ -543,7 +598,7 @@
     info = #{}                      ::  map()
 }).
 
--type t()                           ::  #realm{}.
+-opaque t()                         ::  #realm{}.
 -type kid()                         ::  binary().
 -type keyset()                      ::  #{kid() => map()}.
 -type external()                    ::  #{
@@ -563,17 +618,17 @@
 -export_type([external/0]).
 
 
--export([add/1]).
 -export([allow_connections/1]).
 -export([apply_config/0]).
--export([apply_config/1]).
 -export([authmethods/1]).
+-export([create/1]).
 -export([delete/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
 -export([encryption_keys/1]).
 -export([exists/1]).
 -export([fetch/1]).
+-export([from_file/1]).
 -export([get/1]).
 -export([get/2]).
 -export([get_encryption_key/2]).
@@ -586,6 +641,7 @@
 -export([is_prototype/1]).
 -export([is_security_enabled/1]).
 -export([is_sso_realm/1]).
+-export([is_value_inherited/2]).
 -export([list/0]).
 -export([lookup/1]).
 -export([password_opts/1]).
@@ -597,7 +653,6 @@
 -export([to_external/1]).
 -export([update/2]).
 -export([uri/1]).
--export([is_property_value_inherited/2]).
 
 -export([grants/1]).
 -export([grants/2]).
@@ -609,79 +664,18 @@
 -export([users/2]).
 
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
 
 
 
+
 %% -----------------------------------------------------------------------------
-%% @doc Loads a security config file from
-%% `bondy_config:get([security, config_file])' if defined and applies its
-%% definitions.
+%% @doc Returns the URI that identifies the realm `Realm'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec apply_config() -> ok | no_return().
-
-apply_config() ->
-    case bondy_config:get([security, config_file], undefined) of
-        undefined ->
-            ok;
-
-        Filename ->
-            apply_config(Filename)
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Loads a security config file from `Filename'.
-%% @end
-%% -----------------------------------------------------------------------------
--spec apply_config(Filename :: file:filename_all()) -> ok | no_return().
-
-apply_config(Filename) ->
-    case bondy_utils:json_consult(Filename) of
-        {ok, Realms} ->
-            _ = lager:info(
-                "Loading configuration file; path=~p",
-                [Filename]
-            ),
-
-            %% Because realms can have the sso_realm_uri and prototype
-            %% properties which point to other realms, we need to ensure all
-            %% realms in the file are processed based on a precedence graph, so
-            %% that SSO and prototype realms are created before the realms
-            %% targeting them.
-            SortedRealms = topsort(Realms),
-
-            %% We add the realm and allow an update if it
-            %% already exists by setting IsStrict argument
-            %% to false
-            _ = [add_or_update(Data) || Data <- SortedRealms],
-            ok;
-
-        {error, enoent} ->
-            _ = lager:warning(
-                "Error while parsing configuration file; path=~p, reason=~p",
-                [Filename, file:format_error(enoent)]
-            ),
-            ok;
-
-        {error, Reason} ->
-            _ = lager:warning(
-                "Error while parsing configuration file; path=~p, reason=~p",
-                [Filename, Reason]
-            ),
-            error(invalid_config)
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec uri(t()) -> uri().
+-spec uri(Realm :: t()) -> uri().
 
 uri(#realm{uri = Uri}) ->
     Uri.
@@ -723,31 +717,46 @@ prototype_uri(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns `true' if the property value is inherited from a prototype.
+%% Otherwise returns `false'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_property_value_inherited(Realm :: t() | uri(), Property :: atom()) ->
+-spec is_value_inherited(Realm :: t() | uri(), Property :: atom()) ->
     boolean() | no_return().
 
-is_property_value_inherited(#realm{prototype_uri = undefined}, Property) ->
-    lists:member(Property, record_info(fields, realm)) orelse error(badarg),
+is_value_inherited(#realm{prototype_uri = undefined}, Property) ->
+    %% We have no prototype
+    %% So we validate the property is valid and return false
+    ok = check_is_property(Property),
     false;
 
-is_property_value_inherited(#realm{authmethods = Val}, authmethods) ->
-    Val =/= [];
+is_value_inherited(
+    #realm{allow_connections = Val}, allow_connections) ->
+    Val == undefined;
 
-is_property_value_inherited(#realm{sso_realm_uri = Val}, sso_realm_uri) ->
-    Val =/= undefined;
+is_value_inherited(#realm{authmethods = Val}, authmethods) ->
+    Val == undefined;
 
-is_property_value_inherited(#realm{password_opts = Val}, password_opts) ->
-    Val =/= undefined;
+is_value_inherited(#realm{sso_realm_uri = Val}, sso_realm_uri) ->
+    Val == undefined;
 
-is_property_value_inherited(#realm{}, Property) ->
-    lists:member(Property, record_info(fields, realm)) orelse error(badarg),
+is_value_inherited(#realm{security_enabled = Val}, is_security_enabled) ->
+    Val == undefined;
+
+is_value_inherited(#realm{security_enabled = Val}, security_status) ->
+    %% security_status is an util function that uses the value of the
+    %% security_enabled property
+    Val == undefined;
+
+is_value_inherited(#realm{}, Property) ->
+    %% The property is not inheritable.
+    %% So we validate the property is valid and return false
+    ok = check_is_property(Property),
     false;
 
-is_property_value_inherited(Uri, Property) when is_binary(Uri) ->
-    is_property_value_inherited(fetch(Uri), Property).
+is_value_inherited(Uri, Property) when is_binary(Uri) ->
+    is_value_inherited(fetch(Uri), Property).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -759,9 +768,19 @@ is_property_value_inherited(Uri, Property) when is_binary(Uri) ->
 %% Groups, permissions and sources are still managed by this realm
 %% (or the prototype it inherits from).
 %%
+%% If the value is `undefined' and the realm has a prototype the prototype's
+%% value is returned. Otherwise if the realm doesn't have a prototype returns
+%% `undefined'.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec sso_realm_uri(Realm :: t() | uri()) -> maybe(uri()).
+
+sso_realm_uri(#realm{sso_realm_uri = undefined, prototype_uri = undefined}) ->
+    undefined;
+
+sso_realm_uri(#realm{sso_realm_uri = undefined, prototype_uri = Uri}) ->
+    sso_realm_uri(Uri);
 
 sso_realm_uri(#realm{sso_realm_uri = Val}) ->
     Val;
@@ -786,10 +805,14 @@ is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
     is_allowed_sso_realm(fetch(Uri), SSORealmUri).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns `true' if the Realm is a Same Sign-on (SSO) realm.
 %% Otherwise returns `false'.
+%%
+%% If the value is `undefined' and the realm has a prototype the prototype's
+%% value is returned. Otherwise if the realm doesn't have a prototype returns
+%% `false'.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_sso_realm(Realm :: t() | uri()) -> boolean().
@@ -804,16 +827,32 @@ is_sso_realm(Uri) when is_binary(Uri) ->
 %% -----------------------------------------------------------------------------
 %% @doc Returns `true' if the Realm is allowing connections. Otherwise returns
 %% `false'.
+%%
+%% If the value is `undefined' and the realm has a prototype the prototype's
+%% value is returned. Otherwise if the realm doesn't have a prototype returns
+%% `false'.
+%%
+%% Note that a Prototype realm never allows connections irrespective of the
+%% value set to this property. This this property is just used as a template
+%% for realms to inherit from.
+%%
 %% This setting is used to either temporarilly restrict new connections to the
 %% realm or to avoid connections when the realm is used as a Single Sign-on
 %% Realm. When connections are not allowed the only way of managing the
-%% resources in the realm is through ac connection to the Bondy admin realm.
+%% resources in the realm is through a connection to the Bondy Master Realm.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec allow_connections(Realm :: t() | uri()) -> boolean().
 
-allow_connections(#realm{is_prototype = true}) ->
-    false;
+allow_connections(
+    #realm{allow_connections = undefined, prototype_uri = undefined} = Realm) ->
+    %% By default allow connections unless this is a prototype realm
+    not Realm#realm.is_prototype;
+
+allow_connections(
+    #realm{allow_connections = undefined, prototype_uri = Uri}) ->
+    allow_connections(Uri);
 
 allow_connections(#realm{allow_connections = Val}) ->
     Val;
@@ -821,13 +860,25 @@ allow_connections(#realm{allow_connections = Val}) ->
 allow_connections(Uri) when is_binary(Uri) ->
     allow_connections(fetch(Uri)).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Returns the list of supported authentication methods for Realm.
+%%
+%% If the value is `undefined' and the realm has a prototype the prototype's
+%% value is returned. Otherwise if the realm doesn't have a prototype returns
+%% the default list of authentication methods.
+%%
 %% See {@link is_allowed_authmethod} for more information about how this
 %% affects the methods available for an authenticating user.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec authmethods(Realm :: t() | uri()) -> [binary()].
+
+authmethods(#realm{authmethods = undefined, prototype_uri = undefined}) ->
+    ?DEFAULT_AUTHMETHODS;
+
+authmethods(#realm{authmethods = undefined, prototype_uri = Uri}) ->
+    authmethods(Uri);
 
 authmethods(#realm{authmethods = Val}) ->
     Val;
@@ -837,7 +888,7 @@ authmethods(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returs `true' if Method is an authentication method supported by realm
+%% @doc Returns `true' if Method is an authentication method supported by realm
 %% `Realm'. Otherwise returns `false'.
 %%
 %% The fact that method `Method' is included in the realm's `authmethods'
@@ -852,18 +903,36 @@ authmethods(Uri) when is_binary(Uri) ->
 -spec is_allowed_authmethod(Realm :: t() | uri(), Method :: binary()) ->
     boolean().
 
-is_allowed_authmethod(#realm{authmethods = L}, Method) ->
-    lists:member(Method, L);
+is_allowed_authmethod(#realm{} = Realm, Method) ->
+    lists:member(Method, authmethods(Realm));
 
 is_allowed_authmethod(Uri, Method) when is_binary(Uri) ->
     is_allowed_authmethod(fetch(Uri), Method).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns `true' if security is enabled. Otherwise returns `false'.
+%%
+%% If the value is `undefined' and the realm has a prototype the prototype's
+%% value is returned. Otherwise if the realm doesn't have a prototype returns
+%% `true' (default).
+%%
+%% Security for this realm can be enabled or disabled using the functions
+%% {@link enable_security/1} and {@link disable_security/1} respectively.
+%%
+%% See {@link security_status/1} if you want the security status representation
+%% as an atom.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_security_enabled(t() | uri()) -> boolean().
+
+is_security_enabled(
+    #realm{security_enabled = undefined, prototype_uri = undefined}) ->
+    true;
+
+is_security_enabled(
+    #realm{security_enabled = undefined, prototype_uri = Uri}) ->
+    is_security_enabled(Uri);
 
 is_security_enabled(#realm{security_enabled = Val}) ->
     Val;
@@ -873,7 +942,8 @@ is_security_enabled(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc A util function that returns the security status as an atom.
+%% See {@link is_security_enabled/1}.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec security_status(t() | uri()) -> enabled | disabled.
@@ -886,7 +956,7 @@ security_status(Term) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Enables security for realm `Realm'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec enable_security(t() | uri()) -> ok.
@@ -900,16 +970,16 @@ enable_security(Uri) when is_binary(Uri) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Disables security for realm `Realm'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec disable_security(t() | uri()) -> ok | {error, badarg}.
+-spec disable_security(t() | uri()) -> ok | no_return().
 
 disable_security(#realm{uri = ?MASTER_REALM_URI}) ->
-    {error, badarg};
+    error(badarg);
 
-disable_security(#realm{uri = ?INTERNAL_REALM_URI}) ->
-    {error, badarg};
+disable_security(#realm{uri = ?CONTROL_REALM_URI}) ->
+    error(badarg);
 
 disable_security(#realm{} = Realm) ->
     _ = update(Realm, #{security_enabled => false}),
@@ -917,6 +987,26 @@ disable_security(#realm{} = Realm) ->
 
 disable_security(Uri) when is_binary(Uri) ->
     disable_security(fetch(Uri)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the password options to be used as default when adding users
+%% to this realm. If the options have not been defined returns atom `undefined'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec password_opts(t() | uri()) -> maybe(bondy_password:opts()).
+
+password_opts(#realm{password_opts = undefined, prototype_uri = undefined}) ->
+    true;
+
+password_opts(#realm{password_opts = undefined, prototype_uri = Uri}) ->
+    password_opts(Uri);
+
+password_opts(#realm{password_opts = Opts}) ->
+    Opts;
+
+password_opts(RealmUri) ->
+    password_opts(fetch(RealmUri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1076,8 +1166,8 @@ lookup(Uri) ->
 %% -----------------------------------------------------------------------------
 -spec fetch(uri()) -> t().
 
-fetch(?INTERNAL_REALM_URI) ->
-    ?BONDY_PRIV_REALM;
+fetch(?CONTROL_REALM_URI) ->
+    ?CONTROL_REALM;
 
 fetch(Uri) ->
     case lookup(Uri) of
@@ -1116,7 +1206,7 @@ get(Uri, Opts) ->
         {error, not_found} when Uri == ?MASTER_REALM_URI ->
             add_master_realm();
         {error, not_found} ->
-            maybe_add(Uri, Opts)
+            maybe_create(Uri, Opts)
     end.
 
 
@@ -1124,26 +1214,26 @@ get(Uri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(uri() | map()) -> t() | no_return().
+-spec create(uri() | map()) -> t() | no_return().
 
-add(?INTERNAL_REALM_URI) ->
-    error(badarg);
-
-add(?MASTER_REALM_URI) ->
-    error(badarg);
-
-add(Uri) when is_binary(Uri) ->
-    add(#{uri => Uri});
-
-add(Map0) ->
+create(Map0) when is_map(Map0) ->
     #{uri := Uri} = Map1 = validate(Map0, ?REALM_VALIDATOR),
+
+    Prefix = binary:longest_common_prefix([?MASTER_REALM_URI, Uri]),
+    Size = byte_size(?MASTER_REALM_URI),
+
+    Prefix < Size andalso Uri =/= ?CONTROL_REALM_URI
+    orelse error(badarg),
 
     case exists(Uri) of
         true ->
             error({already_exists, Uri});
         false ->
-            do_add(Map1)
-    end.
+            do_create(Map1)
+    end;
+
+create(Uri) when is_binary(Uri) ->
+    create(#{uri => Uri}).
 
 
 %% -----------------------------------------------------------------------------
@@ -1152,7 +1242,7 @@ add(Map0) ->
 %% -----------------------------------------------------------------------------
 -spec update(Realm :: t() | uri(), Data :: map()) -> Realm :: t() | no_return().
 
-update(#realm{uri = ?INTERNAL_REALM_URI}, _) ->
+update(#realm{uri = ?CONTROL_REALM_URI}, _) ->
     error(badarg);
 
 update(#realm{uri = ?MASTER_REALM_URI} = Realm, Data0) ->
@@ -1163,9 +1253,6 @@ update(#realm{} = Realm, Data0) ->
     Data = validate(Data0, ?REALM_UPDATE_VALIDATOR),
     do_update(Realm, Data);
 
-update(?INTERNAL_REALM_URI, _) ->
-    error(badarg);
-
 update(Uri, Data) when is_binary(Uri) ->
     do_update(fetch(Uri), Data).
 
@@ -1174,23 +1261,14 @@ update(Uri, Data) when is_binary(Uri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec delete(t() | uri()) -> ok | {error, not_found | badarg | active_users}.
+-spec delete(t() | uri()) ->
+    ok | {error, not_found | active_users} | no_return().
 
-delete(?INTERNAL_REALM_URI) ->
-    {error, badarg};
+delete(#realm{uri = Uri}) ->
+    %% Cannot delete master and internal realms
+    Uri =/= ?MASTER_REALM_URI andalso Uri =/= ?CONTROL_REALM_URI
+    orelse error(badarg),
 
-delete(?MASTER_REALM_URI) ->
-    {error, badarg};
-
-delete(Uri) when is_binary(Uri) ->
-    case lookup(Uri) of
-        #realm{} = Realm ->
-            delete(Realm);
-        {error, not_found} = Error ->
-            Error
-    end;
-
-delete(#realm{uri = Uri})  ->
     %% TODO change this
     %% 1. disallow new connections to this realm
     %% ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm#realm{allow_connections = false}),
@@ -1213,7 +1291,77 @@ delete(#realm{uri = Uri})  ->
             ok;
         L when length(L) > 0 ->
             {error, active_users}
+    end;
+
+delete(Uri) when is_binary(Uri) ->
+    case lookup(Uri) of
+        #realm{} = Realm ->
+            delete(Realm);
+        {error, not_found} = Error ->
+            Error
     end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Loads a security config file from
+%% `bondy_config:get([security, config_file])' if defined and applies its
+%% definitions.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec apply_config() -> ok | no_return().
+
+apply_config() ->
+    case bondy_config:get([security, config_file], undefined) of
+        undefined ->
+            ok;
+        Filename ->
+            from_file(Filename)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Loads a security config file from `Filename'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec from_file(Filename :: file:filename_all()) -> ok | no_return().
+
+from_file(Filename) ->
+    case bondy_utils:json_consult(Filename) of
+        {ok, Realms} ->
+            _ = lager:info(
+                "Loading configuration file; path=~p",
+                [Filename]
+            ),
+
+            %% Because realms can have the sso_realm_uri and prototype
+            %% properties which point to other realms, we need to ensure all
+            %% realms in the file are processed based on a precedence graph, so
+            %% that SSO and prototype realms are created before the realms
+            %% targeting them.
+            SortedRealms = topsort(Realms),
+
+            %% We add the realm and allow an update if it
+            %% already exists by setting IsStrict argument
+            %% to false
+            _ = [add_or_update(Data) || Data <- SortedRealms],
+            ok;
+
+        {error, enoent} ->
+            _ = lager:warning(
+                "Error while parsing configuration file; path=~p, reason=~p",
+                [Filename, file:format_error(enoent)]
+            ),
+            ok;
+
+        {error, Reason} ->
+            _ = lager:warning(
+                "Error while parsing configuration file; path=~p, reason=~p",
+                [Filename, Reason]
+            ),
+            error(invalid_config)
+    end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -1225,20 +1373,6 @@ delete(#realm{uri = Uri})  ->
 list() ->
     Opts = [{remove_tombstones, true}, {resolver, lww}],
     [V || {_K, V} <- plum_db:match(?PDB_PREFIX('_'), '_', Opts)].
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns theas password options to be used as default when adding users
-%% to this realm. If the options have not been defined returns atom `undefined'.
-%% @end
-%% -----------------------------------------------------------------------------
--spec password_opts(t() | uri()) -> maybe(bondy_password:opts()).
-
-password_opts(#realm{password_opts = Opts}) ->
-    Opts;
-
-password_opts(RealmUri) ->
-    password_opts(fetch(RealmUri)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1388,7 +1522,7 @@ grants(Uri, Opts) when is_binary(Uri) ->
 %% @private
 add_master_realm() ->
     Data = validate(?MASTER_REALM, ?MASTER_REALM_VALIDATOR),
-    do_add(Data).
+    do_create(Data).
 
 
 %% @private
@@ -1517,10 +1651,20 @@ maybe_error(ok) ->
 
 
 %% @private
-maybe_add(Uri, Opts) ->
+check_is_property(Property) when is_atom(Property) ->
+    Props = [is_security_enabled | record_info(fields, realm)],
+    lists:member(Property, Props) orelse error(badarg),
+    ok;
+
+check_is_property(_) ->
+    error(badarg).
+
+
+%% @private
+maybe_create(Uri, Opts) ->
     case bondy_config:get([security, automatically_create_realms]) of
         true ->
-            add(Opts#{<<"uri">> => Uri});
+            create(Opts#{<<"uri">> => Uri});
         false ->
             {error, not_found}
     end.
@@ -1534,15 +1678,15 @@ add_or_update(#{<<"uri">> := Uri} = Data0) ->
             do_update(Realm, Data);
         {error, not_found} ->
             Data = validate(Data0, ?REALM_VALIDATOR),
-            do_add(Data)
+            do_create(Data)
     end.
 
 
 %% @private
-do_add(#{uri := Uri} = Map) ->
+do_create(#{uri := Uri} = Map) ->
     Realm0 = #realm{uri = Uri},
     Realm = merge_and_store(Realm0, Map),
-    ok = on_add(Realm),
+    ok = on_create(Realm),
     Realm.
 
 
@@ -1578,12 +1722,12 @@ merge_and_store(Realm0, Map) ->
 fold_props(allow_connections, V, Realm) ->
     Realm#realm{allow_connections = V};
 
-fold_props(authmethods, V, Realm) ->
-    Realm#realm{
-        authmethods = V,
-        %% TODO derive password options based on authmethods
-        password_opts = get_password_opts(V)
-    };
+fold_props(authmethods, V, Realm0) ->
+    Realm = Realm0#realm{authmethods = V},
+    %% We get opts by calling the authmethods function which inherits the value
+    %% from the prototype
+    Opts = get_password_opts(authmethods(Realm)),
+    Realm#realm{password_opts = Opts};
 
 fold_props(description, V, Realm) ->
     Realm#realm{description = V};
@@ -1597,7 +1741,7 @@ fold_props(is_prototype, false, #realm{is_prototype = true}) ->
             badarg,
             <<
                 "Cannot set property 'is_prototype' to 'false' "
-                "once it has been to 'true'."
+                "once it has been set to 'true'."
             >>
         }
     );
@@ -1623,7 +1767,7 @@ fold_props(is_sso_realm, false, #realm{is_sso_realm = true}) ->
             badarg,
             <<
                 "Cannot set property 'is_sso_realm' to 'false' "
-                "once it has been to 'true'."
+                "once it has been set to 'true'."
             >>
         }
     );
@@ -1633,6 +1777,7 @@ fold_props(sso_realm_uri, V, Realm) ->
 
 fold_props(security_enabled, V, Realm) ->
     Realm#realm{security_enabled = V};
+
 fold_props(private_keys, V, Realm) ->
     set_keys(Realm, V);
 
@@ -1646,8 +1791,8 @@ fold_props(_, _, Realm) ->
 
 
 %% @private
-on_add(Realm) ->
-    ok = bondy_event_manager:notify({realm_added, Realm#realm.uri}),
+on_create(Realm) ->
+    ok = bondy_event_manager:notify({realm_created, Realm#realm.uri}),
     ok.
 
 
@@ -1836,6 +1981,7 @@ topsort(Realms) ->
 
 %% @private
 precedence_graph(Realms, Graph) ->
+    %% We first add all the realms as vertices in the graph
     Vertices = [
         begin
             R = validate_uris(R0),
@@ -1849,13 +1995,21 @@ precedence_graph(Realms, Graph) ->
 %% @private
 precedence_graph_aux([H|T], Graph) ->
     {H, Realm} = digraph:vertex(Graph, H),
+
+    %% The following cases should be covered:
+    %% 1. a prototype realm that has an sso_realm_uri
+    %% 2. a realm that has a prototype_uri
+    %% 3. a realm that has a sso_realm_uri
+    %% 4. a realm that has a prototype_uri and sso_realm_uri
     Uris = maps:values(
         maps:with([prototype_uri, sso_realm_uri], Realm)
     ),
+
     _ = [
         precedence_graph_add_edge(Graph, Uri, H)
         || Uri <- Uris, Uri =/= undefined
     ],
+
     precedence_graph_aux(T, Graph);
 
 precedence_graph_aux([], Graph) ->
@@ -1883,7 +2037,8 @@ precedence_graph_add_edge(Graph, A, B) ->
     end.
 
 
-%% @private
+%% @private we validate just the URIs that are needed to build the precendence
+%% graph
 validate_uris(Data) ->
     %% We prevalidate the data
     Opts = #{keep_unknown => true},
@@ -1892,6 +2047,13 @@ validate_uris(Data) ->
             key => uri,
             alias => uri,
             required => true,
+            datatype => binary,
+            validator => fun bondy_data_validators:realm_uri/1
+        },
+        <<"prototype_uri">> => #{
+            key => prototype_uri,
+            alias => prototype_uri,
+            required => false,
             datatype => binary,
             validator => fun bondy_data_validators:realm_uri/1
         },
@@ -1906,7 +2068,6 @@ validate_uris(Data) ->
     maps_utils:validate(Data, Validator, Opts).
 
 
-
 %% @private
 check_integrity_constraints(Realm) ->
     ok = check_integrity_constraints(Realm, prototype),
@@ -1915,7 +2076,6 @@ check_integrity_constraints(Realm) ->
 
 
 %% @private
-
 check_integrity_constraints(
     #realm{is_sso_realm = true, sso_realm_uri = undefined}, sso) ->
     ok;

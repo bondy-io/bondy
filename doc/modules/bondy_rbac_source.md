@@ -89,6 +89,9 @@ add(RealmUri::<a href="#type-uri">uri()</a>, Assignment::map() | <a href="#type-
 </code></pre>
 <br />
 
+Adds a source to the realm identified by `RealmUri` using
+assignment or map `Assignment`.
+
 <a name="add-3"></a>
 
 ### add/3 ###
@@ -173,15 +176,6 @@ username `Username`.
 
 Returns the metadata associated with the source
 
-<a name="new-1"></a>
-
-### new/1 ###
-
-<pre><code>
-new(Data::map()) -&gt; Source::<a href="#type-t">t()</a>
-</code></pre>
-<br />
-
 <a name="new_assignment-1"></a>
 
 ### new_assignment/1 ###
@@ -218,5 +212,5 @@ to_external(Source::<a href="#type-t">t()</a>) -&gt; <a href="#type-external">ex
 </code></pre>
 <br />
 
-Returns the external representation of the user `User`.
+Returns the external representation of the source `Source`.
 

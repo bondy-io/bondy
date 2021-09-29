@@ -31,10 +31,10 @@
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
         {init_db_partitions, []},
-        %% We enable the admin API
-        {init_admin_listeners, []},
         %% We configure all features and subsystems
         {configure_features, []},
+        %% We enable the admin API
+        {init_admin_listeners, []},
         %% We initialise the registry
         {init_registry, []},
         %% We conditionally wait for plum_db AAE hashtrees to be built

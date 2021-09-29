@@ -292,7 +292,7 @@ groups if such ordering exists.  Otherwise returns `Groups` unmodified.
 Fails with `{cycle, Path :: [name()]}` exception if the graph directed graph
 has cycles of length two or more.
 
-This function does not fetch the definition of the groups in each group
+This function doesn't fetch the definition of the groups in each group
 `groups` property.
 
 <a name="unknown-2"></a>
@@ -304,7 +304,8 @@ unknown(RealmUri::<a href="#type-uri">uri()</a>, Names::[binary()]) -&gt; Unknow
 </code></pre>
 <br />
 
-Takes a list of groupnames and returns any that can't be found.
+Takes a list of groupnames and returns any that can't be found on the
+realm identified by `RealmUri` or in its prototype (if set).
 
 <a name="update-3"></a>
 

@@ -51,7 +51,7 @@ input to lowercase use [`string:casefold/1`](string.md#casefold-1).
 
 
 <pre><code>
-context() = #bondy_rbac_context{realm_uri = binary(), username = binary(), grants = [<a href="#type-grant">grant()</a>], epoch = integer(), is_anonymous = boolean()}
+context() = #bondy_rbac_context{realm_uri = binary(), username = binary(), exact_grants = [<a href="#type-grant">grant()</a>], pattern_grants = [<a href="#type-grant">grant()</a>], epoch = integer(), is_anonymous = boolean()}
 </code></pre>
 
 
@@ -207,6 +207,17 @@ grant(RealmUri::<a href="#type-uri">uri()</a>, Request::<a href="#type-request">
   grant <permissions> on any to all|{<user>|<group>[,...]}
   grant <permissions> on {<resource>, <exact|prefix|wildcard>} to all|{<user>|<group>[,...]}
 ```
+
+<a name="grants-2"></a>
+
+### grants/2 ###
+
+<pre><code>
+grants(RealmUri::<a href="#type-uri">uri()</a>, Opts::map()) -&gt; [<a href="#type-grant">grant()</a>]
+</code></pre>
+<br />
+
+Returns the local grants assigned in realm `RealmUri`. This function does not use protypical inheritance.
 
 <a name="grants-3"></a>
 

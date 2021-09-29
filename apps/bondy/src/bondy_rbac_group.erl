@@ -94,9 +94,6 @@
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 
-
-
-
 -type t()       ::  #{
     type                :=  group,
     version             :=  binary(),
@@ -112,6 +109,7 @@
 
 -export_type([t/0]).
 -export_type([external/0]).
+
 
 -export([add/2]).
 -export([add_group/3]).
@@ -137,6 +135,7 @@
 -export([update/3]).
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -150,8 +149,7 @@
 -spec new(Data :: map()) -> Group :: t().
 
 new(Data) ->
-    Group = maps_utils:validate(Data, ?VALIDATOR),
-    type_and_version(Group).
+    type_and_version(maps_utils:validate(Data, ?VALIDATOR)).
 
 
 
@@ -250,6 +248,9 @@ update(RealmUri, Name, Data0) when is_binary(Name) ->
                 throw(unknown_group);
             Group ->
                 NewGroup = maps:merge(from_term({Name, Group}), Data),
+
+                %% Throws an exception if any group does not exist in RealmUri
+                %% or in its prototype
                 ok = group_exists_check(RealmUri, maps:get(groups, NewGroup)),
 
                 ok = plum_db:put(Prefix, Name, NewGroup),
@@ -404,6 +405,7 @@ fetch(RealmUri, Name) ->
         Group -> Group
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -468,7 +470,8 @@ to_external(#{type := ?TYPE, version := ?VERSION} = Group) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Takes a list of groupnames and returns any that can't be found.
+%% @doc Takes a list of groupnames and returns any that can't be found on the
+%% realm identified by `RealmUri' or in its prototype (if set).
 %% @end
 %% -----------------------------------------------------------------------------
 -spec unknown(RealmUri :: uri(), Names :: [binary()]) ->
@@ -478,23 +481,18 @@ unknown(_, []) ->
     [];
 
 unknown(RealmUri, Names) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
-    Set = ordsets:from_list(Names),
-    ordsets:fold(
-        fun
-            (all, Acc) ->
-                Acc;
-            (anonymous, Acc) ->
-                Acc;
-            (Name, Acc) ->
-                case plum_db:get(Prefix, Name) of
-                    undefined -> [Name | Acc];
-                    _ -> Acc
-                end
-        end,
-        [],
-        Set
-    ).
+    case do_unknown(RealmUri, Names) of
+        [] ->
+            [];
+        Unknown ->
+            case bondy_realm:prototype_uri(RealmUri) of
+                undefined ->
+                    Unknown;
+                ProtoUri ->
+                    %% Inheritance is only one level so we avoid recursion
+                    do_unknown(ProtoUri, Unknown)
+            end
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -504,7 +502,7 @@ unknown(RealmUri, Names) ->
 %% Fails with `{cycle, Path :: [name()]}' exception if the graph directed graph
 %% has cycles of length two or more.
 %%
-%% This function does not fetch the definition of the groups in each group
+%% This function doesn't fetch the definition of the groups in each group
 %% `groups' property.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -597,7 +595,11 @@ do_add(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
 
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc Doesn't take into account realm inheritance.
+%% @end
+%% -----------------------------------------------------------------------------
 exists_check(Prefix, Name) ->
     case plum_db:get(Prefix, Name) of
         undefined -> throw(unknown_group);
@@ -605,7 +607,11 @@ exists_check(Prefix, Name) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc Doesn't take into account realm inheritance
+%% @end
+%% -----------------------------------------------------------------------------
 not_exists_check(Prefix, Name) ->
     case plum_db:get(Prefix, Name) of
         undefined -> ok;
@@ -613,8 +619,13 @@ not_exists_check(Prefix, Name) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc Takes into account realm inheritance
+%% @end
+%% -----------------------------------------------------------------------------
 group_exists_check(RealmUri, Groups) ->
+    %% Takes into account realm inheritance as it uses unknown
     case unknown(RealmUri, Groups) of
         [] ->
             ok;
@@ -623,11 +634,34 @@ group_exists_check(RealmUri, Groups) ->
     end.
 
 
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Takes into account realm inheritance
+%% @end
+%% -----------------------------------------------------------------------------
+do_unknown(RealmUri, Names) ->
+    Prefix = ?PLUMDB_PREFIX(RealmUri),
+    ordsets:fold(
+        fun
+            (all, Acc) ->
+                Acc;
+            (anonymous, Acc) ->
+                Acc;
+            (Name, Acc) ->
+                case plum_db:get(Prefix, Name) of
+                    undefined -> [Name | Acc];
+                    _ -> Acc
+                end
+        end,
+        [],
+        ordsets:from_list(Names)
+    ).
+
+
 %% @private
 not_reserved_name_check(Term) ->
     not bondy_rbac:is_reserved_name(Term) orelse throw(reserved_name),
     ok.
-
 
 
 %% @private
@@ -641,6 +675,7 @@ from_term({Name, PList}) when is_list(PList) ->
 
 from_term({_, #{type := ?TYPE, version := ?VERSION} = Group}) ->
     Group.
+
 
 %% @private
 type_and_version(Group) ->

@@ -789,7 +789,7 @@ to_external(#{type := ?TYPE, version := ?VERSION} = User) ->
 -spec add_group(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
-    Groupname :: bondy_rbac_group:name()) -> ok.
+    Groupname :: bondy_rbac_group:name()) -> ok | {error, Reason :: any()}.
 
 add_group(RealmUri, Users, Groupname) ->
     add_groups(RealmUri, Users, [Groupname]).
@@ -803,7 +803,7 @@ add_group(RealmUri, Users, Groupname) ->
 -spec add_groups(
     RealmUri :: uri(),
     Users :: all | t() | list(t()) | username() | list(username()),
-    Groupnames :: [bondy_rbac_group:name()]) -> ok.
+    Groupnames :: [bondy_rbac_group:name()]) -> ok | {error, Reason :: any()}.
 
 add_groups(RealmUri, Users, Groupnames)  ->
     Fun = fun(Current, ToAdd) ->
@@ -1177,7 +1177,12 @@ not_exists_check(RealmUri, Username) ->
         _ -> throw(already_exists)
     end.
 
+
+%% -----------------------------------------------------------------------------
 %% @private
+%% @doc Takes into account realm inheritance
+%% @end
+%% -----------------------------------------------------------------------------
 groups_exists_check(RealmUri, Groups) ->
     case bondy_rbac_group:unknown(RealmUri, Groups) of
         [] ->

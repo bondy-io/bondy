@@ -107,7 +107,7 @@ add_sso_realm(RealmUri) ->
             }
         ]
     },
-    _ = bondy_realm:add(Config),
+    _ = bondy_realm:create(Config),
     ok.
 
 
@@ -159,7 +159,7 @@ add_realm(RealmUri, SSORealmUri, _KeyPairs, Users) ->
         ],
         users => Users
     },
-    _ = bondy_realm:add(Config),
+    _ = bondy_realm:create(Config),
     ok.
 
 
