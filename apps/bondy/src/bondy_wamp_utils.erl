@@ -240,10 +240,10 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     case bondy_context:realm_uri(Ctxt) of
         Uri when AdminOnly == false ->
             [Uri];
-        ?BONDY_REALM_URI when AdminOnly == true andalso Min == 0 ->
+        ?MASTER_REALM_URI when AdminOnly == true andalso Min == 0 ->
             [];
-        ?BONDY_REALM_URI when AdminOnly == true ->
-            [?BONDY_REALM_URI];
+        ?MASTER_REALM_URI when AdminOnly == true ->
+            [?MASTER_REALM_URI];
         _ ->
             error(unauthorized(Msg, Ctxt))
     end;
@@ -258,7 +258,7 @@ do_validate_call_args(
         Uri when AdminOnly == false ->
             %% Matches arg URI
             to_list(Msg#call.arguments);
-        ?BONDY_REALM_URI ->
+        ?MASTER_REALM_URI ->
             %% Users logged in root realm can operate on any realm
             to_list(Msg#call.arguments);
         _ ->
@@ -273,8 +273,8 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
             [Uri | to_list(Msg#call.arguments)];
-        {_, ?BONDY_REALM_URI} ->
-            [?BONDY_REALM_URI | to_list(Msg#call.arguments)];
+        {_, ?MASTER_REALM_URI} ->
+            [?MASTER_REALM_URI | to_list(Msg#call.arguments)];
         {_, _} ->
             error(unauthorized(Msg, Ctxt))
     end.
@@ -311,7 +311,7 @@ unauthorized(Type, ReqId, Ctxt) ->
         $\s, $(, $", Uri/binary, $", $), $,,
         " that is not your session's realm or the operation is only "
         "supported when performed by a session on the Bondy Master Realm.",
-        $\s, $(, $", (?BONDY_REALM_URI)/binary, $", $), $.
+        $\s, $(, $", (?MASTER_REALM_URI)/binary, $", $), $.
     >>,
     wamp_message:error(
         Type,

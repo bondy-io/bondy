@@ -11,6 +11,9 @@ genvars:
 compile-no-deps:
 	${REBAR} compile
 
+docs: compile
+	${REBAR} as docs edoc
+
 test: compile
 	${REBAR} ct
 

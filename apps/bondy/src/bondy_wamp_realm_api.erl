@@ -43,7 +43,7 @@
 
 handle_call(?BONDY_REALM_CREATE, M, Ctxt) ->
     [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
-    Realm = bondy_realm:add(Data),
+    Realm = bondy_realm:create(Data),
     Ext = bondy_realm:to_external(Realm),
     wamp_message:result(M#call.request_id, #{}, [Ext]);
 

@@ -107,6 +107,12 @@ start_phase(init_db_partitions, normal, []) ->
     %% plum_db will initialise its partitions from disk.
     ok;
 
+start_phase(configure_features, normal, []) ->
+    ok = bondy_realm:apply_config(),
+    %% ok = bondy_oauth2:apply_config(),
+    ok = bondy_http_gateway:apply_config(),
+    ok;
+
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable certain operations during startup i.e. liveness and
@@ -115,12 +121,6 @@ start_phase(init_admin_listeners, normal, []) ->
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
     bondy_http_gateway:start_admin_listeners();
-
-start_phase(configure_features, normal, []) ->
-    ok = bondy_realm:apply_config(),
-    %% ok = bondy_oauth2:apply_config(),
-    ok = bondy_http_gateway:apply_config(),
-    ok;
 
 start_phase(init_registry, normal, []) ->
     bondy_registry:init_tries();
@@ -195,7 +195,7 @@ setup_env(Args) ->
 setup_bondy_realm() ->
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
-    _ = bondy_realm:get(?BONDY_REALM_URI),
+    _ = bondy_realm:get(?MASTER_REALM_URI),
     ok.
 
 
@@ -232,25 +232,25 @@ setup_wamp_subscriptions() ->
     Opts = #{match => <<"exact">>},
 
     _ = bondy:subscribe(
-        ?INTERNAL_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
         ?BONDY_USER_ADDED,
         fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?INTERNAL_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
         ?BONDY_USER_DELETED,
         fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?INTERNAL_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
         ?BONDY_USER_UPDATED,
         fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?INTERNAL_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
         ?BONDY_USER_CREDENTIALS_CHANGED,
         fun bondy_wamp_rbac_api:handle_event/2

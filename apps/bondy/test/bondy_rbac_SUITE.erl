@@ -33,7 +33,8 @@ all() ->
         test_1,
         test_grants,
         group_topsort_error,
-        group_topsort
+        group_topsort,
+        prototype_1
     ].
 
 
@@ -50,12 +51,17 @@ end_per_suite(Config) ->
 
 
 add_realm(RealmUri) ->
+    add_realm(RealmUri, undefined).
+
+
+add_realm(RealmUri, Prototype) ->
     Config = #{
         uri => RealmUri,
         description => <<"A test realm">>,
         authmethods => [
             ?TRUST_AUTH
         ],
+        prototype_uri => Prototype,
         security_enabled => true,
         groups => [
             #{
@@ -130,7 +136,7 @@ add_realm(RealmUri) ->
             }
         ]
     },
-    _ = bondy_realm:add(Config),
+    _ = bondy_realm:create(Config),
     ok.
 
 
@@ -152,6 +158,10 @@ test_1(Config) ->
             }
         }
     },
+    % dbg:tracer(), dbg:p(all,c),
+    % dbg:tpl(bondy_rbac, 'acc_grants', x),
+    % dbg:tpl(bondy_rbac, 'role_groups', x),
+    % dbg:tpl(bondy_rbac, 'acc_grants_find', x),
     U1Ctxt = #{
         realm_uri => RealmUri,
         security_enabled => true,
@@ -339,7 +349,7 @@ test_grants(_) ->
             }
         ]
     },
-    _ = bondy_realm:add(Data),
+    _ = bondy_realm:create(Data),
     C = bondy_rbac:get_context(Uri, <<"device_registry_test">>),
 
     % dbg:tracer(), dbg:p(all,c), dbg:tpl(bondy_rbac, '_', x),
@@ -393,4 +403,100 @@ group_topsort(_) ->
     ?assertEqual(
         [<<"a">>, <<"b">>, <<"d">>, <<"c">>],
         [maps:get(name, G) || G <- bondy_rbac_group:topsort(Groups)]
+    ).
+
+
+prototype_1(_) ->
+
+    Config = #{
+        uri => <<"prototype_1.proto">>,
+        authmethods => [
+            ?TRUST_AUTH
+        ],
+        is_prototype => true,
+        prototype_uri => undefined,
+        security_enabled => true,
+        groups => [
+            #{
+                name => <<"prototype_group_a">>,
+                groups => [<<"prototype_group_b">>, <<"prototype_group_c">>]
+            },
+            #{
+                name => <<"prototype_group_b">>
+            },
+            #{
+                name => <<"prototype_group_c">>
+            }
+        ],
+        grants => [
+            #{
+                permissions => [
+                    <<"test.permission">>
+                ],
+                uri => <<"bar">>,
+                match => <<"exact">>,
+                roles => [<<"prototype_group_b">>]
+            },
+            #{
+                permissions => [
+                    <<"test.permission">>
+                ],
+                uri => <<"foo">>,
+                match => <<"exact">>,
+                roles => <<"all">>
+            }
+        ]
+    },
+    %% We create a proto realm
+    _ = bondy_realm:create(Config),
+
+    %% We create a new realm with the proto
+    Uri = <<"prototype_1.child">>,
+    _ = add_realm(Uri, <<"prototype_1.proto">>),
+
+    %% We get a fresh context
+    C1 = bondy_rbac:get_context(Uri, ?U1),
+    ?assertMatch(
+        ok,
+        bondy_rbac:authorize(<<"wamp.register">>, <<"any_procedure">>, C1),
+        "Allowed by child realm"
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac:authorize(<<"test.permission">>, <<"foo">>, C1),
+        "Allowed by proto. Grants to 'all' are merged between proto and child"
+    ),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"test.permission">>, <<"bar">>, C1),
+        "U1 should not yet have permission"
+    ),
+
+    %% We grant permission through group membership
+    ?assertMatch(
+        ok,
+        bondy_rbac_user:add_group(Uri, ?U1, <<"prototype_group_a">>)
+    ),
+
+    %% We get a fresh context
+    C2 = bondy_rbac:get_context(Uri, ?U1),
+
+    ?assertMatch(
+        ok,
+        bondy_rbac:authorize(<<"test.permission">>, <<"bar">>, C2),
+        "U1 should now have permission via prototypical inheritance"
+    ),
+
+    %% We override prototype_group_b by creating a group of the same name on
+    %% the child realm.
+    _ = bondy_rbac_group:add(
+        Uri, bondy_rbac_group:new(#{name => <<"prototype_group_b">>})
+    ),
+
+    %% We get a fresh context
+    C3 = bondy_rbac:get_context(Uri, ?U1),
+    ?assertError(
+        {not_authorized, _},
+        bondy_rbac:authorize(<<"test.permission">>, <<"bar">>, C3),
+        "U1 should no longer have permission via prototypical inheritance, because we have overriden prototype_group_b"
     ).

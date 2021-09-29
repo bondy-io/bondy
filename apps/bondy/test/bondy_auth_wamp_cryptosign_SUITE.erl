@@ -103,7 +103,7 @@ add_realm(RealmUri, KeyPairs) ->
             }
         ]
     },
-    _ = bondy_realm:add(Config),
+    _ = bondy_realm:create(Config),
     ok.
 
 

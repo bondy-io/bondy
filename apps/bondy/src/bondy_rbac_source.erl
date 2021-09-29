@@ -32,7 +32,13 @@
 -include("bondy_security.hrl").
 
 
--define(ASSIGNMENT_VALIDATOR, (?SOURCE_VALIDATOR)#{
+-define(ASSIGNMENT_VALIDATOR, #{
+    % <<"roles">> => #{
+    %     alias => roles,
+	% 	key => roles,
+    %     required => true,
+    %     validator => fun bondy_data_validators:rolenames/1
+    % },
     <<"usernames">> => #{
         alias => usernames,
 		key => usernames,
@@ -40,10 +46,7 @@
         allow_null => false,
         allow_undefined => false,
         validator => fun bondy_data_validators:usernames/1
-    }
-}).
-
--define(SOURCE_VALIDATOR, #{
+    },
     <<"cidr">> => #{
         alias => cidr,
 		key => cidr,
@@ -119,7 +122,6 @@
 -export([match/3]).
 -export([match_first/3]).
 -export([meta/1]).
--export([new/1]).
 -export([new_assignment/1]).
 -export([remove/3]).
 -export([remove_all/2]).
@@ -127,29 +129,9 @@
 
 
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec new(Data :: map()) -> Source :: t().
-
-new(Data) when is_map(Data) ->
-    case maps_utils:validate(Data, ?SOURCE_VALIDATOR) of
-        #{usernames := anonymous, authmethod := M} when M /= ?WAMP_ANON_AUTH ->
-            error(
-                bondy_error:map({inconsistency_error, [usernames, authmethod]})
-            );
-        Source ->
-            type_and_version(Source)
-    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -189,7 +171,8 @@ meta(#{type := source, meta := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Adds a source to the realm identified by `RealmUri' using
+%% assignment or map `Assignment'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(
@@ -274,7 +257,6 @@ remove_all(RealmUri, Username) ->
     ).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns all the sources for user including the ones for speacial
 %% use 'all'.
@@ -330,7 +312,7 @@ match(RealmUri, Username, ConnIP) ->
 
 match_first(RealmUri, Username, ConnIP) ->
     %% We need to use the internal match function (do_match) as it returns Keys
-    %% and Values, we need the keys to be able to sort
+    %% and Values, we need the keys to be able to sort the result
     Sources = sort_sources(do_match(RealmUri, Username)),
     Fun = fun({{_, {_, Mask} = CIDR, _}, _} = Term) ->
         bondy_cidr:match(CIDR, {ConnIP, Mask})
@@ -343,8 +325,6 @@ match_first(RealmUri, Username, ConnIP) ->
         throw:{result, Source} ->
             Source
     end.
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -387,7 +367,7 @@ list(RealmUri, Opts) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the external representation of the user `User'.
+%% @doc Returns the external representation of the source `Source'.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec to_external(Source :: t()) -> external().
@@ -400,9 +380,11 @@ to_external(#{type := source, version := ?VERSION} = Source) ->
     maps:put(cidr, String, Source).
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
 
 
 do_add(RealmUri, Keyword, #{type := source} = Source)
@@ -435,6 +417,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
     ok.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
 %% Returns the Key Value
 %% Example:
@@ -442,6 +425,7 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
 %%     {{anonymous, {{0,0,0,0},0}},
 %%     #{authmethod => <<"anonymous">>,...,version => <<"1.1">>}}]
 %% }
+%% -----------------------------------------------------------------------------
 do_match(RealmUri, Username) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri),
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
@@ -449,8 +433,6 @@ do_match(RealmUri, Username) ->
 
 
 %% @private
-
-
 from_term(
     {{Username, CIDR, _M}, #{type := source, version := ?VERSION} = Source}) ->
     Source#{
@@ -470,14 +452,12 @@ from_term({{Username, CIDR}, [{Authmethod, Options}]}) ->
     {Username, type_and_version(Source)}.
 
 
-
 %% @private
 type_and_version(Map) ->
     Map#{
         version => ?VERSION,
         type => source
     }.
-
 
 
 sort_sources(Sources) ->

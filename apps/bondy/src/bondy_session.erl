@@ -208,7 +208,6 @@ open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     S1 = new(Id, Peer, Realm, Opts),
     Agent = S1#session.agent,
 
-    Pid = self(),
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
     case ets:insert_new(Tab, S1) of

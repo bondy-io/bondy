@@ -135,7 +135,8 @@
 -record(bondy_rbac_context, {
     realm_uri               ::  binary(),
     username                ::  binary(),
-    grants                  ::  [grant()],
+    exact_grants = #{}      ::  [grant()],
+    pattern_grants          ::  [grant()],
     epoch                   ::  integer(),
     is_anonymous = false    ::  boolean()
 }).
@@ -176,6 +177,7 @@
 -export([get_context/1]).
 -export([get_context/2]).
 -export([grant/2]).
+-export([grants/2]).
 -export([grants/3]).
 -export([group_grants/2]).
 -export([is_reserved_name/1]).
@@ -255,10 +257,13 @@ get_context(Ctxt) ->
 -spec refresh_context(Ctxt :: bondy_context:t()) -> {boolean(), context()}.
 
 refresh_context(#bondy_rbac_context{realm_uri = Uri} = Context) ->
-    %% TODO replace this with a cluster metadata hash check, or something
     Now = erlang:system_time(second),
     Diff = Now - Context#bondy_rbac_context.epoch,
 
+    %% TODO Replace this with configurable value of 'session' so never
+    %% refreshed during a session or an integer value.
+    %% Also, consider refreshing it based on update events (expensice unless we
+    %% use forward chaining algorithm like RETE).
     case Diff < ?CTXT_REFRESH_SECS of
         false when Context#bondy_rbac_context.is_anonymous ->
             %% context has expired
@@ -293,6 +298,15 @@ get_anonymous_context(Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+get_anonymous_context(RealmUri, Username) ->
+    Ctxt = get_context(RealmUri, Username, grants(RealmUri, anonymous, group)),
+    Ctxt#bondy_rbac_context{is_anonymous = true}.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Contexts are only valid until the GRANT epoch changes, and it will
 %% change whenever a GRANT or a REVOKE is performed. This is a little coarse
 %% grained right now, but it'll do for the moment.
@@ -301,27 +315,7 @@ get_anonymous_context(Ctxt) ->
 
 get_context(RealmUri, Username)
 when is_binary(Username) orelse Username == anonymous ->
-    #bondy_rbac_context{
-        realm_uri = RealmUri,
-        username = Username,
-        grants = grants(RealmUri, Username, user),
-        epoch = erlang:system_time(second),
-        is_anonymous = Username == anonymous
-    }.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-get_anonymous_context(RealmUri, Username) ->
-    #bondy_rbac_context{
-        realm_uri = RealmUri,
-        username = Username,
-        grants = grants(RealmUri, anonymous, group),
-        epoch = erlang:system_time(second),
-        is_anonymous = true
-    }.
+    get_context(RealmUri, Username, grants(RealmUri, Username, user)).
 
 
 %% -----------------------------------------------------------------------------
@@ -480,6 +474,19 @@ revoke_group(RealmUri, Name) ->
     ).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc Returns the local grants assigned in realm `RealmUri'. This function does not use protypical inheritance.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec grants(RealmUri :: uri(), Opts :: map()) -> [grant()].
+
+grants(RealmUri, Opts0) ->
+    Opts = maps:to_list(Opts0),
+    lists:append(
+        find_grants(RealmUri, '_', group, Opts),
+        find_grants(RealmUri, '_', user, Opts)
+    ).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -490,7 +497,7 @@ revoke_group(RealmUri, Name) ->
     [grant()].
 
 grants(RealmUri, Name, Type) ->
-    group_grants(accumulate_grants(RealmUri, Name, Type)).
+    group_grants(acc_grants(RealmUri, Name, Type)).
 
 
 %% -----------------------------------------------------------------------------
@@ -515,39 +522,30 @@ group_grants(RealmUri, Name) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% Resource must be a binary or the atom `any'.
+%% In the case the resource is `any', the role needs to have this permission
+%% applied *globally*. This is for things with undetermined inputs or
+%% permissions that don't tie to a particular resource.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec check_permission(Permission :: permission(), Context :: context()) ->
     {true, context()} | {false, binary(), context()}.
 
-check_permission({Permission, any}, #bondy_rbac_context{} = Context0) ->
-    {_, Context} = refresh_context(Context0),
-    %% The user needs to have this permission applied *globally*
-    %% This is for things with undetermined inputs or
-    %% permissions that don't tie to a particular resource, like 'ping' and
-    %% 'stats'.
-    MatchG = match_grants(any, Context#bondy_rbac_context.grants),
-    case lists:member(Permission, MatchG) of
-        true ->
-            {true, Context};
-        false ->
-            %% no applicable grant
-            Mssg = permission_denied_message(Permission, any, Context),
-            {false, Mssg, Context}
-    end;
-
-check_permission({Permission, Resource}, #bondy_rbac_context{} = Ctxt0) ->
+check_permission({Action, Resource} = Permission, #bondy_rbac_context{} = Ctxt0)
+when is_binary(Resource) orelse Resource =:= any ->
     {_, Ctxt} = refresh_context(Ctxt0),
-    MatchG = match_grants(Resource, Ctxt#bondy_rbac_context.grants),
-    case lists:member(Permission, MatchG) of
+    case check_permission_exact(Permission, Ctxt) of
         true ->
             {true, Ctxt};
         false ->
-            %% no applicable grant
-            Mssg = permission_denied_message(Permission, Resource, Ctxt),
-            {false, Mssg, Ctxt}
+            case check_permission_pattern(Permission, Ctxt) of
+                true ->
+                    {true, Ctxt};
+                false ->
+                    Mssg = permission_denied_message(Action, Resource, Ctxt),
+                    {false, Mssg, Ctxt}
+            end
     end.
-
 
 
 %% =============================================================================
@@ -556,16 +554,55 @@ check_permission({Permission, Resource}, #bondy_rbac_context{} = Ctxt0) ->
 
 
 
+check_permission_exact({Action, Resource}, Ctxt) ->
+    case maps:find(Resource, Ctxt#bondy_rbac_context.exact_grants) of
+        {ok, Actions} ->
+            lists:member(Action, Actions);
+        error ->
+            false
+    end.
+
+
+check_permission_pattern({Action, Resource}, Ctxt) ->
+    Actions = match_grants(Resource, Ctxt#bondy_rbac_context.pattern_grants),
+    lists:member(Action, Actions).
+
+
 %% @private
-do_authorize(Permission, Resource, SecCtxt) ->
+get_context(RealmUri, Username, Grants) ->
+    {Exact, Pattern} = lists:foldl(
+        fun
+            ({any, Permissions}, {Map, L}) ->
+                {maps:put(any, Permissions, Map), L};
+            ({{Uri, <<"exact">>}, Permissions}, {Map, L}) ->
+                {maps:put(Uri, Permissions, Map), L};
+            (Term, {Map, L}) ->
+                {Map, [Term|L]}
+        end,
+        {#{}, []},
+        Grants
+    ),
+    #bondy_rbac_context{
+        realm_uri = RealmUri,
+        username = Username,
+        exact_grants = Exact,
+        pattern_grants = Pattern,
+        epoch = erlang:system_time(second),
+        is_anonymous = Username == anonymous
+    }.
+
+
+%% @private
+do_authorize(Permission, Resource, Ctxt) ->
     %% We could be cashing the security ctxt,
     %% the data is in ets so it should be pretty fast.
-    case check_permission({Permission, Resource}, SecCtxt) of
-        {true, _SecCtxt1} ->
+    case check_permission({Permission, Resource}, Ctxt) of
+        {true, _Ctxt1} ->
             ok;
-        {false, Mssg, _SecCtxt1} ->
+        {false, Mssg, _Ctxt1} ->
             error({not_authorized, Mssg})
     end.
+
 
 
 %% @private
@@ -798,10 +835,12 @@ grant(RealmUri, RoleList0, Resources, Permissions) ->
     _ = length(Anon) > 0 andalso
         grant(RealmUri, anonymous, Resources, Permissions),
 
+    ProtoUri = bondy_realm:prototype_uri(RealmUri),
+    RealmProto = {RealmUri, ProtoUri},
 
     RoleTypes = lists:map(
         fun(Role) ->
-            {chop_name(Role), role_type(RealmUri, Role)}
+            {chop_name(Role), role_type(RealmProto, Role)}
         end,
         RoleList
     ),
@@ -836,13 +875,13 @@ grant(RealmUri, RoleList0, Resources, Permissions) ->
 do_grant([], _, _, _) ->
     ok;
 
-do_grant([{RoleName, RoleType} | T], RealmUri, Resources, Permissions0) ->
+do_grant([{Rolename, RoleType} | T], RealmUri, Resources, Permissions0) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
     ok = lists:foreach(
         fun(Resource) ->
             %% We store the list of permissions as the value
-            Existing = case plum_db:get(Prefix, {RoleName, Resource}) of
+            Existing = case plum_db:get(Prefix, {Rolename, Resource}) of
                 undefined -> [];
                 List -> List
             end,
@@ -853,7 +892,7 @@ do_grant([{RoleName, RoleType} | T], RealmUri, Resources, Permissions0) ->
             ),
 
             %% We finally store the updated grant
-            Key = {RoleName, Resource},
+            Key = {Rolename, Resource},
             ok = plum_db:put(Prefix, Key, Permissions1)
         end,
         Resources
@@ -879,9 +918,12 @@ revoke(RealmUri, all, Resources, Permissions)  ->
     do_revoke([{all, group}], RealmUri, Resources, Permissions);
 
 revoke(RealmUri, RoleList, Resources, Permissions) ->
+    ProtoUri = bondy_realm:prototype_uri(RealmUri),
+    RealmProto = {RealmUri, ProtoUri},
+
     RoleTypes = lists:map(
         fun(Name) ->
-            {chop_name(Name), role_type(RealmUri, Name)}
+            {chop_name(Name), role_type(RealmProto, Name)}
         end,
         RoleList
     ),
@@ -919,13 +961,13 @@ revoke(RealmUri, RoleList, Resources, Permissions) ->
 do_revoke([], _, _, _) ->
     ok;
 
-do_revoke([{RoleName, RoleType}|Roles], RealmUri, Resources, Permissions) ->
+do_revoke([{Rolename, RoleType}|Roles], RealmUri, Resources, Permissions) ->
     Prefix = ?PLUMDB_PREFIX(RealmUri, RoleType),
 
     ok = lists:foreach(
         fun(Resource) ->
             %% check if there is currently a GRANT we can revoke
-            case plum_db:get(Prefix, {RoleName, Resource}) of
+            case plum_db:get(Prefix, {Rolename, Resource}) of
                 undefined ->
                     %% can't REVOKE what wasn't GRANTED
                     ok;
@@ -940,9 +982,9 @@ do_revoke([{RoleName, RoleType}|Roles], RealmUri, Resources, Permissions) ->
 
                     case NewPerms of
                         [] ->
-                            plum_db:delete(Prefix, {RoleName, Resource});
+                            plum_db:delete(Prefix, {Rolename, Resource});
                         _ ->
-                            plum_db:put(Prefix, {RoleName, Resource}, NewPerms)
+                            plum_db:put(Prefix, {Rolename, Resource}, NewPerms)
                     end
             end
         end,
@@ -962,34 +1004,50 @@ chop_name(Name) ->
 
 %% When we need to know whether a role name is a group or user (or
 %% both), use this
-role_type(RealmUri, <<"user/", Name/binary>>) ->
+role_type({RealmUri, _}, <<"user/", Name/binary>>) ->
     do_role_type(
-        bondy_rbac_user:lookup(RealmUri, Name),
-        undefined
+        bondy_rbac_user:exists(RealmUri, Name),
+        false
     );
-role_type(RealmUri, <<"group/", Name/binary>>) ->
+role_type({_, _} = RealmProto, <<"group/", Name/binary>>) ->
     do_role_type(
-        undefined,
-        bondy_rbac_group:lookup(RealmUri, Name)
+        false,
+        group_exists(RealmProto, Name)
+    );
+
+role_type({RealmUri, _} = RealmProto, Name) ->
+    do_role_type(
+        bondy_rbac_user:exists(RealmUri, Name),
+        group_exists(RealmProto, Name)
     );
 
 role_type(RealmUri, Name) ->
-    do_role_type(
-        bondy_rbac_user:lookup(RealmUri, Name),
-        bondy_rbac_group:lookup(RealmUri, Name)
-    ).
+    role_type({RealmUri, undefined}, Name).
+
 
 %% @private
-do_role_type({error, not_found}, undefined) ->
+group_exists({RealmUri, Prototype}, Name) ->
+    case bondy_rbac_group:exists(RealmUri, Name) of
+        false when Prototype == undefined ->
+            false;
+        false ->
+            bondy_rbac_group:exists(Prototype, Name);
+        true ->
+            true
+    end.
+
+
+%% @private
+do_role_type(false, false) ->
     unknown;
 
-do_role_type(_, {error, not_found}) ->
+do_role_type(true, false) ->
     user;
 
-do_role_type({error, not_found}, _) ->
+do_role_type(false, true) ->
     group;
 
-do_role_type(_, _) ->
+do_role_type(true, true) ->
     both.
 
 
@@ -1012,67 +1070,158 @@ check_grant_blockers(UnknownRoles, NameOverlaps) ->
 
 
 %% @private
-accumulate_grants(RealmUri, Role, Type) ->
-    %% The 'all' grants always apply
+acc_grants(RealmUri, Rolename, Type) ->
+    ProtoUri = bondy_realm:prototype_uri(RealmUri),
+    RealmProto = {RealmUri, ProtoUri},
+
+    %% The 'all' grants always apply. The special group 'all' does not follow
+    %% inheritance rules for normal groups i.e. a realm cannot override the
+    %% prototype's 'all' group.
     Acc0 = lists:map(
-        fun({{_Role, Resource}, Permissions}) ->
+        fun({{all, Resource}, Permissions}) ->
             {{<<"group/all">>, Resource}, Permissions}
         end,
-        find_grants(RealmUri, {all, '_'}, group)
+        lists:append(
+            find_grants(RealmUri, {all, '_'}, group),
+            find_grants(ProtoUri, {all, '_'}, group)
+        )
     ),
 
-    {Acc1, _} = accumulate_grants([Role], [], Acc0, Type, RealmUri),
-    lists:flatten(Acc1).
+    {Acc1, _Seen} = acc_grants([Rolename], Type, RealmProto, [], Acc0),
+    Acc1.
 
 
 %% @private
-accumulate_grants([], Seen, Acc, _Type, _) ->
-    {Acc, Seen};
+acc_grants([], _, _, Seen, Acc) ->
+    {lists:flatten(Acc), Seen};
 
-accumulate_grants([Rolename|Rolenames], Seen, Acc, Type, RealmUri) ->
-    Groups = [Name ||
-        Name <- role_groups(RealmUri, Rolename, Type),
-        not lists:member(Name, Seen),
-        bondy_rbac_group:exists(RealmUri, Name)
-    ],
+acc_grants([Rolename|Rolenames], Type, RealmProto, Seen, Acc) ->
+    %% A role can be a member of a group defined in the realm or in the realm's
+    %% prototype.
+    %% Grants can be assigned to a group defined in the realm or in the realm's
+    %% prototype.
+
+    %% We get the groups this role is member of.
+    Groupnames = role_groupnames(Rolename, Type, RealmProto, Seen),
 
     %% We iterate over the role's groups to gather grants (permissions)
-    %% assigned to this role via the group membership relationship.
-    %% We avoid iterating over already seen role groups. This is because group
-    %% membership is recursive and a group can be a member of another group
-    %% multiple times through different paths.
-    {NewAcc, NewSeen} = accumulate_grants(
-        Groups, [Rolename|Seen], Acc, group, RealmUri
+    %% assigned to them.
+    %% We accumulate the rolename in the Seen list (without the realm qualifier)
+    %% as this enables us to implement group override. If group A was defined
+    %% in the Realm it overrides group A in the prototype (if defined), this
+    %% means we will neither traverse the groups of {A, ProtoUri} nor
+    %% accumulate the permissions granted for A in ProtoUri.
+    {NewAcc, NewSeen} = acc_grants(
+        Groupnames,
+        group,
+        RealmProto,
+        acc_grants_append_seen(Rolename, Seen),
+        Acc
     ),
 
     %% We gather the grants associated directly to this role
-    Grants = lists:map(
-        fun ({{_, Resource}, Permissions}) ->
-            {{concat_role(Type, Rolename), Resource}, Permissions}
-        end,
-        find_grants(RealmUri, {Rolename, '_'}, Type)
-    ),
+    Grants = [
+        {{concat_role(Type, Name), Resource}, Permissions}
+        || {{Name, Resource}, Permissions} <-
+            acc_grants_find(Rolename, Type, RealmProto),
+            Name == Rolename
+    ],
 
     %% We continue iterating over the roles
-    accumulate_grants(Rolenames, NewSeen, [Grants|NewAcc], Type, RealmUri).
+    acc_grants(Rolenames, Type, RealmProto, NewSeen, [Grants|NewAcc]).
 
 
 %% @private
-role_groups(RealmUri, Rolename, user) ->
+acc_grants_append_seen({Rolename, _}, Acc) ->
+    %% We acc only the rolename. In the case of users this does not make any
+    %% difference as we do not support user inheritance. But in the case of
+    %% groups, this means that once we've seen a local group, we do not read
+    %% its super group from the prototype (if it existed), which simulates
+    %% group override.
+    acc_grants_append_seen(Rolename, Acc);
+
+acc_grants_append_seen(Rolename, Acc) ->
+    [Rolename | Acc].
+
+
+%% @private
+acc_grants_find({Rolename, RealmUri}, user = Type, _) ->
+    find_grants(RealmUri, {Rolename, '_'}, Type);
+
+acc_grants_find(Rolename, user = Type, {RealmUri, _}) ->
+    %% No user inheritance, so we skip prototype
+    find_grants(RealmUri, {Rolename, '_'}, Type);
+
+acc_grants_find({Rolename, RealmUri}, group = Type, _) ->
+    %% We know the groups exists as we have a qualified name
+    find_grants(RealmUri, {Rolename, '_'}, Type);
+
+acc_grants_find(Rolename, group = Type, {RealmUri, ProtoUri}) ->
+    case bondy_rbac_group:exists(RealmUri, Rolename) of
+        true ->
+            find_grants(RealmUri, {Rolename, '_'}, Type);
+        false ->
+            find_grants(ProtoUri, {Rolename, '_'}, Type)
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc We return the groups this role is a member of. If the groups does not
+%% exist we try fetching from the prototype if it exists.
+%% Returns qualified group names e.g. {Name, Uri} where Uri can be the Realm's
+%% or its prototype.
+%% @end
+%% -----------------------------------------------------------------------------
+role_groupnames(Rolename, Type, RealmProto, Seen) ->
+    case lists:member(Rolename, Seen) of
+        true ->
+            %% We avoid iterating over already seen groups.
+            %% This is because group membership is recursive and a
+            %% group can be a member of another group multiple times
+            %% through different paths.
+            %% But also, to iinheritance overriding where a group in a realm
+            %% overrides the group in the realm's prototype.
+            [];
+        false ->
+            do_role_groupnames(Rolename, Type, RealmProto)
+    end.
+
+
+%% @private
+do_role_groupnames(Rolename, user, {RealmUri, _}) ->
     case bondy_rbac_user:lookup(RealmUri, Rolename) of
-        {error, not_found} -> [];
-        User -> bondy_rbac_user:groups(User)
+        {error, not_found} ->
+            [];
+        User ->
+            bondy_rbac_user:groups(User)
     end;
 
-role_groups(RealmUri, Rolename, group) ->
+do_role_groupnames(Rolename, group, {RealmUri, ProtoUri}) ->
     case bondy_rbac_group:lookup(RealmUri, Rolename) of
-        {error, not_found} -> [];
-        Group -> bondy_rbac_group:groups(Group)
+        {error, not_found} when ProtoUri == undefined ->
+            [];
+        {error, not_found} ->
+            do_role_groupnames(Rolename, group, {ProtoUri, undefined});
+        Group ->
+            bondy_rbac_group:groups(Group)
     end.
+
 
 %% @private
 find_grants(Realm, KeyPattern, Type) ->
-    Opts = [{resolver, lww}, {remove_tombstones, true}],
+    find_grants(Realm, KeyPattern, Type, []).
+
+
+%% @private
+find_grants(undefined, _, _, _) ->
+    [];
+
+find_grants(Realm, KeyPattern, Type, Opts0) ->
+    Opts = lists:merge(
+        lists:sort([{resolver, lww}, {remove_tombstones, true}]),
+        lists:sort(Opts0)
+    ),
     plum_db:match(?PLUMDB_PREFIX(Realm, Type), KeyPattern, Opts).
 
 

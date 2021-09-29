@@ -134,7 +134,7 @@ add_realm(RealmUri) ->
             }
         ]
     },
-    bondy_realm:add(Config).
+    bondy_realm:create(Config).
 
 
 security_toggle(Config) ->

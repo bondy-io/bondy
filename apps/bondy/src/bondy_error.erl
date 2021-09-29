@@ -55,6 +55,9 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+code_to_uri(invalid_argument) ->
+    ?WAMP_INVALID_ARGUMENT;
+
 code_to_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
     <<"bondy.error.", R/binary>>;
@@ -176,18 +179,36 @@ map({missing_required_value, Key}) ->
         key => Key
     };
 
+map({invalid_value, Key, Value}) ->
+    Reason = <<"The value for property ", $', Key/binary, $', " is invalid.">>,
+    map({invalid_value, Key, Value, Reason});
+
+map({invalid_value, Key, Value, Reason}) ->
+    #{
+        code => invalid_value,
+        message => <<"The operation failed due to an invalid value.">>,
+        description => Reason,
+        key => Key,
+        value => Value
+    };
+
 
 map({inconsistency_error, Keys}) when is_list(Keys) ->
+    Reason = iolist_to_binary([
+        <<"The values provided for the keys [">>,
+        binary_utils:join(Keys, <<", ">>),
+        <<"] are inconsistent.">>
+    ]),
+    map({inconsistency_error, Keys, Reason});
+
+map({inconsistency_error, Keys, Reason}) when is_list(Keys) ->
     #{
-        code => inconsistency_error,
+        code => invalid_argument,
         message => <<"The operation failed due to inconsistent values.">>,
-        description => iolist_to_binary([
-            <<"The values provided for the keys [">>,
-            binary_utils:join(Keys, <<", ">>),
-            <<"] are inconsistent.">>
-        ]),
+        description => Reason,
         keys => Keys
     };
+
 
 map({inconsistency_error, Key}) ->
     map({inconsistency_error, [Key]});
@@ -224,6 +245,17 @@ map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
         <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
+
+map({badarg, Map}) when is_map(Map) ->
+    map(Map);
+
+map({badarg, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
+    #{
+        <<"code">> => invalid_argument,
+        <<"message">> => Mssg,
+        <<"description">> => <<"">>
+    };
+
 map({request_error, Key, Desc}) when is_atom(Key), is_atom(Desc) ->
     %% Cowboy error
     #{
@@ -242,17 +274,10 @@ map({request_error, {Key, _}, Desc}) when is_atom(Key), is_atom(Desc) ->
         <<"description">> => Desc
     };
 
-map({badarg, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
-    #{
-        <<"code">> => <<"badarg">>,
-        <<"message">> => Mssg,
-        <<"description">> => <<"">>
-    };
-
 map({badheader, Header, Desc})
 when is_binary(Desc); is_list(Desc); is_atom(Desc) ->
     #{
-        <<"code">> => <<"badarg">>,
+        <<"code">> => invalid_argument,
         <<"message">> => <<"The header '", Header/binary, "' is malformed.">>,
         <<"description">> => Desc
     };
