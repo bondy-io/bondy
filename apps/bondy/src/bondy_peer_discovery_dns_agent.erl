@@ -33,6 +33,8 @@
 -module(bondy_peer_discovery_dns_agent).
 -behaviour(bondy_peer_discovery_agent).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(OPTS_SPEC, #{
     <<"service_name">> => #{
         key => service_name,
@@ -81,12 +83,18 @@ lookup(State, Timeout) ->
 
     case inet_res:resolve(SrvName, in, srv, [], Timeout) of
         {ok, DNSMessage} ->
+            ?LOG_DEBUG(#{
+                description => "Got DNS lookup response",
+                response => DNSMessage,
+                service_name => SrvName
+            }),
             {ok, to_peer_list(DNSMessage), State};
         {error, Reason} ->
-            _ = lager:error(
-                "DNS lookup error; reason=~p, service_name=~p",
-                [Reason, SrvName]
-            ),
+            ?LOG_ERROR(#{
+                description => "DNS lookup error",
+                reason => Reason,
+                service_name => SrvName
+            }),
             {error, Reason, State}
     end.
 

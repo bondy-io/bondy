@@ -23,10 +23,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
+-include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 -include("bondy_security.hrl").
--include_lib("wamp/include/wamp.hrl").
 
 -define(SHUTDOWN_TIMEOUT, 5000).
 -define(IS_TRANSPORT(X), (T =:= ws orelse T =:= raw)).
@@ -35,7 +36,7 @@
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
     challenge               ::  binary() | undefined,
-    auth_context    ::  map() | undefined,
+    auth_context            ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
     context                 ::  bondy_context:t() | undefined
@@ -318,10 +319,12 @@ handle_inbound_messages(Messages, St) ->
         throw:Reason ->
             stop(Reason, St);
         Class:Reason:Stacktrace when Class /= throw ->
-            _ = lager:info(
-                "Unexpected error; class=~p reason=~s, state_name=~p, stacktrace=~p",
-                [Class, Reason, St#wamp_state.state_name, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                state_name => St#wamp_state.state_name
+            }),
             %% REVIEW shouldn't we call stop({system_failure, Reason}) to abort?
             error(Reason)
     end.
@@ -354,10 +357,12 @@ handle_inbound_messages(
     %% Client aborting, we ignore any subsequent messages
     Uri = M#abort.reason_uri,
     Details = M#abort.details,
-    _ = lager:info(
-        "Client aborted; reason=~s, state_name=~p, details=~p",
-        [Uri, Name, Details]
-    ),
+    ?LOG_INFO(#{
+        description => "Client aborted",
+        reason => Uri,
+        state_name => Name,
+        details => Details
+    }),
     St1 = St0#wamp_state{state_name = closed},
     {stop, St1};
 
@@ -566,6 +571,11 @@ open_session(Extra, St0) ->
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
+
+        ok = bondy_logger_utils:update_process_metadata(#{
+            realm_uri => RealmUri
+        }),
+
         {reply, Bin, St1#wamp_state{state_name = established}}
     catch
         error:{invalid_options, missing_client_role} = Reason ->
@@ -933,11 +943,14 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 
 
 %% @private
-do_init(Subprotocol, Peer, _Opts) ->
+do_init({_, _, Serializer} = Subprotocol, Peer, _Opts) ->
     State = #wamp_state{
         subprotocol = Subprotocol,
         context = bondy_context:new(Peer, Subprotocol)
     },
+    ok = bondy_logger_utils:update_process_metadata(#{
+        serializer => Serializer
+    }),
     {ok, State}.
 
 

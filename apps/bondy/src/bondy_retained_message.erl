@@ -3,6 +3,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_retained_message).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(DB_PREFIX(Realm), {retained_messages, Realm}).
@@ -474,11 +475,12 @@ maybe_eval(Realm, Fun, Mssg) ->
         Fun(Realm, Mssg)
     catch
         Class:Reason:Stacktrace ->
-            _ = lager:error(
-                "Error while evaluating user function; "
-                "class=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while evaluating user function",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             ok
     end.
 

@@ -23,6 +23,7 @@
 -module(bondy_app).
 -behaviour(application).
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
@@ -72,7 +73,7 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    %% We initialise the environment
+    %% We initialise the environmentapplication
     ok = setup_env(Args),
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
@@ -264,9 +265,9 @@ suspend_aae() ->
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = plum_db_config:set(aae_enabled, false),
-            _ = lager:info(
-                "Temporarily disabled active anti-entropy (AAE) during initialisation"
-            ),
+            ?LOG_NOTICE(#{
+                description => "Temporarily disabled active anti-entropy (AAE) during initialisation"
+            }),
             ok;
         false ->
             ok
@@ -278,7 +279,7 @@ restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             ok = plum_db_config:set(aae_enabled, true),
-            _ = lager:info("Active anti-entropy (AAE) re-enabled"),
+            ?LOG_NOTICE(#{description => "Active anti-entropy (AAE) re-enabled"}),
             ok;
         false ->
             ok
@@ -287,43 +288,43 @@ restore_aae() ->
 
 %% @private
 stop_router_services() ->
-    _ = lager:info("Initiating shutdown"),
+    ?LOG_NOTICE(#{description => "Initiating shutdown"}),
 
     %% We stop accepting new connections on HTTP/S and WS/S
-    _ = lager:info(
+    ?LOG_NOTICE(#{description =>
         "Suspending HTTP/S and WS/S listeners. "
         "No new connections will be accepted."
-    ),
+    }),
     ok = bondy_http_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
-    _ = lager:info(
+    ?LOG_NOTICE(#{description =>
         "Suspending TCP/TLS listeners. "
         "No new connections will be accepted."
-    ),
+    }),
     ok = bondy_wamp_tcp:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
-    _ = lager:info("Shutting down all existing client sessions."),
+    ?LOG_NOTICE(#{description => "Shutting down all existing client sessions."}),
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully
     Secs = bondy_config:get(shutdown_grace_period, 5),
-    _ = lager:info(
-        "Awaiting ~p secs for client sessions to gracefully terminate",
-        [Secs]
-    ),
+    ?LOG_NOTICE(#{
+        description => "Awaiting for client sessions to gracefully terminate",
+        timer_secs => Secs
+    }),
     ok = timer:sleep(Secs * 1000),
 
     %% We force the HTTP/S and WS/S connections to stop
-    _ = lager:info("Terminating all HTTP/S and WS/S connections"),
+    ?LOG_NOTICE(#{description => "Terminating all HTTP/S and WS/S connections"}),
     ok = bondy_http_gateway:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
-    _ = lager:info("Terminating all TCP/TLS connections"),
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS connections"}),
     ok = bondy_wamp_tcp:stop_listeners(),
 
-    _ = lager:info("Shutdown finished"),
+    ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
 
 

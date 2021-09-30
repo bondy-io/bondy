@@ -81,6 +81,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_wamp_forwarder).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -242,9 +243,11 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]
-    ),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -254,10 +257,12 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
     catch
         Class:Reason:Stacktrace ->
             %% @TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, event=~p, error=~p, reason=~p, stacktrace=~p",
-                [Event, Class, Reason, Stacktrace]
-            )
+            ?LOG_ERROR(#{
+                class => Class,
+                event => Event,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
     end,
     {noreply, State};
 
@@ -279,10 +284,11 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
             Pid = bondy_utils:bin_to_pid(BinPid),
             Pid ! AckOrError;
         false ->
-            _ = lager:error(
-                "Received a message targetted to another node; realm_uri=~p, message=~p",
-                [RealmUri, AckOrError]
-            )
+            ?LOG_ERROR(#{
+                description => "Received a message targetted to another node",
+                realm_uri => RealmUri,
+                wamp_message => AckOrError
+            })
     end,
     {noreply, State};
 
@@ -312,16 +318,21 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
             {noreply, State};
         Class:Reason:Stacktrace ->
             %% TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace]),
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             ok = cast_message(peer_error(Reason, Mssg), BinPid),
             {noreply, State}
     end.
 
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 

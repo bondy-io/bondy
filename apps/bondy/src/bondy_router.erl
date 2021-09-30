@@ -90,8 +90,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_router).
--include("bondy.hrl").
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(ROUTER_ROLES, #{
     broker => #{features => ?BROKER_FEATURES},
@@ -135,9 +137,12 @@ shutdown() ->
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
     catch
-       _:Reason ->
-            _ = lager:error(
-                "Error while shutting down router; reason=~p", [Reason])
+       Class:Reason ->
+            ?LOG_ERROR(#{
+                description => "Error while shutting down router",
+                class => Class,
+                reason => Reason
+            })
     end,
 
     ok.
@@ -191,10 +196,13 @@ agent() ->
 
 forward(M, #{session := _} = Ctxt0) ->
     Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
-    %% _ = lager:debug(
-    %%     "Forwarding message; peer_id=~p, message=~p",
-    %%     [bondy_context:peer_id(Ctxt), M]
-    %% ),
+
+    %% ?LOG_DEBUG(#{
+    %%     description => "Forwarding message",
+    %%     peer_id => bondy_context:peer_id(Ctxt0),
+    %%     message => M
+    %% }),
+
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
@@ -332,10 +340,9 @@ async_forward(M, Ctxt0) ->
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            _ = lager:info(
-                "Router pool overloaded, will route message synchronously; "
-                "message=~p", [M]
-            ),
+            ?LOG_INFO(#{
+                description => "Router pool overloaded, will route message synchronously"
+            }),
             %% @TODO publish metaevent and stats
             %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
@@ -358,11 +365,15 @@ async_forward(M, Ctxt0) ->
         Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
-            _ = lager:error(
-                "Error while routing message; class=~p, reason=~p, message=~p"
-                " realm_uri=~p, session_id=~p, stacktrace=~p",
-                [Class, Reason, M, Ctxt, SessionId, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while routing message",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                session_id => SessionId,
+                context => Ctxt,
+                message => M
+            }),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}
     end.

@@ -22,8 +22,10 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_router_worker).
 -behaviour(gen_server).
--include("bondy.hrl").
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(POOL_NAME, router_pool).
 
@@ -116,8 +118,11 @@ init([Fun]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -127,10 +132,11 @@ handle_cast(Fun, State) ->
         {noreply, State}
     catch
         Class:Reason:Stacktrace ->
-            %% TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace]),
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {noreply, State}
     end.
 
@@ -143,7 +149,10 @@ when Fun /= undefined ->
     {stop, normal, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 

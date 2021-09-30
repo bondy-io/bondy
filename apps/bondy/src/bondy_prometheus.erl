@@ -27,6 +27,7 @@
 -module(bondy_prometheus).
 -behaviour(gen_event).
 -behaviour(prometheus_collector).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("prometheus/include/prometheus.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy.hrl").
@@ -308,8 +309,10 @@ handle_event(_Event, State) ->
 
 
 handle_call(Event, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 

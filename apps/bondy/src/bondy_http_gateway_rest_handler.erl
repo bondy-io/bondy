@@ -36,6 +36,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_rest_handler).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
@@ -75,8 +76,6 @@
 -export([resource_exists/2]).
 -export([to_json/2]).
 -export([to_msgpack/2]).
-
-
 
 
 
@@ -151,8 +150,11 @@ is_authorized(Req0, St0) ->
         Class:Reason:Stacktrace ->
             _ = log(
                 error,
-                "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace],
+                #{
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                },
                 St0
             ),
             {StatusCode, Body} = take_status_code(
@@ -289,10 +291,10 @@ is_authorized(
 is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    _ = lager:info(
-        "Request is using unsupported api_key authentication scheme; "
-        "request=~p", [Req]
-    ),
+    ?LOG_INFO(#{
+        description => "Request is using unsupported api_key authentication scheme",
+        request => Req
+    }),
     {false, Req, St};
 
 is_authorized(_, Req, #{security := _} = St0)  ->
@@ -376,8 +378,11 @@ provide(Req0, #{api_spec := Spec, encoding := Enc} = St0)  ->
         Class:Reason:Stacktrace ->
             _ = log(
                 error,
-                "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace],
+                #{
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                },
                 St0
             ),
             {StatusCode, Body} = take_status_code(
@@ -428,8 +433,11 @@ do_accept(Req0, #{api_spec := Spec, encoding := Enc} = St0) ->
         Class:Reason:Stacktrace ->
             _ = log(
                 error,
-                "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace],
+                #{
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                },
                 St0
             ),
             {StatusCode1, Body} = take_status_code(
@@ -612,9 +620,12 @@ orelse Method =:= <<"put">> ->
         Class:Reason:Stacktrace ->
             _ = log(
                 error,
-                "Error while decoding HTTP body, "
-                "type=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, Stacktrace],
+                #{
+                    description => "Error while decoding HTTP body",
+                    class => Class,
+                    reason => Reason,
+                    stacktrace => Stacktrace
+                },
                 St
             ),
             throw({badarg, {decoding, Enc}})
@@ -673,9 +684,13 @@ perform_action(
     Url = url(Host, Path, QS),
     _ = log(
         info,
-        "Gateway is forwarding request to upstream host, "
-        "upstream_url=~p, headers=~p, body=~p, opts=~p",
-        [Url, Headers, Body, Opts],
+        #{
+            description => "Gateway is forwarding request to upstream host",
+            upstream_url => Url,
+            headers => Headers,
+            body => Body,
+            opts => Opts
+        },
         St0
     ),
     RSpec = maps:get(<<"response">>, Spec),
@@ -1086,39 +1101,25 @@ mops_eval(Expr, Ctxt) ->
     end.
 
 
+set_resp_headers(Headers, Req0) ->
+    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
+    cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
+
+
 %% @private
-log(Level, Prefix, Head, #{api_context := Ctxt} = St)
-when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
+log(Level, Msg0, #{api_context := Ctxt} = St) when is_map(Msg0) ->
     #{
         <<"id">> := TraceId,
         <<"method">> := Method,
         <<"scheme">> := Scheme,
         <<"peername">> := Peername,
         <<"path">> := Path,
-        %% <<"headers">> := Headers,
+        % <<"headers">> := Headers,
         <<"query_string">> := QueryString,
         <<"bindings">> := Bindings,
         <<"body_length">> := Len
     } = maps:get(<<"request">>, Ctxt),
 
-    Format = iolist_to_binary([
-        Prefix,
-        <<
-            %% Right now trace_id is a bin as msgpack does not support
-            %% 128-bit integers
-            ", trace_id=~s"
-            ", realm_uri=~s"
-            ", encoding=~s"
-            ", method=~s"
-            ", scheme=~s"
-            ", peername=~s"
-            ", path=~s"
-            %% ", headers=~s"
-            ", query_string=~s",
-            ", bindings=~p"
-            ", body_length=~p"
-        >>
-    ]),
     BodyLen = case maps:get(body_evaluated, St) of
         true ->
             Len;
@@ -1126,22 +1127,19 @@ when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
             undefined
     end,
 
-    Tail = [
-        TraceId,
-        maps:get(realm_uri, St, undefined),
-        maps:get(encoding, St, undefined),
-        Method,
-        Scheme,
-        Peername,
-        Path,
-        %% Headers,
-        QueryString,
-        Bindings,
-        BodyLen
-    ],
-    lager:log(Level, self(), Format, lists:append(Head, Tail)).
-
-
-set_resp_headers(Headers, Req0) ->
-    Req1 = cowboy_req:set_resp_headers(Headers, Req0),
-    cowboy_req:set_resp_headers(bondy_http_utils:meta_headers(), Req1).
+    Msg = Msg0#{
+        serializer => maps:get(encoding, St, undefined),
+        method => Method,
+        scheme => Scheme,
+        path => Path,
+        query_string => QueryString,
+        bindings => Bindings,
+        body_length => BodyLen
+    },
+    Meta = #{
+        id => TraceId,
+        realm => maps:get(realm_uri, St, undefined),
+        session_id => undefined,
+        peername => Peername
+    },
+    logger:log(Level, Msg, Meta).

@@ -21,6 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_meta_api).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -284,11 +285,16 @@ list(Type, RealmUri, Fun) ->
                 {ok, [Fun(E) || E <- Entries]}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+    class => Class,
+    reason => Reason,
+    stacktrace => Stacktrace
+}),
+            ?LOG_ERROR(#{
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -327,11 +333,12 @@ summary(Type, RealmUri) ->
                 {ok, Map}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -349,11 +356,12 @@ get(Type, [RealmUri, RegId, Details]) ->
                 {ok, bondy_registry_entry:to_details_map(Entry)}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -371,11 +379,12 @@ lookup(Type, [RealmUri, Uri, Opts]) ->
                 {ok, bondy_registry_entry:id(hd(Entries))}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -393,11 +402,12 @@ match(Type, [RealmUri, Uri, Opts]) ->
                 {ok, [bondy_registry_entry:id(E) || E <- Entries]}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -412,11 +422,12 @@ list_callees([RealmUri]) ->
                 {ok, Callees}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end;
 
@@ -429,11 +440,12 @@ list_callees([RealmUri, ProcedureUri]) ->
                 {ok, Callees}
         end
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason=~p, trace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 

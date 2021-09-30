@@ -26,8 +26,9 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_subscriber).
 -behaviour(gen_server).
--include("bondy.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -record(state, {
     realm_uri           ::  uri(),
@@ -162,22 +163,23 @@ handle_call(#event{} = Event, _From, State) ->
         {ok, NewState} ->
             {reply, ok, NewState};
         {error, Reason, NewState} ->
-            _ = lager:error(
-                "Error while handling event; "
-                "realm_uri=~p, event=~p, topic=~p, subscription_id=~p, pid=~p",
-                [
-                    Reason,
-                    State#state.realm_uri,
-                    State#state.topic,
-                    State#state.subscription_id,
-                    self()
-                ]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while handling event",
+                reason => Reason,
+                realm_uri => State#state.realm_uri,
+                topic => State#state.topic,
+                subscription_id => State#state.subscription_id,
+                pid => self()
+            }),
             {reply, {error, Reason}, NewState}
     end;
 
 handle_call(Event, From, State) ->
-    _ = lager:debug("Unexpected event; event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {noreply, State}.
 
 
@@ -186,23 +188,22 @@ handle_cast(#event{} = Event, State) ->
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason, NewState} ->
-            _ = lager:error(
-                "Error while handling event; reason=~p "
-                "realm_uri=~p, topic=~p, subscription_id=~p, pid=~p, event=~p",
-                [
-                    Reason,
-                    State#state.realm_uri,
-                    State#state.topic,
-                    State#state.subscription_id,
-                    self(),
-                    Event
-                ]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while handling event",
+                reason => Reason,
+                realm_uri => State#state.realm_uri,
+                topic => State#state.topic,
+                subscription_id => State#state.subscription_id,
+                pid => self()
+            }),
             {noreply, NewState}
     end;
 
 handle_cast(Event, State) ->
-    _ = lager:debug("Unexpected event; event=~p", [Event]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
@@ -211,23 +212,22 @@ handle_info(#event{} = WAMPEvent, State) ->
         {ok, NewState} ->
             {noreply, NewState};
         {error, Reason, NewState} ->
-            _ = lager:error(
-                "Error while handling info event; reason=~p "
-                "realm_uri=~p, topic=~p, subscription_id=~p, pid=~p, event=~p",
-                [
-                    Reason,
-                    State#state.realm_uri,
-                    State#state.topic,
-                    State#state.subscription_id,
-                    self(),
-                    WAMPEvent
-                ]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while handling event",
+                reason => Reason,
+                realm_uri => State#state.realm_uri,
+                topic => State#state.topic,
+                subscription_id => State#state.subscription_id,
+                wamp_event => WAMPEvent
+            }),
             {noreply, NewState}
     end;
 
 handle_info(Event, State) ->
-    _ = lager:debug("Received unknown event; event=~p", [Event]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
@@ -242,11 +242,13 @@ terminate({shutdown, _}, State) ->
 
 terminate(Reason, State) ->
     do_unsubscribe(State),
-    _ = lager:error(
-        "Terminating local subscriber; reason=~p, "
-        "realm_uri=~p, topic=~p, subscription_id=~p, pid=~p",
-        [Reason, State#state.realm_uri, State#state.topic, State#state.subscription_id, self()]
-    ),
+    ?LOG_ERROR(#{
+        description => "Error while handling event",
+        reason => Reason,
+        realm_uri => State#state.realm_uri,
+        topic => State#state.topic,
+        subscription_id => State#state.subscription_id
+    }),
     ok.
 
 
@@ -283,12 +285,12 @@ do_handle_event(Event, State) ->
         {error, Reason} ->
             {error, Reason, State}
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error while evaluating action; reason=~p, "
-                "stacktrace=~p",
-                [Reason, Stacktrace]
-            ),
+        _:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while evaluating action",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason, State}
     end.
 

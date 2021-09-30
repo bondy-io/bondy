@@ -132,6 +132,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_realm).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_security.hrl").
@@ -1329,11 +1330,10 @@ apply_config() ->
 from_file(Filename) ->
     case bondy_utils:json_consult(Filename) of
         {ok, Realms} ->
-            _ = lager:info(
-                "Loading configuration file; path=~p",
-                [Filename]
-            ),
-
+            ?LOG_INFO(#{
+                description => "Loading configuration file",
+                filename => Filename
+            }),
             %% Because realms can have the sso_realm_uri and prototype
             %% properties which point to other realms, we need to ensure all
             %% realms in the file are processed based on a precedence graph, so
@@ -1348,17 +1348,19 @@ from_file(Filename) ->
             ok;
 
         {error, enoent} ->
-            _ = lager:warning(
-                "Error while parsing configuration file; path=~p, reason=~p",
-                [Filename, file:format_error(enoent)]
-            ),
+            ?LOG_WARNING(#{
+                description => "Error while parsing configuration file",
+                filename => Filename,
+                reason => file:format_error(enoent)
+            }),
             ok;
 
         {error, Reason} ->
-            _ = lager:warning(
-                "Error while parsing configuration file; path=~p, reason=~p",
-                [Filename, Reason]
-            ),
+            ?LOG_WARNING(#{
+                description => "Error while parsing configuration file",
+                filename => Filename,
+                reason => Reason
+            }),
             error(invalid_config)
     end.
 
@@ -1858,9 +1860,11 @@ do_lookup(Uri) ->
         undefined ->
             {error, not_found};
         Data ->
-            _ = lager:warning(
-                "Invalid realm data retrieved from store; data=~p", [Data]
-            ),
+            ?LOG_WARNING(#{
+                description => "Invalid realm data retrieved from store",
+                reason => "Possibly a previous version",
+                data => Data
+            }),
             {error, not_found}
     end.
 

@@ -21,6 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -169,12 +170,14 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     %% We match realm_uri for extra validation
     Key = key(RealmUri, P),
     OnEvict = fun(_) ->
-        _ = lager:debug(
-            "RPC Promise evicted from queue;"
-            " realm_uri=~p, caller_session_id=~p, invocation_id=~p, call_id=~p"
-            " timeout=~p",
-            [RealmUri, CallerSessionId, InvocationId, CallId, Timeout]
-        )
+        ?LOG_DEBUG(#{
+            description => "RPC Promise evicted from queue",
+            realm_uri => RealmUri,
+            caller_session_id => CallerSessionId,
+            invocation_id => InvocationId,
+            call_id => CallId,
+            timeout => Timeout
+        })
     end,
     Secs = erlang:round(Timeout / 1000),
     Opts = #{key => Key, ttl => Secs, on_evict => OnEvict},

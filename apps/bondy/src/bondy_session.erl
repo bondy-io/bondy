@@ -36,8 +36,9 @@
 %% @end
 %% =============================================================================
 -module(bondy_session).
--include("bondy.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(SESSION_SPACE, ?MODULE).
 
@@ -252,7 +253,11 @@ close(#session{id = Id} = S) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:delete(Tab, Id),
 
-    _ = lager:debug("Session closed; session_id=~p, realm=~s", [Id, Realm]),
+    ?LOG_DEBUG(#{
+        description => "Session closed",
+        realm => Realm,
+        session_id => Id
+    }),
 
     ok;
 

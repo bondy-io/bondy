@@ -45,10 +45,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_http_gateway_api_spec_parser).
+-include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
--include_lib("wamp/include/wamp.hrl").
 
 -define(VARS_KEY, <<"variables">>).
 -define(DEFAULTS_KEY, <<"defaults">>).
@@ -987,11 +988,11 @@ from_file(Filename) ->
         {ok, _} ->
             {error, invalid_specification_format};
         {error, Reason} ->
-            _ = lager:error(
-                "Error while parsing API Gateway Specification file; "
-                "filename=~p, reason=~p",
-                [Filename, Reason]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while parsing API Gateway Specification file",
+                filename => Filename,
+                reason => Reason
+            }),
             {error, invalid_json_format}
     end.
 

@@ -23,6 +23,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_router_event_handler).
 -behaviour(gen_event).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -299,9 +300,10 @@ handle_event(_, State) ->
 
 
 handle_call(Event, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]
-    ),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 

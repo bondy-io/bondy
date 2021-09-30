@@ -45,9 +45,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_ws_connection_handler).
+-include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
--include_lib("wamp/include/wamp.hrl").
 
 %% Cowboy will automatically close the Websocket connection when no data
 %% arrives on the socket after ?IDLE_TIMEOUT
@@ -90,7 +91,8 @@
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
 init(Req0, _) ->
-    %% From [Cowboy's Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
+    %% From Cowboy's
+    %% [Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
     %% If the sec-websocket-protocol header was sent with the request for
     %% establishing a Websocket connection, then the Websocket handler must
     %% select one of these subprotocol and send it back to the client,
@@ -98,6 +100,11 @@ init(Req0, _) ->
     %% correct subprotocol was found.
     ClientIP = bondy_http_utils:client_ip(Req0),
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
+
+    ok = bondy_logger_utils:set_process_metadata(#{
+        transport => ws,
+        client_ip => ClientIP
+    }),
 
 
     try
@@ -120,10 +127,11 @@ init(Req0, _) ->
             {ok, Req1, undefined};
 
         throw:missing_subprotocol ->
-            _ = lager:info(
-                "Closing WS connection. Missing value for header '~s'; " "client_ip=~s",
-                [?SUBPROTO_HEADER, ClientIP]
-            ),
+            ?LOG_INFO(#{
+                description => "Closing WS connection",
+                reason => missing_header_value,
+                header => ?SUBPROTO_HEADER
+            }),
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
@@ -131,10 +139,12 @@ init(Req0, _) ->
 
         throw:invalid_subprotocol ->
             %% At the moment we only support WAMP, not plain WS
-            _ = lager:info(
-                "Closing WS connection. Initialised without a valid value for http header '~s'; value=~p, client_ip=~s",
-                [?SUBPROTO_HEADER, Subprotocols, ClientIP]
-            ),
+            ?LOG_INFO(#{
+                description => "Closing WS connection",
+                reason => invalid_header_value,
+                header => ?SUBPROTO_HEADER,
+                value => Subprotocols
+            }),
             %% Returning ok will cause the handler
             %% to stop in websocket_handle
             Req1 = cowboy_req:reply(?HTTP_BAD_REQUEST, Req0),
@@ -170,7 +180,7 @@ websocket_init(#state{protocol_state = undefined} = St) ->
     {reply, Frame, St};
 
 websocket_init(St) ->
-    _ = log(info, "Established connection with peer;", [], St),
+    _ = log(info, #{description => "Established connection with peer"}, St),
     {ok, reset_ping_interval(St)}.
 
 
@@ -183,9 +193,11 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above,
     %% review and eliminate.
-    _ = lager:error(
-        "Connection closing; reason=unsupported_message, message=~p", [Data]
-    ),
+    ?LOG_ERROR(#{
+        description => "Connection closing",
+        reason => unsupported_message,
+        data => Data
+    }),
     {stop, St};
 
 websocket_handle(ping, St) ->
@@ -219,7 +231,13 @@ websocket_handle({T, Data}, #state{frame_type = T} = St0) ->
 
 websocket_handle(Data, St) ->
     %% We ignore this message and carry on listening
-    _ = log(debug, "Received unsupported message; message=~p", [Data], St),
+    _ = log(debug,
+        #{
+            description => "Received unsupported message",
+            data => Data
+        },
+        St
+    ),
     {ok, St}.
 
 
@@ -243,15 +261,36 @@ websocket_info(
     send_ping(St);
 
 websocket_info({timeout, _Ref, Msg}, St) ->
-    _ = log(debug, "Received unknown timeout; message=~p", [Msg], St),
+    _ = log(
+        debug,
+        #{
+            description => "Received unknown timeout",
+            message => Msg
+        },
+        St
+    ),
     {ok, St};
 
 websocket_info({stop, shutdown = Reason}, St) ->
-    _ = log(info, "Connection closing; reason=~p", [Reason], St),
+    _ = log(
+        info,
+        #{
+            description => "Connection closing",
+            reason => Reason
+        },
+        St
+    ),
     {stop, St};
 
 websocket_info({stop, Reason}, St) ->
-    _ = log(info, "Connection closing; reason=~p", [Reason], St),
+    _ = log(
+        info,
+        #{
+            description => "Connection closing",
+            reason => Reason
+        },
+        St
+    ),
     {stop, St};
 
 websocket_info(_, St0) ->
@@ -276,9 +315,13 @@ terminate(stop, _Req, St) ->
 
 terminate(timeout, _Req, St) ->
     Timeout = bondy_config:get([wamp_websocket, idle_timeout]),
-    _ = log(error,
-        "Connection closing; reason=idle_timeout, idle_timeout=~p,",
-        [Timeout],
+    _ = log(
+        error,
+        #{
+            description => "Connection closing",
+            reason => idle_timeout,
+            idle_timeout => Timeout
+        },
         St
     ),
     do_terminate(St);
@@ -286,14 +329,25 @@ terminate(timeout, _Req, St) ->
 terminate(remote, _Req, St) ->
     %% The remote endpoint closed the connection without giving any further
     %% details.
-    _ = log(info, "Connection closed by peer; reason=~p,", [unknown], St),
+    _ = log(
+        info,
+        #{
+            description => "Connection closed by peer",
+            reason => unknown
+        },
+        St
+    ),
     do_terminate(St);
 
 terminate({remote, Code, Payload}, _Req, St) ->
     _ = log(
         info,
-        "Connection closed by peer; reason=remote, code=~p, payload=~p",
-        [Code, Payload],
+        #{
+            description => "Connection closed by peer",
+            reason => remote,
+            code => Code,
+            payload => Payload
+        },
         St
     ),
     do_terminate(St);
@@ -301,36 +355,67 @@ terminate({remote, Code, Payload}, _Req, St) ->
 terminate({error, closed = Reason}, _Req, St) ->
     %% The socket has been closed brutally without a close frame being received
     %% first.
-    _ = log(error, "Connection closed brutally; reason=~p,", [Reason], St),
+    _ = log(error,
+        #{
+            description => "Connection closed brutally",
+            reason => Reason
+        },
+        St
+    ),
     do_terminate(St);
 
 terminate({error, badencoding = Reason}, _Req, St) ->
     %% A text frame was sent by the client with invalid encoding. All text
     %% frames must be valid UTF-8.
-    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    _ = log(error,
+        #{
+            description => "Connection closed",
+            reason => Reason
+        },
+        St
+    ),
     do_terminate(St);
 
 terminate({error, badframe = Reason}, _Req, St) ->
     %% A protocol error has been detected.
-    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    _ = log(error,
+        #{
+            description => "Connection closed",
+            reason => Reason
+        },
+        St
+    ),
     do_terminate(St);
 
 terminate({error, Reason}, _Req, St) ->
-    _ = log(error, "Connection closed; reason=~p,", [Reason], St),
+    _ = log(error,
+        #{
+            description => "Connection closed",
+            reason => Reason
+        },
+        St
+    ),
     do_terminate(St);
 
 terminate({crash, Class, Reason}, _Req, St) ->
     %% A crash occurred in the handler.
     _ = log(error,
-        "Process crashed; error=~p, reason=~p",
-        [Class, Reason], St
+        #{
+            description => "Process crashed",
+            class => Class,
+            reason => Reason
+        },
+        St
     ),
     do_terminate(St);
 
 terminate(Other, _Req, St) ->
-        _ = log(error,
-        "Process crashed; reason=~p",
-        [Other], St
+    _ = log(error,
+        #{
+            description => "Process crashed",
+            reason => Other
+        },
+        St
     ),
     do_terminate(St).
 
@@ -455,30 +540,26 @@ frame(Type, E) when Type == text orelse Type == binary ->
 %% @private
 
 
-log(Level, Prefix, Head, #state{} = St)
-when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
-    Format = iolist_to_binary([
-        Prefix,
-        <<
-            " realm=~p, session_id=~p, peername=~s, agent=~p"
-            ", protocol=wamp, transport=websocket, frame_type=~p, encoding=~p"
-        >>
-    ]),
+log(Level, Msg0, #state{} = St) ->
+    ProtocolState = St#state.protocol_state,
+    Ctxt = bondy_wamp_protocol:context(ProtocolState),
 
-    Ctxt = bondy_wamp_protocol:context(St#state.protocol_state),
+    Msg = Msg0#{
+        protocol => wamp,
+        transport => websocket,
+        agent => bondy_wamp_protocol:agent(ProtocolState),
+        serializer => bondy_context:encoding(Ctxt),
+        frame_type => St#state.frame_type
+    },
+    Meta = #{
+        realm => bondy_wamp_protocol:realm_uri(ProtocolState),
+        session_id => bondy_wamp_protocol:session_id(ProtocolState),
+        peername => bondy_context:peername(Ctxt)
+    },
+    logger:log(Level, Msg, Meta);
 
-    Tail = [
-        bondy_wamp_protocol:realm_uri(St#state.protocol_state),
-        bondy_wamp_protocol:session_id(St#state.protocol_state),
-        bondy_context:peername(Ctxt),
-        bondy_wamp_protocol:agent(St#state.protocol_state),
-        St#state.frame_type,
-        bondy_context:encoding(Ctxt)
-    ],
-    lager:log(Level, self(), Format, lists:append(Head, Tail));
-
-log(Level, Prefix, Head, _) ->
-    lager:log(Level, self(), Prefix, Head).
+log(Level, Msg, _) ->
+    logger:log(Level, Msg).
 
 
 
@@ -505,10 +586,12 @@ reset_ping_interval(St) ->
 
 %% @private
 send_ping(#state{ping_attempts = N, ping_max_attempts = M} = St) when N > M ->
-    _ = log(
-        error,
-        "Connection closing; reason=ping_timeout, attempts=~p",
-        [N],
+    _ = log(error,
+        #{
+            description => "Connection closing",
+            reason => ping_timeout,
+            attempts => N
+        },
         St
     ),
     {stop, St};

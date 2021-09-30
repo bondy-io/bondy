@@ -632,25 +632,3 @@ maybe_set_method(Method, Ctxt) ->
         {error, Reason} ->
             throw(Reason)
     end.
-
-
-%% TODO
-% maybe_upgrade_password(PW0, M) ->
-%     String = maps:get(password, M),
-%     case bondy_password:upgrade(String, PW0) of
-%         false ->
-%             PW0;
-%         {true, PW1} ->
-%             %% The password was upgraded, we store it
-%             RealmUri = maps:get(realm_uri, M),
-%             Name = maps:get(username, M),
-
-%             case bondy_rbac_user:update(RealmUri, Name, #{password => PW1}) of
-%                 {ok, _} ->
-%                     _ = lager:debug("Password upgraded"),
-%                     PW1;
-%                 {error, Reason} ->
-%                     _ = lager:debug("Error while trying to upgrade password"),
-%                     throw(Reason)
-%             end
-%     end.

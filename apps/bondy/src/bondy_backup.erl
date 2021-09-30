@@ -22,6 +22,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_backup).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 -include("bondy_backup.hrl").
 
@@ -274,9 +275,11 @@ handle_info({restore_reply, {error, Reason}, Pid}, #state{pid = Pid} = State) ->
     ok = notify_restore_error([State#state.filename, Reason, Secs]),
     {noreply, State#state{status = undefined, pid = undefined}};
 
-
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        description => "Unexpected event received",
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -424,8 +427,7 @@ async_restore(#{filename := Filename}, State0) ->
         case do_restore(Filename) of
             {ok, _Counters} = OK ->
                 Me ! {restore_reply, OK, self()};
-            {error, Reason} = Error ->
-                _ = lager:error("Error;reason=~p", [Reason]),
+            {error, _} = Error ->
                 Me ! {restore_reply, Error, self()}
         end
     end),
@@ -665,50 +667,63 @@ do_read_head(Log, Acc0) ->
 
 %% @private
 notify_backup_started(File) ->
-    _ = lager:info("Started backup; filename=~p", [File]),
+    ?LOG_INFO(#{
+        description => "Started backup",
+        filename => File
+    }),
     bondy_event_manager:notify({backup_started, File}).
 
 
 %% @private
-notify_backup_finished(Args) when length(Args) == 2 ->
-    _ = lager:info(
-        "Finished creating backup; filename=~p, elapsed_time_secs=~p",
-        Args
-    ),
+notify_backup_finished([Filename, Time] = Args) ->
+    ?LOG_INFO(#{
+        description => "Finished creating backup",
+        filename => Filename,
+        elapsed_time_secs => Time
+    }),
     bondy_event_manager:notify({backup_finished, Args}).
 
 
 %% @private
-notify_backup_error(Args) when length(Args) == 3 ->
-    _ = lager:error(
-        "Error creating backup; filename=~p, reason=~p, elapsed_time_secs=~p",
-        Args
-    ),
+notify_backup_error([Reason, Filename, Time] = Args)  ->
+    ?LOG_ERROR(#{
+        description => "Error creating backup",
+        filename => Filename,
+        reason => Reason,
+        elapsed_time_secs => Time
+    }),
     bondy_event_manager:notify({backup_failed, Args}).
 
 
 %% @private
-notify_restore_started([Filename, _, _] = Args) ->
-    _ = lager:info(
-        "Backup restore started; filename=~p, recovered=~p, bad_bytes=~p",
-        Args
-    ),
+notify_restore_started([Filename, Rec, Bad]) ->
+    ?LOG_INFO(#{
+        description => "Backup restore started",
+        filename => Filename,
+        recovered => Rec,
+        bad_bytes => Bad
+    }),
     bondy_event_manager:notify({backup_restore_started, Filename}).
 
 
 %% @private
-notify_restore_finished(Args) when length(Args) == 4 ->
-    _ = lager:info(
-        "Backup restore finished; filename=~p, elapsed_time_secs=~p, read_count=~p, merged_count=~p",
-        Args
-    ),
+notify_restore_finished([Filename, Time, Read, Merged] = Args) ->
+    ?LOG_INFO(#{
+        description => "Backup restore finished",
+        filename => Filename,
+        elapsed_time_secs => Time,
+        read_count => Read,
+        merged_count => Merged
+    }),
     bondy_event_manager:notify({backup_restore_finished, Args}).
 
 
 %% @private
-notify_restore_error(Args)  when length(Args) == 3 ->
-    _ = lager:info(
-        "Backup restore error; filename=~p, reason=~p, elapsed_time_secs=~p",
-        Args
-    ),
+notify_restore_error([Filename, Reason, Time] = Args) ->
+    ?LOG_ERROR(#{
+        description => "Backup restore failed",
+        filename => Filename,
+        reason => Reason,
+        elapsed_time_secs => Time
+    }),
     bondy_event_manager:notify({backup_restore_failed, Args}).

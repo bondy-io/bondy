@@ -1,7 +1,7 @@
 -module(bondy_kafka_bridge).
 -behaviour(bondy_broker_bridge).
--include_lib("wamp/include/wamp.hrl").
 -include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 
 -define(PRODUCE_OPTIONS_SPEC, ?BROD_OPTIONS_SPEC#{
     %% The brod client to be used. This should have been configured through the
@@ -410,12 +410,13 @@ apply_action(Action) ->
                 {error, Reason}
         end
     catch
-        _:EReason:Stacktrace ->
-            _ = lager:error(
-                "Error while evaluating action; reason=~p, "
-                "action=~p, stacktrace=~p",
-                [EReason, Action, Stacktrace]
-            ),
+        Class:EReason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while evaluating action",
+                class => Class,
+                reason => EReason,
+                stacktrace => Stacktrace
+            }),
             {error, EReason}
     end.
 

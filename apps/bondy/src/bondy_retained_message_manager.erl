@@ -4,6 +4,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_retained_message_manager).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 
@@ -154,22 +155,26 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
                         retained_messages_count_limit,
                         <<"The number of retained messages has reached the system limit.">>
                     }),
-                    _ = lager:info(
-                        "Cannot retain message; reason=count_limit, "
-                        "realm=~p, topic=~p, publication_id=~p",
-                        [Realm, Topic, Event#event.publication_id]
-                    ),
+                    ?LOG_INFO(#{
+                        description => "Cannot retain message",
+                        reason => count_limit,
+                        realm_uri => Realm,
+                        topic => Topic,
+                        publication_id => Event#event.publication_id
+                    }),
                     ok;
                 #{memory := Val} when Val > MaxMem ->
                     bondy_alarm_handler:set_alarm({
                         retained_messages_memory_limit,
                         <<"The memory allocation for retained messages has reached the system limit.">>
                     }),
-                    _ = lager:info(
-                        "Cannot retain message; reason=memory_limit, "
-                        "realm=~p, topic=~p, publication_id=~p",
-                        [Realm, Topic, Event#event.publication_id]
-                    ),
+                    ?LOG_INFO(#{
+                        description => "Cannot retain message",
+                        reason => memory_limit,
+                        realm_uri => Realm,
+                        topic => Topic,
+                        publication_id => Event#event.publication_id
+                    }),
                     ok;
                 _ ->
                     try
@@ -178,20 +183,22 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
                         )
                     catch
                         Class:Reason:Stacktrace ->
-                            _ = lager:error(
-                                "Error while retaining message; "
-                                "class=~p, reason=~p, stacktrace=~p",
-                                [Class, Reason, Stacktrace]
-                            ),
+                            ?LOG_INFO(#{
+                                class => Class,
+                                reason => Reason,
+                                stacktrace => Stacktrace
+                            }),
                             ok
                     end
             end;
         false ->
-            lager:info(
-                "Cannot retain message; reason=max_size_limit, "
-                "realm=~p, topic=~p, publication_id=~p",
-                [Realm, Topic, Event#event.publication_id]
-            ),
+            ?LOG_INFO(#{
+                description => "Cannot retain message",
+                reason => max_size_limit,
+                realm_uri => Realm,
+                topic => Topic,
+                publication_id => Event#event.publication_id
+            }),
             ok
     end.
 
@@ -301,23 +308,29 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast(Event, State) ->
-    _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 handle_info(
     {plum_db_event, object_update, {{{_, Realm}, _Key}, Obj, PrevObj}},
     State) ->
-    _ = lager:debug(
-        "Object update notification; object=~p, previous=~p",
-        [Obj, PrevObj]
-    ),
+    ?LOG_ERROR(#{
+        description => "Object update notification",
+        object => Obj,
+        previous => PrevObj
+    }),
     case maybe_resolve(Obj) of
         '$deleted' when PrevObj =/= undefined ->
             %% We make sure we get the last event from the dvvset
@@ -335,7 +348,10 @@ handle_info(
     {noreply, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -372,7 +388,10 @@ init_evictor() ->
         N = bondy_retained_message:evict_expired('_', Decr),
         _ = case N > 0 of
             true ->
-                _ = lager:info("Evicted ~p retained messages", [N]),
+                ?LOG_INFO(#{
+                    description => "Evicted retained messages",
+                    count => N
+                }),
                 ok;
             false ->
                 ok
@@ -388,7 +407,7 @@ init_evictor() ->
         ]}
     ]),
 
-    _ = lager:info("Retained message evictor initialised"),
+    ?LOG_INFO(#{description => "Retained message evictor initialised"}),
     ok.
 
 

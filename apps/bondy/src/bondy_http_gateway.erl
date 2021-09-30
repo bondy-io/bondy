@@ -22,6 +22,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_http_gateway).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -217,6 +218,9 @@ dispatch_table(Listener) ->
 %% @end
 %% -----------------------------------------------------------------------------
 rebuild_dispatch_tables() ->
+    ?LOG_INFO(#{
+        description => "Rebuilding HTTP Gateway dispatch tables"
+    }),
     _ = [
         rebuild_dispatch_table(Scheme, Routes) ||
         {Scheme, Routes} <- load_dispatch_tables()
@@ -306,8 +310,11 @@ handle_call({load, Map}, _From, State) ->
     end;
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -324,8 +331,10 @@ handle_cast(#event{} = Event, State) ->
     {noreply, NewState};
 
 handle_cast(Event, State) ->
-    _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 handle_info({plum_db_event, exchange_started, {Pid, _Node}}, State) ->
@@ -351,9 +360,10 @@ handle_info({plum_db_event, object_update, {{?PREFIX, Key}, _, _}}, State0) ->
     %% We've got a notification that an API Spec object has been updated
     %% in the database via cluster replication, so we need to rebuild the
     %% Cowboy dispatch tables.
-
-    _ = lager:info("API Spec object_update received; key=~p", [Key]),
-
+    ?LOG_INFO(#{
+        description => "API Specification remote update received",
+        key => Key
+    }),
     Specs = [Key|State0#state.updated_specs],
     State1 = State0#state{updated_specs = Specs},
     Status = {bondy_config:get(status), plum_db_config:get(aae_enabled)},
@@ -400,7 +410,10 @@ handle_info(
     {noreply, State1};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -477,13 +490,17 @@ unsubscribe(State) ->
 
 %% @private
 do_start_listeners(public) ->
-    _ = lager:info("Starting public HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Starting public HTTP/S listeners"
+    }),
     DTables = load_dispatch_tables(),
     _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok;
 
 do_start_listeners(admin) ->
-    _ = lager:info("Starting admin HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Starting admin HTTP/S listeners"
+    }),
     DTables = parse_specs([admin_spec()], admin_base_routes()),
     _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
     ok.
@@ -491,13 +508,17 @@ do_start_listeners(admin) ->
 
 %% @private
 do_suspend_listeners(public) ->
-    _ = lager:info("Suspending public HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Suspending public HTTP/S listeners"
+    }),
     catch ranch:suspend_listener(?HTTP),
     catch ranch:suspend_listener(?HTTPS),
     ok;
 
 do_suspend_listeners(admin) ->
-    _ = lager:info("Suspending admin HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Suspending admin HTTP/S listeners"
+    }),
     catch ranch:suspend_listener(?ADMIN_HTTP),
     catch ranch:suspend_listener(?ADMIN_HTTPS),
     ok.
@@ -505,13 +526,17 @@ do_suspend_listeners(admin) ->
 
 %% @private
 do_resume_listeners(public) ->
-    _ = lager:info("Resuming public HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Resuming public HTTP/S listeners"
+    }),
     catch ranch:resume_listener(?HTTP),
     catch ranch:resume_listener(?HTTPS),
     ok;
 
 do_resume_listeners(admin) ->
-    _ = lager:info("Resuming admin HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Resuming admin HTTP/S listeners"
+    }),
     catch ranch:resume_listener(?ADMIN_HTTP),
     catch ranch:resume_listener(?ADMIN_HTTPS),
     ok.
@@ -519,13 +544,17 @@ do_resume_listeners(admin) ->
 
 %% @private
 do_stop_listeners(public) ->
-    _ = lager:info("Stopping public HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Stopping public HTTP/S listeners"
+    }),
     catch cowboy:stop_listener(?HTTP),
     catch cowboy:stop_listener(?HTTPS),
     ok;
 
 do_stop_listeners(admin) ->
-    _ = lager:info("Stopping admin HTTP/S listeners"),
+    ?LOG_INFO(#{
+        description => "Stopping admin HTTP/S listeners"
+    }),
     catch cowboy:stop_listener(?ADMIN_HTTP),
     catch cowboy:stop_listener(?ADMIN_HTTPS),
     ok.
@@ -551,32 +580,36 @@ do_apply_config(FName) ->
             {ok, []} ->
                 ok;
             {ok, Specs} when is_list(Specs) ->
-                _ = lager:info(
-                    "Loading configuration file; filename=~p", [FName]
-                ),
+                ?LOG_INFO(#{
+                    description => "Loading configuration file found",
+                    filename => FName
+                }),
                 _ = [load_spec(Spec) || Spec <- Specs],
                 rebuild_dispatch_tables();
             {error, enoent} ->
-                _ = lager:warning(
-                    "No configuration file found; path=~p",
-                    [FName]
-                ),
+                ?LOG_WARNING(#{
+                    description => "No configuration file found",
+                    reason => enoent,
+                    filename => FName
+                }),
                 ok;
             {error, Reason} ->
-                _ = lager:error(
-                    "Error while loading API specification; "
-                    "filename=~p, reason=~p",
-                    [FName, Reason]
-                ),
+                ?LOG_ERROR(#{
+                    description => "Error while loading API specification",
+                    reason => invalid_json_format,
+                    filename => FName
+                }),
                 error({invalid_json_format, Reason})
         end
     catch
         Class:EReason:Stacktrace ->
-            _ = lager:error(
-                "Error while loading API specification; "
-                "filename=~p, class=~p, reason=~p, stacktrace=~p",
-                [FName, Class, EReason, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while loading API specification",
+                class => Class,
+                reason => EReason,
+                stacktrace => Stacktrace,
+                filename => FName
+            }),
             ok
     end.
 
@@ -592,9 +625,11 @@ load_spec(Map) when is_map(Map) ->
                 maps:put(<<"ts">>, erlang:monotonic_time(millisecond), Map)
             );
         {error, Reason} ->
-            _ = lager:error(
-                "Error while loading API specification; reason=~p, api_id=~p", [Reason, maps:get(<<"id">>, Map, undefined)]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while loading API specification",
+                reason => Reason,
+                api_id => maps:get(<<"id">>, Map, undefined)
+            }),
             throw(Reason)
     end;
 
@@ -606,10 +641,11 @@ load_spec(FName) ->
         {ok, []} ->
             ok;
         {error, Reason} ->
-            _ = lager:error(
-                "Error while parsing API specification; filename=~p, reason=~p",
-                [FName, Reason]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while parsing API specification",
+                filename => FName,
+                reason => Reason
+            }),
             throw(invalid_json_format)
     end.
 
@@ -680,10 +716,11 @@ start_http(Routes, Name) ->
         {ok, _} ->
             ok;
         {error, eaddrinuse} ->
-            _ = lager:error(
-                "Cannot start HTTP listener, address is in use; name=~p,reason=eaddrinuse, transport_opts=~p",
-                [Name, TransportOpts]
-            ),
+            ?LOG_ERROR(#{
+                description => "Cannot start HTTP listener, address is in use", name => Name,
+                reason => eaddrinuse,
+                transport_opts => TransportOpts
+            }),
             {error, eaddrinuse};
         {error, _} = Error ->
             Error
@@ -739,10 +776,12 @@ start_https(Routes, Name) ->
         {ok, _} ->
             ok;
         {error, eaddrinuse} ->
-            _ = lager:error(
-                "Cannot start HTTPS listener, address is in use; name=~p, reason=eaddrinuse, transport_opts=~p",
-                [Name, TransportOpts]
-            ),
+            ?LOG_ERROR(#{
+                description => "Cannot start HTTPS listener, address is in use",
+                name => Name,
+                reason => eaddrinuse,
+                transport_opts => TransportOpts
+            }),
             {error, eaddrinuse};
         {error, _} = Error ->
             Error
@@ -780,18 +819,20 @@ load_dispatch_tables() ->
             try
                 Parsed = bondy_http_gateway_api_spec_parser:parse(V),
                 Ts = maps:get(<<"ts">>, V),
-                _ = lager:info(
-                    "Loading and parsing API Gateway specification from store"
-                    ", name=~s, id=~s, ts=~p",
-                    [maps:get(<<"name">>, V), maps:get(<<"id">>, V), Ts]
-                ),
+                ?LOG_INFO(#{
+                    description => "Loading and parsing API Gateway specification from store",
+                    name => maps:get(<<"name">>, V),
+                    id => maps:get(<<"id">>, V),
+                    timestamp => Ts
+                }),
                 {K, Ts, Parsed}
             catch
                 _:_:_ ->
                     _ = delete(K),
-                    _ = lager:warning(
-                        "Removed invalid API Gateway specification from store"
-                    ),
+                    ?LOG_WARNING(#{
+                        description => "Removed invalid API Gateway specification from store",
+                        key => K
+                    }),
                     []
             end
 
@@ -840,18 +881,17 @@ handle_spec_updates(#state{updated_specs = []}) ->
     ok;
 
 handle_spec_updates(#state{updated_specs = [Key]}) ->
-    _ = lager:info(
-        "API Spec object_update received,"
-        " rebuilding HTTP server dispatch tables; key=~p",
-        [Key]
-    ),
+    ?LOG_INFO(#{
+        description => "API Spec object_update received",
+        key => Key
+    }),
     rebuild_dispatch_tables();
 
-handle_spec_updates(#state{}) ->
-    _ = lager:info(
-        "Multiple API Spec object_update(s) received,"
-        " rebuilding HTTP server dispatch tables"
-    ),
+handle_spec_updates(#state{updated_specs = L}) ->
+    ?LOG_INFO(#{
+        description => "Multiple API Spec object_update(s) received",
+        count => length(L)
+    }),
     rebuild_dispatch_tables().
 
 
@@ -892,18 +932,18 @@ admin_spec() ->
         {ok, Spec} ->
             Spec;
         {error, enoent} ->
-            _ = lager:error(
-                "Error processing API Gateway Specification file. "
-                "filename=~p, reason=~p",
-                [File, file:format_error(enoent)]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error processing API Gateway Specification file.",
+                filename => File,
+                reason => file:format_error(enoent)
+            }),
             exit(enoent);
         {error, Reason} ->
-            _ = lager:error(
-                "Error while parsing API Gateway Specification file; "
-                "filename=~p, reason=~p",
-                [File, Reason]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while parsing API Gateway Specification file",
+                filename => File,
+                reason => Reason
+            }),
             exit(invalid_json_format)
     end.
 

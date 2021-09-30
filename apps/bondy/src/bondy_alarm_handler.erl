@@ -23,6 +23,8 @@
 -module(bondy_alarm_handler).
 -behaviour(gen_event).
 
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {
     alarms = []     ::  list()
 }).
@@ -88,7 +90,11 @@ init({[], _}) ->
     {ok, State}.
 
 handle_event({set_alarm, {Id, Desc} = Alarm}, State0)->
-    _ = lager:warning("Alarm set; id=~p, description=~p", [Id, Desc]),
+    ?LOG_WARNING(#{
+        description => "Alarm set",
+        alarm_id => Id,
+        alarm_description => Desc
+    }),
     Alarms = case {State0#state.alarms, Id} of
         {[], _} ->
             [Alarm];

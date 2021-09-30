@@ -22,9 +22,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy).
+-include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
--include_lib("wamp/include/wamp.hrl").
 
 -type wamp_error_map() :: #{
     error_uri => uri(),
@@ -383,11 +384,13 @@ maybe_enqueue(true, _SessionId, _M, _) ->
     ok;
 
 maybe_enqueue(false, _SessionId, _M, _Reason) ->
-    % _ = lager:debug(
-    %     "Could not deliver message to WAMP peer; "
-    %     "reason=~p, session_id=~p, message_type=~p",
-    %     [Reason, SessionId, element(1, M)]
-    % ),
+    %% ?LOG_DEBUG(#{
+    %%     description => "Could not deliver message to WAMP peer",
+    %%     reason => Reason,
+    %%     session_id => SessionId,
+    %%     messate_type => element(1, M)
+    %% }),
+
     %% TODO add stats
     ok.
 

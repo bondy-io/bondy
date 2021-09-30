@@ -36,7 +36,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_registry).
 -behaviour(gen_server).
-
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -326,9 +326,10 @@ remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
 when is_function(Task, 2) orelse Task == undefined ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
-            _ = lager:info(
-                "Context has no session_id; failed to remove registry contents"
-            ),
+            ?LOG_INFO(#{
+                description => "Failed to remove registry contents",
+                reason => "Context has no session_id"
+            }),
             ok;
         SessionId ->
             Node = bondy_context:node(Ctxt),
@@ -603,10 +604,11 @@ match(Type, Uri, RealmUri, Opts) ->
             {[], ?EOT};
         error:badarg:Stacktrace ->
             %% @TODO this will be fixed when art provides persistent tries
-            _ = lager:warning(
-                "Error while searching trie; stacktrace=~p",
-                [Stacktrace]
-            ),
+            ?LOG_DEBUG(#{
+                description => "Error while searching trie",
+                reason => badarg,
+                stacktrace => Stacktrace
+            }),
             {[], ?EOT}
     end.
 
@@ -663,24 +665,30 @@ handle_call(init_tries, _From, State0) ->
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast(Event, State) ->
-    _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
 handle_info(
     {plum_db_event, object_update, {{{_, _}, _Key}, Obj, PrevObj}},
     State) ->
-    _ = lager:debug(
-        "Object update notification; object=~p, previous=~p",
-        [Obj, PrevObj]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Object update notification.",
+        object => Obj,
+        previous => PrevObj
+    }),
     case maybe_resolve(Obj) of
         '$deleted' when PrevObj =/= undefined ->
             %% We do this since we need to know the Match Policy of the
@@ -702,7 +710,10 @@ handle_info(
     {noreply, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        reason => unexpected_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -730,7 +741,9 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 init_tries(State0) ->
-    _ = lager:info("Initialising in-memory registry tries from store."),
+    ?LOG_INFO(#{
+        description => "Initialising in-memory registry tries from store."
+    }),
     Opts = [{resolver, lww}],
     Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
     {ok, State1} = init_tries(Iterator0, State0),
@@ -770,8 +783,10 @@ maybe_add_to_trie(Entry, Now) ->
     case MyNode == Node andalso Created < Now of
         true ->
             %% This entry should have been deleted when node crashed or shutdown
-            _ = lager:debug(
-                "Removing stale entry from plum_db; entry=~p", [Entry]),
+            ?LOG_DEBUG(#{
+                description => "Removing stale entry from plum_db",
+                entry => Entry
+            }),
             _ = delete_from_trie(Entry),
             ok;
         false ->
@@ -794,8 +809,10 @@ delete_from_trie(Entry) ->
             _ = decr_counter(RealmUri, Uri, 1),
             ok;
         error ->
-            _ = lager:debug(
-                "Failed deleting entry from trie; key=~p", [TrieKey]),
+            ?LOG_DEBUG(#{
+                description => "Failed deleting entry from trie",
+                key => TrieKey
+            }),
             ok
     end.
 

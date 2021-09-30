@@ -98,6 +98,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_broker_bridge_manager).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 -define(TIMEOUT, 30000).
@@ -422,23 +423,36 @@ handle_call({load, Term}, _From, State) ->
     {reply, Res, NewState};
 
 handle_call(Event, From, State) ->
-    _ = lager:error("Unexpected event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {noreply, State}.
 
 
 handle_cast(Event, State) ->
-    _ = lager:error("Unexpected event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
-    _ = lager:debug("Subscriber down, pid=~p", [Pid]),
+    ?LOG_DEBUG(#{
+        description => "Subscriber down",
+        pid => Pid
+    }),
     %% TODO
     {noreply, State};
 
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected event, event=~p, state=~p", [Info, State]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -488,11 +502,12 @@ init_bridges(State) ->
         Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
         {ok, State#state{bridges = Bridges1}}
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error; reason ~p, stacktrace=~p",
-                [Reason, Stacktrace]
-            ),
+        Class:Reason:Stacktrace->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -547,25 +562,26 @@ load_config(Map, State) when is_map(Map) ->
 load_config(FName, State) when is_list(FName) orelse is_binary(FName) ->
     case bondy_utils:json_consult(FName) of
         {ok, Spec} ->
-            _ = lager:info(
-                "Loading configuration file; path=~p", [FName]
-            ),
+            ?LOG_INFO(#{
+                description => "Loading configuration file",
+                filename => FName
+            }),
             load_config(Spec, State);
         {error, enoent} ->
             {ok, State};
         {error, {badarg, Reason}} ->
             {{error, {invalid_specification_format, Reason}}, State};
         {error, Reason} ->
-            _ = lager:error(
-                "Error while parsing JSON configuration file. "
-                "filename=~p, reason=~p, ",
-                [FName, Reason]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while parsing JSON configuration file.",
+                filename => FName,
+                reason => Reason
+            }),
             exit(badarg)
     end;
 
 load_config(undefined, State) ->
-    _ = lager:info("Broker Bridge configuration file undefined"),
+    ?LOG_INFO(#{description => "Broker Bridge configuration file undefined"}),
     {ok, State};
 
 load_config(_, State) ->
@@ -648,13 +664,13 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
         true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
         Res
     catch
-        _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error while evaluating action; reason=~p, "
-                "bridge = ~p "
-                "stacktrace=~p",
-                [Reason, Bridge, Stacktrace]
-            ),
+        Class:Reason:Stacktrace->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                bridge => Bridge
+            }),
             {{error, Reason}, State}
     end.
 

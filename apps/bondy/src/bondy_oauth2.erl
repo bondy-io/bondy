@@ -31,6 +31,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2).
+
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
 -define(FOLD_OPTS, [{resolver, lww}]).
@@ -214,13 +216,12 @@ refresh_token(RealmUri, Issuer, Token) ->
             %% We double check the user still exists
             case bondy_rbac_user:lookup(RealmUri, Username) of
                 {error, not_found} ->
-                    _ = lager:warning(
-                        "Removing dangling refresh_token; "
-                        "refresh_token=~p, "
-                        "realm_uri=~p, "
-                        "issuer=~p",
-                        [Token, RealmUri, Issuer]
-                    ),
+                    ?LOG_WARNING(#{
+                        description => "Removing dangling refresh_token",
+                        refresh_token => Token,
+                        realm_uri => RealmUri,
+                        issuer => Issuer
+                    }),
                     %% We remove all refresh tokens for this user
                     _ = revoke_tokens(refresh_token, RealmUri, Username),
                     {error, oauth2_invalid_grant};
@@ -446,13 +447,12 @@ rebuild_token_indices(RealmUri, Issuer) ->
         when Iss == Issuer ->
             store_token_indices(RealmUri, Token, Data);
         ({Token, #bondy_oauth2_token{issuer = Iss}}) ->
-            _ = lager:error(
-                "Found invalid token; "
-                "token=~p, "
-                "reason=issuer_mismatch, "
-                "issuer=~p",
-                [Token, Iss]
-            ),
+            ?LOG_ERROR(#{
+                description => "Found invalid token",
+                token => Token,
+                reason => issuer_mismatch,
+                issuer => Iss
+            }),
             ok
     end,
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).

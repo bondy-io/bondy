@@ -2,6 +2,7 @@
 
 -export([set_process_metadata/1]).
 -export([update_process_metadata/1]).
+-export([message_and_meta/2]).
 
 
 
@@ -32,3 +33,22 @@ set_process_metadata(Map) ->
 
 update_process_metadata(Map) ->
     logger:update_process_metadata(Map).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec message_and_meta(wamp_message:t(), bondy_context:t()) -> {map(), map()}.
+
+message_and_meta(WAMPMsg, Ctxt) ->
+    Msg = #{
+        message_type => element(1, WAMPMsg),
+        message_id => element(2, WAMPMsg)
+    },
+    Meta = #{
+        realm_uri => bondy_context:realm_uri(Ctxt),
+        session_id => bondy_context:session_id(Ctxt),
+        encoding => bondy_context:encoding(Ctxt)
+    },
+
+    {Msg, Meta}.

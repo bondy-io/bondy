@@ -109,14 +109,14 @@ challenge(Details, Ctxt, State) ->
 
         case lists:member(Key, Keys) of
             true ->
-                Message = enacl:randombytes(32),
+                Challenge = enacl:randombytes(32),
                 NewState = State#{
                     pubkey => Key,
-                    message => Message
+                    challenge => Challenge
                 },
 
                 Extra = #{
-                    challenge => encode_hex(Message),
+                    challenge => encode_hex(Challenge),
                     channel_binding => undefined %% TODO
                 },
                 {ok, Extra, NewState};
@@ -145,15 +145,15 @@ authenticate(EncSignature, _, _, #{pubkey := PK} = State)
 when is_binary(EncSignature) ->
     try
         Signature = decode_hex(EncSignature),
-        Message = maps:get(message, State),
+        Challenge = maps:get(challenge, State),
 
-        %% Verify that the message was signed using the Ed25519 key
-        case enacl:sign_verify_detached(Signature, Message, PK) of
+        %% Verify that the Challenge was signed using the Ed25519 key
+        case enacl:sign_verify_detached(Signature, Challenge, PK) of
             true ->
                 {ok, #{}, State};
 
             false ->
-                %% Message does not match the expected
+                %% Challenge does not match the expected
                 {error, invalid_signature, State}
         end
     catch

@@ -66,25 +66,25 @@ handle_call(?BONDY_OAUTH2_CLIENT_DELETE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_OAUTH2_CLIENT_GET, #call{} = M, Ctxt) ->
-    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-    case bondy_oauth2_client:lookup(Uri, Username) of
-        {ok, Client} ->
-            Ext = bondy_oauth2_client:to_external(Client),
-            wamp_message:result(M#call.request_id, #{}, [Ext]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
+% handle_call(?BONDY_OAUTH2_CLIENT_GET, #call{} = M, Ctxt) ->
+%     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+%     case bondy_oauth2_client:lookup(Uri, Username) of
+%         {ok, Client} ->
+%             Ext = bondy_oauth2_client:to_external(Client),
+%             wamp_message:result(M#call.request_id, #{}, [Ext]);
+%         {error, Reason} ->
+%             bondy_wamp_utils:error(Reason, M)
+%     end;
 
-handle_call(?BONDY_OAUTH2_CLIENT_LIST, #call{} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-    case bondy_oauth2_client:list(Uri) of
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M);
-        List ->
-            Ext = [bondy_oauth2_client:to_external(C) || C <- List],
-            wamp_message:result(M#call.request_id, #{}, [Ext])
-    end;
+% handle_call(?BONDY_OAUTH2_CLIENT_LIST, #call{} = M, Ctxt) ->
+%     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+%     case bondy_oauth2_client:list(Uri) of
+%         {error, Reason} ->
+%             bondy_wamp_utils:error(Reason, M);
+%         List ->
+%             Ext = [bondy_oauth2_client:to_external(C) || C <- List],
+%             wamp_message:result(M#call.request_id, #{}, [Ext])
+%     end;
 
 handle_call(?BONDY_OAUTH2_CLIENT_UPDATE, #call{} = M, Ctxt) ->
     [Uri, Username, Info] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
@@ -116,25 +116,25 @@ handle_call(?BONDY_OAUTH2_RES_OWNER_DELETE, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end;
 
-handle_call(?BONDY_OAUTH2_RES_OWNER_GET, #call{} = M, Ctxt) ->
-    [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-    case bondy_oauth2_resource_owner:lookup(Uri, Username) of
-        {ok, Client} ->
-            Ext = bondy_oauth2_resource_owner:to_external(Client),
-            wamp_message:result(M#call.request_id, #{}, [Ext]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end;
+% handle_call(?BONDY_OAUTH2_RES_OWNER_GET, #call{} = M, Ctxt) ->
+%     [Uri, Username] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+%     case bondy_oauth2_resource_owner:lookup(Uri, Username) of
+%         {ok, Client} ->
+%             Ext = bondy_oauth2_resource_owner:to_external(Client),
+%             wamp_message:result(M#call.request_id, #{}, [Ext]);
+%         {error, Reason} ->
+%             bondy_wamp_utils:error(Reason, M)
+%     end;
 
-handle_call(?BONDY_OAUTH2_RES_OWNER_LIST, #call{} = M, Ctxt) ->
-    [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
-    case bondy_oauth2_resource_owner:list(Uri) of
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M);
-        List ->
-            Ext = [bondy_oauth2_resource_owner:to_external(C) || C <- List],
-            wamp_message:result(M#call.request_id, #{}, [Ext])
-    end;
+% handle_call(?BONDY_OAUTH2_RES_OWNER_LIST, #call{} = M, Ctxt) ->
+%     [Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+%     case bondy_oauth2_resource_owner:list(Uri) of
+%         {error, Reason} ->
+%             bondy_wamp_utils:error(Reason, M);
+%         List ->
+%             Ext = [bondy_oauth2_resource_owner:to_external(C) || C <- List],
+%             wamp_message:result(M#call.request_id, #{}, [Ext])
+%     end;
 
 
 handle_call(?BONDY_OAUTH2_RES_OWNER_UPDATE, #call{} = M, Ctxt) ->

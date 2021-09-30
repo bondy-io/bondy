@@ -68,6 +68,7 @@
 %% =============================================================================
 -module(bondy_broker).
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
 
@@ -103,10 +104,12 @@ close_context(Ctxt) ->
         Ctxt
     catch
         Class:Reason:Stacktrace ->
-        _ = lager:debug(
-            "Error while closing context; class=~p, reason=~p, trace=~p",
-            [Class, Reason, Stacktrace]
-        ),
+        ?LOG_DEBUG(#{
+            description => "Error while closing context",
+            class => Class,
+            reason => Reason,
+            stacktrace => Stacktrace
+        }),
         Ctxt
     end.
 
@@ -246,16 +249,13 @@ when is_map(Ctxt) ->
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         _:Reason:Stacktrace->
-            _ = lager:error(
-                "Error while publishing; reason=~p, "
-                "topic=~p, session_id=~p, stacktrace=~p",
-                [
-                    Reason,
-                    TopicUri,
-                    bondy_context:session_id(Ctxt),
-                    Stacktrace
-                ]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while publishing",
+                reason => Reason,
+                session_id => bondy_context:session_id(Ctxt),
+                topic => TopicUri,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -694,15 +694,20 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     {ok, Good, Bad} = bondy_peer_wamp_forwarder:broadcast(
         Publisher, Nodes, M, Opts),
 
-    Nodes =:= Good orelse
-    bondy_utils:log(
-        error,
-        "Publication broadcast failed; good_nodes=~p, bad_nodes=~p",
-        [Good, Bad],
-        M,
-        Ctxt
-    ),
-
+    case Nodes =:= Good of
+        true ->
+            ok;
+        false ->
+            {Msg, Meta} = bondy_logger_utils:message_and_meta(M, Ctxt),
+            ?LOG_ERROR(
+                Msg#{
+                    description => "Publication broadcast failed",
+                    good_nodes => Good,
+                    bad_nodes => Bad
+                },
+                Meta
+            )
+    end,
     ok.
 
 

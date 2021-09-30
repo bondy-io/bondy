@@ -162,6 +162,7 @@
 %% =============================================================================
 -module(bondy_dealer).
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
 
@@ -270,10 +271,12 @@ close_context(Ctxt) ->
         Ctxt
     catch
         Class:Reason:Stacktrace ->
-            _ = lager:error(
-                "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while closing context",
+                class => Class,
+                reason => Reason,
+                trace => Stacktrace
+            }),
             Ctxt
     end.
 
@@ -994,10 +997,11 @@ peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 2) ->
 no_matching_promise(M) ->
     %% Promise was fulfilled or timed out and/or garbage collected,
     %% we do nothing.
-    _ = lager:debug(
-        "Message ignored; reason=no_matching_promise, message=~p",
-        [M]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Message ignored",
+        reason => no_matching_promise,
+        message => M
+    }),
     ok.
 
 

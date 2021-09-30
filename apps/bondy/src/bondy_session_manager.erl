@@ -1,7 +1,9 @@
 -module(bondy_session_manager).
 -behaviour(gen_server).
--include("bondy.hrl").
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -record(state, {}).
 
@@ -71,7 +73,6 @@ open(Id, Peer, RealmOrUri, Opts) ->
 -spec close(bondy_session:t()) -> ok.
 
 close(Session) ->
-
     ok = bondy_session:close(Session),
     gen_server:cast(?MODULE, {close, Session}).
 
@@ -94,35 +95,40 @@ handle_call({open, Session}, _From, State) ->
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]
-    ),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 handle_cast({close, Session}, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
     ok = gproc_monitor:unsubscribe({n, l, {session, Uri, Id}}),
-    _ = lager:debug(
-        "Demonitoring session connection; realm=~p, session_id=~p",
-        [Uri, Id]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Demonitoring session connection",
+        realm => Uri,
+        session_id => Id
+    }),
     {noreply, State};
 
 handle_cast(Event, State) ->
-    _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p", [Event]
-    ),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
 handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, undefined}, State) ->
     %% The connection process has died or closed
-    _ = lager:debug(
-        "Connection process for session terminated, cleaning up; "
-        "realm=~p, session_id=~p",
-        [Uri, Id]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Connection process for session terminated, cleaning up",
+        realm => Uri,
+        session_id => Id
+    }),
+
     case bondy_session:lookup(Id) of
         {error, not_found} ->
             ok;
@@ -132,14 +138,19 @@ handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, undefined}, State) ->
     {noreply, State};
 
 handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, Pid}, State) ->
-    _ = lager:debug(
-        "Monitoring session connection; realm=~p, session_id=~p, pid=~p",
-        [Uri, Id, Pid]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Monitoring session connection",
+        realm => Uri,
+        session_id => Id,
+        pid => Pid
+    }),
     {noreply, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 

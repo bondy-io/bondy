@@ -54,6 +54,8 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_event_manager).
 
+-include_lib("kernel/include/logger.hrl").
+
 %% API
 -export([add_handler/2]).
 -export([add_handler/3]).

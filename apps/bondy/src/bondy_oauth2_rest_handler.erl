@@ -21,6 +21,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2_rest_handler).
+
+-include_lib("kernel/include/logger.hrl").
 -include("http_api.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -310,10 +312,13 @@ accept(Req0, St) ->
                 jwks(Req1, St)
         end
     catch
-        error:Reason:Stacktrace->
-            _ = lager:error(
-                "type=error, reason=~p, stacktrace:~p",
-                [Reason, Stacktrace]),
+        error:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => error,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+
             Req2 = reply(Reason, Req0),
             {false, Req2, St}
     end.
@@ -355,20 +360,24 @@ do_is_authorized(Req0, St0) ->
 
     catch
         throw:EReason ->
-            _ = lager:info(
-                "API Client login failed due to invalid client ID; "
-                "reason=~p, realm=~p, client_ip=~s",
-                [EReason, St0#state.realm_uri, ClientIP]
-            ),
+            ?LOG_INFO(#{
+                description => "API Client login failed due to invalid client ID",
+                reason => EReason,
+                rea => St0#state.realm_uri,
+                client_ip => ClientIP
+            }),
             Req1 = reply(oauth2_invalid_client, Req0),
             {stop, Req1, St0};
 
         _:{request_error, {header, H}, Desc} ->
-            _ = lager:info(
-                "API Client login failed due to bad request; "
-                "reason=badheader, header=~p, realm=~p, client_ip=~s ",
-                [H, St0#state.realm_uri, ClientIP]
-            ),
+            ?LOG_INFO(#{
+                description => "API Client login failed due to invalid client ID",
+                reason => badheader,
+                header => H,
+                realm => St0#state.realm_uri,
+                client_ip => ClientIP
+            }),
+
             Req1 = reply({badheader, H, Desc}, Req0),
             {stop, Req1, St0}
     end.
@@ -442,10 +451,12 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     catch
         throw:EReason ->
             BinIP = inet_utils:ip_address_to_binary(IP),
-            _ = lager:info(
-                "Resource Owner login failed, error=invalid_grant, reason=~p, client_device_id=~s, realm_uri=~s, ip=~s",
-                [EReason, DeviceId, RealmUri, BinIP]
-            ),
+            ?LOG_INFO(#{
+                description => "Resource Owner login failed. The grant is invalid", reason => EReason,
+                client_device_id => DeviceId,
+                realm_uri => RealmUri,
+                cient_ip => BinIP
+            }),
             {stop, reply(oauth2_invalid_grant, Req0), St0}
     end;
 
@@ -462,11 +473,11 @@ token_flow(#{?GRANT_TYPE := <<"refresh_token">>} = Map0, Req0, St0) ->
         #{<<"refresh_token">> := Val} -> refresh_token(Val, Req0, St0)
     catch
         error:Reason:Stacktrace->
-            _ = lager:info(
-                "Error while refreshing OAuth2 token; "
-                "reason=~[], stacktrace:~p",
-                [Reason, Stacktrace]
-            ),
+            ?LOG_INFO(#{
+                description => "Error while refreshing OAuth2 token",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             error({oauth2_invalid_request, Map0})
     end;
 

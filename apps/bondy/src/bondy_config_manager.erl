@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_config_manager).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
 -define(WAMP_EXT_OPTIONS, [
@@ -198,19 +199,30 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        description => "Error handling call",
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
 handle_cast(Event, State) ->
-    _ = lager:error(
-        "Error handling cast, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        description => "Error handling cast",
+        reason => unsupported_event,
+        event => Event
+    }),
     {noreply, State}.
 
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p, state=~p", [Info, State]),
+    ?LOG_DEBUG(#{
+        description => "Error handling info",
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -274,10 +286,11 @@ maybe_configure_message_retention(Config0) ->
         end
     catch
         _:Reason:Stacktrace ->
-            _ = lager:error(
-                "Error while preparing configuration; reason=~p, stacktrace=~p",
-                [Reason, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while preparing configuration",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {error, Reason}
     end.
 
@@ -287,21 +300,21 @@ apply_private_config({error, Reason}, _State) ->
     {stop, Reason};
 
 apply_private_config({ok, Config}, State) ->
-    _ = lager:debug("Bondy private configuration started"),
+    ?LOG_DEBUG(#{description => "Bondy private configuration started"}),
     try
         _ = [
             ok = application:set_env(App, Param, Val)
             || {App, Params} <- Config, {Param, Val} <- Params
         ],
-        _ = lager:info("Bondy private configuration initialised"),
+        ?LOG_INFO("Bondy private configuration initialised"),
         {ok, State}
     catch
         error:Reason:Stacktrace ->
-            _ = lager:error(
-                "Error while applying private configuration options; "
-                " reason=~p, stacktrace=~p",
-                [Reason, Stacktrace]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while applying private configuration options",
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {stop, Reason}
     end.
 

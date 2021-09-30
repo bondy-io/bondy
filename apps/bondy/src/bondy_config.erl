@@ -22,6 +22,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_config).
 -behaviour(app_config).
+-include_lib("kernel/include/logger.hrl").
 
 -define(APP, bondy).
 
@@ -47,7 +48,7 @@
 %% -----------------------------------------------------------------------------
 init() ->
     ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
-    _ = lager:info("Bondy configuration initialised"),
+    ?LOG_INFO(#{description => "Bondy configuration initialised"}),
     ok.
 
 
