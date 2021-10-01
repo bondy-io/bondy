@@ -75,6 +75,7 @@ vsn() ->
 start(_Type, Args) ->
     %% We initialise the environmentapplication
     ok = setup_env(Args),
+
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
     ok = suspend_aae(),
