@@ -31,12 +31,11 @@ format(Map = #{msg := {report, #{label := {error_logger, _}, format := Format, a
                               unicode:characters_to_binary(io_lib:format(Format, Terms))}}},
            UsrConfig);
 format(#{level:=Level, msg:={report, Msg}, meta:=Meta}, UsrConfig) when is_map(Msg) ->
-    Config = apply_defaults(UsrConfig),
     NewMeta = maps:merge(Meta, #{level => Level
                                 ,colored_start => Level
                                 ,colored_end => "\e[0m"
                                 }),
-    format_log(maps:get(template, Config), Config, Msg, NewMeta);
+    format_log(maps:get(template, UsrConfig), UsrConfig, Msg, NewMeta);
 format(Map = #{msg := {report, KeyVal}}, UsrConfig) when is_list(KeyVal) ->
     format(Map#{msg := {report, maps:from_list(KeyVal)}}, UsrConfig);
 format(Map = #{msg := {string, String}}, UsrConfig) ->
@@ -52,28 +51,55 @@ format(Map = #{msg := {Format, Terms}}, UsrConfig) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-apply_defaults(Map) ->
-    maps:merge(
-      #{term_depth => undefined,
-        map_depth => -1,
-        time_offset => 0,
-        time_designator => $T,
-        colored => false,
-        colored_debug =>     "\e[0;38m",
-        colored_info =>      "\e[1;37m",
-        colored_notice =>    "\e[1;36m",
-        colored_warning =>   "\e[1;33m",
-        colored_error =>     "\e[1;31m",
-        colored_critical =>  "\e[1;35m",
-        colored_alert =>     "\e[1;44m",
-        colored_emergency => "\e[1;41m",
-        template => [colored_start, "when=", time, " level=", level,
-                     {id, [" id=", id], ""}, {parent_id, [" parent_id=", parent_id], ""},
-                     {correlation_id, [" correlation_id=", correlation_id], ""},
-                     {pid, [" pid=", pid], ""}, " at=", mfa, ":", line, colored_end, " ", msg, "\n"]
-       },
-      Map
-    ).
+% apply_defaults(Map) ->
+%     maps:merge(
+%       #{term_depth => undefined,
+%         map_depth => -1,
+%         time_offset => 0,
+%         time_designator => $T,
+%         colored => true,
+%         colored_debug =>     "\e[0;38m",
+%         colored_info =>      "\e[1;37m",
+%         colored_notice =>    "\e[1;36m",
+%         colored_warning =>   "\e[1;33m",
+%         colored_error =>     "\e[1;31m",
+%         colored_critical =>  "\e[1;35m",
+%         colored_alert =>     "\e[1;45m",
+%         colored_emergency => "\e[1;41;1m",
+%         template => [
+%             colored_start,
+%             "when=", time,
+%             " level=", level,
+%             {pid, [" pid=", pid], ""},
+%             " at=", mfa, ":", line,
+%             {
+%                 {msg, description},
+%                 [" description=", description],
+%                 ""
+%             },
+%             colored_end,
+%             {
+%                 {msg, reason},
+%                 [" reason=", reason],
+%                 ""
+%             },
+%             {id, [" id=", id], ""},
+%             {parent_id, [" parent_id=", parent_id], ""},
+%             {correlation_id, [" correlation_id=", correlation_id], ""},
+%             {node, [" node=", node], ""},
+%             {router_vsn, [" router_vsn=", router_vsn], ""},
+%             {realm, [" realm=", realm], ""},
+%             {session_id, [" session_id=", session_id], ""},
+%             {protocol, [" protocol=", protocol], ""},
+%             {transport, [" transport=", transport], ""},
+%             {peername, [" peername=", peername], ""},
+%             " ",
+%             msg,
+%             "\n"
+%         ]
+%        },
+%       Map
+%     ).
 
 
 -spec format_log(template(), Config, Msg, Meta) -> unicode:chardata() when
