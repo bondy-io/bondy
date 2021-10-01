@@ -17,8 +17,8 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 
 ### Requirements
 
-* [Erlang](https://www.erlang.org/) 23.3.1 or later
-* [Rebar3](https://rebar3.readme.io/)
+* [Erlang](https://www.erlang.org/) 23.3.4.7 or later
+* [Rebar3](https://rebar3.readme.io/) 3.17.0 or later
 * openssl
 * libssl
 * [Libsodium](https://github.com/jedisct1/libsodium)
