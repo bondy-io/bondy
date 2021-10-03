@@ -46,32 +46,37 @@
         {init_listeners, []}
     ]},
     {applications,[
-        %% Erlang
-        kernel,
-        stdlib,
-        sasl,
+        %% Erlang/OTP
         crypto,
         inets,
-        tools,
+        kernel,
         runtime_tools,
-        %% Third party
-        cowboy,
-        hackney,
+        sasl,
+        stdlib,
+        tools,
+        %% 3rd-party Crypto
+        enacl,
         jose,
         pbkdf2,
-        enacl,
         stringprep,
-        jsone,
+        %% 3rd-party Web Sevrver|client
+        cowboy,
+        hackney,
+        %% 3rd-party Utils
+        %% 3rd-party Instrumentation
         lager,
-        msgpack,
+        observer_cli,
         opencensus,
         prometheus,
         redbug,
-        observer_cli,
+        telemetry,
+        %% 3rd-party Serialization formats
+        jsone,
+        msgpack,
         sidejob,
         jobs,
         uuid,
-        %% Leapsight
+        %% 1st-party deps
         mops,
         art,
         wamp
