@@ -666,7 +666,8 @@ subscribe(M, Ctxt) ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry, Ctxt);
-        {error, {already_exists, #{id := Id}}} ->
+        {error, {already_exists, Entry}} ->
+            Id = bondy_registry_entry:id(Entry),
             bondy:send(PeerId, wamp_message:subscribed(ReqId, Id))
     end.
 

@@ -280,6 +280,20 @@ acknowledge_message(_) ->
 
 
 %% @private
+do_forward(#subscribe{} = M, Ctxt) ->
+    %% This is a sync call as clients can call subscribe multiple times
+    %% concurrently. This is becuase matching and adding to the registry is not
+    %% done atomically: bondy_registry:add uses art_server:match/2 to
+    %% determine if a subscription already exists and then adds to the registry
+    %% (and trie). If we allow this request to be concurrent 2 or more request
+    %% could get no matches from match and thus create 3 subscriptions when
+    %% according to the protocol the subscriber should always get the same
+    %% subscription as result.
+    %% REVIEW An alternative approach would be for this to be handled async and
+    %% a pool of register servers to block.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
+
 do_forward(#register{} = M, Ctxt) ->
     %% This is a sync call as it is an easy way to preserve RPC ordering as
     %% defined by RFC 11.2:
