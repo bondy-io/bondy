@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.schema - Bondy configuration schema for Cuttlefish
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -78,8 +78,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "security.config_file", "bondy.security.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/security_config.json"}
+  {datatype, file}
 ]}.
 
 %% -----------------------------------------------------------------------------
@@ -87,7 +86,7 @@
 %% to connect a non existing realm.
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.automatically_create_realms", "bondy.automatically_create_realms", [
+{mapping, "security.automatically_create_realms", "bondy.security.automatically_create_realms", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
@@ -96,10 +95,368 @@
 %% @doc Defines whether Bondy allows the "anonymous" user
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "security.allow_anonymous_user", "bondy.allow_anonymous_user", [
+{mapping, "security.allow_anonymous_user", "bondy.security.allow_anonymous_user", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default password protocol to be used for new user password
+%% creation. Notice the user API allows a caller to define the protocol to be
+%% used. This default is used when the caller does not specify a protocol.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.password.protocol", "bondy.security.password.protocol", [
+  {default, cra},
+  {datatype, {enum, [cra, scram]}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether a password protocol upgrade is performed during
+%% password migrations. A password migration occurs when Bondy changes the
+%% internal representation of the password object to accommodate new protocols,
+%% features or bug fixes. Normally some of this changes can be done without
+%% user input, but when these changes include a re-calculation of the salted
+%% hash they can only happend during authentication or when the user changes
+%% the password.
+%% If this option is set to 'on', then Bondy will try to upgrade the password
+%% protocol of an existing password to the protocol defined by the
+%% 'security.password.protocol' option using the defaul parameters defined in
+%% the 'security.password.{SelectedProtocol}.{Option}' options.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.protocol.upgrade.enabled",
+  "bondy.security.password.protocol_upgrade_enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the minimum length for newly created passwords. The value
+%% should be at least 6 and at most 254.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.password.min_length", "bondy.security.password.min_length", [
+  {default, 6},
+  {datatype, integer}
+]}.
+
+
+{translation, "bondy.security.password.min_length",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.min_length", Conf) of
+        Value when is_integer(Value), Value >= 6, Value =< 254 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 6..254"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the maximum length for newly created passwords. The value
+%% should be at least 6 and at most 254.
+%% @end
+%% -----------------------------------------------------------------------------
+
+{mapping, "security.password.max_length", "bondy.security.password.max_length", [
+  {default, 254},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.security.password.max_length",
+  fun(Conf) ->
+    Min = cuttlefish:conf_get("security.password.min_length", Conf),
+    case cuttlefish:conf_get("security.password.max_length", Conf) of
+        Value when is_integer(Value), Value >= Min, Value =< 254 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range {Min}..254"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default key derivation function (KDF) to be used with SCRAM.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.scram.kdf",
+  "bondy.security.password.scram.kdf", [
+  {default, pbkdf2},
+  {datatype, {enum, [pbkdf2, argon2id13]}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default key derivation function (KDF) to be used with CRA. The only option is pbkdf2.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.cra.kdf",
+  "bondy.security.password.cra.kdf", [
+  {default, pbkdf2},
+  {datatype, {enum, [pbkdf2]}},
+  hidden
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default number of iterations to be used with the pbkdf2 key
+%% derivation function. It should be an integer in the range 4096..65536.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.pbkdf2.iterations",
+  "bondy.security.password.pbkdf2.iterations", [
+  {default, "10000"},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.security.password.pbkdf2.iterations",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.pbkdf2.iterations", Conf) of
+        Value when is_integer(Value), Value >= 4096, Value =< 65536 ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 4096..65536"
+            )
+    end
+  end
+}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default iterations to be used with the argon2id13 key
+%% derivation function. It should be an integer in the range 4096..4294967295
+%% or a named configuration:
+%% - interactive (integer 2)
+%% - moderate (integer 3)
+%% - sensitive (integer 4)
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.argon2id13.iterations",
+  "bondy.security.password.argon2id13.iterations", [
+  {default, moderate},
+  {datatype, [
+    integer, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+  ]}
+]}.
+
+{translation, "bondy.security.password.argon2id13.iterations",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.argon2id13.iterations", Conf) of
+        Value when is_integer(Value), Value >= 1, Value =< 4294967295 ->
+          Value;
+        Value when Value == interactive; Value == moderate; Value == sensitive ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 1..4294967295"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the default memory to be used with the argon2id13 key
+%% derivation function. It should be an integer in the range 8192..1073741824
+%% or a named configuration:
+%% - interactive (integer 64MB)
+%% - moderate (integer 256MB)
+%% - sensitive (integer 1GB)
+%%
+%% (Notice that the underlying library allows up to 4398046510080 (3.9 TB)
+%% but we have restricted this value to avoid a configuration error to enable a
+%% DoS attack).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping,
+  "security.password.argon2id13.memory",
+  "bondy.security.password.argon2id13.memory", [
+  {default, interactive},
+  {datatype, [
+    bytesize, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+  ]}
+]}.
+
+{translation, "bondy.security.password.argon2id13.memory",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.password.argon2id13.memory", Conf) of
+        Value when is_integer(Value), Value >= 8192, Value =< 1073741824 ->
+          Value;
+        Value when Value == interactive; Value == moderate; Value == sensitive ->
+          Value;
+        _ ->
+            cuttlefish:invalid(
+              "value should be an integer in the range 1..4294967295"
+            )
+    end
+  end
+}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The default expiration time on or after which authentication ticket
+%% MUST NOT be accepted for processing.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.expiry_time", "bondy.security.ticket.expiry_time_secs",[
+  {default, "30d"},
+  {datatype, {duration, s}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximum expiration time on or after which authentication ticket
+%% MUST NOT be accepted for processing.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.max_expiry_time", "bondy.security.ticket.max_expiry_time_secs",[
+{default, "30d"},
+{datatype, {duration, s}}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether local scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.local.persistence", "bondy.security.ticket.local.persistence",[
+  {default, on},
+  {datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether SSO scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.sso.persistence", "bondy.security.ticket.sso.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether client-local scope tickets are persistent. If enabled
+%% the ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.client_local.persistence", "bondy.security.ticket.client_local.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Controls whether client-SSO scope tickets are persistent. If enabled the
+%% ticket will be stored in Bondy's database. Otherwise the ticket is not
+%% stored.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.scope.client_sso.persistence", "bondy.security.ticket.client_sso.persistence",[
+{default, on},
+{datatype, flag}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines whether Bondy will allow a valid ticket to be used for
+%% authentication when a local copy of the ticket has not been found in
+%% storage. This might happen if the ticket data has not yet been syncrhonised
+%% to the node handling the authentication request.
+%% @end
+%% -----------------------------------------------------------------------------
+%%
+{mapping, "security.ticket.allow_not_found", "bondy.security.ticket.allow_not_found",[
+{default, on},
+{datatype, flag}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc Defines the a comma separated list of authentication methods that a
+%% user can use to establish a session that is allowed to issue tickets to be
+%% used with 'ticket' authentication.
+%%
+%% The possible values are the names of the authentication methods:
+%% - "cryptosign"
+%% - "password"
+%% - "ticket"
+%% - "tls"
+%% - "trust"
+%% - "wamp-scram"
+%% - "wampcra"
+%%
+%% The option also allows a single value "all" in which case all the methods
+%% above will be allowed.
+%%
+%% Notice that "anonymous" and "oauth2" methods are NOT allowed in this list as
+%% they are incompatible with the idea of tickets.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "security.ticket.authmethods", "bondy.security.ticket.authmethods",[
+  {default, "all"},
+  {datatype, string}
+]}.
+
+{translation, "bondy.security.ticket.authmethods",
+  fun(Conf) ->
+    case cuttlefish:conf_get("security.ticket.authmethods", Conf) of
+        Value when is_list(Value) ->
+          Allowed = ordsets:from_list([
+            <<"cryptosign">>,
+            <<"password">>,
+            <<"ticket">>,
+            <<"tls">>,
+            <<"trust">>,
+            <<"wamp-scram">>,
+            <<"wampcra">>
+          ]),
+          try
+            Requested = ordsets:from_list([
+              list_to_binary(string:strip(Method))
+              || Method <- string:split(Value, ",")
+            ]),
+
+            case Requested of
+              [<<"all">>] ->
+                Allowed;
+              _ ->
+                Invalid = ordsets:subtract(Requested, Allowed),
+                ordsets:size(Invalid) == 0 orelse throw({invalid, Invalid}),
+                Requested
+            end
+
+          catch
+            throw:{invalid, List} ->
+              String = string:join(List, ", "),
+              cuttlefish:invalid("invalid authmethods " ++ String)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid authmethods e.g. \"cryptosign, wampcra, ticket\""
+            )
+    end
+  end
+}.
 
 
 %% -----------------------------------------------------------------------------
@@ -113,18 +470,84 @@
   hidden
 ]}.
 
-
-
+%% -----------------------------------------------------------------------------
+%% @doc The default timeout for WAMP (RPC) Calls when the CALL.Options.timeout
+%% property is not used. This value will be restricted by the
+%% 'wamp.max_call_timeout' property
+%% @end
+%% -----------------------------------------------------------------------------
 {mapping, "wamp.call_timeout", "bondy.wamp_call_timeout", [
-  {default, "10s"}, % Long enough but not infinity
-  {datatype, {duration, ms}},
-  hidden
+  {default, "30s"}, % Long enough but not infinity
+  {datatype, {duration, ms}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc The maximum timeout value for WAMP (RPC) Calls when the CALL.Options.
+%% timeout. According to the protocol a missing value or a value
+%% of 0 diabels the timeout feature, but we disagree, set it to 24 hours if you
+%% want but not infinite.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "wamp.max_call_timeout", "bondy.wamp_max_call_timeout", [
+{default, "10m"}, % Long enough but not infinity
+{datatype, {duration, ms}},
+hidden
+]}.
+
+{mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [
+  {datatype, flag},
+  {default, on}
+]}.
+
+%% How will Bondy store the retained messages.
+{mapping, "wamp.message_retention.storage_type", "bondy.wamp_message_retention.storage_type", [
+  {default, ram},
+  {datatype, {enum, [ram, disk, ram_disk]}}
+]}.
+
+%% Maximum number of messages that can be store in a Bondy node.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
+  {default, "1000000"},
+  {datatype, integer}
+]}.
+
+
+%% Maximum space in memory used by retained messages.
+%% Once the max has been reached no more events will be stored.
+%% A value of 0 means no limit is enforced.
+{mapping, "wamp.message_retention.max_memory", "bondy.wamp_message_retention.max_memory", [
+  {default, "1GB"},
+  {datatype, bytesize}
+]}.
+
+%% The max size for an event message.
+%% All events whose size exceeds this value will not be retained.
+{mapping, "wamp.message_retention.max_message_size", "bondy.wamp_message_retention.max_message_size", [
+  {default, "64KB"},
+  {datatype, bytesize}
+]}.
+
+%% The default Time To Live (TTL) in seconds Bondy will use for all retained
+%% messages not specifying a specific TTL.
+%% A value of 0 means a message will not be expired.
+{mapping, "wamp.message_retention.default_ttl", "bondy.wamp_message_retention.default_ttl", [
+  {default, "0"},
+  {datatype, [integer, {duration, s}]}
 ]}.
 
 {mapping, "request_timeout", "bondy.request_timeout", [
   {default, "20s"}, % Long enough but not infinity
   {datatype, {duration, ms}},
   hidden
+]}.
+
+
+{mapping, "wamp.uri.strictness", "wamp.uri_strictness", [
+  {default, loose},
+  {datatype, {enum, [loose, strict]}}
 ]}.
 
 
@@ -173,7 +596,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
-  {default, 10000},
+  {default, 100000},
   {datatype, integer}
 ]}.
 
@@ -194,7 +617,7 @@
 %% @doc http.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
-  {default, "{{admin_api_http_port}}" },
+  {default, 18081},
   {datatype, integer},
   hidden
 ]}.
@@ -211,6 +634,13 @@
   {default, 250000}
 ]}.
 
+
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "admin_api.http.backlog", "bondy.admin_api_http.backlog", [
+{datatype, integer},
+{default, 1024}
+]}.
 
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
@@ -248,12 +678,6 @@
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "admin_api.http.backlog", "bondy.admin_api_http.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
-
 
 
 
@@ -270,7 +694,7 @@
 %% @doc https.port is the TCP port that Bondy uses for
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
-  {default, "{{admin_api_https_port}}" },
+  {default, 18084},
   {datatype, integer},
   hidden
 ]}.
@@ -285,6 +709,12 @@
 {mapping, "admin_api.https.max_connections", "bondy.admin_api_https.max_connections", [
   {datatype, integer},
   {default, 250000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "admin_api.https.backlog", "bondy.admin_api_https.backlog", [
+  {datatype, integer},
+  {default, 1024}
 ]}.
 
 
@@ -315,21 +745,15 @@
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "api_gateway.https.buffer", "bondy.api_gateway_https.socket_opts.buffer", [
+{mapping, "admin_api.https.buffer", "bondy.admin_api_https.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
+{mapping, "admin_api.https.nodelay", "bondy.admin_api_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
 ]}.
 
 
@@ -354,6 +778,40 @@
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
 
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "admin_api.https.versions", "bondy.admin_api_https.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.admin_api_https.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("admin_api.https.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case string:strip(Version) of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(Value, ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 %% =============================================================================
@@ -361,10 +819,15 @@
 %% =============================================================================
 
 
+{mapping, "api_gateway.http.enabled", "bondy.api_gateway_http.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
 %% @doc api_gateway.http.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
-  {default, "{{api_gateway_http_port}}"},
+  {default, 18080},
   {datatype, integer},
   hidden
 ]}.
@@ -383,12 +846,12 @@
   {default, 500000}
 ]}.
 
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.backlog", [
+  {datatype, integer},
+  {default, 4096}
+]}.
 
-
-
-%% =============================================================================
-%% API GATEWAY
-%% =============================================================================
 
 %% -----------------------------------------------------------------------------
 %% @doc The filename of a the API Gatyeway JSON configuration file, which
@@ -397,8 +860,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "api_gateway.config_file", "bondy.api_gateway.config_file", [
-  {datatype, file},
-  {default, "$(platform_etc_dir)/api_gateway_config.json"}
+  {datatype, file}
 ]}.
 
 
@@ -443,22 +905,21 @@
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 4096}
-]}.
-
 
 %% =============================================================================
 %% API GATEWAY TLS
 %% =============================================================================
 
 
+{mapping, "api_gateway.https.enabled", "bondy.api_gateway_https.enabled", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
-  {default, "{{api_gateway_https_port}}" },
+  {default, 18083},
   {datatype, integer},
   hidden
 ]}.
@@ -474,6 +935,12 @@
 {mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
   {datatype, integer},
   {default, 500000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.backlog", [
+  {datatype, integer},
+  {default, 4096}
 ]}.
 
 % SOCKET OPTS
@@ -507,17 +974,11 @@
   {datatype, bytesize}
 ]}.
 
-%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
+%% If on, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
 {mapping, "api_gateway.https.nodelay", "bondy.api_gateway_https.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
-]}.
-
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 4096}
 ]}.
 
 
@@ -536,17 +997,300 @@
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
-%% with the api_gateway.ssl config variable, for example:
+%% with the admin_api.ssl config variable, for example:
 {mapping, "api_gateway.https.cacertfile", "bondy.api_gateway_https.socket_opts.cacertfile", [
   {datatype, file},
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "api_gateway.https.versions", "bondy.api_gateway_https.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.api_gateway_https.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("api_gateway.https.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case string:strip(Version) of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(Value, ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
+
+
+
+%% =============================================================================
+%% WAMP
+%% =============================================================================
+
+%% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
+%% ("erl") and BERT ("bert") serializations.
+%%
+%% The WAMP v2 Raw Socket protocol defines a code (integer from 1..15) for each
+%% serializer, and specifies json and msgpack to be assigned to slots 1 and 2
+%% respectively, leaving the remaining 13 slots for future assignment.
+%%
+%% Because some clients might be harcoded to expect certain serializers in
+%% certain slots, we need to make the slots asigned to "erl" and "bert"
+%% configurable.
+%%
+%% For example, in order to assign the erl serializer to a slot 15 and bert
+%% to slot 4 we write the following configuration line:
+%%
+%% wamp.serializers.erl = 15
+%% wamp.serializers.bert = 4
+{mapping,
+  "wamp.serializers.erl", "bondy.wamp_serializers.erl", [
+  {datatype, integer},
+  {default, 15}
+]}.
+
+{mapping,
+  "wamp.serializers.bert", "bondy.wamp_serializers.bert", [
+  {datatype, integer},
+  {default, 4}
+]}.
+
+% {translation,
+% "bondy.wamp_serializers",
+% fun(Conf0) ->
+%     Conf1 = cuttlefish_variable:filter_by_prefix(
+%       "wamp.serializers", Conf0),
+%     Fun = fun ({[_, _, _, Key], Value}, Acc) ->
+%       case lists:member(Key, ["erl", "bert"]) of
+%         true when is_integer(Value) andalso (Value >= 3 orelse Value =< 15) ->
+%           [{Value, list_to_atom(Key)} | Acc];
+%         true ->
+%           cuttlefish:invalid("value should be an integer between 3 and 15");
+%         false ->
+%           cuttlefish:invalid("key should be one of 'erl' or 'bert'")
+%       end
+%     end,
+%     lists:foldl(Fun, [], Conf1)
+% end}.
+
+
+%% =============================================================================
+%% WAMP WEBSOCKET
+%% =============================================================================
+
+%% @doc Defines if Websockets PING control message functionality is enabled or
+%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% might also initiate ping requests and Bondy will always respond to those
+%% even if this option is turned off.
+%% This feature is useful to keep a connection alive and validate the
+%% connection is healthy. For example, Browsers will typically kill websocket
+%% connections after 60s and will not initiate PINGs.
+{mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
+  {default, on},
+  {datatype, {flag, on, off}}
+]}.
+
+%% @doc If wamp.websocket.ping.enabled is 'on', this value controls the interval
+%% in which Bondy sends WebSockets PING control messages.
+{mapping, "wamp.websocket.ping.interval", "bondy.wamp_websocket.ping.interval", [
+  {default, "30s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.websocket.ping.enabled is 'on', this value controls how many
+%% missed pings are considered a timeout. Thus, after this number of attempts
+%% Bondy will drop the connection.
+%% If the value is 'infinity' Bondy will never timeout based on missed pings.
+{mapping,
+  "wamp.websocket.ping.max_attempts",
+  "bondy.wamp_websocket.ping.max_attempts",
+  [
+    {default, 3},
+    {datatype, [integer, {atom, infinity}]}
+  ]
+}.
+
+%% @doc Drops the connection after a period of inactivity. This option does not
+%% take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
+%% interval times wamp.websocket.ping.max_attempts results in a value higher
+%% than this option.
+%% Notice that for some clients using this option alone is not enough to keep
+%% a connection alive as the client will drop the connection due to inactivity.
+%% If the client supports Websocket PING control messages, enabled them,
+%% otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
+{mapping, "wamp.websocket.idle_timeout", "bondy.wamp_websocket.idle_timeout", [
+  {default, "8h"},
+  {datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
+
+%% Maximum frame size allowed by this Websocket handler. Cowboy will close the
+%% connection when a client attempts to send a frame that goes over this limit.
+%% For fragmented frames this applies to the size of the reconstituted frame.
+%%
+%% A value of cero means un unbounded size (internally translated to 'infinity')
+{mapping, "wamp.websocket.max_frame_size", "bondy.wamp_websocket.max_frame_size", [
+  {default, infinity},
+  {datatype, [{atom, infinity}, integer]}
+]}.
+
+% {translation, "bondy.wamp_websocket.max_frame_size",
+%  fun(Conf) ->
+%   TheLimit = cuttlefish:conf_get("wamp.websocket.max_frame_size", Conf),
+%   case TheLimit of
+%       0 -> infinite;
+%       Int when is_integer(Int) andalso Int > 0 -> Int;
+%       _ ->
+%           %% This would have been caught earlier in datatype validation
+%           cuttlefish:invalid("should be a non negative integer")
+%   end
+%  end
+% }.
+
+
+%% Defines if Websocket compression (permessage-deflate extension) is enabled
+%% or not. If enabled it will be negotiated with supporting clients.
+{mapping, "wamp.websocket.compression_enabled", "bondy.wamp_websocket.compress", [
+  {default, off},
+  {datatype, {flag, on, off}}
+]}.
+
+
+%% Compression level to use. A value between 0 and 9
+%% * 0 (none), gives no compression
+%% * 1 (best_speed) gives best speed
+%% * 9 (best_compression) gives best compression
+{mapping, "wamp.websocket.deflate.level", "bondy.wamp_websocket.deflate_opts.level", [
+  {default, 5},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.level",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.level", Conf) of
+      Int when is_integer(Int) andalso Int >= 0 andalso Int =< 9 -> Int;
+      _ ->
+          %% This would have been caught earlier in datatype validation
+          cuttlefish:invalid(
+            "should be an integer between 0 and 9")
+  end
+ end
+}.
+
+%% Specifies how much memory is to be allocated for the internal compression
+%% state. An integer between 1 and 9, where 1 uses minimum memory but is slow
+%% and reduces compression ratio while 9 uses maximum memory for optimal speed.
+{mapping, "wamp.websocket.deflate.mem_level", "bondy.wamp_websocket.deflate_opts.mem_level", [
+  {default, 8},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.mem_level",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.mem_level", Conf) of
+      Int when is_integer(Int) andalso Int >= 1 andalso Int =< 9 -> Int;
+      _ ->
+          %% This would have been caught earlier in datatype validation
+          cuttlefish:invalid(
+            "should be an integer between 1 and 9")
+  end
+ end
+}.
+
+%% Tunes the compression algorithm. Use the following values:
+%%  -   default for normal data
+%%  -   filtered for data produced by a filter (or predictor)
+%%  -   huffman_only to force Huffman encoding only (no string match)
+%%  -   rle to limit match distances to one (run-length encoding)
+%%
+%% Filtered data consists mostly of small values with a somewhat random
+%% distribution. In this case, the compression algorithm is tuned to compress
+%% them better. The effect of filtered is to force more Huffman coding and less
+%% string matching; it is somewhat intermediate between default and
+%% huffman_only. rle is designed to be almost as fast as huffman_only, but
+%% gives better compression for PNG image data.
+%%
+%% Strategy affects only the compression ratio, but not the correctness of the
+%% compressed output even if it is not set appropriately.
+{mapping, "wamp.websocket.deflate.strategy", "bondy.wamp_websocket.deflate_opts.strategy", [
+  {default, default},
+  {datatype, {enum, [default, filtered, huffman_only, rle]}}
+]}.
+
+%%  Using no_takeover can severly limit the usefulness of compression.
+{mapping, "wamp.websocket.deflate.server_context_takeover", "bondy.wamp_websocket.deflate_opts.server_context_takeover", [
+  {default, takeover},
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%%  Using no_takeover can severly limit the usefulness of compression.
+{mapping, "wamp.websocket.deflate.client_context_takeover", "bondy.wamp_websocket.deflate_opts.client_context_takeover", [
+  {default, takeover},
+  {datatype, {enum, [takeover, no_takeover]}}
+]}.
+
+%% The base two logarithm of the window size (the size of the history buffer).
+%% It is to be in the range 8 through 15. Larger values result in better
+%% compression at the expense of memory usage.
+{mapping, "wamp.websocket.deflate.server_max_window_bits", "bondy.wamp_websocket.deflate_opts.server_max_window_bits", [
+  {default, 11},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.server_max_window_bits",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.server_max_window_bits", Conf) of
+      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
+      _ ->
+          cuttlefish:invalid(
+            "should be an integer between 8 and 15")
+  end
+ end
+}.
+
+%% The base two logarithm of the window size (the size of the history buffer).
+%% It is to be in the range 8 through 15. Larger values result in better
+%% compression at the expense of memory usage.
+{mapping, "wamp.websocket.deflate.client_max_window_bits", "bondy.wamp_websocket.deflate_opts.client_max_window_bits", [
+  {default, 11},
+  {datatype, integer}
+]}.
+
+{translation, "bondy.wamp_websocket.deflate_opts.client_max_window_bits",
+ fun(Conf) ->
+  case cuttlefish:conf_get("wamp.websocket.deflate.client_max_window_bits", Conf) of
+      Int when is_integer(Int) andalso Int >= 8 andalso Int =< 15 -> Int;
+      _ ->
+          cuttlefish:invalid(
+            "should be an integer between 8 and 15")
+  end
+ end
+}.
 
 
 
 %% =============================================================================
 %% WAMP RAW SOCKET
 %% =============================================================================
+
+
 
 
 
@@ -558,7 +1302,7 @@
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tcp.port", "bondy.wamp_tcp.port", [
-  {default, "{{wamp_tcp_port}}"},
+  {default, 18082},
   {datatype, integer}
 ]}.
 
@@ -573,6 +1317,12 @@
 {mapping, "wamp.tcp.max_connections", "bondy.wamp_tcp.max_connections", [
   {datatype, integer},
   {default, 100000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "wamp.tcp.backlog", "bondy.wamp_tcp.backlog", [
+  {datatype, integer},
+  {default, 1024}
 ]}.
 
 %% TCP SOCKET OPTS
@@ -613,63 +1363,14 @@
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tcp.backlog", "bondy.wamp_tcp.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
 
-
-%% In addition to JSON and Msgpack, Bondy supports Erlang External Term Format
-%% ("erl") and BERT ("bert") serializations.
-%%
-%% The WAMP v2 Raw Socket protocol defines a code (integer from 1..15) for each
-%% serializer, and specifies json and msgpack to be assigned to slots 1 and 2
-%% respectively, leaving the remaining 13 slots for future assignment.
-%%
-%% Because some clients might be harcoded to expect certain serializers in
-%% certain slots, we need to make the slots asigned to "erl" and "bert"
-%% configurable.
-%%
-%% For example, in order to assign the erl serializer to a slot 15 and bert
-%% to slot 4 we write the following configuration line:
-%%
-%% wamp.tcp.serializers.erl = 15
-%% wamp.tcp.serializers.bert = 4
-{mapping, "wamp.tcp.serializers.erl", "bondy.wamp_tcp.serializers", [
-  {datatype, integer},
-  {default, 15}
-]}.
-
-{mapping, "wamp.tcp.serializers.bert", "bondy.wamp_tcp.serializers", [
-  {datatype, integer},
-  {default, 4}
-]}.
-
-{translation,
-"bondy.wamp_tcp.serializers",
-fun(Conf0) ->
-    Conf1 = cuttlefish_variable:filter_by_prefix(
-      "wamp.tcp.serializers", Conf0),
-    Fun = fun ({[_, _, _, Key], Value}, Acc) ->
-      case lists:member(Key, ["erl", "bert"]) of
-        true when is_integer(Value) andalso (Value >= 3 orelse Value =< 15) ->
-          [{Value, list_to_atom(Key)} | Acc];
-        true ->
-          cuttlefish:invalid("value should be an integer between 3 and 15");
-        false ->
-          cuttlefish:invalid("key should be one of 'erl' or 'bert'")
-      end
-    end,
-    lists:foldl(Fun, [], Conf1)
-end}.
 
 
 
 
 
 %% =============================================================================
-%% WAMP TCP TLS
+%% WAMP RAWSOCKET TLS
 %% =============================================================================
 
 
@@ -683,7 +1384,7 @@ end}.
 %% @doc api_gateway.ssl.port is the TCP port that Bondy uses for
 %% exposing the WAMP raw socket transport
 {mapping, "wamp.tls.port", "bondy.wamp_tls.port", [
-  {default, "{{wamp_tls_port}}"},
+  {default, 18085},
   {datatype, integer}
 ]}.
 
@@ -697,6 +1398,12 @@ end}.
 {mapping, "wamp.tls.max_connections", "bondy.wamp_tls.max_connections", [
   {datatype, integer},
   {default, 100000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "wamp.tls.backlog", "bondy.wamp_tls.backlog", [
+  {datatype, integer},
+  {default, 1024}
 ]}.
 
 
@@ -739,12 +1446,6 @@ end}.
   {default, on}
 ]}.
 
-%% The maximum length that the queue of pending connections can grow to.
-{mapping, "wamp.tls.backlog", "bondy.wamp_tls.socket_opts.backlog", [
-  {datatype, integer},
-  {default, 1024}
-]}.
-
 %% @doc Default cert location for https can be overridden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.certfile", "bondy.wamp_tls.socket_opts.certfile", [
@@ -766,6 +1467,40 @@ end}.
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
 
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "wamp.tls.versions", "bondy.wamp_tls.socket_opts.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "bondy.wamp_tls.socket_opts.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("wamp.tls.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case string:strip(Version) of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(Value, ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 %% =============================================================================
@@ -782,13 +1517,13 @@ end}.
 
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
-  {default, "{{peer_port}}"},
+  {default, 18086},
   {datatype, integer}
 ]}.
 
 %% @doc Defines the number of TCP connections for the cluster TCP stack
 {mapping, "cluster.parallelism", "partisan.parallelism", [
-  {default, 1},
+  {default, 4},
   {datatype, integer}
 ]}.
 
@@ -881,6 +1616,40 @@ end}.
   {default, "$(platform_etc_dir)/cacert.pem"}
 ]}.
 
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "cluster.tls.versions", "partisan.tls_options.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+
+{translation, "partisan.tls_options.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("cluster.tls.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case string:strip(Version) of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(Value, ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
 
 
 %% =============================================================================
@@ -892,7 +1661,7 @@ end}.
 %% @doc Platform-specific installation paths (substituted by rebar)
 {mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
   {datatype, directory},
-  {default, "{{platform_bin_dir}}"},
+  {default, "./bin"},
   hidden
 ]}.
 
@@ -900,7 +1669,7 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
   {datatype, directory},
-  {default, "{{platform_lib_dir}}"},
+  {default, "./lib"},
   hidden
 ]}.
 
@@ -908,25 +1677,25 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_data_dir", "bondy.platform_data_dir", [
   {datatype, directory},
-  {default, "{{platform_data_dir}}"}
+  {default, "./data"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_tmp_dir", "bondy.platform_tmp_dir", [
   {datatype, directory},
-  {default, "{{platform_tmp_dir}}"}
+  {default, "./tmp"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
   {datatype, directory},
-  {default, "{{platform_etc_dir}}"}
+  {default, "./etc"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_log_dir", "bondy.platform_log_dir", [
   {datatype, directory},
-  {default, "{{platform_log_dir}}"}
+  {default, "./log"}
 ]}.
 
 
@@ -996,7 +1765,7 @@ end}.
   {datatype, {duration, ms}}
 ]}.
 
-%% Controls wether the active anti-entropy subsystem is enabled.
+%% Controls whether the active anti-entropy subsystem is enabled.
 {mapping, "aae.enabled", "plum_db.aae_enabled", [
   {datatype, {flag, on, off}},
   {default, on}

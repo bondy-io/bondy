@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% Copyright (c) 2017 Ngineo Limited t/a Leapsight.  All Rights Reserved.
+%%  Copyright (c) 2017-2021 Leapsight. All rights reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_event_manager).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -133,8 +134,11 @@ handle_event({event, Topic, #event{} = Event}, State) ->
 
 
 handle_call(Event, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        description => "Error handling call",
+        reason => unsupported_event,
+        event => Event
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 

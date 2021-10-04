@@ -2,7 +2,7 @@
 %% =============================================================================
 %%  bondy_context.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -41,18 +41,20 @@
     %% Realm and Session
     realm_uri => uri(),
     node => atom(),
-    session => bondy_session:session() | undefined,
+    security_enabled => boolean(),
+    session => bondy_session:t() | undefined,
     %% Peer Info
     peer => bondy_session:peer(),
     authmethod => binary(),
     authid => binary(),
     is_anonymous => boolean(),
     roles => map(),
-    challenge_sent => {true, AuthMethod :: any()} | false,
     request_id => id(),
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),
     request_details => map(),
+    is_closing => boolean(),
+    is_shutting_down => boolean(),
     %% Metadata
     user_info => map()
 }.
@@ -60,22 +62,28 @@
 
 -export([agent/1]).
 -export([authid/1]).
+-export([call_timeout/1]).
 -export([close/1]).
+-export([close/2]).
+-export([encoding/1]).
 -export([has_session/1]).
--export([is_feature_enabled/3]).
+-export([id/1]).
 -export([is_anonymous/1]).
--export([new/0]).
+-export([is_closing/1]).
+-export([is_feature_enabled/3]).
+-export([is_security_enabled/1]).
+-export([is_shutting_down/1]).
 -export([local_context/1]).
+-export([new/0]).
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
 -export([peer_id/1]).
+-export([peername/1]).
+-export([rbac_context/1]).
 -export([realm_uri/1]).
--export([request_id/1]).
--export([call_timeout/1]).
--export([set_call_timeout/2]).
--export([set_is_anonymous/2]).
 -export([request_details/1]).
+-export([request_id/1]).
 -export([request_timeout/1]).
 -export([request_timestamp/1]).
 -export([reset/1]).
@@ -83,15 +91,18 @@
 -export([session/1]).
 -export([session_id/1]).
 -export([set_authid/2]).
+-export([set_call_timeout/2]).
+-export([set_is_anonymous/2]).
 -export([set_peer/2]).
+-export([set_realm_uri/2]).
+-export([set_request_details/2]).
 -export([set_request_id/2]).
 -export([set_request_timeout/2]).
 -export([set_request_timestamp/2]).
--export([set_subprotocol/2]).
--export([set_realm_uri/2]).
--export([subprotocol/1]).
 -export([set_session/2]).
--export([encoding/1]).
+-export([set_subprotocol/2]).
+-export([subprotocol/1]).
+
 
 
 
@@ -112,8 +123,8 @@ new() ->
         id => bondy_utils:get_id(global),
         node => bondy_peer_service:mynode(),
         request_id => undefined,
-        call_timeout => bondy_config:get(wamp_call_timeout),
-        request_timeout => bondy_config:get(request_timeout)
+        call_timeout => bondy_config:get(wamp_call_timeout, undefined),
+        request_timeout => bondy_config:get(request_timeout, undefined)
     }.
 
 
@@ -123,7 +134,11 @@ new() ->
 %% -----------------------------------------------------------------------------
 local_context(RealmUri) when is_binary(RealmUri) ->
     Ctxt = new(),
-    Ctxt#{realm_uri => RealmUri}.
+
+    Ctxt#{
+        realm_uri => RealmUri,
+        security_enabled => bondy_realm:is_security_enabled(RealmUri)
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -153,21 +168,45 @@ reset(Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Closes the context. This function calls {@link bondy_session:close/1}
-%% and {@link bondy_router:close_context/1}.
+%% Closes the context. This function calls close/2 with `normal' as reason.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec close(t()) -> ok.
 
 close(Ctxt0) ->
+    close(Ctxt0, normal).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Closes the context. This function calls {@link bondy_session:close/1}
+%% and {@link bondy_router:close_context/1}.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close(t(), Reason :: normal | crash | shutdown) -> ok.
+
+close(Ctxt0, Reason) ->
+    Ctxt = Ctxt0#{
+        is_closing => true,
+        is_shutting_down => Reason =:= shutdown
+    },
     %% We cleanup router first as cleanup requires the session
-    case maps:find(session, Ctxt0) of
+    case maps:find(session, Ctxt) of
         {ok, Session} ->
-            _ = bondy_router:close_context(Ctxt0),
-            bondy_session:close(Session);
+            _ = bondy_router:close_context(Ctxt),
+            bondy_session_manager:close(Session);
         error ->
             ok
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the context identifier.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec id(t()) -> id().
+
+id(#{id := Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -177,6 +216,17 @@ close(Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec peer(t()) -> bondy_session:peer().
 peer(#{peer := Val}) -> Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the peer of the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peername(t()) -> binary().
+
+peername(#{peer := Val}) ->
+    inet_utils:peername_to_binary(Val).
 
 
 %% -----------------------------------------------------------------------------
@@ -243,8 +293,9 @@ roles(Ctxt) ->
 %% Returns the realm uri of the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t()) -> uri().
-realm_uri(#{realm_uri := Val}) -> Val.
+-spec realm_uri(t()) -> maybe(uri()).
+realm_uri(#{realm_uri := Val}) -> Val;
+realm_uri(_) -> undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -264,8 +315,10 @@ set_realm_uri(Ctxt, Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec agent(t()) -> binary() | undefined.
+
 agent(#{session := S}) ->
     bondy_session:agent(S);
+
 agent(#{}) ->
     undefined.
 
@@ -274,9 +327,30 @@ agent(#{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authid(t()) -> binary() | undefined.
-authid(#{authid := Val}) -> Val;
-authid(#{}) -> undefined.
+-spec is_security_enabled(t()) -> boolean().
+
+is_security_enabled(#{session := Session}) when Session =/= undefined ->
+    bondy_session:is_security_enabled(Session);
+
+is_security_enabled(#{security_enabled := Val}) when is_boolean(Val) ->
+    Val;
+
+is_security_enabled(#{realm_uri := Uri}) ->
+    bondy_realm:is_security_enabled(Uri).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authid(t()) -> binary() | anonymous | undefined.
+
+authid(#{authid := Val}) ->
+    Val;
+
+authid(#{}) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -286,7 +360,7 @@ authid(#{}) -> undefined.
 -spec set_authid(t(), binary()) -> t().
 
 set_authid(Ctxt, Val)
-when is_map(Ctxt) andalso (is_binary(Val) orelse Val == undefined) ->
+when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
     maps:put(authid, Val, Ctxt).
 
 
@@ -300,6 +374,21 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == undefined) ->
 session_id(#{session := S}) ->
     bondy_session:id(S);
 session_id(#{}) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the sessionId of the provided context or 'undefined'
+%% if there is none.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec rbac_context(t()) -> bondy_rbac:context() | undefined.
+
+rbac_context(#{session := S}) ->
+    bondy_session:rbac_context(S);
+
+rbac_context(#{}) ->
     undefined.
 
 
@@ -319,7 +408,7 @@ has_session(#{}) -> false.
 %% Sets the sessionId to the provided context.
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_session(t(), bondy_session:session()) -> t().
+-spec set_session(t(), bondy_session:t()) -> t().
 set_session(Ctxt, S) ->
     Ctxt#{session => S}.
 
@@ -341,7 +430,7 @@ peer_id(#{session := S}) ->
 %% Fetches and returns the bondy_session for the associated sessionId.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session(t()) -> bondy_session:session() | no_return().
+-spec session(t()) -> bondy_session:t() | no_return().
 session(#{session := S}) ->
     S.
 
@@ -363,6 +452,17 @@ request_id(#{request_id := Val}) ->
 -spec set_request_id(t(), id()) -> t().
 set_request_id(Ctxt, ReqId) ->
     Ctxt#{set_request_id => ReqId}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Sets the current request details to the provided context.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec set_request_details(t(), map()) -> t().
+
+set_request_details(Ctxt, Details) when is_map(Details) ->
+    Ctxt#{request_details => Details}.
 
 
 %% -----------------------------------------------------------------------------
@@ -456,6 +556,28 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 
 is_anonymous(Ctxt) ->
     maps:get(is_anonymous, Ctxt, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the context and session are closing.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_closing(t()) -> boolean().
+
+is_closing(Ctxt) ->
+    maps:get(is_closing, Ctxt, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if bondy is shutting down
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_shutting_down(t()) -> boolean().
+
+is_shutting_down(Ctxt) ->
+    maps:get(is_shutting_down, Ctxt, false).
 
 
 %% -----------------------------------------------------------------------------

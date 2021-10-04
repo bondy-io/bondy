@@ -31,3 +31,4 @@ log/index
 logs
 rebar3.crashdump
 relx
+/erlang_ls.config

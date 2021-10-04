@@ -1,7 +1,7 @@
 %% =============================================================================
 %% bondy_app -
 %%
-%% Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%% Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -22,9 +22,10 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_app).
 -behaviour(application).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy_security.hrl").
+-include_lib("kernel/include/logger.hrl").
+-include("bondy.hrl").
+-include("bondy_uris.hrl").
 
 
 -export([start/2]).
@@ -72,8 +73,9 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    %% We initialise the environment
+    %% We initialise the environmentapplication
     ok = setup_env(Args),
+
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
     ok = suspend_aae(),
@@ -83,7 +85,6 @@ start(_Type, Args) ->
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
             ok = bondy_router_worker:start_pool(),
-            ok = bondy_cli:register(),
             ok = setup_bondy_realm(),
             ok = setup_event_handlers(),
             ok = setup_wamp_subscriptions(),
@@ -104,43 +105,49 @@ start(_Type, Args) ->
 %% -----------------------------------------------------------------------------
 start_phase(init_db_partitions, normal, []) ->
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will initialise its partitions from disk.
+    ok;
+
+start_phase(configure_features, normal, []) ->
+    ok = bondy_realm:apply_config(),
+    %% ok = bondy_oauth2:apply_config(),
+    ok = bondy_http_gateway:apply_config(),
     ok;
 
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
     %% This is to enable certain operations during startup i.e. liveness and
-    %% readiness probes.
+    %% readiness http probes.
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
-    bondy_api_gateway:start_admin_listeners();
-
-start_phase(configure_features, normal, []) ->
-    ok = bondy_realm:apply_config(),
-    %% ok = bondy_oauth2:apply_config(),
-    ok = bondy_api_gateway:apply_config(),
-    ok;
+    bondy_http_gateway:start_admin_listeners();
 
 start_phase(init_registry, normal, []) ->
-    bondy_registry:init();
+    bondy_registry:init_tries();
 
 start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will calculate the Active Anti-entropy hashtrees.
     ok;
 
 start_phase(aae_exchange, normal, []) ->
     %% The application master will call this same phase in plum_db
-    %% we do nothing here
+    %% we do nothing here.
+    %% plum_db will try to perform an Active Anti-entropy exchange.
     ok;
 
 start_phase(init_listeners, normal, []) ->
     %% Now that the registry has been initialised we can initialise
-    %% the remaining HTTP, WS and TCP listeners for clients to connect
-    ok = bondy_wamp_raw_handler:start_listeners(),
-    ok = bondy_api_gateway:start_listeners(),
+    %% the remaining listeners for clients to connect
+    %% WAMP TCP listeners
+    ok = bondy_wamp_tcp:start_listeners(),
+    %% WAMP Websocket and REST Gateway HTTP listeners
+    %% @TODO We need to separate the /ws path into another listener/port number
+    ok = bondy_http_gateway:start_listeners(),
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),
     ok.
@@ -172,7 +179,7 @@ stop(_State) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc A utility function that we use to extract the version name that is
+%% @doc A utility function we use to extract the version name that is
 %% injected by the bondy.app.src configuration file.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -188,9 +195,9 @@ setup_env(Args) ->
 
 %% @private
 setup_bondy_realm() ->
-    %% We use get/2 to force the creation of the bondy admin realm
+    %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
-    _ = bondy_realm:get(?BONDY_REALM_URI),
+    _ = bondy_realm:get(?MASTER_REALM_URI),
     ok.
 
 
@@ -198,50 +205,57 @@ setup_bondy_realm() ->
 setup_partisan() ->
     %% We add the wamp_peer_messages channel to the configured channels
     Channels0 = partisan_config:get(channels, []),
-    partisan_config:set(channels, [wamp_peer_messages | Channels0]).
+    Channels1 = [wamp_peer_messages | Channels0],
+    ok = partisan_config:set(channels, Channels1),
+    bondy_config:set(wamp_peer_channel, wamp_peer_messages).
 
 
 %% @private
 setup_event_handlers() ->
     %% We replace the default OTP alarm handler with ours
     _ = bondy_event_manager:swap_watched_handler(
-        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}),
+        alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
+    ),
+    _ = bondy_event_manager:add_watched_handler(
+        bondy_wamp_router_event_handler, []
+    ),
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
-    _ = bondy_event_manager:add_watched_handler(bondy_wamp_meta_events, []),
     ok.
 
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc Sets up the internal WAMP subscriptions.
+%% @doc Sets up some internal WAMP subscribers. These are processes supervised
+%% by {@link bondy_subsribers_sup}.
 %% @end
 %% -----------------------------------------------------------------------------
 setup_wamp_subscriptions() ->
-    %% TODO moved this into each app when we finish restructuring
+    %% TODO move this into each app when we finish restructuring
     Opts = #{match => <<"exact">>},
+
     _ = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
-        ?USER_ADDED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        ?BONDY_USER_ADDED,
+        fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
-        ?USER_DELETED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        ?BONDY_USER_DELETED,
+        fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
-        ?USER_UPDATED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        ?BONDY_USER_UPDATED,
+        fun bondy_wamp_rbac_api:handle_event/2
     ),
     _ = bondy:subscribe(
-        ?BONDY_PRIV_REALM_URI,
+        ?CONTROL_REALM_URI,
         Opts,
-        ?PASSWORD_CHANGED,
-        fun bondy_api_gateway_wamp_handler:handle_event/2
+        ?BONDY_USER_CREDENTIALS_CHANGED,
+        fun bondy_wamp_rbac_api:handle_event/2
     ),
     ok.
 
@@ -252,18 +266,21 @@ suspend_aae() ->
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = plum_db_config:set(aae_enabled, false),
-            _ = lager:info(
-                "Temporarily disabled active anti-entropy (AAE) during initialisation"),
+            ?LOG_NOTICE(#{
+                description => "Temporarily disabled active anti-entropy (AAE) during initialisation"
+            }),
             ok;
         false ->
             ok
     end.
 
+
+%% @private
 restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
             ok = plum_db_config:set(aae_enabled, true),
-            _ = lager:info("Active anti-entropy (AAE) re-enabled"),
+            ?LOG_NOTICE(#{description => "Active anti-entropy (AAE) re-enabled"}),
             ok;
         false ->
             ok
@@ -272,37 +289,43 @@ restore_aae() ->
 
 %% @private
 stop_router_services() ->
-    _ = lager:info("Initiating shutdown"),
+    ?LOG_NOTICE(#{description => "Initiating shutdown"}),
 
     %% We stop accepting new connections on HTTP/S and WS/S
-    _ = lager:info("Suspending HTTP/S and WS/S listeners"),
-    ok = bondy_api_gateway:suspend_listeners(),
+    ?LOG_NOTICE(#{description =>
+        "Suspending HTTP/S and WS/S listeners. "
+        "No new connections will be accepted."
+    }),
+    ok = bondy_http_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
-    _ = lager:info("Suspending TCP/TLS listeners"),
-    ok = bondy_wamp_raw_handler:suspend_listeners(),
+    ?LOG_NOTICE(#{description =>
+        "Suspending TCP/TLS listeners. "
+        "No new connections will be accepted."
+    }),
+    ok = bondy_wamp_tcp:suspend_listeners(),
 
     %% We ask the router to shutdown. This will send a goodbye to all sessions
-    _ = lager:info("Shutting down all WAMP sessions"),
+    ?LOG_NOTICE(#{description => "Shutting down all existing client sessions."}),
     ok = bondy_router:shutdown(),
 
     %% We sleep for a while to allow all sessions to terminate gracefully
     Secs = bondy_config:get(shutdown_grace_period, 5),
-    _ = lager:info(
-        "Awaiting ~p secs for WAMP sessions to gracefully terminate",
-        [Secs]
-    ),
+    ?LOG_NOTICE(#{
+        description => "Awaiting for client sessions to gracefully terminate",
+        timer_secs => Secs
+    }),
     ok = timer:sleep(Secs * 1000),
 
     %% We force the HTTP/S and WS/S connections to stop
-    _ = lager:info("Terminating all HTTP/S and WS/S connections"),
-    ok = bondy_api_gateway:stop_listeners(),
+    ?LOG_NOTICE(#{description => "Terminating all HTTP/S and WS/S connections"}),
+    ok = bondy_http_gateway:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
-    _ = lager:info("Terminating all TCP/TLS connections"),
-    ok = bondy_wamp_raw_handler:stop_listeners(),
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS connections"}),
+    ok = bondy_wamp_tcp:stop_listeners(),
 
-    _ = lager:info("Shutdown finished"),
+    ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
 
 

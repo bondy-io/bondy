@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_event_manager.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -23,9 +23,38 @@
 %% In addition, this module mirrors most of the gen_event API and adds variants
 %% with two arguments were the first argument is the defaul event manager
 %% (`bondy_event_manager').
+%%
+%% ```
+%%      +---------------------------------------+
+%%      |                                       |
+%%      |          bondy_event_manager          |
+%%      |                                       |
+%%      +---------------------------------------+
+%%                          |
+%%                          |
+%%                          v
+%%      +---------------------------------------+
+%%      |                                       |
+%%      |    bondy_event_handler_watcher_sup    |
+%%      |                                       |
+%%      +---------------------------------------+
+%%                          |
+%%                          +--------------------------------+
+%%                          |                                |
+%%       +---------------------------------------+       +---+---+
+%%       |                                       |       |       |
+%%       |     bondy_event_handler_watcher 1     |       |   N   |
+%%       |                                       |       |       |
+%%       +---------------------------------------+       +-------+
+%%
+%%                       simple_one_for_one
+%% '''
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_event_manager).
+
+-include_lib("kernel/include/logger.hrl").
 
 %% API
 -export([add_handler/2]).

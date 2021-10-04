@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_load_balancer.erl -
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -26,6 +26,29 @@
 %% replica of the global registry and thus can load balance between local and
 %% remote Callees.
 %%
+%% ## Supported Load Balancing Strategies
+%%
+%% Bondy supports all WAMP Basic and Advanced Profile load balancing
+%% strategies for Shared Registrations and extends those with additional
+%% strategies.
+%%
+%% ### Single
+%%
+%% ### First
+%%
+%% ### Last
+%%
+%% ### Random
+%%
+%% ### Round Robin
+%%
+%% ### Jump Consistent Hash
+%%
+%% ### Queue Least Loaded
+%%
+%% ### Queue Least Loaded Sample
+%%
+%%
 %% In the future we will explore implementing distributed load balancing
 %% algorithms such as Ant Colony, Particle Swarm Optimization and Biased Random
 %% Sampling [See references](https://pdfs.semanticscholar.org/b9a9/52ed1b8bfae2e976b5c0106e894bd4c41d89.pdf)
@@ -37,45 +60,75 @@
 
 -define(RPC_STATE_TABLE, bondy_rpc_state).
 -define(OPTS_SPEC, #{
+    %% BONDY extension
+    %% TODO this should be a map
+    %% #{strategy => #{id => queue_least_loaded, force_locality}}
     strategy => #{
         required => true,
         allow_null => false,
         allow_undefined => false,
         datatype => {in, [
             %% WAMP
-            single, first, last, random, round_robin,
+            single, ?INVOKE_SINGLE,
+            first, ?INVOKE_FIRST,
+            last, ?INVOKE_LAST,
+            random, ?INVOKE_RANDOM,
+            round_robin, ?INVOKE_ROUND_ROBIN,
             %% BONDY extensions
-            queue_least_loaded, queue_least_loaded_sample
-        ]}
+            jump_consistent_hash, ?INVOKE_JUMP_CONSISTENT_HASH,
+            queue_least_loaded, ?INVOKE_QUEUE_LEAST_LOADED,
+            queue_least_loaded_sample, ?INVOKE_QUEUE_LEAST_LOADED_SAMPLE
+        ]},
+        validator => fun
+            (?INVOKE_ROUND_ROBIN) ->
+                %% We are picky with style
+                {ok, round_robin};
+            (Val) when is_binary(Val) ->
+                {ok, binary_to_existing_atom(Val, utf8)};
+            (Val) when is_atom(Val) ->
+                true
+        end
     },
-    %% BONDY extension
-    %% TODO this should be a map
-    %% #{strategy => #{id => queue_least_loaded, force_locality}}
-    force_locality => #{
-        alias => <<"force_locality">>,
+    'x_force_locality' => #{
         required => true,
         allow_null => false,
         allow_undefined => false,
         default => true,
         datatype => boolean
+    },
+    'x_routing_key' => #{
+        required => false,
+        allow_null => false,
+        allow_undefined => false,
+        datatype => binary
     }
 }).
 
 -record(last_invocation, {
-    key     ::  {uri(), uri()},
-    value   ::  id()
+    key             ::  {uri(), uri()},
+    value           ::  id()
+}).
+
+-record(iterator, {
+    strategy        ::  strategy(),
+    entries         ::  entries(),
+    options = #{}   ::  map()
 }).
 
 -type entries()             ::  [bondy_registry_entry:t()].
--type strategy()            ::  single | first | last | random | round_robin.
+-type strategy()            ::  single | first | last | random | round_robin
+                                | jump_consistent_hash
+                                | queue_least_loaded
+                                | queue_least_loaded_sample.
 -type opts()                ::  #{
-    strategy => strategy(),
-    force_locality => boolean()
+    strategy := strategy(),
+    'x_force_locality' => boolean(),
+    'x_routing_key' => binary()
 }.
--opaque continuation()        ::  {strategy(), entries()}.
+-opaque iterator()          ::  #iterator{}.
 
 
--export_type([continuation/0]).
+-export_type([iterator/0]).
 
 
 -export([iterate/1]).
@@ -106,60 +159,43 @@ get(Entries, Opts) when is_list(Entries) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec iterate(entries(), opts()) ->
-    {bondy_registry_entry:t(), continuation()} | '$end_of_table'.
+    {bondy_registry_entry:t(), iterator()}
+    | '$end_of_table'
+    | {error, noproc | map()} .
 
-iterate(Entries0, Opts0) when is_list(Entries0) ->
-
-    {Strat, Loc} = case maps_utils:validate(Opts0, ?OPTS_SPEC) of
-        #{strategy := S}
-        when S == queue_least_loaded
-        orelse S == queue_least_loaded_sample ->
-            {S, true};
-        #{strategy := S, force_locality := L} ->
-            {S, L}
-    end,
-
-
-    Entries = maybe_sort_entries(Loc, Entries0),
-
-    case Strat of
-        single when length(Entries) == 1 ->
-            next(Entries);
-        first ->
-            next(Entries);
-        last ->
-            next(lists:reverse(Entries));
-        random ->
-            next(lists_utils:shuffle(Entries));
-        round_robin ->
-            get_round_robin(Entries);
-        queue_least_loaded_sample ->
-            get_queue_least_loaded(lists_utils:shuffle(Entries), 2);
-        queue_least_loaded ->
-            get_queue_least_loaded(Entries, length(Entries));
-        _ ->
-            error(badarg)
+iterate(Entries, Opts0) when is_list(Entries) ->
+    try
+        Opts = validate_options(Opts0),
+        iterate(iterator(Entries, Opts))
+    catch
+        error:Error when is_map(Error) ->
+            {error, Error}
     end.
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec iterate(continuation()) ->
-    {bondy_registry_entry:t(), continuation()} | {error, noproc}.
+-spec iterate(iterator()) ->
+    {bondy_registry_entry:t(), iterator()} | {error, noproc} | 'end_of_table'.
 
-iterate({round_robin, Entries}) ->
-    get_round_robin(Entries);
 
-iterate({queue_least_loaded, Entries}) ->
-    get_queue_least_loaded(Entries, length(Entries));
 
-iterate({queue_least_loaded_sample, Entries}) ->
-    get_queue_least_loaded(Entries, 2);
+iterate(#iterator{strategy = round_robin} = Iter) ->
+    next_round_robin(Iter);
 
-iterate({_, Entries}) ->
-    next(Entries).
+iterate(#iterator{strategy = jump_consistent_hash} = Iter) ->
+    next_consistent_hash(Iter, jch);
+
+iterate(#iterator{strategy = queue_least_loaded} = Iter) ->
+    next_queue_least_loaded(Iter, length(Iter#iterator.entries));
+
+iterate(#iterator{strategy = queue_least_loaded_sample} = Iter) ->
+    next_queue_least_loaded(Iter, 2);
+
+iterate(#iterator{} = Iter) ->
+    %%  single, first, last
+    next(Iter).
 
 
 
@@ -168,11 +204,76 @@ iterate({_, Entries}) ->
 %% =============================================================================
 
 
+validate_options(Opts0) ->
+    case maps_utils:validate(Opts0, ?OPTS_SPEC) of
+        #{strategy := jump_consistent_hash, 'x_routing_key' := _} = Opts ->
+            Opts;
+        #{strategy := jump_consistent_hash} ->
+            ErrorMap = bondy_error:map({
+                <<"missing_option">>,
+                <<"A value for option 'x_routing_key' or 'rkey' is required">>
+            }),
+            error(ErrorMap);
+        Opts ->
+            Opts
+    end.
+
+
+%% @private
+iterator(Entries, Opts) ->
+    #iterator{
+        strategy = maps:get(strategy, Opts),
+        entries = prepare_entries(Entries, Opts),
+        options = maps:without([strategy], Opts)
+    }.
+
+
+%% @private
+prepare_entries(Entries, #{strategy := jump_consistent_hash}) ->
+    lists:keysort(1, Entries);
+
+prepare_entries(Entries, #{strategy := queue_least_loaded_sample}) ->
+    lists_utils:shuffle(Entries);
+
+prepare_entries(Entries, #{strategy := last, force_locality := Flag}) ->
+    lists:reverse(maybe_sort_by_locality(Flag, Entries));
+
+prepare_entries(Entries, #{strategy := last}) ->
+    lists:reverse(maybe_sort_by_locality(true, Entries));
+
+prepare_entries(Entries, #{strategy := single}) ->
+    %% There should only be one entry here, but instead of failing
+    %% we would consistently pick the first one, regardless of location.
+    lists:keysort(1, Entries);
+
+prepare_entries(Entries, _) ->
+    maybe_sort_by_locality(true, Entries).
+
+
+%% @private
+maybe_sort_by_locality(true, L) ->
+    Node = bondy_peer_service:mynode(),
+    Fun = fun(A, B) ->
+        case {bondy_registry_entry:node(A), bondy_registry_entry:node(B)} of
+            {Node, _} -> true;
+            {_, Node} -> false;
+            _ -> A =< B % to keep order of remaining elements
+        end
+    end,
+    lists:sort(Fun, L);
+
+maybe_sort_by_locality(false, L) ->
+    L.
+
+
 %% @private
 do_get('$end_of_table', _) ->
     {error, noproc};
 
-do_get({Entry, Cont}, Node) ->
+do_get({error, _} = Error, _) ->
+    Error;
+
+do_get({Entry, Iter}, Node) ->
     case bondy_registry_entry:node(Entry) =:= Node of
         true ->
             %% The wamp peer is local
@@ -184,7 +285,7 @@ do_get({Entry, Cont}, Node) ->
                     %% This should happen when the WAMP Peer
                     %% disconnected between the time we read the entry
                     %% and now. We contine trying with other entries.
-                    do_get(iterate(Cont), Node)
+                    do_get(iterate(Iter), Node)
             end;
         false ->
             %% This wamp peer is remote.
@@ -195,20 +296,7 @@ do_get({Entry, Cont}, Node) ->
     end.
 
 
-%% @private
-maybe_sort_entries(true, L) ->
-    Node = bondy_peer_service:mynode(),
-    Fun = fun(A, B) ->
-        case {bondy_registry_entry:node(A), bondy_registry_entry:node(B)} of
-            {Node, _} -> true;
-            {_, Node} -> false;
-            _ -> A =< B % to keep order of remaining elements
-        end
-    end,
-    lists:sort(Fun, L);
 
-maybe_sort_entries(false, L) ->
-    L.
 
 
 %% -----------------------------------------------------------------------------
@@ -216,13 +304,13 @@ maybe_sort_entries(false, L) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec next(entries()) ->
-    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
+-spec next(iterator()) ->
+    {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
-next([H|T]) ->
-    {H, T};
+next(#iterator{entries = [H|T]} = Iter) ->
+    {H, Iter#iterator{entries = T}};
 
-next([]) ->
+next(#iterator{entries = []}) ->
     '$end_of_table'.
 
 
@@ -231,18 +319,20 @@ next([]) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_round_robin(entries()) ->
-    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
+-spec next_round_robin(iterator()) ->
+    {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
-get_round_robin(Entries) ->
-    First = hd(Entries),
+next_round_robin(Iter) ->
+    First = hd(Iter#iterator.entries),
     Uri = bondy_registry_entry:uri(First),
     RealmUri = bondy_registry_entry:realm_uri(First),
-    get_round_robin(last_invocation(RealmUri, Uri), Entries).
+    next_round_robin(Iter, last_invocation(RealmUri, Uri)).
 
 
-get_round_robin(undefined, [H|T]) ->
+next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
     %% We never invoked this procedure before or we reordered the round
+    NewIter = Iter#iterator{entries = T},
+
     case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
         true ->
             %% The pid of the connection process
@@ -256,11 +346,11 @@ get_round_robin(undefined, [H|T]) ->
                         bondy_registry_entry:id(H)
                     ),
                     %% We return the entry and the remaining ones
-                    {H, T};
+                    {H, NewIter};
                 false ->
                     %% The peer connection must have been closed between
                     %% the time we read and now.
-                    get_round_robin(undefined, T)
+                    next_round_robin(NewIter, undefined)
             end;
         false ->
             %% A remote callee
@@ -271,15 +361,15 @@ get_round_robin(undefined, [H|T]) ->
                 bondy_registry_entry:id(H)
             ),
             %% We return the entry and the remaining ones
-            {H, T}
+            {H, NewIter}
     end;
 
-get_round_robin(#last_invocation{value = LastId}, Entries0) ->
+next_round_robin(Iter, #last_invocation{value = LastId}) ->
     Pred = fun(E) -> LastId =:= bondy_registry_entry:id(E) end,
-    Entries1 = lists_utils:rotate_right_with(Pred, Entries0),
-    get_round_robin(undefined, Entries1);
+    Entries = lists_utils:rotate_right_with(Pred, Iter#iterator.entries),
+    next_round_robin(Iter#iterator{entries = Entries}, undefined);
 
-get_round_robin(undefined, []) ->
+next_round_robin(#iterator{entries = []}, undefined) ->
     '$end_of_table'.
 
 
@@ -289,22 +379,50 @@ get_round_robin(undefined, []) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_queue_least_loaded(entries(), SampleSize :: integer()) ->
-    {bondy_registry_entry:t(), entries()} | '$end_of_table'.
+-spec next_consistent_hash(Iter :: iterator(), Algo :: atom()) ->
+    {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
-get_queue_least_loaded([], _) ->
+next_consistent_hash(#iterator{entries = []}, _) ->
     '$end_of_table';
 
-get_queue_least_loaded(L, SampleSize) ->
-    get_queue_least_loaded(L, SampleSize, 0, undefined).
+next_consistent_hash(Iter, Algo) ->
+    Key = maps:get('x_routing_key', Iter#iterator.options),
+    Buckets = length(Iter#iterator.entries),
+    Bucket = bondy_consistent_hashing:bucket(Key, Buckets, Algo),
+    Entries = Iter#iterator.entries,
+
+    %% Bucket is zero-based while lists position numbering starts at 1.
+    Entry = lists:nth(Bucket + 1, Entries),
+    EntryKey = bondy_registry_entry:key(Entry),
+
+    NewIter = Iter#iterator{entries = lists:keydelete(EntryKey, 1, Entries)},
+    {Entry, NewIter}.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec next_queue_least_loaded(iterator(), SampleSize :: integer()) ->
+    {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
+
+next_queue_least_loaded([], _) ->
+    '$end_of_table';
+
+next_queue_least_loaded(Iter, SampleSize) ->
+    next_queue_least_loaded(Iter, SampleSize, 0, undefined).
 
 
 %% @private
-get_queue_least_loaded(L, SampleSize, Count, {_, Entry})
+next_queue_least_loaded(Iter, SampleSize, Count, {_, Entry})
 when SampleSize == Count ->
-    {Entry, L};
+    {Entry, Iter};
 
-get_queue_least_loaded([H|T], SampleSize, Count, Chosen) ->
+next_queue_least_loaded(
+    #iterator{entries = [H|T]} = Iter, SampleSize, Count, Chosen) ->
+    NewIter = Iter#iterator{entries = T},
+
     case bondy_registry_entry:is_local(H) of
         true ->
             %% The pid of the connection process
@@ -312,27 +430,29 @@ get_queue_least_loaded([H|T], SampleSize, Count, Chosen) ->
             case erlang:process_info(Pid, [message_queue_len]) of
                 undefined ->
                     %% Process died, we continue iterating
-                    get_queue_least_loaded(T, SampleSize, Count, Chosen);
+                    next_queue_least_loaded(NewIter, SampleSize, Count, Chosen);
                 [{message_queue_len, Len}] when Chosen == undefined ->
-                    get_queue_least_loaded(T, SampleSize, Count + 1, {Len, H});
+                    next_queue_least_loaded(
+                        NewIter, SampleSize, Count + 1, {Len, H});
                 [{message_queue_len, Len}] ->
                     NewChosen = case Chosen of
                         {Val, _} when Val =< Len -> Chosen;
                         _ -> {Len, H}
                     end,
-                    get_queue_least_loaded(T, SampleSize, Count + 1, NewChosen)
+                    next_queue_least_loaded(
+                        NewIter, SampleSize, Count + 1, NewChosen)
             end;
         false ->
             %% We already covered all local callees,
             %% pick the first remote callee (in effect randomnly as we already
             %% shuffled the list of entries)
-            {H, T}
+            {H, NewIter}
     end;
 
-get_queue_least_loaded([], _, _, undefined) ->
+next_queue_least_loaded(#iterator{entries = []}, _, _, undefined) ->
     '$end_of_table';
 
-get_queue_least_loaded([], _, _, Entry) ->
+next_queue_least_loaded(#iterator{entries = []}, _, _, Entry) ->
     Entry.
 
 
@@ -364,5 +484,7 @@ set_last_invocation(RealmUri, Uri, Val) ->
     Entry = #last_invocation{key = {RealmUri, Uri}, value = Val},
     true = ets:insert(rpc_state_table(RealmUri, Uri), Entry),
     ok.
+
+
 
 

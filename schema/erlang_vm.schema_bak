@@ -1,0 +1,92 @@
+
+
+%% @doc Starts the Erlang runtime system with SMP support
+%% enabled. This may fail if no runtime system with SMP support is
+%% available. The 'auto' setting starts the Erlang runtime system with
+%% SMP support enabled if it is available and more than one logical
+%% processor are detected. -smp disable starts a runtime system
+%% without SMP support.
+%%
+%% NOTE: The runtime system with SMP support will not be available on
+%% all supported platforms. See also the erlang.schedulers settings.
+%%
+%% NOTE: Some native extensions (NIFs) require use of the SMP
+%% emulator.
+%%
+%% More information at: http://erlang.org/doc/man/erl.html
+{mapping, "erlang.smp", "vm_args.-smp", [
+  {default, enable},
+  {datatype, {enum, [enable, auto, disable]}},
+  hidden
+]}.
+
+
+
+%% @doc Enables or disables the kernel poll functionality if the
+%% emulator supports it. If the emulator does not support kernel poll,
+%% and the K flag is passed to the emulator, a warning is issued at
+%% startup.
+%%
+%% Similar information at: http://erlang.org/doc/man/erl.html
+{mapping, "erlang.K", "vm_args.+K", [
+  {default, on},
+  {datatype, flag},
+  hidden
+]}.
+
+%%%% Tunables
+%% @doc Name of the Erlang node
+{mapping, "nodename", "vm_args.-name", [
+  {default, "{{node}}"}
+]}.
+
+%% @doc Cookie for distributed node communication.  All nodes in the
+%% same cluster should use the same cookie or they will not be able to
+%% communicate.
+{mapping, "distributed_cookie", "vm_args.-setcookie", [
+  {default, "{{cookie}}"}
+]}.
+
+
+
+
+
+%% @doc Enable or disable time correction
+{mapping, "erlang.time_correction", "vm_args.+c", [
+  {default, on},
+  {datatype, flag},
+  hidden
+]}.
+
+%% @doc Sets the Erlang Time Warp Mode
+{mapping, "erlang.time_warp_mode", "vm_args.+C", [
+  {default, multi_time_warp},
+  {datatype, {enum, [no_time_warp, single_time_warp, multi_time_warp]}},
+  hidden
+]}.
+
+
+
+
+%% @doc Because we are using Partisan we set 'off' for allowing explicit
+%% connections only.
+{mapping, "erlang.distribution.connect_all", "vm_args.-connect_all", [
+  {default, off},
+  {datatype, flag},
+  hidden
+]}.
+
+%% In a distributed Erlang system, it is sometimes useful to connect to a node without also connecting to all other nodes.
+%% A hidden node is a node started with the command-line flag -hidden.
+%% Connections between hidden nodes and other nodes are not transitive, they
+%% must be set up explicitly. Also, hidden nodes does not show up in the list
+%% of nodes returned by nodes(). Instead, nodes(hidden) or nodes(connected)
+%% must be used. This means, for example, that the hidden node is not added to
+%% the set of nodes that global is keeping track of.
+%%
+%% Because we are using Partisan, we enable this flag.
+{mapping, "erlang.distribution.hidden", "vm_args.-hidden", [
+  {default, ""},
+  {datatype, string},
+  hidden
+]}.

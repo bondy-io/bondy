@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  common.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@
            {polling_interval,10000},
            {join_retry_interval,5000},
            {automatic_join,true},
-           {enabled,true},
+           {enabled,false},
            {config,[{<<"service_name">>,<<"bondy">>}]}]},
       {wamp_tls,
           [{socket_opts,
@@ -54,42 +54,60 @@
            {port,18085},
            {enabled,false}]},
       {wamp_tcp,
-          [{socket_opts,[{backlog,1024},{nodelay,true},{keepalive,true}]},
+          [{socket_opts,[{nodelay,true},{keepalive,true}]},
+            {backlog,1024},
            {max_connections,100000},
            {acceptors_pool_size,200},
            {port,18082},
            {enabled,true}]},
+      {wamp_websocket,
+          [{deflate_opts,
+               [{client_context_takeover,takeover},
+                {server_context_takeover,takeover},
+                {strategy,default},
+                {level,5},
+                {mem_level,8},
+                {server_max_window_bits,11},
+                {client_max_window_bits,11}]},
+           {compress,false},
+           {max_frame_size,infinity},
+           {idle_timeout,28800000},
+           {ping,[{max_attempts,3},{interval,30000},{enabled,true}]}]},
       {api_gateway_https,
           [{socket_opts,
                [{cacertfile,"./etc/cacert.pem"},
                 {keyfile,"./etc/key.pem"},
                 {certfile,"./etc/cert.pem"},
-                {keepalive,false},
                 {backlog,4096},
-                {nodelay,true}]},
+                {nodelay,true},
+                {keepalive,false}]},
            {max_connections,500000},
            {acceptors_pool_size,200},
-           {port,18083}]},
+           {port,18083},
+           {enabled,false}]},
       {api_gateway_http,
-          [{socket_opts,[{backlog,4096},{nodelay,true},{keepalive,false}]},
+          [{socket_opts,[{nodelay,true},{keepalive,false}]},
+          {backlog,4096},
            {max_connections,500000},
            {acceptors_pool_size,200},
-           {port,18080}]},
-      {api_gateway,
-          [{config_file,
-               "./etc/api_gateway_config.json"}]},
+           {port,18080},
+           {enabled,true}]},
+      {api_gateway,[{config_file,"./etc/api_gateway_config.json"}]},
       {admin_api_https,
           [{socket_opts,
                [{cacertfile,"./etc/cacert.pem"},
                 {keyfile,"./etc/key.pem"},
                 {certfile,"./etc/cert.pem"},
+                {backlog,1024},
+                {nodelay,true},
                 {keepalive,false}]},
            {max_connections,250000},
            {acceptors_pool_size,200},
-           {port,18084},
+           {port,18083},
            {enabled,false}]},
       {admin_api_http,
-          [{socket_opts,[{backlog,1024},{nodelay,true},{keepalive,false}]},
+          [{socket_opts,[{nodelay,true},{keepalive,false}]},
+          {backlog,1024},
            {max_connections,250000},
            {acceptors_pool_size,200},
            {port,18081},
@@ -97,76 +115,85 @@
       {router_pool,[{capacity,10000},{size,8},{type,transient}]},
       {load_regulation_enabled,true},
       {request_timeout,20000},
+      {wamp_message_retention,
+          [{default_ttl,0},
+           {max_message_size,65536},
+           {max_memory,1073741824},
+           {max_messages,1000000},
+           {storage_type,ram},
+           {enabled,true}]},
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
-      {allow_anonymous_user,true},
-      {automatically_create_realms,false},
-      {security,
-          [{config_file,
-               "./etc/security_config.json"}]},
-      {shutdown_grace_period,5}
+      {security,[
+          {ticket, [
+              {expiry_time_secs, 300},
+              {max_expiry_time_secs, 600},
+              {allow_not_found, true},
+              {authmethods, [
+                <<"cryptosign">>, <<"password">>, <<"ticket">>, <<"tls">>, <<"trust">>,<<"wamp-scram">>, <<"wampcra">>
+                ]}
+            ]},
+          {password,
+               [{cra,[{kdf,pbkdf2}]},
+                {scram,[{kdf,pbkdf2}]},
+                {protocol_upgrade_enabled,false},
+                {protocol,cra},
+                {min_length,6},
+                {max_length,254},
+                {pbkdf2,[{iterations,10000}]},
+                {argon2id13,[{iterations,moderate},{memory,interactive}]}]},
+            {config_file,"./etc/security_config.json"},
+            {allow_anonymous_user,true},
+            {automatically_create_realms,false}
+        ]},
+      {shutdown_grace_period,5},
+      {wamp_serializers, []}
 ]).
 
 -define(CONFIG, [
-
- {bondy_broker_bridge,
-     [{bridges,
-          [{bondy_kafka_bridge,
-               [{enabled,true},
-                {topics,
-                    [{<<"account_events">>,<<"foo">>},
-                     {<<"agent_events">>,<<"foo">>},
-                     {<<"geofence_events">>,<<"foo">>},
-                     {<<"notification_events">>,<<"foo">>},
-                     {<<"reminder_events">>,<<"foo">>},
-                     {<<"task_events">>,<<"foo">>},
-                     {<<"thing_events">>,<<"foo">>},
-                     {<<"trip_events">>,<<"foo">>},
-                     {<<"user_events">>,<<"foo">>}]},
-                {clients,
-                    [{default,
-                         [{extra_sock_opts,[]},
-                          {default_producer_config,
-                              [{partition_restart_delay_seconds,2},
-                               {required_acks,1},
-                               {topic_restart_delay_seconds,10}]},
-                          {reconnect_cool_down_seconds,10},
-                          {auto_start_producers,true},
-                          {restart_delay_seconds,10},
-                          {allow_topic_auto_creation,false},
-                          {max_metadata_sock_retry,5},
-                          {endpoints,{"127.0.0.1",9092}}]}]}]}]},
-      {config_file,
-          "etc/broker_bridge_config.json"}]},
-    {lager,
-    [{error_logger_hwm,100},
-     {crash_log_count,5},
-     {crash_log_date,"$D0"},
-     {crash_log_size,10485760},
-     {crash_log_msg_size,65536},
-     {crash_log,"./data/bondy/log/crash.log"},
-     {handlers,
-         [{lager_file_backend,
-              [{file,"./data/bondy/log/console.log"},
-               {level,info},
-               {size,10485760},
-               {date,"$D0"},
-               {count,5}]},
-          {lager_file_backend,
-              [{file,"./data/bondy/log/error.log"},
-               {level,error},
-               {size,10485760},
-               {date,"$D0"},
-               {count,5}]},
-          {lager_file_backend,
-              [{file,"./data/bondy/log/debug.log"},
-               {level,debug},
-               {size,10485760},
-               {date,"$D0"},
-               {count,5}]}]},
-     {error_logger_redirect,true}]},
-    {sasl,[{sasl_error_logger,false}]},
-    {os_mon,[{system_memory_high_watermark,0.6}]}
+    {bondy_broker_bridge,
+        [{bridges,
+             [{bondy_kafka_bridge,
+                  [{enabled,false},
+                   {topics,[{<<"wamp_events">>,<<"com.leapsight.wamp.events">>}]},
+                   {clients,
+                       [{default,
+                            [{endpoints,[{"127.0.0.1",9092}]},
+                             {extra_sock_opts,[]},
+                             {default_producer_config,
+                                 [{partition_restart_delay_seconds,2},
+                                  {required_acks,1},
+                                  {topic_restart_delay_seconds,10}]},
+                             {reconnect_cool_down_seconds,10},
+                             {auto_start_producers,true},
+                             {restart_delay_seconds,10},
+                             {endpoints,"[{\"127.0.0.1\", 9092}]"},
+                             {allow_topic_auto_creation,true},
+                             {max_metadata_sock_retry,5}]}]}]}]},
+         {config_file,"./etc/broker_bridge_config.json"}]},
+    {plum_db,
+        [{aae_exchange_on_cluster_join,true},
+            {hashtree_ttl,604800},
+            {hashtree_timer,10000},
+            {aae_enabled,true},
+            {data_exchange_timeout,60000},
+            {data_dir,"./data"},
+            {store_open_retries_delay,2000},
+            {store_open_retry_Limit,30},
+            {shard_by,prefix},
+            {partitions,16},
+            {wait_for_aae_exchange,false},
+            {wait_for_hashtrees,true},
+            {wait_for_partitions,true}]},
+    {plumtree,[{broadcast_exchange_timer,60000}]},
+    {partisan,
+    [{tls_options,
+            [{cacertfile,"./etc/cacert.pem"},
+            {keyfile,"./etc/key.pem"},
+            {certfile,"./etc/cert.pem"}]},
+        {tls,false},
+        {parallelism,1},
+        {peer_port,18086}]}
 ]).
 
 -export([
@@ -175,7 +202,6 @@
 	 suite/0,
      tests/1,
      start_bondy/0,
-     maybe_start_bondy/0,
      stop_bondy/0
 	]).
 
@@ -197,39 +223,51 @@ is_a_test(is_a_test) ->
 is_a_test(Function) ->
     hd(lists:reverse(string:tokens(atom_to_list(Function), "_"))) == "test".
 
-
-maybe_start_bondy() ->
-    case persistent_term:get(bondy_started, false) of
+start_bondy() ->
+    case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
-            start_bondy();
+            _ = [
+                begin
+                    application:unload(App),
+                    application:load(App)
+                end || {App, _} <- ?CONFIG
+            ],
+
+            _ = [
+                begin
+                    application:set_env(App, K, V)
+                end || {App, L} <- ?CONFIG, {K, V} <- L
+            ],
+
+            application:unload(bondy),
+            application:load(bondy),
+            [application:set_env(bondy, K, V) || {K, V} <- ?BONDY],
+
+            length(?BONDY) == length(application:get_all_env(bondy))
+            orelse exit(configuration_error),
+
+            maybe_error(application:ensure_all_started(gproc)),
+            maybe_error(application:ensure_all_started(jobs)),
+            maybe_error(application:ensure_all_started(wamp)),
+            maybe_error(application:ensure_all_started(enacl)),
+            maybe_error(application:ensure_all_started(pbkdf2)),
+            maybe_error(application:ensure_all_started(stringprep)),
+            maybe_error(application:ensure_all_started(bondy)),
+            persistent_term:put({?MODULE, bondy_started}, true),
+            ok;
         true ->
             ok
     end.
 
 
-start_bondy() ->
-
-    %% dbg:tracer(), dbg:p(all,c),
-    %% dbg:tpl(application, '_', []),
-    [begin
-        application:unload(App),
-        application:load(App),
-        application:set_env(App, K, V)
-    end || {App, L} <- ?CONFIG, {K, V} <- L],
-
-    application:unload(bondy),
-    application:load(bondy),
-    [application:set_env(bondy, K, V) || {K, V} <- ?BONDY],
-
-    {ok, _} = application:ensure_all_started(gproc),
-    {ok, _} = application:ensure_all_started(jobs),
-    {ok, _} = application:ensure_all_started(bondy),
-    persistent_term:put(bondy_started, true),
-    ok.
-
 stop_bondy() ->
     ok = application:stop(gproc),
     ok = application:stop(jobs),
+    persistent_term:put({?MODULE, bondy_started}, false),
     application:stop(bondy).
 
 
+maybe_error({error, _} = Error) ->
+    error(Error);
+maybe_error({ok, _}) ->
+    ok.

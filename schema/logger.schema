@@ -1,0 +1,826 @@
+%% @doc Specifies the primary log level, that is, log event that are equally or
+%% more severe than this level, are forwarded to the primary filters. Less
+%% severe log events are immediately discarded.
+{mapping, "log.level", "kernel.logger_level", [
+    {default, info},
+    {datatype, {enum, [
+        debug, info, notice, warning, error, critical, alert, emergency
+    ]}}
+]}.
+
+
+%% =============================================================================
+%% DEFAULT HANDLER
+%% =============================================================================
+
+
+
+%% @doc allows to enable or disable a comnfigured handler
+{mapping, "log.handlers.default.enabled", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% @doc The destination backend handler.
+{mapping, "log.handlers.default.backend", "kernel.logger", [
+    {default, console},
+    {datatype, {enum, [disk, console]}}
+]}.
+
+%% @doc Specifies the log level for the handler, that is, log events that are
+%% equally or more severe than this level, are forwarded to the handler filters
+%% for this handler.
+{mapping, "log.handlers.default.level", "kernel.logger", [
+    {default, info},
+    {datatype, {enum, [
+        debug, info, notice, warning, error, critical, alert, emergency
+    ]}}
+]}.
+
+%% Defaults to standard_io, unless parameter logger.handlers.default.config.file is
+%% given, in which case it defaults to file.
+{mapping, "log.handlers.default.config.type", "kernel.logger", [
+    {default, standard_io},
+    {datatype, {enum, [standard_io, standard_error, file]}}
+]}.
+
+%% This specifies the name of the log file when the handler is of type file.
+%% If provided the logger.handlers.default.config.type will be set to file.
+{mapping, "log.handlers.default.config.file", "kernel.logger", [
+    {datatype, file}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% Value true enables burst control and false disables it.
+{mapping, "log.handlers.default.config.burst_limit_enable", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% This is the maximum number of events to handle within a
+%% burst_limit_window_time time frame. After the limit is reached, successive
+%% events are dropped until the end of the time frame.
+{mapping, "log.handlers.default.config.burst_limit_max_count", "kernel.logger", [
+    {default, 500},
+    {datatype, integer}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% See the previous description of burst_limit_max_count.
+{mapping, "log.handlers.default.config.burst_limit_window_time", "kernel.logger", [
+    {default, 1000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% As long as the length of the message queue is lower than this value, all log
+%% events are handled asynchronously. This means that the client process
+%% sending the log event, by calling a log function in the Logger API, does not
+%% wait for a response from the handler but continues executing immediately
+%% after the event is sent. It is not affected by the time it takes the handler
+%% to print the event to the log device. If the message queue grows larger than
+%% this value, the handler starts handling log events synchronously instead,
+%% meaning that the client process sending the event must wait for a response.
+%% When the handler reduces the message queue to a level below the
+%% sync_mode_qlen threshold, asynchronous operation is resumed. The switch from
+%% asynchronous to synchronous mode can slow down the logging tempo of one, or
+%% a few, busy senders, but cannot protect the handler sufficiently in a
+%% situation of many busy concurrent senders.
+{mapping, "log.handlers.default.config.sync_mode_qlen", "kernel.logger", [
+    {default, 10},
+    {datatype, integer}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% When the message queue grows larger than this threshold, the handler
+%% switches to a mode in which it drops all new events that senders want to
+%% log. Dropping an event in this mode means that the call to the log function
+%% never results in a message being sent to the handler, but the function
+%% returns without taking any action. The handler keeps logging the events that
+%% are already in its message queue, and when the length of the message queue
+%% is reduced to a level below the threshold, synchronous or asynchronous mode
+%% is resumed. Notice that when the handler activates or deactivates drop mode,
+%% information about it is printed in the log.
+{mapping, "log.handlers.default.config.drop_mode_qlen", "kernel.logger", [
+    {default, 200},
+    {datatype, integer}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% If the length of the message queue grows larger than this threshold, a flush
+%% (delete) operation takes place. To flush events, the handler discards the
+%% messages in the message queue by receiving them in a loop without logging.
+%% Client processes waiting for a response from a synchronous log request
+%% receive a reply from the handler indicating that the request is dropped. The
+%% handler process increases its priority during the flush loop to make sure
+%% that no new events are received during the operation. Notice that after the
+%% flush operation is performed, the handler prints information in the log
+%% about how many events have been deleted.
+{mapping, "log.handlers.default.config.flush_qlen", "kernel.logger", [
+    {default, 1000},
+    {datatype, integer}
+]}.
+
+%% If disabled the repeated file sync operation is disabled,
+%% and it is the operating system settings that determine how quickly or slowly
+%% data is written to disk.
+{mapping, "log.handlers.default.config.filesync_repeat_enable", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% This value, in milliseconds, specifies how often the handler does a file
+%% sync operation to write buffered data to disk. The handler attempts the
+%% operation repeatedly, but only performs a new sync if something has actually
+%% been logged.
+{mapping, "log.handlers.default.config.filesync_repeat_interval", "kernel.logger", [
+    {default, 5000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% Value true enables the feature and false disables it.
+{mapping, "log.handlers.default.config.overload_kill_enable", "kernel.logger", [
+    {default, off},
+    {datatype, flag}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% This is the maximum memory size that the handler process is allowed to use. If the handler grows larger than this, the process is terminated.
+{mapping, "log.handlers.default.config.overload_kill_mem_size", "kernel.logger", [
+    {default, 3000000},
+    {datatype, integer}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% This is the maximum allowed queue length. If the message queue grows larger
+%% than this, the handler process is terminated.
+{mapping, "log.handlers.default.config.overload_kill_qlen", "kernel.logger", [
+    {default, 20000},
+    {datatype, integer}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% If the handler is terminated, it restarts automatically after a delay
+%% specified in milliseconds. The value infinity prevents restarts.
+{mapping, "log.handlers.default.config.overload_kill_restart_after", "kernel.logger", [
+    {default, 5000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc Specifies what happens to a log event if all filters return ignore, or
+%% if no filters exist.
+{mapping, "log.handlers.default.filter_default", "kernel.logger", [
+    {default, stop},
+    {datatype, {enum, [log, stop]}}
+]}.
+
+%% @doc Defines which domains are logged. All log messages that do not have the
+%% domain metadata key will be logged.
+%% This allows for example to avoid printing bondy_audit logs in the console
+%% and print them to a dedicated handler.
+%%
+%% The value is a comma separated string which con contain one or more of the
+%% following elements: "otp", "sasl" and "bondy_audit"
+{mapping, "log.handlers.default.filter_domains", "kernel.logger", [
+    {default, "otp, bondy_audit"},
+    {datatype, string}
+]}.
+
+%% When formatting maps limit their depth to a value. If -1 is provided, this
+%% option is disabled.
+{mapping, "log.handlers.default.formatter.map_depth", "kernel.logger", [
+    {default, 3},
+    {datatype, integer}
+]}.
+
+%% When formatting erlang terms limit their depth to a value. If -1 is
+%% provided, this option is disabled.
+{mapping, "log.handlers.default.formatter.term_depth", "kernel.logger", [
+    {default, 50},
+    {datatype, integer}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_debug", "kernel.logger", [
+    {default, "\e[0;38m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_info", "kernel.logger", [
+    {default, "\e[1;37m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_notice", "kernel.logger", [
+    {default, "\e[1;36m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_warning", "kernel.logger", [
+    {default, "\e[1;33m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_error", "kernel.logger", [
+    {default, "\e[1;31m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_critical", "kernel.logger", [
+    {default, "\e[1;35m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_alert", "kernel.logger", [
+    {default, "\e[1;45m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.colored_emergency", "kernel.logger", [
+    {default, "\e[1;41;1m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.default.formatter.time_offset", "kernel.logger", [
+    {default, 0},
+    {datatype, integer}
+]}.
+
+{mapping, "log.handlers.default.formatter.time_designator", "kernel.logger", [
+    {default, "T"},
+    {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% DYNAMIC HANDLERS
+%% =============================================================================
+
+
+
+%% @doc allows to enable or disable a comnfigured handler
+{mapping, "log.handlers.$id.enabled", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% @doc The destination backend handler.
+{mapping, "log.handlers.$id.backend", "kernel.logger", [
+    {default, console},
+    {datatype, {enum, [disk, console]}}
+]}.
+
+%% @doc Specifies the log level for the handler, that is, log events that are
+%% equally or more severe than this level, are forwarded to the handler filters
+%% for this handler.
+{mapping, "log.handlers.$id.level", "kernel.logger", [
+    {default, info},
+    {datatype, {enum, [
+        debug, info, notice, warning, error, critical, alert, emergency
+    ]}}
+]}.
+
+%% Defaults to standard_io, unless parameter logger.handlers.$id.config.file is
+%% given, in which case it defaults to file.
+{mapping, "log.handlers.$id.config.type", "kernel.logger", [
+    {default, standard_io},
+    {datatype, {enum, [standard_io, standard_error, file]}}
+]}.
+
+%% This specifies the name of the log file when the handler is of type file.
+%% If provided the logger.handlers.$id.config.type will be set to file.
+{mapping, "log.handlers.$id.config.file", "kernel.logger", [
+    {datatype, file}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% Value true enables burst control and false disables it.
+{mapping, "log.handlers.$id.config.burst_limit_enable", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% This is the maximum number of events to handle within a
+%% burst_limit_window_time time frame. After the limit is reached, successive
+%% events are dropped until the end of the time frame.
+{mapping, "log.handlers.$id.config.burst_limit_max_count", "kernel.logger", [
+    {default, 500},
+    {datatype, integer}
+]}.
+
+%% @doc Large bursts of log events - many events received by the handler under
+%% a short period of time - can potentially cause problems, such as:
+%% - Log files grow very large, very quickly.
+%% - Circular logs wrap too quickly so that important data is overwritten.
+%%  - Write buffers grow large, which slows down file sync operations.
+%% For this reason, both built-in handlers offer the possibility to specify the
+%% maximum number of events to be handled within a certain time frame. With
+%% this burst control feature enabled, the handler can avoid choking the log
+%% with massive amounts of printouts.
+%%
+%% See the previous description of burst_limit_max_count.
+{mapping, "log.handlers.$id.config.burst_limit_window_time", "kernel.logger", [
+    {default, 1000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% As long as the length of the message queue is lower than this value, all log
+%% events are handled asynchronously. This means that the client process
+%% sending the log event, by calling a log function in the Logger API, does not
+%% wait for a response from the handler but continues executing immediately
+%% after the event is sent. It is not affected by the time it takes the handler
+%% to print the event to the log device. If the message queue grows larger than
+%% this value, the handler starts handling log events synchronously instead,
+%% meaning that the client process sending the event must wait for a response.
+%% When the handler reduces the message queue to a level below the
+%% sync_mode_qlen threshold, asynchronous operation is resumed. The switch from
+%% asynchronous to synchronous mode can slow down the logging tempo of one, or
+%% a few, busy senders, but cannot protect the handler sufficiently in a
+%% situation of many busy concurrent senders.
+{mapping, "log.handlers.$id.config.sync_mode_qlen", "kernel.logger", [
+{default, 10},
+{datatype, integer}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% When the message queue grows larger than this threshold, the handler
+%% switches to a mode in which it drops all new events that senders want to
+%% log. Dropping an event in this mode means that the call to the log function
+%% never results in a message being sent to the handler, but the function
+%% returns without taking any action. The handler keeps logging the events that
+%% are already in its message queue, and when the length of the message queue
+%% is reduced to a level below the threshold, synchronous or asynchronous mode
+%% is resumed. Notice that when the handler activates or deactivates drop mode,
+%% information about it is printed in the log.
+{mapping, "log.handlers.$id.config.drop_mode_qlen", "kernel.logger", [
+    {default, 200},
+    {datatype, integer}
+]}.
+
+%% @doc The handler process keeps track of the length of its message queue and
+%% takes some form of action when the current length exceeds a configurable
+%% threshold. The purpose is to keep the handler in, or to as quickly as
+%% possible get the handler into, a state where it can keep up with the pace of
+%% incoming log events. The memory use of the handler must never grow larger
+%% and larger, since that will eventually cause the handler to crash.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% If the length of the message queue grows larger than this threshold, a flush
+%% (delete) operation takes place. To flush events, the handler discards the
+%% messages in the message queue by receiving them in a loop without logging.
+%% Client processes waiting for a response from a synchronous log request
+%% receive a reply from the handler indicating that the request is dropped. The
+%% handler process increases its priority during the flush loop to make sure
+%% that no new events are received during the operation. Notice that after the
+%% flush operation is performed, the handler prints information in the log
+%% about how many events have been deleted.
+{mapping, "log.handlers.$id.config.flush_qlen", "kernel.logger", [
+    {default, 1000},
+    {datatype, integer}
+]}.
+
+%% If disabled the repeated file sync operation is disabled,
+%% and it is the operating system settings that determine how quickly or slowly
+%% data is written to disk.
+{mapping, "log.handlers.$id.config.filesync_repeat_enable", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+%% This value, in milliseconds, specifies how often the handler does a file
+%% sync operation to write buffered data to disk. The handler attempts the
+%% operation repeatedly, but only performs a new sync if something has actually
+%% been logged.
+{mapping, "log.handlers.$id.config.filesync_repeat_interval", "kernel.logger", [
+    {default, 5000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% For the overload protection algorithm to work properly, it is required that:
+%% sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+%% and that: drop_mode_qlen > 1
+%%
+%% Value true enables the feature and false disables it.
+{mapping, "log.handlers.$id.config.overload_kill_enable", "kernel.logger", [
+    {default, off},
+    {datatype, flag}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% This is the maximum memory size that the handler process is allowed to use. If the handler grows larger than this, the process is terminated.
+{mapping, "log.handlers.$id.config.overload_kill_mem_size", "kernel.logger", [
+    {default, 3000000},
+    {datatype, integer}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% This is the maximum allowed queue length. If the message queue grows larger
+%% than this, the handler process is terminated.
+{mapping, "log.handlers.$id.config.overload_kill_qlen", "kernel.logger", [
+    {default, 20000},
+    {datatype, integer}
+]}.
+
+%% @doc It is possible that a handler, even if it can successfully manage peaks
+%% of high load without crashing, can build up a large message queue, or use a
+%% large amount of memory. The overload protection mechanism includes an
+%% automatic termination and restart feature for the purpose of guaranteeing
+%% that a handler does not grow out of bounds.
+%%
+%% If the handler is terminated, it restarts automatically after a delay
+%% specified in milliseconds. The value infinity prevents restarts.
+{mapping, "log.handlers.$id.config.overload_kill_restart_after", "kernel.logger", [
+    {default, 5000},
+    {datatype, {duration, ms}}
+]}.
+
+%% @doc Specifies what happens to a log event if all filters return ignore, or
+%% if no filters exist.
+{mapping, "log.handlers.$id.filter_default", "kernel.logger", [
+    {default, stop},
+    {datatype, {enum, [log, stop]}}
+]}.
+
+%% @doc Defines which domains are logged. All log messages that do not have the
+%% domain metadata key will be logged.
+%% This allows for example to avoid printing bondy_audit logs in the console
+%% and print them to a dedicated handler.
+%%
+%% The value is a comma separated string which con contain one or more of the
+%% following elements: "otp", "sasl" and "bondy_audit"
+{mapping, "log.handlers.$id.filter_domains", "kernel.logger", [
+    {default, "otp, bondy_audit"},
+    {datatype, string}
+]}.
+
+%% When formatting maps limit their depth to a value. If -1 is provided, this
+%% option is disabled.
+{mapping, "log.handlers.$id.formatter.map_depth", "kernel.logger", [
+    {default, 3},
+    {datatype, integer}
+]}.
+
+%% When formatting erlang terms limit their depth to a value. If -1 is
+%% provided, this option is disabled.
+{mapping, "log.handlers.$id.formatter.term_depth", "kernel.logger", [
+    {default, 50},
+    {datatype, integer}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored", "kernel.logger", [
+    {default, on},
+    {datatype, flag}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_debug", "kernel.logger", [
+    {default, "\e[0;38m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_info", "kernel.logger", [
+    {default, "\e[1;37m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_notice", "kernel.logger", [
+    {default, "\e[1;36m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_warning", "kernel.logger", [
+    {default, "\e[1;33m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_error", "kernel.logger", [
+    {default, "\e[1;31m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_critical", "kernel.logger", [
+    {default, "\e[1;35m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_alert", "kernel.logger", [
+    {default, "\e[1;45m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.colored_emergency", "kernel.logger", [
+    {default, "\e[1;41;1m"},
+    {datatype, string}
+]}.
+
+{mapping, "log.handlers.$id.formatter.time_offset", "kernel.logger", [
+    {default, 0},
+    {datatype, integer}
+]}.
+
+{mapping, "log.handlers.$id.formatter.time_designator", "kernel.logger", [
+    {default, "T"},
+    {datatype, string}
+]}.
+
+
+
+%% =============================================================================
+%% TRANSLATIONS
+%% =============================================================================
+
+
+
+{translation, "kernel.logger", fun(CuttleConf) ->
+    FormatterTemplate = [
+        colored_start,
+        "when=", time,
+        " level=", level,
+        {pid, [" pid=", pid], ""},
+        " at=", mfa, ":", line,
+        {
+            {msg, description},
+            [" description=", description],
+            ""
+        },
+        colored_end,
+        {
+            {msg, reason},
+            [" reason=", reason],
+            ""
+        },
+        {id, [" id=", id], ""},
+        {parent_id, [" parent_id=", parent_id], ""},
+        {correlation_id, [" correlation_id=", correlation_id], ""},
+        {node, [" node=", node], ""},
+        {router_vsn, [" router_vsn=", router_vsn], ""},
+        {realm, [" realm=", realm], ""},
+        {session_id, [" session_id=", session_id], ""},
+        {protocol, [" protocol=", protocol], ""},
+        {transport, [" transport=", transport], ""},
+        {peername, [" peername=", peername], ""},
+        " ",
+        msg,
+        "\n"
+    ],
+
+    HandlersConf = cuttlefish_variable:filter_by_prefix(
+        "log.handlers", CuttleConf
+    ),
+
+    HandlerIDs = sets:to_list(
+        sets:from_list(
+            lists:foldl(
+                fun
+                    ({["log", "handlers", Id, "enabled"], true}, Acc) ->
+                        [Id | Acc];
+                    (_, Acc) ->
+                        Acc
+                end,
+                [],
+                HandlersConf
+            )
+        )
+    ),
+
+    lists:foldl(
+        fun(Id, Acc) ->
+            HandlerPrefix = ["log", "handlers", Id],
+            %% Backend Mod
+            Backend = cuttlefish:conf_get(
+                HandlerPrefix ++  ["backend"], HandlersConf
+            ),
+            Mod = case Backend of
+                console -> logger_std_h;
+                disk -> logger_disk_log_h
+            end,
+
+            %% Level
+            Level = cuttlefish:conf_get(
+                HandlerPrefix ++ ["level"], HandlersConf
+            ),
+
+            %% FilterDefault
+            FilterDefault = cuttlefish:conf_get(
+                HandlerPrefix ++ ["filter_default"], HandlersConf
+            ),
+
+            %% Conf
+            HandlerConf = cuttlefish_variable:filter_by_prefix(
+                HandlerPrefix ++ ["config"], CuttleConf
+            ),
+
+            ConfMap0 = maps:from_list([
+                {list_to_atom(K), V}
+                || {[_, _, _, "config", K], V} <- HandlerConf
+            ]),
+
+            ConfMap = case maps:take(filesync_repeat_enable, ConfMap0) of
+                {true, M} ->
+                    M#{filesync_repeat_interval => no_repeat};
+                {false, M} ->
+                    M
+            end,
+
+            %% Filters
+            AllDomains = sets:from_list([otp, sasl, bondy_audit]),
+            ConfDomains = cuttlefish:conf_get(
+                HandlerPrefix ++ ["filter_domains"], HandlersConf
+            ),
+
+            LogDomains = sets:from_list([
+                list_to_existing_atom(string:strip(X, both))
+                || X <- string:tokens(ConfDomains, ",")
+            ]),
+
+            StopDomains = sets:subtract(AllDomains, LogDomains),
+            Filters = [
+                {remote_gl,
+                    {fun logger_filters:remote_gl/2, stop}
+                },
+                {no_domain,
+                    {fun logger_filters:domain/2, {log, undefined, []}}
+                },
+                {domain,
+                    {
+                        fun logger_filters:domain/2,
+                        {stop, equal, sets:to_list(StopDomains)}}
+                },
+                {domain,
+                    {
+                        fun logger_filters:domain/2,
+                        {log, super, sets:to_list(LogDomains)}}
+                }
+            ],
+            %% Formatter
+            FormatConf = cuttlefish_variable:filter_by_prefix(
+                HandlerPrefix ++ ["formatter"], CuttleConf
+            ),
+            FormatConfMap0 = maps:from_list([
+                {list_to_atom(K), V}
+                || {[_, _, _, "formatter", K], V} <- FormatConf
+            ]),
+            FormatConfMap = FormatConfMap0#{
+                template => FormatterTemplate
+            },
+
+            %% Final
+            Handler = {handler, list_to_atom(Id), Mod, #{
+                level => Level,
+                filter_default => FilterDefault,
+                filters => Filters,
+                config => ConfMap,
+                formatter => {bondy_logger_formatter, FormatConfMap}
+            }},
+
+            [Handler | Acc]
+        end,
+        [],
+        HandlerIDs
+    )
+end}.

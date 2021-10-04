@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_peer_discovery_agent.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@
 -module(bondy_peer_discovery_agent).
 -behaviour(gen_statem).
 
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {
     enabled                 ::  boolean(),
     automatic_join          ::  boolean(),
@@ -59,7 +61,7 @@
 -export([terminate/3]).
 -export([code_change/4]).
 
-%% gen_satatem states
+%% gen_statem states
 -export([discovering/3]).
 -export([joined/3]).
 -export([disabled/3]).
@@ -234,7 +236,11 @@ discovering(internal, lookup, State) ->
         true ->
             %% Not in cluster
             Res = CBMod:lookup(CBState, Timeout),
-            _ = lager:debug("~p lookup returned: ~p", [CBMod, Res]),
+            ?LOG_DEBUG(#{
+                description => "Got lookup response",
+                callback_mod => CBMod,
+                response => Res
+            }),
             maybe_join(Res, State);
         false ->
             %% We have already joined the cluster
@@ -250,7 +256,9 @@ discovering(EventType, EventContent, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 joined(cast, left, State) ->
-    _ = lager:info("Received cluster leave event, disabling automatic join."),
+    ?LOG_INFO(#{
+        description => "Received cluster leave event, disabling automatic join."
+    }),
     {next_state, disabled, State};
 
 joined(EventType, EventContent, State) ->
@@ -281,10 +289,10 @@ do_init(State) ->
             NewState = State#state{callback_state = CBState},
             {ok, discovering, NewState, [{next_event, internal, lookup}]};
         {error, Reason} ->
-            _ = lager:error(
-                "Peer discovery agent could not start due to misconfiguration; reason=~p",
-                [Reason]
-            ),
+            ?LOG_ERROR(#{
+                description => "Peer discovery agent could not start due to misconfiguration",
+                reason => Reason
+            }),
             {error, Reason, State}
     end.
 

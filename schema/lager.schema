@@ -152,8 +152,8 @@
     ConsoleLogLevel = cuttlefish:conf_get("log.console.level", Conf),
     ConsoleLogFile = cuttlefish:conf_get("log.console.file", Conf),
 
-
-    ConsoleHandler = {lager_console_backend, [
+    %% we replace lager_console_backend w/ bondy_lager_logger_backend
+    ConsoleHandler = {bondy_lager_logger_backend, [
       %% {size, 10485760},
       %% {date, "$D0"},
       %% {count, 5}
@@ -223,7 +223,7 @@
 
 %% @doc Whether to redirect error_logger messages into lager - defaults to true
 {mapping, "log.error.redirect", "lager.error_logger_redirect", [
-  {default, on},
+  {default, off},
   {datatype, {enum, [on, off]}}
 ]}.
 

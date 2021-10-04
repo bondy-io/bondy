@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_promethues_event_handler.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc This module provides a bridge between WAMP events and OTP events.
+%% @doc Implements the event watcher capability as designed by Lager.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_event_handler_watcher).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -129,15 +130,19 @@ handle_info(
 
 handle_info(
     {gen_event_EXIT, Handler, Reason}, #state{handler = Handler} = State) ->
-    _ = lager:error(
-        "Event handler exited, re-installing; reason=~p, handler=~p",
-        [Reason, Handler]
-    ),
+    ?LOG_ERROR(#{
+        description => "Event handler exited, re-installing",
+        reason => Reason,
+        handler => Handler
+    }),
     ok = add_sup_handler(State#state.manager, Handler, State#state.args),
     {noreply, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        description => "Unexpected event",
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -161,19 +166,24 @@ add_sup_handler(Manager, Handler, Args) ->
         ok ->
             ok;
         {error, {fatal, Reason}} ->
-            _ = lager:error(
-                "Fatally failed to install event handler, not retrying; reason=~p, manager=~p, handler=~p",
-                [Reason, Manager, Handler]
-            ),
+            ?LOG_ERROR(#{
+                description => "Fatally failed to install event handler, not retrying",
+                reason => Reason,
+                handler => Handler,
+                manager => Manager
+            }),
             self() ! stop,
             ok;
         {error, Reason} ->
-            _ = lager:error(
-                "Failed to install event handler, retrying later; "
-                "reason=~p, manager=~p, handler=~p",
-                [Reason, Manager, Handler]
-            ),
-            erlang:send_after(5000, self(), add_sup_handler),
+            Timeout = 5000,
+            ?LOG_ERROR(#{
+                description => "Failed to install event handler, retrying later",
+                reason => Reason,
+                handler => Handler,
+                timeout => 5000,
+                manager => Manager
+            }),
+            erlang:send_after(Timeout, self(), add_sup_handler),
             ok
     end.
 

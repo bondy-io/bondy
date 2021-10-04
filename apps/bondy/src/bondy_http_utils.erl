@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_http_utils.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@
 -export([set_meta_headers/1]).
 -export([meta_headers/0]).
 
+-on_load(on_load/0).
 
 
 
@@ -81,7 +82,6 @@ forwarded_for(Req) ->
     NewReq :: cowboy_req:req().
 
 set_meta_headers(Req) ->
-
     cowboy_req:set_resp_headers(meta_headers(), Req).
 
 
@@ -92,6 +92,20 @@ set_meta_headers(Req) ->
 -spec meta_headers() -> map().
 
 meta_headers() ->
-    #{
-        <<"via">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
-    }.
+    persistent_term:get({?MODULE, meta_headers}).
+
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+on_load() ->
+    Meta = #{
+        <<"server">> => "bondy/" ++ bondy_config:get(vsn, "undefined")
+    },
+    ok = persistent_term:put({?MODULE, meta_headers}, Meta),
+    ok.

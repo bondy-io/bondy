@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_sup.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -71,7 +71,6 @@ start_link() ->
 
 
 
-
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
@@ -89,11 +88,13 @@ init([]) ->
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
+        ?WORKER(bondy_session_manager, [], permanent, 5000),
         ?WORKER(bondy_registry, [], permanent, 5000),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
+        ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
         ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
         ?WORKER(bondy_backup, [], permanent, 5000),
-        ?WORKER(bondy_api_gateway, [], permanent, 5000),
+        ?WORKER(bondy_http_gateway, [], permanent, 5000),
         ?WORKER(bondy_peer_discovery_agent, [], permanent, 5000)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.

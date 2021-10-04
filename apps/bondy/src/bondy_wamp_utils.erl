@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_utils.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -26,12 +26,16 @@
 
 
 -export([maybe_error/2]).
+-export([error/2]).
+-export([no_such_procedure_error/1]).
+-export([no_such_registration_error/1]).
+-export([no_such_session_error/1]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
 -export([validate_call_args/4]).
--export([no_such_procedure_error/1]).
--export([no_such_registration_error/1]).
+
+-compile({no_auto_import, [error/2]}).
 
 
 
@@ -39,6 +43,94 @@
 %% API
 %% =============================================================================
 
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_call_args(Msg, Ctxt, Min) ->
+    validate_call_args(Msg, Ctxt, Min, Min).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_call_args(Msg, Ctxt, Min, Max) ->
+    Len = args_len(Msg#call.arguments),
+    do_validate_call_args(Msg, Ctxt, Min, Max, Len, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_admin_call_args(Msg, Ctxt, Min) ->
+    validate_admin_call_args(Msg, Ctxt, Min, Min).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc @throws wamp_message:error()
+%% @end
+%% -----------------------------------------------------------------------------
+validate_admin_call_args(Msg, Ctxt, Min, Max) ->
+    Len = args_len(Msg#call.arguments),
+    do_validate_call_args(Msg, Ctxt, Min, Max, Len, true).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a CALL RESULT or ERROR based on the first Argument
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_error(ok, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{});
+
+maybe_error({ok, Val}, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{}, [Val]);
+
+maybe_error({'EXIT', {Reason, _}}, M) ->
+    maybe_error({error, Reason}, M);
+
+maybe_error(#error{} = Error, _) ->
+    Error;
+
+maybe_error({error, #error{} = Error}, _) ->
+    Error;
+
+maybe_error({error, Reason}, #call{} = M) ->
+    error(Reason, M);
+
+maybe_error(Val, #call{} = M) ->
+    wamp_message:result(M#call.request_id, #{}, [Val]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+error({not_authorized, Reason}, #call{} = M) ->
+    Map = bondy_error:map(Reason),
+
+    wamp_message:error_from(
+        M,
+        #{},
+        ?WAMP_NOT_AUTHORIZED,
+        [Map]
+    );
+
+error(Reason, #call{} = M) ->
+    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
+    Mssg = maps:get(<<"message">>, Map, <<>>),
+    wamp_message:error_from(
+        M,
+        #{},
+        bondy_error:code_to_uri(Code),
+        [Mssg],
+        Map
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -50,54 +142,47 @@ no_such_procedure_error(#call{} = M) ->
         "There are no registered procedures matching the uri",
         $\s, $', (M#call.procedure_uri)/binary, $', $.
     >>,
-    wamp_message:error(
-        ?CALL,
-        M#call.request_id,
+    wamp_message:error_from(
+        M,
         #{},
         ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
-        }
+        [Mssg]
     ).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 no_such_registration_error(RegId) when is_integer(RegId) ->
-    Mssg = <<"No registration exists for the supplied RegistrationId">>,
     wamp_message:error(
         ?UNREGISTER,
         RegId,
         #{},
         ?WAMP_NO_SUCH_REGISTRATION,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"No registration exists for the supplied RegistrationId or the details provided did not match an existing registration.">>
-        }
+        [<<"No registration exists for the supplied RegistrationId">>]
     ).
 
-%% @private
-validate_call_args(Call, Ctxt, Min) ->
-    validate_call_args(Call, Ctxt, Min, Min).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+no_such_session_error(SessionId) when is_integer(SessionId) ->
+    wamp_message:error(
+        ?UNREGISTER,
+        SessionId,
+        #{},
+        ?WAMP_NO_SUCH_SESSION,
+        [<<"No session exists for the supplied identifier">>]
+    ).
 
 
-%% @private
-validate_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, false).
 
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
 
-%% @private
-validate_admin_call_args(Call, Ctxt, Min) ->
-    validate_admin_call_args(Call, Ctxt, Min, Min).
-
-
-%% @private
-validate_admin_call_args(Call, Ctxt, Min, Max) ->
-    do_validate_call_args(Call, Ctxt, Min, Max, true).
 
 
 %% -----------------------------------------------------------------------------
@@ -113,116 +198,120 @@ validate_admin_call_args(Call, Ctxt, Min, Max) ->
 -spec do_validate_call_args(
     wamp_call(),
     bondy_context:t(),
-    MinArity :: integer(),
-    MaxArity :: integer(),
-    AdminOnly :: boolean()) ->
-        {ok, Args :: list()} | {error, wamp_error()}.
+    MinArity :: pos_integer(),
+    MaxArity :: pos_integer(),
+    Len :: pos_integer(),
+    AdminOnly :: boolean()) -> Args :: list() | no_return().
 
-do_validate_call_args(#call{arguments = L} = M, _, Min, _, _)
-when length(L) + 1 < Min ->
+do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
     E = wamp_message:error(
         ?CALL,
-        M#call.request_id,
+        Msg#call.request_id,
         #{},
         ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of arguments.">>],
+        [<<"Invalid number of positional arguments.">>],
         #{
             description =>
             <<"The procedure requires at least ",
             (integer_to_binary(Min))/binary,
-            " arguments.">>
+            " positional arguments.">>
         }
     ),
-    {error, E};
+    error(E);
 
-do_validate_call_args(#call{arguments = L} = M, _, _, Max, _)
-when length(L) > Max ->
+do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
     E = wamp_message:error(
         ?CALL,
-        M#call.request_id,
+        Msg#call.request_id,
         #{},
         ?WAMP_INVALID_ARGUMENT,
-        [<<"Invalid number of arguments.">>],
+        [<<"Invalid number of positional arguments.">>],
         #{
             description =>
             <<"The procedure accepts at most ",
             (integer_to_binary(Max))/binary,
-            " arguments.">>
+            " positional arguments.">>
         }
     ),
-    {error, E};
+    error(E);
 
-do_validate_call_args(#call{arguments = []} = M, Ctxt, Min, _, AdminOnly) ->
+do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     %% We are missing the RealmUri argument, we default to the session's Realm
-    case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
-        {false, Uri} ->
-            {ok, [Uri]};
-        {true, ?BONDY_REALM_URI} when Min == 0 ->
-            {ok, []};
-        {true, ?BONDY_REALM_URI} ->
-            {ok, [?BONDY_REALM_URI]};
-        {_, _} ->
-            {error, unauthorized(M)}
+    case bondy_context:realm_uri(Ctxt) of
+        Uri when AdminOnly == false ->
+            [Uri];
+        ?MASTER_REALM_URI when AdminOnly == true andalso Min == 0 ->
+            [];
+        ?MASTER_REALM_URI when AdminOnly == true ->
+            [?MASTER_REALM_URI];
+        _ ->
+            error(unauthorized(Msg, Ctxt))
     end;
 
 do_validate_call_args(
-    #call{arguments = [Uri|_] = L} = M, Ctxt, Min, _, AdminOnly)
-    when length(L) >= Min ->
-    %% A call can only proceed if the session's Realm is the one being
-    %% modified, unless the session's Realm is the Root Realm in which
-    %% case any Realm can be modified
-    case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
-        {false, Uri} ->
+    #call{arguments = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
+    when Len >= Min ->
+    %% A call can only proceed if the session's Realm matches the one passed in
+    %% the arguments, unless the session's Realm is the Root Realm which allows
+    %% operations on other realms
+    case bondy_context:realm_uri(Ctxt) of
+        Uri when AdminOnly == false ->
             %% Matches arg URI
-            {ok, L};
-        {_, ?BONDY_REALM_URI} ->
+            to_list(Msg#call.arguments);
+        ?MASTER_REALM_URI ->
             %% Users logged in root realm can operate on any realm
-            {ok, L};
-        {_, _} ->
-            {error, unauthorized(M)}
+            to_list(Msg#call.arguments);
+        _ ->
+            error(unauthorized(Msg, Ctxt))
     end;
 
-do_validate_call_args(
-    #call{arguments = L} = M, Ctxt, Min, _, AdminOnly)
-    when length(L) + 1 >= Min ->
+do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     %% We are missing the RealmUri argument, we default to the session's Realm
-    %% A call can only proceed if the session's Realm is the one being
-    %% modified, unless the session's Realm is the Root Realm in which
-    %% case any Realm can be modified
+    %% A call can only proceed if the session's Realm matches the one passed in
+    %% the arguments, unless the session's Realm is the Root Realm which allows
+    %% operations on other realms
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            {ok, [Uri|L]};
-        {_, ?BONDY_REALM_URI} ->
-            {ok, [?BONDY_REALM_URI|L]};
+            [Uri | to_list(Msg#call.arguments)];
+        {_, ?MASTER_REALM_URI} ->
+            [?MASTER_REALM_URI | to_list(Msg#call.arguments)];
         {_, _} ->
-            {error, unauthorized(M)}
+            error(unauthorized(Msg, Ctxt))
     end.
 
 
 %% @private
-unauthorized(#subscribe{} = M) ->
-    unauthorized(?SUBSCRIBE, M#subscribe.request_id);
-unauthorized(#unsubscribe{} = M) ->
-    unauthorized(?UNSUBSCRIBE, M#unsubscribe.request_id);
-unauthorized(#register{} = M) ->
-    unauthorized(?REGISTER, M#register.request_id);
-unauthorized(#unregister{} = M) ->
-    unauthorized(?REGISTER, M#unregister.request_id);
-unauthorized(#call{} = M) ->
-    unauthorized(?CALL, M#call.request_id);
-unauthorized(#cancel{} = M) ->
-    unauthorized(?CANCEL, M#cancel.request_id).
+unauthorized(#subscribe{} = M, Ctxt) ->
+    unauthorized(?SUBSCRIBE, M#subscribe.request_id, Ctxt);
+
+unauthorized(#unsubscribe{} = M, Ctxt) ->
+    unauthorized(?UNSUBSCRIBE, M#unsubscribe.request_id, Ctxt);
+
+unauthorized(#register{} = M, Ctxt) ->
+    unauthorized(?REGISTER, M#register.request_id, Ctxt);
+
+unauthorized(#unregister{} = M, Ctxt) ->
+    unauthorized(?REGISTER, M#unregister.request_id), Ctxt;
+
+unauthorized(#call{} = M, Ctxt) ->
+    unauthorized(?CALL, M#call.request_id, Ctxt);
+
+unauthorized(#cancel{} = M, Ctxt) ->
+    unauthorized(?CANCEL, M#cancel.request_id, Ctxt).
 
 
-unauthorized(Type, ReqId) ->
+%% @private
+unauthorized(Type, ReqId, Ctxt) ->
+    Uri = bondy_context:realm_uri(Ctxt),
     Mssg = <<
         "You have no authorisation to perform this operation on this realm."
     >>,
     Description = <<
-        "The operation you've requested is a targeting a Realm "
-        "that is not your session's realm or the operation is only "
-        "supported when you are logged into the Bondy realm",
-        $\s, $(, $", (?BONDY_REALM_URI)/binary, $", $), $.
+        "The operation you've requested is targeting a realm ",
+        $\s, $(, $", Uri/binary, $", $), $,,
+        " that is not your session's realm or the operation is only "
+        "supported when performed by a session on the Bondy Master Realm.",
+        $\s, $(, $", (?MASTER_REALM_URI)/binary, $", $), $.
     >>,
     wamp_message:error(
         Type,
@@ -234,35 +323,11 @@ unauthorized(Type, ReqId) ->
     ).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc Returns a CALL RESULT or ERROR based on the first Argument
-%% @end
-%% -----------------------------------------------------------------------------
-maybe_error(ok, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [], #{});
+%% @private
+args_len(undefined) -> 0;
+args_len(L) when is_list(L) -> length(L).
 
-maybe_error({ok, Val}, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{});
 
-maybe_error({'EXIT', {Reason, _}}, M) ->
-    maybe_error({error, Reason}, M);
-
-maybe_error(#error{} = Error, _) ->
-    Error;
-maybe_error({error, #error{} = Error}, _) ->
-    Error;
-
-maybe_error({error, Reason}, #call{} = M) ->
-    #{<<"code">> := Code} = Map = bondy_error:map(Reason),
-    Mssg = maps:get(<<"message">>, Map, <<>>),
-    wamp_message:error(
-        ?CALL,
-        M#call.request_id,
-        #{},
-        bondy_error:code_to_uri(Code),
-        [Mssg],
-        Map
-    );
-
-maybe_error(Val, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val], #{}).
+%% @private
+to_list(undefined) -> [];
+to_list(L) when is_list(L) -> L.

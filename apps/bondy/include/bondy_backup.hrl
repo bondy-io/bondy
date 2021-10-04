@@ -1,7 +1,7 @@
 %% =============================================================================
-%%  bondy_security.hrl -
+%%  bondy_backup.hrl -
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -16,29 +16,3 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
-
-%% =============================================================================
-%% PROCEDURE
-%% =============================================================================
-
-
-
--define(CREATE_BACKUP, <<"com.leapsight.bondy.backup.create">>).
--define(BACKUP_STATUS, <<"com.leapsight.bondy.backup.status">>).
--define(RESTORE_BACKUP, <<"com.leapsight.bondy.backup.restore">>).
-
-
-
-%% =============================================================================
-%% EVENTS
-%% =============================================================================
-
-
-
--define(BACKUP_STARTED, <<"com.leapsight.bondy.backup.backup_started">>).
--define(BACKUP_FINISHED, <<"com.leapsight.bondy.backup.backup_finished">>).
--define(BACKUP_ERROR, <<"com.leapsight.bondy.backup.backup_error">>).
--define(RESTORE_STARTED, <<"com.leapsight.bondy.backup.restored_started">>).
--define(RESTORE_FINISHED, <<"com.leapsight.bondy.backup.restored_finished">>).
--define(RESTORE_ERROR, <<"com.leapsight.bondy.backup.restore_error">>).

@@ -1,0 +1,25 @@
+otp_path: "${_KERL_ACTIVE_DIR}"
+apps_dirs:
+  - "apps/*"
+  - "lib/*"
+deps_dirs:
+  - "_build/default/lib/*"
+  - "_build/default/checkouts/*"
+include_dirs:
+  - "apps"
+  - "apps/*/include"
+  - "_build/default/lib/"
+  - "_build/default/lib/*/include"
+  - "_checkouts/*/include"
+  - "lib"
+  - "lib/*/include"
+diagnostics:
+  enabled:
+    - crossref
+  disabled:
+    - dialyzer
+lenses:
+  enabled:
+    - ct-run-test
+  disabled:
+    - show-behaviour-usages

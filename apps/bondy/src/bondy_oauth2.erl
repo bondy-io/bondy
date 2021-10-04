@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_oauth2.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -31,38 +31,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_oauth2).
+
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
-% -record(oauth2_credentials, {
-%     id                  ::  binary(),
-%     consumer_id         ::  binary(),
-%     name                ::  binary(),
-%     client_id           ::  binary(),
-%     client_secret       ::  binary(),
-%     redirect_uri        ::  binary(),
-%     created_at          ::  binary()
-% }).
-
-% -record(oauth2_auth_codes, {
-%     id                      ::  binary(),
-%     api_id                  ::  binary(),
-%     code                    ::  binary(),
-%     authenticated_userid    ::  binary(),
-%     scope                   ::  binary(),
-%     created_at              ::  binary()
-% }).
-
-% -record(jwt, {
-%     id                      ::  binary(),
-%     created_at              ::  binary(),
-%     consumer_id             ::  binary(),
-%     key                     ::  binary(),
-%     secret                  ::  binary(),
-%     rsa_public_key          ::  binary(),
-%     algorithm               ::  binary() %% HS256 RS256 ES256
-% }).
 -define(FOLD_OPTS, [{resolver, lww}]).
--define(TOMBSTONE, '$deleted').
 
 -define(ENV, bondy_config:get(oauth2)).
 -define(CLIENT_CREDENTIALS_GRANT_TTL,
@@ -82,8 +55,8 @@
 ).
 
 -define(NOW, erlang:system_time(second)).
--define(LEEWAY_MSECS, 2 * 60). % 2 mins
--define(EXPIRY_TIME_MSECS(Ts, MSecs), Ts + MSecs + ?LEEWAY_MSECS).
+-define(LEEWAY_SECS, 2 * 60). % 2 mins
+-define(EXPIRY_TIME_SECS(Ts, Secs), Ts + Secs + ?LEEWAY_SECS).
 
 
 
@@ -235,21 +208,20 @@ refresh_token(RealmUri, Issuer, Token) ->
 
     case lookup_token(RealmUri, Issuer, Token) of
         #bondy_oauth2_token{issued_at = Ts}
-        when ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now  ->
+        when ?EXPIRY_TIME_SECS(Ts, Secs) =< Now  ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
             {error, oauth2_invalid_grant};
         #bondy_oauth2_token{username = Username} = Data0 ->
             %% We double check the user still exists
-            case bondy_security_user:lookup(RealmUri, Username) of
+            case bondy_rbac_user:lookup(RealmUri, Username) of
                 {error, not_found} ->
-                    _ = lager:warning(
-                        "Removing dangling refresh_token; "
-                        "refresh_token=~p, "
-                        "realm_uri=~p, "
-                        "issuer=~p",
-                        [Token, RealmUri, Issuer]
-                    ),
+                    ?LOG_WARNING(#{
+                        description => "Removing dangling refresh_token",
+                        refresh_token => Token,
+                        realm_uri => RealmUri,
+                        issuer => Issuer
+                    }),
                     %% We remove all refresh tokens for this user
                     _ = revoke_tokens(refresh_token, RealmUri, Username),
                     {error, oauth2_invalid_grant};
@@ -451,7 +423,7 @@ revoke_dangling_tokens(RealmUri, Issuer) ->
             ok;
         ({Token, #bondy_oauth2_token{} = Data}) ->
             Username = Data#bondy_oauth2_token.username,
-            case bondy_security_user:lookup(RealmUri, Username) of
+            case bondy_rbac_user:lookup(RealmUri, Username) of
                 {error, not_found} ->
                     do_revoke_refresh_token(RealmUri, Token, Data);
                 _ ->
@@ -475,13 +447,12 @@ rebuild_token_indices(RealmUri, Issuer) ->
         when Iss == Issuer ->
             store_token_indices(RealmUri, Token, Data);
         ({Token, #bondy_oauth2_token{issuer = Iss}}) ->
-            _ = lager:error(
-                "Found invalid token; "
-                "token=~p, "
-                "reason=issuer_mismatch, "
-                "issuer=~p",
-                [Token, Iss]
-            ),
+            ?LOG_ERROR(#{
+                description => "Found invalid token",
+                token => Token,
+                reason => issuer_mismatch,
+                issuer => Iss
+            }),
             ok
     end,
     plum_db:foreach(Fun, Prefix, ?FOLD_OPTS).
@@ -512,21 +483,23 @@ verify_jwt(RealmUri, JWT) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), Match :: map()) ->
+-spec verify_jwt(RealmUri :: binary(), JWTString :: binary(), MatchSpec :: map()) ->
     {ok, map()} | {error, error()}.
 
-verify_jwt(RealmUri, JWTString, Match0) ->
-    Match1 = Match0#{<<"aud">> => RealmUri},
+verify_jwt(RealmUri, JWTString, MatchSpec) ->
+
     case bondy_cache:get(RealmUri, JWTString) of
         {ok, Claims} ->
             %% We skip verification as we found the JWT
-            maybe_expired(matches(Claims, Match1), JWTString);
+            maybe_expired(matches(RealmUri, Claims, MatchSpec), JWTString);
         {error, not_found} ->
-            %% We do verify the JWT and if valid we cache it
-            maybe_cache(
-                maybe_expired(do_verify_jwt(JWTString, Match1), JWTString),
-                JWTString
-            )
+            %% This JWT might still be valid i.e. created by another Bondy
+            %% node and we have never received the broadcast,
+            %% so we verify it and if valid we cache it
+            Result = maybe_expired(
+                do_verify_jwt(RealmUri, JWTString, MatchSpec), JWTString
+            ),
+            maybe_cache(Result, JWTString)
     end.
 
 
@@ -684,31 +657,43 @@ sign(Key, Claims) ->
 
 
 %% @private
--spec do_verify_jwt(binary(), map()) -> {ok, map()} | {error, error()}.
+-spec do_verify_jwt(Realm :: binary(), binary(), map()) ->
+    {ok, map()} | {error, error()}.
 
-do_verify_jwt(JWT, Match) ->
+do_verify_jwt(RealmUri, JWT, Match) ->
     try
         {jose_jwt, Map} = jose_jwt:peek(JWT),
         #{
-            <<"aud">> := RealmUri,
+            <<"aud">> := JWTRealmUri,
             <<"kid">> := Kid
         } = Map,
+
+        %% An early check, matches/3 will also check realm but we do it
+        %% here to avoid verifying if we already know there will not be
+        %% a match.
+        JWTRealmUri == RealmUri orelse throw(oauth2_invalid_grant),
+
+        %% We check the realm actualyy exists
         Realm = bondy_realm:fetch(RealmUri),
+
+        %% Finally we try to verify the JWT
         case bondy_realm:get_public_key(Realm, Kid) of
             undefined ->
                 {error, oauth2_invalid_grant};
             JWK ->
                 case jose_jwt:verify(JWK, JWT) of
                     {true, {jose_jwt, Claims}, _} ->
-                        matches(Claims, Match);
+                        matches(RealmUri, Claims, Match);
                     {false, {jose_jwt, _Claims}, _} ->
                         {error, oauth2_invalid_grant}
                 end
         end
     catch
-        ?EXCEPTION(error, no_such_realm, _) ->
+        throw:Reason ->
+            {error, Reason};
+        error:no_such_realm ->
             {error, no_such_realm};
-        ?EXCEPTION(error, _, _) ->
+        error:_ ->
             {error, oauth2_invalid_grant}
     end.
 
@@ -725,7 +710,7 @@ maybe_cache(Error, _) ->
 %% @private
 cache(Claims, AccessToken) when is_map(Claims) ->
     #{<<"aud">> := RealmUri, <<"exp">> := Secs} = Claims,
-    Opts = #{exp => ?EXPIRY_TIME_MSECS(?NOW, Secs)},
+    Opts = #{exp => ?EXPIRY_TIME_SECS(?NOW, Secs)},
     _ = bondy_cache:put(RealmUri, AccessToken, Claims, Opts),
     ok.
 
@@ -733,7 +718,7 @@ cache(Claims, AccessToken) when is_map(Claims) ->
 %% @private
 maybe_expired({ok, #{<<"iat">> := Ts, <<"exp">> := Secs} = Claims}, _JWT) ->
     Now = ?NOW,
-    case ?EXPIRY_TIME_MSECS(Ts, Secs) =< Now of
+    case ?EXPIRY_TIME_SECS(Ts, Secs) =< Now of
         true ->
             %% ok = bondy_cache:remove(RealmUri, JWT),
             {error, oauth2_invalid_grant};
@@ -746,9 +731,11 @@ maybe_expired(Error, _) ->
 
 
 %% @private
-matches(Claims, Match) ->
-    Keys = maps:keys(Match),
-    case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Match) of
+matches(RealmUri, Claims, Spec0) ->
+    Spec1 = Spec0#{<<"aud">> => RealmUri},
+    Keys = maps:keys(Spec1),
+
+    case maps_utils:collect(Keys, Claims) =:= maps_utils:collect(Keys, Spec1) of
         true ->
             {ok, Claims};
         false ->

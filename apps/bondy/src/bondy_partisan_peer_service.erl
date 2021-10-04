@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_partisan_peer_service.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%  Copyright (c) 2015 Christopher Meiklejohn.  All Rights Reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
@@ -169,6 +169,5 @@ stop() ->
 %% @end
 %% -----------------------------------------------------------------------------
 stop(Reason) ->
-    _ = lager:notice("Stopping; reason=~p", [Reason]),
     partisan_peer_service:stop(Reason).
 

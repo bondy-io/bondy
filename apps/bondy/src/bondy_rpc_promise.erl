@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_rpc_promise.erl -
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -165,15 +166,18 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
+    {_, _, CallerSessionId, _} = P#bondy_rpc_promise.caller,
     %% We match realm_uri for extra validation
     Key = key(RealmUri, P),
     OnEvict = fun(_) ->
-        _ = lager:debug(
-            "RPC Promise evicted from queue;"
-            " realm_uri=~p, caller_session_id=~p, invocation_id=~p, call_id=~p"
-            " ttl=~p",
-            [RealmUri, element(3, Key), InvocationId, CallId, Timeout]
-        )
+        ?LOG_DEBUG(#{
+            description => "RPC Promise evicted from queue",
+            realm_uri => RealmUri,
+            caller_session_id => CallerSessionId,
+            invocation_id => InvocationId,
+            call_id => CallId,
+            timeout => Timeout
+        })
     end,
     Secs = erlang:round(Timeout / 1000),
     Opts = #{key => Key, ttl => Secs, on_evict => OnEvict},

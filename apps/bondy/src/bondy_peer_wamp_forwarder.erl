@@ -3,7 +3,7 @@
 %%  ERROR), INTERRUPT and PUBLISH messages between WAMP clients connected to
 %%  different Bondy peers (nodes).
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -81,6 +81,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_wamp_forwarder).
 -behaviour(gen_server).
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -242,9 +243,11 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]
-    ),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -252,12 +255,14 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
     try
         cast_message(Mssg, BinPid)
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             %% @TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, event=~p, error=~p, reason=~p, stacktrace=~p",
-                [Event, Class, Reason, ?STACKTRACE(Stacktrace)]
-            )
+            ?LOG_ERROR(#{
+                class => Class,
+                event => Event,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
     end,
     {noreply, State};
 
@@ -279,10 +284,11 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
             Pid = bondy_utils:bin_to_pid(BinPid),
             Pid ! AckOrError;
         false ->
-            _ = lager:error(
-                "Received a message targetted to another node; realm_uri=~p, message=~p",
-                [RealmUri, AckOrError]
-            )
+            ?LOG_ERROR(#{
+                description => "Received a message targetted to another node",
+                realm_uri => RealmUri,
+                wamp_message => AckOrError
+            })
     end,
     {noreply, State};
 
@@ -307,21 +313,26 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
         {noreply, State}
 
     catch
-        ?EXCEPTION(throw, badarg, _) ->
+        throw:badarg ->
             ok = cast_message(peer_error(badarg, Mssg), BinPid),
             {noreply, State};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             %% TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]),
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             ok = cast_message(peer_error(Reason, Mssg), BinPid),
             {noreply, State}
     end.
 
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_WARNING(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -353,7 +364,7 @@ receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
         ok ->
             receive_broadcast_acks(T, Timeout, [Node|Good], Bad)
     catch
-        ?EXCEPTION(_, _, _) ->
+        _:_ ->
             receive_broadcast_acks(T, Timeout, Good, [Node|Bad])
     end;
 
@@ -385,9 +396,9 @@ cast_message(Mssg, BinPid) ->
 
 %% @private
 do_cast_message(Node, Mssg, BinPid) ->
-    Channel = channel(),
-    ServerRef = ?MODULE,
     Manager = bondy_peer_service:manager(),
+    Channel = bondy_config:get(wamp_peer_channel, default),
+    ServerRef = ?MODULE,
     Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
 
 
@@ -406,14 +417,4 @@ peer_error(Reason, Mssg) ->
         id = bondy_peer_message:id(Mssg),
         reason = Reason
     }.
-
-
-channel() ->
-    Channels = partisan_config:get(channels),
-    case lists:member(wamp_peer_messages, Channels) of
-        true ->
-            wamp_peer_messages;
-        false ->
-            default
-    end.
 

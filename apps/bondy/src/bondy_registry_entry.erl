@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_registry_backend.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
     pid                     ::  pid(),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
-    created                 ::  calendar:date_time() | atom(),
+    created                 ::  pos_integer() | atom(),
     options                 ::  map() | atom()
 }).
 
@@ -119,7 +119,7 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
         pid = Pid,
         uri = Uri,
         match_policy = MatchPolicy,
-        created = calendar:local_time(),
+        created = erlang:system_time(seconds),
         options = parse_options(Type, Options)
     }.
 
@@ -332,10 +332,12 @@ match_policy(#entry{match_policy = Val}) -> Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the time when this entry was created.
+%% Returns the time when this entry was created. Its value is a timestamp in
+%% seconds.
 %% @end
 %% -----------------------------------------------------------------------------
--spec created(t()) -> calendar:date_time().
+-spec created(t()) -> pos_integer().
+
 created(#entry{created = Val}) -> Val.
 
 
@@ -366,19 +368,25 @@ get_option(#entry{options = Opts}, Key, Default) ->
 -spec to_details_map(t()) -> details_map().
 
 to_details_map(#entry{key = Key} = E) ->
-    #{
+    Details = #{
         id =>  Key#entry_key.entry_id,
-        created => E#entry.created,
+        created => created_format(E#entry.created),
         uri => E#entry.uri,
-        match => E#entry.match_policy,
-        invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
-    }.
+        match => E#entry.match_policy
+    },
+    case type(E) of
+        registration ->
+            Details#{
+                invoke => maps:get(invoke, E#entry.options, ?INVOKE_SINGLE)
+            };
+        _ ->
+            Details
+    end.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Converts the entry into a map according to the WAMP protocol Details
-%% dictionary format.
+%% Converts the entry into a map
 %% @end
 %% -----------------------------------------------------------------------------
 -spec to_map(t()) -> details_map().
@@ -388,7 +396,7 @@ to_map(#entry{key = Key} = E) ->
         id =>  Key#entry_key.entry_id,
         session_id => Key#entry_key.session_id,
         node => Key#entry_key.node,
-        created => E#entry.created,
+        created => created_format(E#entry.created),
         uri => E#entry.uri,
         pid => list_to_binary(pid_to_list(E#entry.pid)),
         match => E#entry.match_policy,
@@ -435,3 +443,8 @@ parse_subscription_options(Opts) ->
 %% @private
 parse_registration_options(Opts) ->
     maps:without([match], Opts).
+
+
+%% @private
+created_format(Secs) ->
+    calendar:system_time_to_universal_time(Secs, second).

@@ -6,9 +6,11 @@
 
 ## Explicit connections only.
 -connect_all false
-
-## Hidden nodes
 -hidden
+
+## Time Correction
++c
++C multi_time_warp
 
 ## Max processes
 +P 2000000
@@ -22,5 +24,4 @@
 ## Increase distribution port buffer size.
 +zdbbl 32768
 
-## Enable multi_time_warp
-+C multi_time_warp
++sbwt none

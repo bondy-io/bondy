@@ -1,13 +1,13 @@
-image: erlang:21.3.8.6
+image: erlang:23
 
 before_script:
   - apt-get update -y
-  - apt-get -y install build-essential libssl-dev openssl
+  - apt-get -y install build-essential libssl-dev openssl libsodium-dev
 
 test:
   script:
     - rm -rf _build/test
-    - rebar3 as test ct
+    - make test
 
   cache:
     paths:

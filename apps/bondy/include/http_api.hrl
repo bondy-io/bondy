@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  http_api.hrl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -23,13 +23,25 @@
 -define(HEAD, <<"HEAD">>).
 -define(OPTIONS, <<"OPTIONS">>).
 -define(POST, <<"POST">>).
-
 -define(PUT, <<"PUT">>).
 
 
+%% =============================================================================
+%% SUCCESS
+%% =============================================================================
 
+-define(HTTP_OK, 200).
+-define(HTTP_CREATED, 201).
+-define(HTTP_ACCEPTED, 202).
+-define(HTTP_NO_CONTENT, 204).
+-define(HTTP_RESET_CONTENT, 205).
 
+%% =============================================================================
+%% REDIRECTION
+%% =============================================================================
 
+-define(HTTP_TEMP_REDIRECT, 307).
+-define(HTTP_PERMANENT_REDIRECT, 308).
 
 %% =============================================================================
 %% CLIENT ERROR
@@ -165,3 +177,12 @@
 %% The 511 status code indicates that the client needs to authenticate to gain network access.
 -define(HTTP_NETWORK_AUTHENTICATION_REQUIRED, 511).
 
+
+
+-define(CORS_HEADERS, #{
+    <<"access-control-allow-origin">> => <<"*">>,
+    <<"access-control-allow-credentials">> => <<"true">>,
+    <<"access-control-allow-methods">> => <<"HEAD,OPTIONS,POST">>,
+    <<"access-control-allow-headers">> => <<"origin,x-requested-with,content-type,accept,authorization,accept-language">>,
+    <<"access-control-max-age">> => <<"86400">>
+}).

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_router_worker -
 %%
-%%  Copyright (c) 2016-2018 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -22,8 +22,10 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_router_worker).
 -behaviour(gen_server).
--include("bondy.hrl").
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(POOL_NAME, router_pool).
 
@@ -60,6 +62,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_pool() -> ok.
+
 start_pool() ->
     case do_start_pool() of
         {ok, _Child} -> ok;
@@ -81,8 +84,9 @@ cast(Fun) when is_function(Fun, 0) ->
             ok;
         {ok, _} ->
             ok;
-        overload ->
-            {error, overload}
+        {error, overload} = Error ->
+            Error
+
     end.
 
 
@@ -114,8 +118,11 @@ init([Fun]) ->
 
 
 handle_call(Event, From, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p, from=~p", [Event, From]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event,
+        from => From
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -124,11 +131,12 @@ handle_cast(Fun, State) ->
         _ = Fun(),
         {noreply, State}
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
-            %% TODO publish metaevent
-            _ = lager:error(
-                "Error handling cast, error=~p, reason=~p, stacktrace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
             {noreply, State}
     end.
 
@@ -141,7 +149,10 @@ when Fun /= undefined ->
     {stop, normal, State};
 
 handle_info(Info, State) ->
-    _ = lager:debug("Unexpected message, message=~p", [Info]),
+    ?LOG_DEBUG(#{
+        reason => unsupported_event,
+        event => Info
+    }),
     {noreply, State}.
 
 
@@ -197,7 +208,10 @@ do_start_pool() ->
 do_cast(permanent, PoolName, Mssg) ->
     %% We send a request to an existing permanent worker
     %% using bondy_router acting as a sidejob_worker
-    sidejob:cast(PoolName, Mssg);
+    case sidejob:cast(PoolName, Mssg) of
+        ok -> ok;
+        overload -> {error, overload}
+    end;
 
 do_cast(transient, PoolName, Mssg) ->
     %% We spawn a transient worker using sidejob_supervisor

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.hrl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -15,22 +15,11 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
-
--define(BONDY_REALM_URI, <<"com.leapsight.bondy">>).
--define(BONDY_PRIV_REALM_URI, <<"com.leapsight.bondy.private">>).
+-define(MASTER_REALM_URI, <<"com.leapsight.bondy">>).
+-define(CONTROL_REALM_URI, <<"com.leapsight.bondy.internal">>).
 
 -define(BONDY_PEER_REQUEST, '$bondy_request').
 -define(BONDY_PEER_ACK, '$bondy_ack').
-
--ifdef(OTP_RELEASE). %% => OTP is 21 or higher
--include_lib("kernel/include/logger.hrl").
--define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
--define(STACKTRACE(Stacktrace), Stacktrace).
--else.
--define(EXCEPTION(Class, Reason, _), Class:Reason).
--define(STACKTRACE(_), erlang:get_stacktrace()).
--endif.
-
 
 %% In msecs
 -define(SEND_TIMEOUT, 20000).
@@ -41,7 +30,9 @@
 %% FEATURES
 %% =============================================================================
 
-
+-define(INVOKE_JUMP_CONSISTENT_HASH, <<"jump_consistent_hash">>).
+-define(INVOKE_QUEUE_LEAST_LOADED, <<"queue_least_loaded">>).
+-define(INVOKE_QUEUE_LEAST_LOADED_SAMPLE, <<"queue_least_loaded_sample">>).
 
 -define(WAMP_DEALER_FEATURES, #{
     call_canceling => true,
@@ -52,11 +43,11 @@
     progressive_call_results => false,
     progressive_calls => false,
     reflection => false,
-    registration_meta_api => false,
     registration_revocation => false,
-    session_meta_api => false,
     sharded_registration => false,
-    shared_registration => true
+    shared_registration => true,
+    registration_meta_api => true,
+    session_meta_api => false
 }).
 -define(DEALER_FEATURES, ?WAMP_DEALER_FEATURES#{
     caller_auth_claims => true
@@ -71,9 +62,9 @@
     progressive_call_results => false,
     progressive_calls => false,
     registration_revocation => false,
-    session_meta_api => false,
     sharded_registration => false,
-    shared_registration => true
+    shared_registration => true,
+    session_meta_api => false
 }).
 -define(CALLEE_FEATURES, ?WAMP_CALLEE_FEATURES#{
     caller_auth_claims => true
@@ -93,11 +84,11 @@
     event_history => false,
     publication_trustlevels => false,
     publisher_identification => true,
-    session_meta_api => false,
     sharded_subscription => false,
     subscriber_blackwhite_listing => false,
-    subscription_meta_api => false,
-    reflection => false
+    reflection => false,
+    session_meta_api => false,
+    subscription_meta_api => false
 }).
 
 -define(SUBSCRIBER_FEATURES, #{
@@ -122,12 +113,6 @@
 %% =============================================================================
 
 
--define(BONDY_ERROR_NOT_IN_SESSION, <<"com.leapsight.bondy.error.not_in_session">>).
--define(BONDY_SESSION_ALREADY_EXISTS, <<"com.leapsight.bondy.error.session_already_exists">>).
-
--define(BONDY_ERROR_TIMEOUT, <<"com.leapsight.bondy.error.timeout">>).
--define(BONDY_INCONSISTENCY_ERROR, <<"com.leapsight.bondy.error.unknown_error">>).
-
 -type local_peer_id()   ::  {
     Realm       ::  binary(),
     Node        ::  atom(),
@@ -142,7 +127,7 @@
 }.
 -type peer_id()         ::  local_peer_id() | remote_peer_id().
 
-
+-type maybe(T)          ::  T | undefined.
 
 
 
@@ -153,3 +138,11 @@
 -define(EOT, '$end_of_table').
 -define(CHARS2BIN(Chars), unicode:characters_to_binary(Chars, utf8, utf8)).
 -define(CHARS2LIST(Chars), unicode:characters_to_list(Chars, utf8)).
+
+
+
+%% =============================================================================
+%% PLUM_DB
+%% =============================================================================
+
+-define(TOMBSTONE, '$deleted').

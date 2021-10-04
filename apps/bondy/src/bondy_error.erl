@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_error.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_error).
--include("http_api.hrl").
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
+-include("http_api.hrl").
 
 
 
@@ -55,9 +55,12 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+code_to_uri(invalid_argument) ->
+    ?WAMP_INVALID_ARGUMENT;
+
 code_to_uri(Reason) when is_atom(Reason) ->
     R = list_to_binary(atom_to_list(Reason)),
-    <<"com.leapsight.bondy.error.", R/binary>>;
+    <<"bondy.error.", R/binary>>;
 
 code_to_uri(<<"wamp.", _/binary>> = Reason) ->
     Reason;
@@ -69,7 +72,7 @@ code_to_uri(<<"com.", _/binary>> = Reason) ->
     Reason;
 
 code_to_uri(Reason) when is_binary(Reason) ->
-    <<"com.leapsight.bondy.error.", Reason/binary>>.
+    <<"bondy.error.", Reason/binary>>.
 
 
 
@@ -168,12 +171,54 @@ map(invalid_scheme) ->
     Msg = <<"The authorization scheme is missing or the one provided is not the one required.">>,
     maps:put(<<"message">>, Msg, map(oauth2_invalid_client));
 
+map({missing_required_value, Key}) ->
+    #{
+        code => missing_required_value,
+        message => <<"The operation failed due to a missing required value.">>,
+        description => <<"A value for ", $', Key/binary, $', " is required.">>,
+        key => Key
+    };
+
+map({invalid_value, Key, Value}) ->
+    Reason = <<"The value for property ", $', Key/binary, $', " is invalid.">>,
+    map({invalid_value, Key, Value, Reason});
+
+map({invalid_value, Key, Value, Reason}) ->
+    #{
+        code => invalid_value,
+        message => <<"The operation failed due to an invalid value.">>,
+        description => Reason,
+        key => Key,
+        value => Value
+    };
+
+
+map({inconsistency_error, Keys}) when is_list(Keys) ->
+    Reason = iolist_to_binary([
+        <<"The values provided for the keys [">>,
+        binary_utils:join(Keys, <<", ">>),
+        <<"] are inconsistent.">>
+    ]),
+    map({inconsistency_error, Keys, Reason});
+
+map({inconsistency_error, Keys, Reason}) when is_list(Keys) ->
+    #{
+        code => invalid_argument,
+        message => <<"The operation failed due to inconsistent values.">>,
+        description => Reason,
+        keys => Keys
+    };
+
+
+map({inconsistency_error, Key}) ->
+    map({inconsistency_error, [Key]});
+
 map({no_such_realm, Uri}) ->
 
     #{
         <<"code">> => ?WAMP_NO_SUCH_REALM,
-        <<"message">> => <<"There is no realm named ", $', Uri/binary, $'>>,
-        <<"description">> => <<"The request cannot be executed because the realm provided does not exist.">>
+        <<"message">> => <<"The request failed because the realm provided does not exist.">>,
+        <<"description">> => <<"A realm named ", $', Uri/binary, $', "could not be found.">>
     };
 
 map({badarg, {decoding, json}}) ->
@@ -200,6 +245,17 @@ map({badarg, {body_max_bytes_exceeded, MaxLen}}) ->
         <<"description">> => <<"The body cannot be larger that the defined maximum allowed.">>
     };
 
+
+map({badarg, Map}) when is_map(Map) ->
+    map(Map);
+
+map({badarg, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
+    #{
+        <<"code">> => invalid_argument,
+        <<"message">> => Mssg,
+        <<"description">> => <<"">>
+    };
+
 map({request_error, Key, Desc}) when is_atom(Key), is_atom(Desc) ->
     %% Cowboy error
     #{
@@ -218,17 +274,10 @@ map({request_error, {Key, _}, Desc}) when is_atom(Key), is_atom(Desc) ->
         <<"description">> => Desc
     };
 
-map({badarg, Mssg}) when is_binary(Mssg); is_list(Mssg); is_atom(Mssg) ->
-    #{
-        <<"code">> => <<"badarg">>,
-        <<"message">> => Mssg,
-        <<"description">> => <<"">>
-    };
-
 map({badheader, Header, Desc})
 when is_binary(Desc); is_list(Desc); is_atom(Desc) ->
     #{
-        <<"code">> => <<"badarg">>,
+        <<"code">> => invalid_argument,
         <<"message">> => <<"The header '", Header/binary, "' is malformed.">>,
         <<"description">> => Desc
     };

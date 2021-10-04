@@ -2,7 +2,7 @@
 %%  bondy_prometheus - this module is used to configure the prometheus metrics
 %%  and export the prometheus report.
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -27,17 +27,15 @@
 -module(bondy_prometheus).
 -behaviour(gen_event).
 -behaviour(prometheus_collector).
+-include_lib("kernel/include/logger.hrl").
 -include_lib("prometheus/include/prometheus.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
+-include_lib("bondy.hrl").
 
 -record(state, {}).
 
-%% Used by promethues METRIC_NAME macro
--define(METRIC_NAME_PREFIX, "bondy_").
-
 -define(WAMP_MESSAGE_LABELS, [
-    realm, node, session_id, agent, peername, protocol, transport, frame_type, encoding
+    realm_type, node, protocol, transport, frame_type, encoding
 ]).
 
 
@@ -117,18 +115,22 @@ seconds_duration_buckets() ->
 %% @end
 %% -----------------------------------------------------------------------------
 milliseconds_duration_buckets() ->
-    [0, 1, 2, 5, 10, 15,
-      25, 50, 75, 100, 150, 200, 250, 300, 400,
-      500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000].
+    [
+        0, 1, 2, 5, 10, 15,
+        25, 50, 75, 100, 150, 200, 250, 300, 400,
+        500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000
+    ].
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 microseconds_duration_buckets() ->
-    [10, 25, 50, 100, 250, 500,
-      1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
-      1000000, 2500000, 5000000, 10000000].
+    [
+        10, 25, 50, 100, 250, 500,
+        1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 500000,
+        1000000, 2500000, 5000000, 10000000
+    ].
 
 
 
@@ -166,34 +168,34 @@ init([]) ->
     {ok, State}.
 
 
-handle_event({socket_open, Procotol, Transport, Peername}, State) ->
-    Labels = get_socket_labels(Procotol, Transport, Peername),
+handle_event({socket_open, Procotol, Transport, _Peername}, State) ->
+    Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({socket_closed, Procotol, Transport, Peername, Secs}, State) ->
-    Labels = get_socket_labels(Procotol, Transport, Peername),
+handle_event({socket_closed, Procotol, Transport, _Peername, Secs}, State) ->
+    Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_sockets_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     ok = prometheus_histogram:observe(
         bondy_socket_duration_seconds, Labels, Secs),
     {ok, State};
 
-handle_event({socket_error, Procotol, Transport, Peername}, State) ->
-    Labels = get_socket_labels(Procotol, Transport, Peername),
+handle_event({socket_error, Procotol, Transport, _Peername}, State) ->
+    Labels = get_socket_labels(Procotol, Transport),
     ok = prometheus_counter:inc(bondy_socket_errors_total, Labels),
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({session_opened, RealmUri, Id, Agent, Peer}, State) ->
-    Labels = get_session_labels(RealmUri, Id, Agent, Peer),
+handle_event({session_opened, RealmUri, _Id, _Agent, _Peer, _Pid}, State) ->
+    Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
     {ok, State};
 
-handle_event({session_closed, RealmUri, Id, Agent, Peer, Secs}, State) ->
-    Labels = get_session_labels(RealmUri, Id, Agent, Peer),
+handle_event({session_closed, RealmUri, _Id, _Agent, _Peer, Secs}, State) ->
+    Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sessions_total, Labels),
     ok = prometheus_histogram:observe(
@@ -307,8 +309,10 @@ handle_event(_Event, State) ->
 
 
 handle_call(Event, State) ->
-    _ = lager:error(
-        "Error handling call, reason=unsupported_event, event=~p", [Event]),
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
@@ -336,7 +340,7 @@ setup() ->
     ok = declare_net_metrics(),
     ok = declare_session_metrics(),
     ok = declare_wamp_metrics(),
-    ok = bondy_cowboy_prometheus:setup(),
+    ok = bondy_prometheus_cowboy_collector:setup(),
     Collectors = [
         prometheus_vm_memory_collector,
         prometheus_vm_statistics_collector,
@@ -367,32 +371,24 @@ get_labels(_) ->
 
 
 %% @private
-get_session_labels(RealmUri, Id, Agent, {_, _} = Peer) ->
-    get_session_labels(
-        RealmUri, Id, Agent, inet_utils:peername_to_binary(Peer));
-
-get_session_labels(RealmUri, Id, Agent, Peername) ->
-    [RealmUri, node_name(), Id, Agent, Peername].
+get_session_labels(RealmUri) ->
+    [RealmUri, node_name()].
 
 
 %% @private
-get_socket_labels(Protocol, Transport, Peername) ->
+get_socket_labels(Protocol, Transport) ->
     [
         node_name(),
         Protocol,
-        Transport,
-        Peername
+        Transport
     ].
 
 %% @private
 get_labels_values(Ctxt) ->
     {T, FT, E} = bondy_context:subprotocol(Ctxt),
     [
-        get_realm(Ctxt),
+        get_realm_type(Ctxt),
         node_name(),
-        bondy_context:session_id(Ctxt),
-        bondy_context:agent(Ctxt),
-        inet_utils:peername_to_binary(bondy_context:peer(Ctxt)),
         wamp,
         T,
         FT,
@@ -401,11 +397,12 @@ get_labels_values(Ctxt) ->
 
 
 %% @private
-get_realm(Ctxt) ->
-    try
-        bondy_context:realm_uri(Ctxt)
+get_realm_type(Ctxt) ->
+    try bondy_context:realm_uri(Ctxt) of
+        ?MASTER_REALM_URI -> master;
+        _ -> user
     catch
-        ?EXCEPTION(_, _, _) ->
+        _:_ ->
             undefined
     end.
 
@@ -442,32 +439,32 @@ declare_net_metrics() ->
         {name, bondy_sockets_total},
         {help,
             <<"The number of active sockets on a bondy node.">>},
-        {labels, [node, protocol, transport, peername]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_opened_total},
         {help,
             <<"The number of sockets opened on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, peername]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sockets_closed_total},
         {help,
             <<"The number of sockets closed on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, peername]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_socket_errors_total},
         {help,
             <<"The number of socket errors on a bondy node since reset.">>},
-        {labels, [node, protocol, transport, peername]}
+        {labels, [node, protocol, transport]}
     ]),
     _ = prometheus_histogram:declare([
         {name, bondy_socket_duration_seconds},
         {buckets, seconds_duration_buckets()},
         {help,
             <<"A histogram of the duration of a socket.">>},
-        {labels, [node, protocol, transport, peername]}
+        {labels, [node, protocol, transport]}
     ]),
 
     %% Bytes
@@ -511,26 +508,26 @@ declare_session_metrics() ->
         {name, bondy_sessions_total},
         {help,
             <<"The number of active sessions on a bondy node since reset.">>},
-        {labels, [realm, node, session_id, agent, peername]}
+        {labels, [realm_type, node]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sessions_opened_total},
         {help,
             <<"The number of sessions opened on a bondy node since reset.">>},
-        {labels, [realm, node, session_id, agent, peername]}
+        {labels, [realm_type, node]}
     ]),
     _ = prometheus_counter:declare([
         {name, bondy_sessions_closed_total},
         {help,
             <<"The number of sessions closed on a bondy node since reset.">>},
-        {labels, [realm, node, session_id, agent, peername]}
+        {labels, [realm_type, node]}
     ]),
     _ = prometheus_histogram:declare([
         {name, bondy_session_duration_seconds},
         {buckets, seconds_duration_buckets()},
         {help,
             <<"A histogram of the duration of sessions.">>},
-        {labels, [realm, node, session_id, agent, peername]}
+        {labels, [realm_type, node]}
     ]),
     ok.
 
@@ -729,7 +726,7 @@ registry_metrics() ->
     Info = bondy_registry:info(),
     L = [
         registry_metric(K, [{name, Name}], V)
-        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner
+        || {Name, PL} <- Info,  {K, V} <- PL, K =/= owner andalso K =/= heir
     ],
     [
         {registry_tries, gauge, "Registry tries count.", length(Info)}
@@ -737,8 +734,12 @@ registry_metrics() ->
     ].
 
 
+%% Used by promethues METRIC_NAME macro
+-define(METRIC_NAME_PREFIX, "bondy_").
+
 %% @private
 add_metric_family({Name, Type, Help, Metrics}, Callback) ->
+    %% METRIC_NAME uses the METRIC_NAME_PREFIX
     Callback(create_mf(?METRIC_NAME(Name), Help, Type, Metrics)).
 
 %% @private

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_utils.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -31,21 +31,27 @@
 -export([generate_fragment/1]).
 -export([get_id/1]).
 -export([get_nonce/0]).
+-export([get_nonce/1]).
 -export([get_random_string/2]).
 -export([is_uuid/1]).
--export([log/5]).
+-export([json_consult/1]).
+-export([json_consult/2]).
 -export([maybe_encode/2]).
 -export([merge_map_flags/2]).
 -export([pid_to_bin/1]).
 -export([timeout/1]).
 -export([to_binary_keys/1]).
+-export([to_existing_atom_keys/1]).
 -export([uuid/0]).
+-export([system_time_to_rfc3339/2]).
 
 
 
 %% =============================================================================
 %%  API
 %% =============================================================================
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -86,40 +92,6 @@ bin_to_pid(Bin) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec log(
-    atom(), binary() | list(), list(), wamp_message(), bondy_context:t()) -> ok.
-
-log(Level, Prefix, Head, WampMessage, Ctxt)
-when is_binary(Prefix) orelse is_list(Prefix), is_list(Head) ->
-    Format = iolist_to_binary([
-        Prefix,
-        <<
-            %% Right now trace_id is a bin as msgpack does not support
-            %% 128-bit integers
-            ", trace_id=~s"
-            ", realm_uri=~s"
-            ", session_id=~p"
-            ", message_type=~s"
-            ", message_id=~p"
-            ", encoding=~s"
-        >>
-    ]),
-    TraceId = <<>>,
-    Tail = [
-        TraceId,
-        bondy_context:realm_uri(Ctxt),
-        bondy_context:session_id(Ctxt),
-        element(1, WampMessage), %% add function to wamp_message.erl
-        element(2, WampMessage), %% add function to wamp_message.erl
-        bondy_context:encoding(Ctxt)
-    ],
-    _ = lager:log(Level, self(), Format, lists:append(Head, Tail)),
-    ok.
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
 to_binary_keys(Map) when is_map(Map) ->
     F = fun
         (K, V, Acc) when is_binary(K) ->
@@ -134,8 +106,34 @@ to_binary_keys(Map) when is_map(Map) ->
 %% @private
 maybe_to_binary_keys(T) when is_map(T) ->
     to_binary_keys(T);
+
 maybe_to_binary_keys(T) ->
     T.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+to_existing_atom_keys(Map) when is_map(Map) ->
+    F = fun
+        (K, V, Acc) when is_binary(K) andalso is_map(V) ->
+            maps:put(
+                binary_to_existing_atom(K, utf8),
+                to_existing_atom_keys(V),
+                Acc
+            );
+
+        (K, V, Acc) when is_binary(K) ->
+            maps:put(binary_to_existing_atom(K, utf8), V, Acc);
+
+        (K, V, Acc) when is_atom(K) andalso is_map(V) ->
+            maps:put(K, to_existing_atom_keys(V), Acc);
+
+        (K, V, Acc) when is_atom(K) ->
+            maps:put(K, V, Acc)
+    end,
+    maps:fold(F, #{}, Map).
 
 
 %% -----------------------------------------------------------------------------
@@ -177,21 +175,26 @@ maybe_encode(bert, Term) ->
 maybe_encode(erl, Term) ->
    binary_to_term(Term);
 
-maybe_encode(json, Term) ->
-    case jsx:is_json(Term) of
-        true ->
-            Term;
-        false ->
-            jsx:encode(Term)
+maybe_encode(json, Term) when is_binary(Term) ->
+    %% TODO this is wrong, we should be pasing the metadada so that we know in
+    %% which encoding the Term is
+    case jsone:try_decode(Term) of
+        {ok, JSON} ->
+            JSON;
+        {error, _} ->
+            jsone:encode(Term, [undefined_as_null, {object_key_type, string}])
     end;
 
- maybe_encode(msgpack, Term) ->
+maybe_encode(json, Term) ->
+    jsone:encode(Term, [undefined_as_null, {object_key_type, string}]);
+
+maybe_encode(msgpack, Term) ->
      %% TODO see if we can catch error when Term is already encoded
      Opts = [{map_format, map}, {pack_str, from_binary}],
      msgpack:pack(Term, Opts);
 
 maybe_encode(Enc, Term) when is_binary(Enc) ->
-    maybe_encode(list_to_atom(binary_to_list(Enc)), Term).
+    maybe_encode(binary_to_atom(Enc, utf8), Term).
 
 
 
@@ -206,7 +209,7 @@ decode(json, <<>>) ->
     <<>>;
 
 decode(json, Term) ->
-    jsx:decode(Term, [return_maps]);
+    jsone:decode(Term, [undefined_as_null]);
 
 decode(msgpack, Term) ->
     Opts = [{map_format, map}, {unpack_str, as_binary}],
@@ -323,11 +326,15 @@ merge_fun(K, V, Acc) ->
 %% @end
 %% -----------------------------------------------------------------------------
 get_nonce() ->
-    base64:encode(
-        get_random_string(
-            32,
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")).
+    get_nonce(32).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a base64 encoded random string
+%% @end
+%% -----------------------------------------------------------------------------
+get_nonce(Len) ->
+    base64:encode(enacl:randombytes(Len)).
 
 
 %% -----------------------------------------------------------------------------
@@ -345,3 +352,43 @@ get_random_string(Length, AllowedChars) ->
         end,
         [],
         lists:seq(1, Length)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec json_consult(File :: file:name_all()) -> any().
+
+json_consult(File) ->
+    json_consult(File, [undefined_as_null]).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec json_consult(File :: file:name_all(), Opts :: list()) ->
+    {ok, any()} | {error, any()}.
+
+json_consult(File, Opts) when is_list(Opts) ->
+    case file:read_file(File) of
+        {ok, JSONBin}  ->
+            case jsone:try_decode(JSONBin, Opts) of
+                {ok, Term, _} ->
+                    {ok, Term};
+                {error, {Reason, _}} ->
+                    {error, Reason}
+            end;
+        {error, _} = Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+system_time_to_rfc3339(Value, Opts) ->
+    String = calendar:system_time_to_rfc3339(Value, Opts),
+    list_to_binary(String).

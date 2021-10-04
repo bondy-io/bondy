@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_router.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@
 %% load regulation. Inn case a maximum pool capacity has been reached,
 %% the router will handle the message synchronously i.e. blocking the
 %% calling processes (usually the one that handles the transport connection
-%% e.g. {@link bondy_wamp_ws_handler}).
+%% e.g. {@link bondy_wamp_ws_connection_handler}).
 %%
 %% The router also handles messages synchronously in those
 %% cases where it needs to preserve message ordering guarantees.
@@ -90,12 +90,14 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_router).
--include("bondy.hrl").
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -define(ROUTER_ROLES, #{
-    broker => ?BROKER_FEATURES,
-    dealer => ?DEALER_FEATURES
+    broker => #{features => ?BROKER_FEATURES},
+    dealer => #{features => ?DEALER_FEATURES}
 }).
 
 
@@ -130,14 +132,17 @@ shutdown() ->
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
     ),
-    Fun = fun(PeerId) -> bondy:send(PeerId, M) end,
+    Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
 
     try
         _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
     catch
-        ?EXCEPTION(_, Reason, _) ->
-            _ = lager:error(
-                "Error while shutting down router; reason=~p", [Reason])
+       Class:Reason ->
+            ?LOG_ERROR(#{
+                description => "Error while shutting down router",
+                class => Class,
+                reason => Reason
+            })
     end,
 
     ok.
@@ -191,10 +196,13 @@ agent() ->
 
 forward(M, #{session := _} = Ctxt0) ->
     Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
-    %% _ = lager:debug(
-    %%     "Forwarding message; peer_id=~p, message=~p",
-    %%     [bondy_context:peer_id(Ctxt), M]
-    %% ),
+
+    %% ?LOG_DEBUG(#{
+    %%     description => "Forwarding message",
+    %%     peer_id => bondy_context:peer_id(Ctxt0),
+    %%     message => M
+    %% }),
+
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
@@ -272,6 +280,20 @@ acknowledge_message(_) ->
 
 
 %% @private
+do_forward(#subscribe{} = M, Ctxt) ->
+    %% This is a sync call as clients can call subscribe multiple times
+    %% concurrently. This is becuase matching and adding to the registry is not
+    %% done atomically: bondy_registry:add uses art_server:match/2 to
+    %% determine if a subscription already exists and then adds to the registry
+    %% (and trie). If we allow this request to be concurrent 2 or more request
+    %% could get no matches from match and thus create 3 subscriptions when
+    %% according to the protocol the subscriber should always get the same
+    %% subscription as result.
+    %% REVIEW An alternative approach would be for this to be handled async and
+    %% a pool of register servers to block.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
+
 do_forward(#register{} = M, Ctxt) ->
     %% This is a sync call as it is an easy way to preserve RPC ordering as
     %% defined by RFC 11.2:
@@ -293,10 +315,6 @@ do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
 
 do_forward(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    async_forward(M, Ctxt);
-
-do_forward(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
     async_forward(M, Ctxt);
 
 do_forward(#call{} = M, Ctxt0) ->
@@ -336,23 +354,21 @@ async_forward(M, Ctxt0) ->
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            _ = lager:info(
-                "Router pool overloaded, will route message synchronously; "
-                "message=~p", [M]
-            ),
+            ?LOG_INFO(#{
+                description => "Router pool overloaded, will route message synchronously"
+            }),
             %% @TODO publish metaevent and stats
             %% @TODO use throttling and send error to caller conditionally
             %% We do it synchronously i.e. blocking the caller
             ok = sync_forward(Event),
             {ok, Ctxt0}
     catch
-        ?EXCEPTION(error, Reason, _) when Acknowledge == true ->
+        error:Reason when Acknowledge == true ->
             %% TODO Maybe publish metaevent
             %% REVIEW are we using the right error uri?
             ErrorMap = bondy_error:map(Reason),
-            Reply = wamp_message:error(
-                ?UNSUBSCRIBE,
-                M#unsubscribe.request_id,
+            Reply = wamp_message:error_from(
+                M,
                 #{},
                 ?WAMP_CANCELLED,
                 [maps:get(<<"message">>, ErrorMap)],
@@ -360,14 +376,18 @@ async_forward(M, Ctxt0) ->
             ),
             ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
             {reply, Reply, Ctxt0};
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
+        Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
-            _ = lager:error(
-                "Error while routing message; class=~p, reason=~p, message=~p"
-                " realm_uri=~p, session_id=~p, stacktrace=~p",
-                [Class, Reason, M, Ctxt, SessionId, ?STACKTRACE(Stacktrace)]
-            ),
+            ?LOG_ERROR(#{
+                description => "Error while routing message",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                session_id => SessionId,
+                context => Ctxt,
+                message => M
+            }),
             %% TODO Maybe publish metaevent and stats
             {ok, Ctxt0}
     end.

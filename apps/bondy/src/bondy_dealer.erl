@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_dealer.erl -
 %%
-%%  Copyright (c) 2016-2019 Ngineo Limited t/a Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -162,11 +162,14 @@
 %% =============================================================================
 -module(bondy_dealer).
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 
 
 -define(DEFAULT_LIMIT, 1000).
-
+-define(RESERVED_NS(NS),
+    <<"Use of reserved namespace '", NS/binary, "'.">>
+).
 
 %% API
 -export([close_context/1]).
@@ -267,11 +270,13 @@ close_context(Ctxt) ->
         ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
         Ctxt
     catch
-        ?EXCEPTION(Class, Reason, Stacktrace) ->
-            _ = lager:error(
-                "Error while closing context; class=~p, reason=~p, trace=~p",
-                [Class, Reason, ?STACKTRACE(Stacktrace)]
-            ),
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while closing context",
+                class => Class,
+                reason => Reason,
+                trace => Stacktrace
+            }),
             Ctxt
     end.
 
@@ -307,7 +312,13 @@ handle_message(M, Ctxt) ->
         do_handle_message(M, Ctxt)
     catch
         _:{not_authorized, Reason} ->
-            Reply = not_authorized_error(Reason, M, Ctxt),
+            Reply = wamp_message:error_from(
+                M,
+                #{},
+                ?WAMP_NOT_AUTHORIZED,
+                [Reason],
+                #{message => Reason}
+            ),
             bondy:send(bondy_context:peer_id(Ctxt), Reply);
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
@@ -449,7 +460,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     %% the Procedure URI required for authrization
     Authorize = fun(Promise, Ctxt) ->
         Uri = bondy_rpc_promise:procedure_uri(Promise),
-        ok = bondy_security_utils:authorize(<<"wamp.cancel">>, Uri, Ctxt),
+        ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt),
         {ok, Ctxt}
     end,
     _ = peek_invocations(CallId, Authorize, Ctxt0),
@@ -606,36 +617,30 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
 do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
     %% TODO Maybe
     %% ReqId = bondy_utils:get_id(global),
-    %% spawn with pool -> bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    %% spawn with pool -> bondy_wamp_meta_api:handle_call(M, Ctxt);
     %% {ok, ReqId, Ctxt}.
-    ok = bondy_security_utils:authorize(<<"wamp.call">>, Uri, Ctxt),
+    ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
     handle_call(M, Ctxt).
 
 
 %% @private
-handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
-
 handle_call(
     #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    bondy_wamp_api:handle_call(M, Ctxt);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.registration.", _/binary>>} = M, Ctxt) ->
-    bondy_dealer_wamp_handler:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+    bondy_wamp_api:handle_call(M, Ctxt);
 
 handle_call(
-    #call{procedure_uri = <<"wamp.subscription.", _/binary>>} = M, Ctxt) ->
-    bondy_broker_wamp_handler:handle_call(M, Ctxt);
+    #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    bondy_wamp_meta_api:handle_call(M, Ctxt);
 
 handle_call(#call{} = M, Ctxt0) ->
     %% invoke/5 takes a fun which takes the registration_id of the
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-
-    %% TODO check if authorized and if not throw
-    %% wamp.error.not_authorized
 
     Caller = bondy_context:peer_id(Ctxt0),
     Fun = fun
@@ -665,16 +670,22 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
 
-    Details = #{
-        procedure => Uri,
-        trust_level => 0
-    },
+    Details0 = #{procedure => Uri, trust_level => 0},
 
-    case DiscloseCaller orelse DiscloseMe of
+    Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->
-            Details#{caller => bondy_context:session_id(Ctxt)};
+            Details0#{caller => bondy_context:session_id(Ctxt)};
         false ->
-            Details
+            Details0
+    end,
+
+    case maps:get('x_disclose_session_info', RegOpts, false) of
+        true ->
+            Session = bondy_context:session(Ctxt),
+            Info = bondy_session:info(Session),
+            Details1#{'x_session_info' => Info};
+        false ->
+            Details1
     end.
 
 
@@ -685,31 +696,25 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
 %% `{not_authorized | procedure_already_exists, binary()}' reason.
 %% @end
 %% -----------------------------------------------------------------------------
-handle_register(#register{procedure_uri = <<"bondy.", _/binary>>}, _) ->
-    throw({not_authorized, <<"Use of reserved namespace 'bondy'.">>});
-
-handle_register(
-    #register{procedure_uri = <<"com.leapsight.bondy.", _/binary>>}, _) ->
-    throw({
-        not_authorized, <<"Use of reserved namespace 'com.leapsight.bondy'.">>
-    });
-
-handle_register(#register{procedure_uri = <<"wamp.", _/binary>>}, _) ->
-    throw({not_authorized, <<"Use of reserved namespace 'wamp'.">>});
-
 handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
-    ok = bondy_security_utils:authorize(<<"wamp.register">>, Uri, Ctxt),
+    ok = maybe_reserved_ns(Uri),
+    ok = bondy_rbac:authorize(<<"wamp.register">>, Uri, Ctxt),
 
     #register{options = Opts, request_id = ReqId} = M,
     PeerId = bondy_context:peer_id(Ctxt),
 
     case bondy_registry:add(registration, Uri, Opts, Ctxt) of
-        {ok, Details, IsFirst} ->
-            ok = on_register(IsFirst, Details, Ctxt),
-            Reply = wamp_message:registered(ReqId, maps:get(id, Details)),
+        {ok, Entry, IsFirst} ->
+            ok = on_register(IsFirst, Entry, Ctxt),
+            Id = bondy_registry_entry:id(Entry),
+            Reply = wamp_message:registered(ReqId, Id),
             bondy:send(PeerId, Reply);
-        {error, {already_exists, #{match := Policy}}} ->
-            Mssg = <<"The procedure is already registered by another peer with policy ", $', Policy/binary, $', $.>>,
+        {error, {already_exists, Entry}} ->
+            Policy = bondy_registry_entry:match_policy(Entry),
+            Mssg = <<
+                "The procedure is already registered by another peer ",
+                "with policy ", $', Policy/binary, $', $.
+            >>,
             Reply = wamp_message:error(
                 ?REGISTER,
                 ReqId,
@@ -743,32 +748,20 @@ handle_unregister(#unregister{} = M, Ctxt) ->
         Entry ->
             Uri = bondy_registry_entry:uri(Entry),
             %% We authorize first
-            ok = bondy_security_utils:authorize(
+            ok = bondy_rbac:authorize(
                 <<"wamp.unregister">>, Uri, Ctxt),
             unregister(Uri, M, Ctxt)
     end.
 
 
 %% @private
-unregister(<<"com.leapsight.bondy",  _/binary>>, _, _) ->
-    NS = <<"com.leapsight.bondy">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
-unregister(<<"bondy",  _/binary>>, _, _) ->
-    NS = <<"bondy">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
-unregister(<<"wamp", _/binary>>, _, _) ->
-    NS = <<"wamp">>,
-    throw({not_authorized, <<"Use of reserved namespace '", NS/binary, "'.">>});
-
 unregister(Uri, M, Ctxt) ->
+    ok = maybe_reserved_ns(Uri),
     RegId = M#unregister.request_id,
-    ok = bondy_security_utils:authorize(<<"wamp.unregister">>, Uri, Ctxt),
+    ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:peer_id(Ctxt), Reply).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -901,16 +894,19 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% for that procedure.
     case match_registrations(ProcUri, Ctxt0, #{}) of
         {[], ?EOT} ->
-            reply_error(ProcUri, CallId, Ctxt0);
+            reply_error(no_such_procedure(ProcUri, CallId), Ctxt0);
         Regs ->
-            %% TODO Should we invoke all matching invocations?
-
             %% We invoke Fun for each entry
             Fun = fun
+                ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
+                    ok = reply_error(error_from_map(ErrorMap, CallId), Ctxt1),
+                    {ok, Ctxt1};
+
                 ({error, noproc}, Ctxt1) ->
                     %% The local process associated with the entry
                     %% is no longer alive.
-                    reply_error(ProcUri, CallId, Ctxt1);
+                    ok = reply_error(no_such_procedure(ProcUri, CallId), Ctxt1),
+                    {ok, Ctxt1};
                 (Entry, Ctxt1) ->
                     Callee = bondy_registry_entry:peer_id(Entry),
 
@@ -933,17 +929,17 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 
                     {ok, Ctxt2}
             end,
-            invoke(Regs, Fun, Ctxt0)
+            invoke_aux(Regs, Fun, Opts, Ctxt0)
     end.
 
 
 %% @private
--spec reply_error(uri(), id(), bondy_context:t()) -> ok.
+-spec reply_error(wamp_error(), bondy_context:t()) -> ok.
 
-reply_error(ProcUri, CallId, Ctxt) ->
+reply_error(Error, Ctxt) ->
     bondy:send(
         bondy_context:peer_id(Ctxt),
-        no_such_procedure(ProcUri, CallId)
+        Error
     ).
 
 
@@ -1001,10 +997,11 @@ peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 2) ->
 no_matching_promise(M) ->
     %% Promise was fulfilled or timed out and/or garbage collected,
     %% we do nothing.
-    _ = lager:debug(
-        "Message ignored; reason=no_matching_promise, message=~p",
-        [M]
-    ),
+    ?LOG_DEBUG(#{
+        description => "Message ignored",
+        reason => no_matching_promise,
+        message => M
+    }),
     ok.
 
 
@@ -1016,17 +1013,17 @@ no_matching_promise(M) ->
 
 
 %% @private
-invoke({[], ?EOT}, _, _) ->
+invoke_aux({[], ?EOT}, _, _, _) ->
     ok;
 
-invoke({L, ?EOT}, Fun, Ctxt) ->
-    invoke(L, Fun, Ctxt);
+invoke_aux({L, ?EOT}, Fun, Opts, Ctxt) ->
+    invoke_aux(L, Fun, Opts, Ctxt);
 
-invoke({L, Cont}, Fun, Ctxt) ->
-    ok = invoke(L, Fun, Ctxt),
-    invoke(match_registrations(Cont), Fun, Ctxt);
+invoke_aux({L, Cont}, Fun, Opts, Ctxt) ->
+    ok = invoke_aux(L, Fun, Opts, Ctxt),
+    invoke_aux(match_registrations(Cont), Fun, Opts, Ctxt);
 
-invoke(L, Fun, Ctxt) when is_list(L) ->
+invoke_aux(L, Fun, Opts, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
     Triples = [{
@@ -1034,76 +1031,70 @@ invoke(L, Fun, Ctxt) when is_list(L) ->
         maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
         E
     } || E <- L],
-    invoke(Triples, undefined, Fun, Ctxt).
+    invoke_aux(Triples, undefined, Fun, Opts, Ctxt).
 
 
 %% @private
--spec invoke(
+-spec invoke_aux(
     [{uri(), Strategy :: binary(), Entry :: tuple()}],
     Acc :: tuple() | undefined,
     Fun :: function(),
+    Opts :: map(),
     Ctxt :: bondy_context:t()) ->
     ok.
 
-invoke([], undefined, _, _) ->
+invoke_aux([], undefined, _, _, _) ->
     ok;
 
-invoke([], {_, ?INVOKE_SINGLE, []}, _, _) ->
+invoke_aux([], {_, ?INVOKE_SINGLE, []}, _, _, _) ->
     ok;
 
-invoke([], {_, Invoke, L}, Fun, Ctxt0) ->
-    {ok, _Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+invoke_aux([], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
+    {ok, _Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     ok;
 
-invoke([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Ctxt0) ->
-    {ok, Ctxt1} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt0),
+invoke_aux([{Uri, ?INVOKE_SINGLE, E}|T], undefined, Fun, Opts, Ctxt0) ->
+    {ok, Ctxt1} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt0),
     %% We add an accummulator to drop any subsequent matching Uris.
-    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt1);
+    invoke_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt1);
 
-invoke(
-    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last, Fun, Ctxt) ->
+invoke_aux(
+    [{Uri, ?INVOKE_SINGLE, _}|T], {Uri, ?INVOKE_SINGLE, _} = Last,
+    Fun, Opts, Ctxt) ->
     %% A single invocation strategy and we have multiple registrations so we
     %% ignore them
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    invoke(T, Last, Fun, Ctxt);
+    invoke_aux(T, Last, Fun, Opts, Ctxt);
 
-invoke([{Uri, Invoke, E}|T], undefined, Fun, Ctxt) ->
+invoke_aux([{Uri, Invoke, E}|T], undefined, Fun, Opts, Ctxt) ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt);
+    invoke_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt);
 
-invoke([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Ctxt)  ->
+invoke_aux([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Opts, Ctxt)  ->
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
-    invoke(T, {Uri, Invoke, [E|L]}, Fun, Ctxt);
+    invoke_aux(T, {Uri, Invoke, [E|L]}, Fun, Opts, Ctxt);
 
-invoke([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Ctxt0) ->
+invoke_aux([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
     %% We found a different Uri so we invoke the previous one
-    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     %% The new one is a single so we also invoke and continue
-    {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Ctxt1),
-    invoke(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Ctxt2);
+    {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt1),
+    invoke_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt2);
 
-invoke([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Ctxt0)  ->
+invoke_aux([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0)  ->
     %% We found another Uri so we invoke the previous one
-    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Ctxt0),
+    {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     %% We do not apply the invocation yet as it is not single, so we need
     %% to accummulate and apply at the end.
     %% We build a list for subsequent entries for same Uri.
-    invoke(T, {Uri, Invoke, [E]}, Fun, Ctxt1).
-
-
-%% @private
-invocation_strategy(?INVOKE_SINGLE) -> single;
-invocation_strategy(?INVOKE_FIRST) -> first;
-invocation_strategy(?INVOKE_LAST) -> last;
-invocation_strategy(?INVOKE_RANDOM) -> random;
-invocation_strategy(?INVOKE_ROUND_ROBIN) -> round_robin.
+    invoke_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt1).
 
 
 %% -----------------------------------------------------------------------------
@@ -1111,20 +1102,61 @@ invocation_strategy(?INVOKE_ROUND_ROBIN) -> round_robin.
 %% @doc
 %% Implements load balancing and fail over invocation strategies.
 %% This works over a list of registration entries for the SAME
-%% procedure
+%% procedure.
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_invoke(term(), function(), bondy_context:t()) ->
+-spec do_invoke(term(), function(), map(), bondy_context:t()) ->
     {ok, bondy_context:t()}.
 
-do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
-    Strategy = invocation_strategy(WAMPStrategy),
-    case bondy_rpc_load_balancer:get(L, #{strategy => Strategy}) of
-        {error, noproc} = Error ->
-            Fun(Error, Ctxt);
-        Entry ->
-            Fun(Entry, Ctxt)
+do_invoke({Strategy, L}, Fun, CallOpts0, Ctxt) ->
+    try
+        Opts = load_balancer_options(Strategy, CallOpts0),
+
+        case bondy_rpc_load_balancer:get(L, Opts) of
+            {error, noproc} = Error ->
+                %% We trid all callees in the list `L' but none was alive
+                throw(Error);
+            Entry ->
+                Fun(Entry, Ctxt)
+        end
+    catch
+        throw:{error, _} = ErrorMap ->
+            %% Unexpected error ocurred
+            Fun(ErrorMap, Ctxt)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Adds support for (Sharded Registration)
+%% [https://wamp-proto.org/_static/gen/wamp_latest.html#sharded-registration]
+%% by transforming the call runmode and rkey properties into the ones
+%% expected by the extensions to REGISTER.Options in order to reuse Bondy's
+%% jump_consistent_hash load balancing strategy.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+load_balancer_options(Strategy, CallOpts0) ->
+    CallOpts1 = coerce_strategy(Strategy, CallOpts0),
+    coerce_routing_key(CallOpts1).
+
+
+%% @private
+coerce_strategy(_, #{runmode := <<"partition">>} = CallOpts) ->
+    maps:put(strategy, jump_consistent_hash, CallOpts);
+
+coerce_strategy(Strategy, CallOpts) ->
+    %% An invalid runmode value would have been caught by
+    %% wamp_message's validation.
+    maps:put(strategy, Strategy, CallOpts).
+
+
+%% @private
+coerce_routing_key(#{rkey := Value} = CallOpts) ->
+    maps:put('x_routing_key', Value, CallOpts);
+
+coerce_routing_key(CallOpts) ->
+    CallOpts.
 
 
 
@@ -1135,22 +1167,37 @@ do_invoke({WAMPStrategy, L}, Fun, Ctxt) ->
 
 
 %% @private
-on_register(true, Map, Ctxt) ->
-    bondy_event_manager:notify({registration_created, Map, Ctxt});
+on_register(true, Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_created, Entry, Ctxt});
 
-on_register(false, Map, Ctxt) ->
-    bondy_event_manager:notify({registration_added, Map, Ctxt}).
+on_register(false, Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_added, Entry, Ctxt}).
 
 
 %% @private
-on_unregister(Map, Ctxt) ->
-    bondy_event_manager:notify({registration_removed, Map, Ctxt}).
+on_unregister(Entry, Ctxt) ->
+    bondy_event_manager:notify({registration_removed, Entry, Ctxt}).
 
 
 %% @private
 %% on_delete(Map, Ctxt) ->
 %%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
+
+error_from_map(Error, CallId) ->
+     Mssg = <<"The request failed due to invalid option parameters.">>,
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_INVALID_ARGUMENT,
+        [Mssg],
+        #{
+            message => Mssg,
+            details => Error,
+            description => <<"A required options parameter was missing in the request or while present they were malformed.">>
+        }
+    ).
 
 no_such_procedure(ProcUri, CallId) ->
     Mssg = <<
@@ -1227,26 +1274,14 @@ not_found_error(M, _Ctxt) ->
 
 
 %% @private
-not_authorized_error(Reason, #register{} = M, Ctxt) ->
-    not_authorized_error(?REGISTER, M#register.request_id, Reason, Ctxt);
+maybe_reserved_ns(<<"com.leapsight.bondy",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"com.leapsight.bondy">>)});
 
-not_authorized_error(Reason, #unregister{} = M, Ctxt) ->
-    not_authorized_error(?UNREGISTER, M#unregister.request_id, Reason, Ctxt);
+maybe_reserved_ns(<<"bondy",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"bondy">>)});
 
-not_authorized_error(Reason, #call{} = M, Ctxt) ->
-    not_authorized_error(?CALL, M#call.request_id, Reason, Ctxt);
+maybe_reserved_ns(<<"wamp",  _/binary>>) ->
+    throw({not_authorized, ?RESERVED_NS(<<"wamp">>)});
 
-not_authorized_error(Reason, #cancel{} = M, Ctxt) ->
-    not_authorized_error(?CANCEL, M#cancel.request_id, Reason, Ctxt).
-
-
-%% @private
-not_authorized_error(Type, ReqId, Mssg, _Ctxt) ->
-    wamp_message:error(
-        Type,
-        ReqId,
-        #{},
-        ?WAMP_NOT_AUTHORIZED,
-        [Mssg],
-        #{message => Mssg}
-    ).
+maybe_reserved_ns(_) ->
+    ok.
