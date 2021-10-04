@@ -250,10 +250,10 @@ websocket_handle(Data, St) ->
 websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     handle_outbound(St#state.frame_type, M, St);
 
-websocket_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
+websocket_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
-    ok = bondy:ack(Pid, Ref),
+    %% ok = bondy:ack(Pid, Ref),
     handle_outbound(St#state.frame_type, M, St);
 
 websocket_info(

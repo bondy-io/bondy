@@ -207,15 +207,13 @@ handle_info({tcp_error, _, _} = Reason, State) ->
 handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_router in those cases
     %% in which the router is embodied by our process i.e. the sync part
-    %% of a routing process e.g. wamp calls, so we do not ack
-    %% TODO check if we still need this now that bondy:ack seems to handle this
-    %% case
+    %% of a routing process e.g. wamp calls
     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_REQUEST, Pid, Ref, M}, St) ->
+handle_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
     %% Here we receive the messages that either the router or another peer
-    %% have sent to us using bondy:send/2,3 which requires us to ack
-    ok = bondy:ack(Pid, Ref),
+    %% have sent to us using bondy:send/2,3
+    %% ok = bondy:ack(Pid, Ref),
     %% We send the message to the peer
     handle_outbound(M, St);
 
@@ -258,6 +256,16 @@ handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
 
 handle_info({stop, Reason}, State) ->
     {stop, Reason, State};
+
+handle_info({'DOWN', Ref, process, Pid, Reason}, State) ->
+    ?LOG_DEBUG(#{
+        description => "Failed to send message to destination, process is gone",
+        reason => noproc,
+        destination => Pid,
+        destination_ref => Ref,
+        destination_termination_reason => Reason
+    }),
+    {noreply, State};
 
 handle_info(Event, State) ->
     ?LOG_ERROR(#{
@@ -667,6 +675,12 @@ close_socket(Reason, St) ->
                 reason => Reason
             };
 
+        closed ->
+            #{
+                description => <<"Connection closed by peer">>,
+                reason => Reason
+            };
+
         shutdown ->
             #{
                 description => <<"Connection closed by router">>,
@@ -683,7 +697,7 @@ close_socket(Reason, St) ->
 
 
         _ ->
-            %% We increase the socker error counter
+            %% We increase the socket error counter
             ok = IncrSockerErrorCnt(),
             #{
                 description => <<"Connection closing due to system error">>,
