@@ -24,10 +24,10 @@
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
         "offering both Publish and Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC)."
     },
-    {vsn, "1.0.0-beta.4"},
+    {vsn, "1.0.0-beta.5"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {application_starter, [bondy_app, [{vsn, "1.0.0-beta.4"}]]}},
+    {mod, {application_starter, [bondy_app, [{vsn, "1.0.0-beta.5"}]]}},
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
         {init_db_partitions, []},
@@ -46,32 +46,37 @@
         {init_listeners, []}
     ]},
     {applications,[
-        %% Erlang
-        kernel,
-        stdlib,
-        sasl,
+        %% Erlang/OTP
         crypto,
         inets,
-        tools,
+        kernel,
         runtime_tools,
-        %% Third party
-        cowboy,
-        hackney,
+        sasl,
+        stdlib,
+        tools,
+        %% 3rd-party Crypto
+        enacl,
         jose,
         pbkdf2,
-        enacl,
         stringprep,
-        jsone,
+        %% 3rd-party Web Sevrver|client
+        cowboy,
+        hackney,
+        %% 3rd-party Utils
+        %% 3rd-party Instrumentation
         lager,
-        msgpack,
+        observer_cli,
         opencensus,
         prometheus,
         redbug,
-        observer_cli,
+        telemetry,
+        %% 3rd-party Serialization formats
+        jsone,
+        msgpack,
         sidejob,
         jobs,
         uuid,
-        %% Leapsight
+        %% 1st-party deps
         mops,
         art,
         wamp

@@ -86,7 +86,7 @@ add_subscription(Config) ->
 
     ?assertEqual(
         {error, {already_exists, Entry}},
-        bondy_registry:add(subscription, <<"com.a.b.c">>, Opts, Ctxt)
+        bondy_registry:add(subscription, Uri, Opts, Ctxt)
     ),
 
     ?assertEqual(

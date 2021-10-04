@@ -233,8 +233,8 @@ add(Type, Uri, Options, Ctxt) ->
     {RealmUri, Node, SessionId, _} = PeerId,
     Pattern = case Type of
         registration ->
-            %% A session can register a procedure multiple times if
-            %% shared_registration is enabled
+            %% A session can register a procedure even if it is already
+            %% registered if shared_registration is enabled.
             %% So we do not match SessionId
             bondy_registry_entry:pattern(
                 Type, RealmUri, '_', '_', Uri, Options);
