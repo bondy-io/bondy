@@ -104,6 +104,8 @@
 %%
 %% * **security_enabled**
 %% * **allow_connections**
+%% * **sso_realm_uri**
+%% * **authmethods**
 %%
 %% In addition realms inherit Groups, Sources and Grants from their prototype.
 %% The following are the inheritance rules:
