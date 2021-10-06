@@ -1386,7 +1386,7 @@ list() ->
 -spec to_external(t() | uri()) -> external().
 
 to_external(#realm{} = R) ->
-    #{
+    Map = #{
         uri => R#realm.uri,
         description => R#realm.description,
         is_prototype => R#realm.is_prototype,
@@ -1401,7 +1401,8 @@ to_external(#realm{} = R) ->
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
         ]
-    };
+    },
+    maps:filter(fun(_, V) -> V =/= undefined end, Map);
 
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
