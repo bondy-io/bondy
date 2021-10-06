@@ -427,9 +427,22 @@ do_add(RealmUri, Usernames, #{type := source} = Source) ->
 %% }
 %% -----------------------------------------------------------------------------
 do_match(RealmUri, Username) ->
-    Prefix = ?PLUMDB_PREFIX(RealmUri),
     Opts = [{remove_tombstones, true} | ?FOLD_OPTS],
-    plum_db:match(Prefix, {Username, '_', '_'}, Opts).
+    ProtoSources = case bondy_realm:prototype_uri(RealmUri) of
+        undefined ->
+            [];
+        ProtoUri ->
+            %% TODO when we enable assigned to groups here we need to also
+            %% union the sources assigned to the group in the proto
+            plum_db:match(?PLUMDB_PREFIX(ProtoUri), {all, '_', '_'}, Opts)
+    end,
+    Sources = plum_db:match(
+        ?PLUMDB_PREFIX(RealmUri), {Username, '_', '_'}, Opts
+    ),
+    sets:to_list(
+        sets:union(sets:from_list(ProtoSources), sets:from_list(Sources))
+    ).
+
 
 
 %% @private
