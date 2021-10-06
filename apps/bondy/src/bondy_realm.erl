@@ -104,6 +104,8 @@
 %%
 %% * **security_enabled**
 %% * **allow_connections**
+%% * **sso_realm_uri**
+%% * **authmethods**
 %%
 %% In addition realms inherit Groups, Sources and Grants from their prototype.
 %% The following are the inheritance rules:
@@ -1384,7 +1386,7 @@ list() ->
 -spec to_external(t() | uri()) -> external().
 
 to_external(#realm{} = R) ->
-    #{
+    Map = #{
         uri => R#realm.uri,
         description => R#realm.description,
         is_prototype => R#realm.is_prototype,
@@ -1399,7 +1401,8 @@ to_external(#realm{} = R) ->
             begin {_, Map} = jose_jwk:to_map(K), Map end
             || {_, K} <- maps:to_list(R#realm.public_keys)
         ]
-    };
+    },
+    maps:filter(fun(_, V) -> V =/= undefined end, Map);
 
 to_external(RealmUri) ->
     to_external(fetch(RealmUri)).
@@ -1613,7 +1616,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_group:add_or_update(Uri, Group)
+            bondy_rbac_group:add_or_update(Uri, Group), Uri
         )
         || Group <- Groups
     ],
@@ -1624,18 +1627,19 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
                 Uri,
                 User,
                 #{update_credentials => true, forward_credentials => true}
-            )
+            ),
+            Uri
         )
         || User <- Users
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment))
+        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment), Uri)
         || Assignment <- SourcesAssignments
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac:grant(Uri, Grant))
+        ok = maybe_error(bondy_rbac:grant(Uri, Grant), Uri)
         || Grant <- Grants
     ],
 
@@ -1643,13 +1647,13 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
 
 %% @private
-maybe_error({error, Reason}) ->
-    error(Reason);
+maybe_error({error, Reason}, Uri) ->
+    error({Reason, Uri});
 
-maybe_error({ok, _}) ->
+maybe_error({ok, _}, _) ->
     ok;
 
-maybe_error(ok) ->
+maybe_error(ok, _) ->
     ok.
 
 

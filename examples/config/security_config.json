@@ -422,5 +422,107 @@
         "security_enabled" : true,
         "allow_connections": false,
         "is_sso_realm": true
+    },
+    {
+        "uri" : "com.leapsight.test.proto",
+        "description" : "A test prototype realm",
+        "authmethods" : ["cryptosign", "wampcra", "ticket"],
+        "is_prototype": true,
+        "security_enabled" : true,
+        "allow_connections": true,
+        "sso_realm_uri": "com.leapsight.sso",
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "ticket",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            }
+        ],
+        "groups" : [
+            {
+                "name": "apps"
+            },
+            {
+                "name": "users"
+            }
+
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "resources": [
+                    {"uri" : "", "match": "prefix"}
+                ],
+                "roles" : ["apps"]
+            },
+            {
+                "permissions" : [
+                    "wamp.call"
+                ],
+                "resources": [
+                    {"uri" : "bondy.ticket.issue", "match": "exact"}
+                ],
+                "roles" : ["users", "apps"]
+            },
+            {
+                "permissions" : [
+                    "bondy.issue"
+                ],
+                "resources": [
+                    {"uri" : "bondy.ticket.scope.sso", "match": "exact"},
+                    {"uri" : "bondy.ticket.scope.client_sso", "match": "exact"}
+                ],
+                "roles" : ["users"]
+            },
+            {
+                "permissions" : [
+                    "bondy.issue"
+                ],
+                "resources": [
+                    {"uri" : "bondy.ticket.scope.local", "match": "exact"}
+                ],
+                "roles" : ["apps"]
+            }
+        ]
+    },
+    {
+        "uri" : "com.leapsight.test.inheritance",
+        "description" : "A test realm",
+        "prototype_uri": "com.leapsight.test.proto",
+        "users" : [
+            {
+                "username": "linda",
+                "password": "123456",
+                "groups": ["users"],
+                "sso_realm_uri": "com.leapsight.sso"
+            },
+            {
+                "username": "app",
+                "authorized_keys": ["1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"],
+                "groups" : ["apps"],
+                "comment": "for testing the corresponding priv key is '4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd'"
+            }
+        ]
     }
 ]

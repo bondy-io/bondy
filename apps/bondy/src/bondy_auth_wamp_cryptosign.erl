@@ -157,6 +157,9 @@ when is_binary(EncSignature) ->
                 {error, invalid_signature, State}
         end
     catch
+        error:badarg ->
+            %% enacl failed
+            {error, invalid_signature, State};
         throw:invalid_hex_encoding ->
             {error, invalid_signature, State}
     end.
