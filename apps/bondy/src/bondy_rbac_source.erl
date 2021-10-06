@@ -439,9 +439,7 @@ do_match(RealmUri, Username) ->
     Sources = plum_db:match(
         ?PLUMDB_PREFIX(RealmUri), {Username, '_', '_'}, Opts
     ),
-    sets:to_list(
-        sets:union(sets:from_list(ProtoSources), sets:from_list(Sources))
-    ).
+    lists:append(Sources, ProtoSources).
 
 
 
