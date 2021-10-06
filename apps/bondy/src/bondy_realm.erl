@@ -1616,7 +1616,7 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
     _ = [
         ok = maybe_error(
-            bondy_rbac_group:add_or_update(Uri, Group)
+            bondy_rbac_group:add_or_update(Uri, Group), Uri
         )
         || Group <- Groups
     ],
@@ -1627,18 +1627,19 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
                 Uri,
                 User,
                 #{update_credentials => true, forward_credentials => true}
-            )
+            ),
+            Uri
         )
         || User <- Users
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment))
+        ok = maybe_error(bondy_rbac_source:add(Uri, Assignment), Uri)
         || Assignment <- SourcesAssignments
     ],
 
     _ = [
-        ok = maybe_error(bondy_rbac:grant(Uri, Grant))
+        ok = maybe_error(bondy_rbac:grant(Uri, Grant), Uri)
         || Grant <- Grants
     ],
 
@@ -1646,13 +1647,13 @@ apply_rbac_config(#realm{uri = Uri}, Map) ->
 
 
 %% @private
-maybe_error({error, Reason}) ->
-    error(Reason);
+maybe_error({error, Reason}, Uri) ->
+    error({Reason, Uri});
 
-maybe_error({ok, _}) ->
+maybe_error({ok, _}, _) ->
     ok;
 
-maybe_error(ok) ->
+maybe_error(ok, _) ->
     ok.
 
 
