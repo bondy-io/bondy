@@ -1710,8 +1710,10 @@ end}.
 %% -----------------------------------------------------------------------------
 %% @doc Defines the level of concurrency in plum_db (the local embedded
 %% database used by Bondy).
-%% Each partition has its own leveldb and ets instance.
-
+%% Each partition has its own leveldb and ets (in-memory db) instance. Ideally
+%% we can have one partition per CPU core.
+%% Bondy will ignore this configuration in case data already exists i.e. this
+%% parameter is considered on a fresh start.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "store.partitions", "plum_db.partitions", [
