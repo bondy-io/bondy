@@ -1731,10 +1731,11 @@ end}.
 %% -----------------------------------------------------------------------------
 {mapping, "store.shard_by", "plum_db.shard_by", [
   {default, prefix},
-  {datatype, {enum, [prefix, key]}}
+  {datatype, {enum, [prefix, key]}},
+  hidden
 ]}.
 
-{mapping, "store.open_retry_Limit", "plum_db.store_open_retry_Limit", [
+{mapping, "store.open_retry_Limit", "plum_db.store_open_retry_limit", [
   {default, 30},
   {datatype, integer}
 ]}.
