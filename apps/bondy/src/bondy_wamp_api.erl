@@ -37,7 +37,7 @@
 -callback handle_call(
     Procedure :: uri(),
     M :: wamp_message:call(),
-    Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
+    Ctxt :: bony_context:t()) -> wamp_message:result() | wamp_message:error().
 
 
 
