@@ -54,9 +54,10 @@
 -define(SUBSCRIPTION_TRIE, bondy_subscription_trie).
 -define(REGISTRATION_TRIE, bondy_registration_trie).
 -define(TRIES, [?SUBSCRIPTION_TRIE, ?REGISTRATION_TRIE]).
+
 %% OTHER
--define(MAX_LIMIT, 10000).
--define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
+% -define(MAX_LIMIT, 10000).
+% -define(LIMIT(Opts), min(maps:get(limit, Opts, ?MAX_LIMIT), ?MAX_LIMIT)).
 
 -record(state, {
     start_time = erlang:system_time(second)  :: pos_integer()
