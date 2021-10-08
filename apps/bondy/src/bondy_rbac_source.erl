@@ -29,6 +29,7 @@
 -module(bondy_rbac_source).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
 
@@ -76,7 +77,7 @@
 }).
 
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {security_sources, RealmUri}).
+-define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_SOURCE_TAB, RealmUri}).
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 

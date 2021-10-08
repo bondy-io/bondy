@@ -144,13 +144,14 @@
 -module(bondy_ticket).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
 -define(NOW, erlang:system_time(second)).
 -define(LEEWAY_SECS, 120). % 2 mins
 
--define(PDB_PREFIX(L),
-    {bondy_ticket, binary_utils:join(L, <<",">>)}
+-define(PLUM_DB_PREFIX(L),
+    {?PLUM_DB_TICKET_TAB, binary_utils:join(L, <<",">>)}
 ).
 
 -define(OPTS_VALIDATOR, #{
@@ -369,7 +370,7 @@ verify(Ticket, Opts) ->
 
 lookup(RealmUri, Authid, Scope) ->
     Key = store_key(Authid, normalise_scope(Scope)),
-    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     Opts = [{resolver, fun ticket_resolver/2}, {allow_put, true}],
 
     case plum_db:get(Prefix, Key, Opts) of
@@ -430,7 +431,7 @@ revoke(Claims) when is_map(Claims) ->
     ok.
 
 revoke_all(RealmUri, Authid) ->
-    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     Fun = fun
         ({_, ?TOMBSTONE}) ->
             ok;
@@ -451,7 +452,7 @@ revoke_all(RealmUri, Authid) ->
     Scope :: scope()) -> ok.
 
 revoke_all(_RealmUri, _Authid, _Scope) ->
-    % Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    % Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     % Key = store_key(Authid, Scope),
     % Realm = maps:get(realm, Scope, undefined),
     % InstanceId = maps:get(client_instance_id, Scope, undefined),
@@ -689,7 +690,7 @@ list_key(#{realm := Uri, client_instance_id := Id}) ->
 
 %% @private
 store_ticket(RealmUri, Authid, Claims) ->
-    Prefix = ?PDB_PREFIX([RealmUri, Authid]),
+    Prefix = ?PLUM_DB_PREFIX([RealmUri, Authid]),
     Scope = maps:get(scope, Claims),
     Key = store_key(Authid, Scope),
 

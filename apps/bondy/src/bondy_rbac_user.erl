@@ -33,12 +33,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_user).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 
 -define(TYPE, user).
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {security_users, RealmUri}).
+-define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_USER_TAB, RealmUri}).
 
 %% TODO resolver function to reconcile sso_realm_uri, meta, groups,
 %% password and authorized_keys. In the case of sso_realm_uri and groups

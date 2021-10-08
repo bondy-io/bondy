@@ -39,14 +39,16 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 
 
 %% PLUM_DB
--define(REG_PREFIX, bondy_registry_registrations).
--define(SUBS_PREFIX, bondy_registry_subscriptions).
--define(PREFIXES, [?REG_PREFIX, ?SUBS_PREFIX]).
--define(REG_FULL_PREFIX(RealmUri), {?REG_PREFIX, RealmUri}).
--define(SUBS_FULL_PREFIX(RealmUri), {?SUBS_PREFIX, RealmUri}).
+-define(REG_FULL_PREFIX(RealmUri),
+    {?PLUM_DB_REGISTRATION_TAB, RealmUri}
+).
+-define(SUBS_FULL_PREFIX(RealmUri),
+    {?PLUM_DB_SUBSCRIPTION_TAB, RealmUri}
+).
 %% ART TRIES
 -define(ANY, <<"*">>).
 -define(SUBSCRIPTION_TRIE, bondy_subscription_trie).
@@ -649,8 +651,8 @@ init([]) ->
         {{{'$1', '_'}, '_'}, '_', '_'},
         [
             {'orelse',
-                {'=:=', ?REG_PREFIX, '$1'},
-                {'=:=', ?SUBS_PREFIX, '$1'}
+                {'=:=', ?PLUM_DB_REGISTRATION_TAB, '$1'},
+                {'=:=', ?PLUM_DB_SUBSCRIPTION_TAB, '$1'}
             }
         ],
         [true]

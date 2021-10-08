@@ -24,6 +24,7 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_backup.hrl").
 
 -define(BACKUP_SPEC, #{
@@ -555,23 +556,23 @@ rename_prefix({A, B}) when is_binary(A) ->
 %% @private
 rename_prefix(<<"groups">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
-    {security_groups, Realm};
+    {?PLUM_DB_GROUP_TAB, Realm};
 
 rename_prefix(<<"users">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
-    {security_users, Realm};
+    {?PLUM_DB_USER_TAB, Realm};
 
 rename_prefix(<<"sources">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
-    {security_sources, Realm};
+    {?PLUM_DB_SOURCE_TAB, Realm};
 
 rename_prefix(<<"usergrants">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
-    {security_user_grants, Realm};
+    {?PLUM_DB_USER_GRANT_TAB, Realm};
 
 rename_prefix(<<"groupgrants">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),
-    {security_group_grants, Realm};
+    {?PLUM_DB_GROUP_GRANT_TAB, Realm};
 
 rename_prefix(<<"status">>, Bin) ->
     Realm = binary:part(Bin, {0, byte_size(Bin) - byte_size(<<".security">>)}),

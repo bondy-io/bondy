@@ -27,8 +27,10 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rbac_group).
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
+-include("bondy_plum_db.hrl").
+
 
 
 -define(VALIDATOR, ?UPDATE_VALIDATOR#{
@@ -90,7 +92,7 @@
 
 -define(TYPE, group).
 -define(VERSION, <<"1.1">>).
--define(PLUMDB_PREFIX(RealmUri), {security_groups, RealmUri}).
+-define(PLUMDB_PREFIX(RealmUri), {?PLUM_DB_GROUP_TAB, RealmUri}).
 -define(FOLD_OPTS, [{resolver, lww}]).
 
 

@@ -53,6 +53,7 @@
 -module(bondy_rbac).
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
 
@@ -113,8 +114,8 @@
     }
 }).
 
--define(USER_GRANTS_PREFIX(RealmUri),   {security_user_grants, RealmUri}).
--define(GROUP_GRANTS_PREFIX(RealmUri),  {security_group_grants, RealmUri}).
+-define(USER_GRANTS_PREFIX(RealmUri),   {?PLUM_DB_USER_GRANT_TAB, RealmUri}).
+-define(GROUP_GRANTS_PREFIX(RealmUri),  {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}).
 -define(PLUMDB_PREFIX(RealmUri, Type),
     case Type of
         user -> ?USER_GRANTS_PREFIX(RealmUri);
