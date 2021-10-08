@@ -37,6 +37,7 @@
 -export([json_consult/1]).
 -export([json_consult/2]).
 -export([maybe_encode/2]).
+-export([maybe_slice/3]).
 -export([merge_map_flags/2]).
 -export([pid_to_bin/1]).
 -export([timeout/1]).
@@ -196,6 +197,12 @@ maybe_encode(msgpack, Term) ->
 maybe_encode(Enc, Term) when is_binary(Enc) ->
     maybe_encode(binary_to_atom(Enc, utf8), Term).
 
+
+maybe_slice(undefined, _, _) ->
+    undefined;
+
+maybe_slice(String, Start, Length) ->
+    string:slice(String, Start, Length).
 
 
 %% @private

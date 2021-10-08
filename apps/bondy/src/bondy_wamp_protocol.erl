@@ -490,7 +490,7 @@ handle_inbound_messages(_, St, _) ->
 
 
 %% @private
-maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
+maybe_open_session({send_challenge, AuthMethod, Challenge, St0}) ->
     M = wamp_message:challenge(AuthMethod, Challenge),
     ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     Bin = wamp_encoding:encode(M, encoding(St0)),
@@ -500,9 +500,9 @@ maybe_open_session({challenge, AuthMethod, Challenge, St0}) ->
     },
     {reply, Bin, St1};
 
-maybe_open_session({ok, St}) ->
+maybe_open_session({ok, Extra, St}) ->
     %% No need for a challenge, anonymous|trust or security disabled
-    open_session(undefined, St);
+    open_session(Extra, St);
 
 maybe_open_session({error, Reason, St}) ->
     stop(Reason, St).
@@ -514,11 +514,11 @@ maybe_open_session({error, Reason, St}) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec open_session(map() | undefined, state()) ->
+-spec open_session(map(), state()) ->
     {reply, binary(), state()}
     | {stop, binary(), state()}.
 
-open_session(Extra, St0) ->
+open_session(Extra, St0) when is_map(Extra) ->
     try
         Ctxt0 = St0#wamp_state.context,
         AuthCtxt = St0#wamp_state.auth_context,
@@ -530,11 +530,13 @@ open_session(Extra, St0) ->
         Authroles = bondy_auth:roles(AuthCtxt),
         Authprovider = bondy_auth:provider(AuthCtxt),
         Authmethod = bondy_auth:method(AuthCtxt),
+        Agent = maps:get(agent, ReqDetails, undefined),
 
-        Details = #{
+
+        InDetails = #{
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
-            agent => maps:get(agent, ReqDetails, undefined),
+            agent => Agent,
             roles => maps:get(roles, ReqDetails, undefined),
             authid => maybe_gen_authid(Authid),
             authprovider => Authprovider,
@@ -545,26 +547,22 @@ open_session(Extra, St0) ->
 
         %% We open a session
         Session = bondy_session_manager:open(
-            Id, maps:get(peer, Ctxt0), RealmUri, Details
+            Id, maps:get(peer, Ctxt0), RealmUri, InDetails
         ),
 
         %% We set the session in the context
-        Ctxt1 = Ctxt0#{
-            session => Session
-        },
+        Ctxt1 = Ctxt0#{session => Session},
         St1 = update_context(Ctxt1, St0),
-
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             Id,
-            Details#{
+            #{
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles(),
                 authprovider => Authprovider,
                 authmethod => Authmethod,
                 authrole => to_bin(Authrole),
-                'x_authroles' => [to_bin(R) || R <- Authroles],
                 authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
                 authextra => Extra
             }
@@ -573,6 +571,8 @@ open_session(Extra, St0) ->
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
 
         ok = bondy_logger_utils:update_process_metadata(#{
+            agent => bondy_utils:maybe_slice(Agent, 0, 64),
+            authmethod => Authmethod,
             realm_uri => RealmUri
         }),
 
@@ -700,18 +700,18 @@ auth_challenge(Method, St0) ->
     Details = bondy_context:request_details(Ctxt),
 
     case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-        {ok, AuthCtxt1} ->
+        {ok, AuthExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
-            {ok, St1};
-        {ok, ChallengeExtra, AuthCtxt1} ->
+            {ok, AuthExtra, St1};
+        {challenge, ChallengeExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
-            {challenge, Method, ChallengeExtra, St1};
+            {send_challenge, Method, ChallengeExtra, St1};
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St0}
     end.

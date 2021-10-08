@@ -160,7 +160,7 @@ test_1(Config) ->
     HelloDetails = #{authextra => #{
         <<"nonce">> => base64:encode(ClientNonce)
     }},
-    {ok, ChallengeExtra, NewCtxt1} = bondy_auth:challenge(
+    {challenge, ChallengeExtra, NewCtxt1} = bondy_auth:challenge(
         ?WAMP_SCRAM_AUTH, HelloDetails, Ctxt1
     ),
 
