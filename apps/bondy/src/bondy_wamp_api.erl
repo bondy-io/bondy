@@ -52,7 +52,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+	ok | ignore | {redirect, uri()}.
 
 handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     PeerId = bondy_context:peer_id(Ctxt),

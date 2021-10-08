@@ -626,17 +626,37 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 %% @private
 handle_call(
     #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_api:handle_call(M, Ctxt);
+    %% Deprecated API prefix. Now "bondy."
+    maybe_callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_api:handle_call(M, Ctxt);
+    maybe_callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(
     #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    bondy_wamp_meta_api:handle_call(M, Ctxt);
+    maybe_callback(M, Ctxt, bondy_wamp_meta_api);
 
-handle_call(#call{} = M, Ctxt0) ->
+handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
+    do_handle_call(M, Ctxt, Uri).
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc If the callback module returns ignore we need to find the callee in the
+%% registry
+%% @end
+%% -----------------------------------------------------------------------------
+maybe_callback(#call{procedure_uri = Uri} = M, Ctxt, Mod) ->
+    case Mod:handle_call(M, Ctxt) of
+        ok -> ok;
+        ignore -> do_handle_call(M, Ctxt, Uri);
+        {redirect, OtherUri} -> do_handle_call(M, Ctxt, OtherUri)
+    end.
+
+
+%% @private
+do_handle_call(#call{} = M, Ctxt0, Uri) ->
     %% invoke/5 takes a fun which takes the registration_id of the
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
@@ -654,7 +674,6 @@ handle_call(#call{} = M, Ctxt0) ->
             RegId = bondy_registry_entry:id(Entry),
             RegOpts = bondy_registry_entry:options(Entry),
             CallOpts = M#call.options,
-            Uri = M#call.procedure_uri,
             Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
             R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
             ok = bondy:send(Caller, Callee, R, #{}),
@@ -662,7 +681,8 @@ handle_call(#call{} = M, Ctxt0) ->
     end,
 
     %% A response will be send asynchronously by another router process instance
-    invoke(M#call.request_id, M#call.procedure_uri, Fun, M#call.options, Ctxt0).
+    invoke(M#call.request_id, Uri, Fun, M#call.options, Ctxt0).
+
 
 
 %% @private

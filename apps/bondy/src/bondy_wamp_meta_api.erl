@@ -42,7 +42,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok.
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+    ok | ignore | {redirect, uri()}.
 
 handle_call(M, Ctxt) ->
     PeerId = bondy_context:peer_id(Ctxt),
@@ -68,6 +69,7 @@ handle_call(M, Ctxt) ->
 
 do_handle(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
     [RealmUri, SessionId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+
     case bondy_session:lookup(RealmUri, SessionId) of
         {error, not_found} ->
             bondy_wamp_utils:no_such_session_error(SessionId);
@@ -488,3 +490,8 @@ list_subscription_subscribers(_RealmUri, _RegId) ->
 
 count_subscribers(_RealmUri, _RegId) ->
     {error, not_implemented}.
+
+% To use as {redirect, redirect_uri(?WAMP_SESSION_GET, SessionId)};
+% redirect_uri(<<"wamp.session.", Rest/binary>>, Id) when is_integer(Id) ->
+%     <<"wamp.session.", (integer_to_binary(Id))/binary, $., Rest>>.
+
