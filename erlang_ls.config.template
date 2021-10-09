@@ -10,9 +10,12 @@ include_dirs:
   - "apps/*/include"
   - "_build/default/lib/"
   - "_build/default/lib/*/include"
+  - "_build/default/lib/*/apps/*/include"
   - "_checkouts/*/include"
+  - "_checkouts/*/apps/*/include"
   - "lib"
   - "lib/*/include"
+  - "lib/*/apps/*/include"
 diagnostics:
   enabled:
     - crossref

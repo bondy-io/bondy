@@ -525,7 +525,7 @@ update_context({body, Body}, #{<<"request">> := _} = Ctxt0) ->
 %% @private
 init_context(Req) ->
     Peer = cowboy_req:peer(Req),
-    Id = opencensus:generate_trace_id(),
+    Id = bondy_telemetry:trace_id(),
 
     M = #{
         %% Msgpack does not support 128-bit integers,

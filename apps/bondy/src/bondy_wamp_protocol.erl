@@ -25,6 +25,8 @@
 -module(bondy_wamp_protocol).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("opentelemetry_api/include/otel_tracer.hrl").
+
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 -include("bondy_security.hrl").
