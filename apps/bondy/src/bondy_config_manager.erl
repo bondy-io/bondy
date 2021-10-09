@@ -109,7 +109,7 @@
                 {read_concurrency, true},
                 {write_concurrency, true}
             ]},
-            %% Used by bondy_registry.erl
+            %% Used by bondy_registry.erl counters
             {bondy_registry_state, [
                 set,
                 {keypos, 2},
@@ -121,14 +121,6 @@
             %% Holds information required to implement the different invocation
             %% strategies like round_robin
             {bondy_rpc_state,  [
-                set,
-                {keypos, 2},
-                named_table,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true}
-            ]},
-            {bondy_token_cache, [
                 set,
                 {keypos, 2},
                 named_table,
