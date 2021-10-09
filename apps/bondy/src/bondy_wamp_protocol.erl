@@ -35,7 +35,6 @@
 -record(wamp_state, {
     subprotocol             ::  subprotocol() | undefined,
     authmethod              ::  any(),
-    challenge               ::  binary() | undefined,
     auth_context            ::  map() | undefined,
     auth_timestamp          ::  integer() | undefined,
     state_name = closed     ::  state_name(),
