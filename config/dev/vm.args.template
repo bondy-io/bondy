@@ -9,4 +9,4 @@
 -hidden
 
 
--args_file releases/1.0.0-beta.6/generated/vm.generated.args
+-args_file releases/{{release_version}}/generated/vm.generated.args
