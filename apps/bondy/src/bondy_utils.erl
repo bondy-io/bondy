@@ -45,6 +45,7 @@
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([system_time_to_rfc3339/2]).
+-export([tc/3]).
 
 
 
@@ -399,3 +400,15 @@ json_consult(File, Opts) when is_list(Opts) ->
 system_time_to_rfc3339(Value, Opts) ->
     String = calendar:system_time_to_rfc3339(Value, Opts),
     list_to_binary(String).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+tc(M, F, A) ->
+    T1 = erlang:monotonic_time(),
+    Val = apply(M, F, A),
+    T2 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T2 - T1, native, perf_counter),
+    {Time, Val}.
