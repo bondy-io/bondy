@@ -64,6 +64,7 @@
         hackney,
         %% 3rd-party Utils
         %% 3rd-party Instrumentation
+        bear,
         lager,
         observer_cli,
         prometheus,
