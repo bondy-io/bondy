@@ -26,6 +26,7 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 
 -define(WAMP_EXT_OPTIONS, [
     {call, [
@@ -84,26 +85,7 @@
 -define(CONFIG, [
     %% Distributed globally replicated storage
     {plum_db, [
-        {prefixes, [
-            %% ram
-            %% ------------------------------------------
-            %% used by bondy_registry.erl
-            {bondy_registry_registrations, ram},
-            {bondy_registry_subscriptions, ram},
-            %% ram_disk
-            %% ------------------------------------------
-            {bondy_realm, ram_disk},
-            {security_group_grants, ram_disk},
-            {security_groups, ram_disk},
-            {security_sources, ram_disk},
-            {security_user_grants, ram_disk},
-            {security_users, ram_disk},
-            %% disk
-            %% ------------------------------------------
-            {api_gateway, disk},
-            {bondy_auth_ticket, disk},
-            {oauth2_refresh_tokens, disk}
-        ]}
+        {prefixes, ?PLUM_DB_PREFIXES}
     ]},
     {partisan, [
         {partisan_peer_service_manager, partisan_default_peer_service_manager},
@@ -114,7 +96,9 @@
     ]},
     %% Local in-memory storage
     {tuplespace, [
-    %% {ring_size, 32},
+        %% Ring size is determined based on number of Erlang schedulers
+        %% which are based on number of CPU Cores.
+        %% {ring_size, 32},
         {static_tables, [
             %% Used by bondy_session.erl
             {bondy_session, [
@@ -125,7 +109,7 @@
                 {read_concurrency, true},
                 {write_concurrency, true}
             ]},
-            %% Used by bondy_registry.erl
+            %% Used by bondy_registry.erl counters
             {bondy_registry_state, [
                 set,
                 {keypos, 2},
@@ -137,14 +121,6 @@
             %% Holds information required to implement the different invocation
             %% strategies like round_robin
             {bondy_rpc_state,  [
-                set,
-                {keypos, 2},
-                named_table,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true}
-            ]},
-            {bondy_token_cache, [
                 set,
                 {keypos, 2},
                 named_table,

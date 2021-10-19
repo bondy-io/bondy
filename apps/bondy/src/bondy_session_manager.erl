@@ -91,7 +91,11 @@ init([]) ->
 handle_call({open, Session}, _From, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
+
+    %% We monitor the session owner so that we can cleanup when the process
+    %% terminates
     ok = gproc_monitor:subscribe({n, l, {session, Uri, Id}}),
+
     {reply, ok, State};
 
 handle_call(Event, From, State) ->

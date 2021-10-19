@@ -37,6 +37,7 @@
 -export([json_consult/1]).
 -export([json_consult/2]).
 -export([maybe_encode/2]).
+-export([maybe_slice/3]).
 -export([merge_map_flags/2]).
 -export([pid_to_bin/1]).
 -export([timeout/1]).
@@ -44,6 +45,7 @@
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([system_time_to_rfc3339/2]).
+-export([tc/3]).
 
 
 
@@ -196,6 +198,12 @@ maybe_encode(msgpack, Term) ->
 maybe_encode(Enc, Term) when is_binary(Enc) ->
     maybe_encode(binary_to_atom(Enc, utf8), Term).
 
+
+maybe_slice(undefined, _, _) ->
+    undefined;
+
+maybe_slice(String, Start, Length) ->
+    string:slice(String, Start, Length).
 
 
 %% @private
@@ -392,3 +400,15 @@ json_consult(File, Opts) when is_list(Opts) ->
 system_time_to_rfc3339(Value, Opts) ->
     String = calendar:system_time_to_rfc3339(Value, Opts),
     list_to_binary(String).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+tc(M, F, A) ->
+    T1 = erlang:monotonic_time(),
+    Val = apply(M, F, A),
+    T2 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T2 - T1, native, perf_counter),
+    {Time, Val}.

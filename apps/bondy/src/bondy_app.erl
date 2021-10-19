@@ -76,6 +76,12 @@ start(_Type, Args) ->
     %% We initialise the environmentapplication
     ok = setup_env(Args),
 
+    {ok, Vsn} = application:get_env(bondy, vsn),
+    ?LOG_NOTICE(#{
+        description => "Initialising Bondy",
+        version => Vsn
+    }),
+
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
     ok = suspend_aae(),

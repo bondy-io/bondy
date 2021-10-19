@@ -231,7 +231,7 @@
                 "roles" : ["peer1", "peer2"]
             },
             {
-                "roles" : ["applications"],
+                "roles" : ["applications", "microservices"],
                 "permissions" : [
                     "wamp.call"
                 ],
@@ -239,6 +239,15 @@
                     {"uri" : "bondy.ticket.issue", "match": "exact"},
                     {"uri" : "bondy.ticket.revoke", "match": "exact"}
                 ]
+            },
+            {
+                "permissions" : [
+                    "bondy.issue"
+                ],
+                "resources": [
+                    {"uri" : "bondy.ticket.scope.", "match": "prefix"}
+                ],
+                "roles" : ["microservices"]
             },
             {
                 "roles" : ["peer1", "peer2"],

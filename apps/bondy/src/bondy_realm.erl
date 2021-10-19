@@ -137,12 +137,14 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
 
-%% -define(PDB_PREFIX, {security, realms}).
+
+%% -define(PLUM_DB_PREFIX, {security, realms}).
 %% TODO This is a breaking change, we need to migrate the realms in
 %% {security, realms} into their new {security, RealmUri}
--define(PDB_PREFIX(Uri), {bondy_realm, Uri}).
+-define(PLUM_DB_PREFIX(Uri), {?PLUM_DB_REALM_TAB, Uri}).
 
 -define(DEFAULT_AUTHMETHODS, [
     ?WAMP_ANON_AUTH,
@@ -1272,22 +1274,25 @@ delete(#realm{uri = Uri}) ->
     Uri =/= ?MASTER_REALM_URI andalso Uri =/= ?CONTROL_REALM_URI
     orelse error(badarg),
 
-    %% TODO change this
-    %% 1. disallow new connections to this realm
-    %% ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm#realm{allow_connections = false}),
-    %% 2. Close all existing sessions (in all nodes)
+    %% TODO implement this process
+    %% 1. Send command to all nodes to delete realm. We need to avoid
+    %% replicating all the plum_db state for all the deletes we are about to do
+    %% and use a single command that performs the following steps on each node.
+    %% 2. disallow new connections to this realm
+    %% ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm#realm{allow_connections = false}),
+    %% 3. Close all existing sessions (in all nodes)
     %% with wamp.close.close_realm URI reason
-    %% 3. delete all grants
-    %% 4. delete all sources
-    %% 5. delete all groups
-    %% 6. delete all users
-    %% 7. delete realm
+    %% 4. delete all grants
+    %% 5. delete all sources
+    %% 6. delete all groups
+    %% 7. delete all users
+    %% 8. delete realm
 
     %% If there are users in the realm, the caller will need to first
     %% explicitely delete the users
     case bondy_rbac_user:list(Uri, #{limit => 1}) of
         [] ->
-            plum_db:delete(?PDB_PREFIX(Uri), Uri),
+            plum_db:delete(?PLUM_DB_PREFIX(Uri), Uri),
             ok = on_delete(Uri),
             %% TODO we need to close all sessions for this realm
             %% and send error wamp.close.close_realm
@@ -1376,7 +1381,7 @@ from_file(Filename) ->
 
 list() ->
     Opts = [{remove_tombstones, true}, {resolver, lww}],
-    [V || {_K, V} <- plum_db:match(?PDB_PREFIX('_'), '_', Opts)].
+    [V || {_K, V} <- plum_db:match(?PLUM_DB_PREFIX('_'), '_', Opts)].
 
 
 %% -----------------------------------------------------------------------------
@@ -1717,7 +1722,7 @@ merge_and_store(Realm0, Map) ->
 
     %% We then create the realm
     Uri = Realm#realm.uri,
-    ok = plum_db:put(?PDB_PREFIX(Uri), Uri, Realm),
+    ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
 
     %% We finally apply all the RBAC objects that have been validated
     ok = apply_rbac_config(Realm, RBACConfig),
@@ -1858,7 +1863,7 @@ keys_to_jwts(Old, New) ->
 -spec do_lookup(uri()) -> t() | {error, not_found}.
 
 do_lookup(Uri) ->
-    case plum_db:get(?PDB_PREFIX(Uri), Uri) of
+    case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
         #realm{} = Realm ->
             Realm;
         undefined ->
