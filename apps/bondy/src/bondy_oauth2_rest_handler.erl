@@ -363,7 +363,7 @@ do_is_authorized(Req0, St0) ->
             ?LOG_INFO(#{
                 description => "API Client login failed due to invalid client ID",
                 reason => EReason,
-                rea => St0#state.realm_uri,
+                realm => St0#state.realm_uri,
                 client_ip => ClientIP
             }),
             Req1 = reply(oauth2_invalid_client, Req0),
@@ -385,29 +385,26 @@ do_is_authorized(Req0, St0) ->
 
 %% @private
 authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
-    NewCtxt = do_authenticate(Password, Ctxt, St),
+    NewCtxt = do_authenticate(Password, Ctxt),
     St#state{
         client_id = bondy_auth:user_id(NewCtxt),
         client_auth_ctxt = NewCtxt
     };
 
 authenticate(
-    resource_onwer, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
-    NewCtxt = do_authenticate(Password, Ctxt, St),
+    resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
+    NewCtxt = do_authenticate(Password, Ctxt),
     St#state{
-        client_id = bondy_auth:user_id(NewCtxt),
+        % client_id = bondy_auth:user_id(NewCtxt),
         owner_auth_ctxt = NewCtxt
     }.
 
 
 %% @private
-do_authenticate(Password, Ctxt, St) ->
+do_authenticate(Password, Ctxt) ->
     case bondy_auth:authenticate(?PASSWORD_AUTH, Password, undefined, Ctxt) of
         {ok, _, NewCtxt} ->
-            St#state{
-                client_id = bondy_auth:user_id(NewCtxt),
-                client_auth_ctxt = NewCtxt
-            };
+            NewCtxt;
         {error, Reason} ->
             throw(Reason)
     end.
