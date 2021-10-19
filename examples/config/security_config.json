@@ -185,6 +185,12 @@
                 "authmethod" : "ticket",
                 "cidr" : "0.0.0.0/0",
                 "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "oauth2",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
             }
         ],
         "grants" : [
