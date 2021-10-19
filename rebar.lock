@@ -70,7 +70,7 @@
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.2.0">>},1},
  {<<"mops">>,
   {git,"https://gitlab.com/leapsight/mops.git",
-       {ref,"c98caae5efed6ac3cb8820ada21029644b941e56"}},
+       {ref,"e375f1955ff713ece4bea28d42a6e10b955b2d65"}},
   0},
  {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.7.0">>},0},
  {<<"observer_cli">>,{pkg,<<"observer_cli">>,<<"1.7.1">>},0},
