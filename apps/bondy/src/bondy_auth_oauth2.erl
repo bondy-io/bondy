@@ -56,10 +56,6 @@ init(Ctxt) ->
         User = bondy_auth:user(Ctxt),
         User =/= undefined orelse throw(invalid_context),
 
-        PWD = bondy_rbac_user:password(User),
-        PWD =/= undefined andalso bondy_password:protocol(PWD) == scram
-        orelse throw(invalid_context),
-
         {ok, maps:new()}
 
     catch
@@ -110,15 +106,10 @@ challenge(_, _, State) ->
 
 authenticate(JWT, _, Ctxt, State) ->
     RealmUri = bondy_auth:realm_uri(Ctxt),
-    UserId = bondy_auth:user_id(Ctxt),
 
     case bondy_oauth2:verify_jwt(RealmUri, JWT) of
-        {ok, #{<<"sub">> := UserId} = Claims} ->
+        {ok, Claims} ->
             {ok, Claims, State};
-        {ok, _} ->
-            %% The JWT is valid but UserId does not match the token's sub!
-            %% TODO Flag as potential threat and limit future attempts
-            {error, oauth2_invalid_grant, State};
         {error, Reason} ->
             {error, Reason, State}
     end.
