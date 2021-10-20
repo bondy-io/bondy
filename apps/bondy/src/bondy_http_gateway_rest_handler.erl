@@ -271,21 +271,31 @@ is_authorized(
     _, Req0, #{security := #{<<"type">> := <<"oauth2">>}} = St0) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    Token = cowboy_req:parse_header(<<"authorization">>, Req0),
 
     RealmUri = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
     %% This is ID will bot be used as the ID is already defined in the JWT
     SessionId = bondy_utils:get_id(global),
-    case bondy_auth:init(SessionId, RealmUri, Token, all, Peer) of
-        {ok, Ctxt} ->
-            authenticate(Token, Ctxt, Req0, St0);
-        {error, Reason} ->
-            Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
-            Req2 = reply_auth_error(
-                Reason, <<"Bearer">>, RealmUri, json, Req1
-            ),
-            {stop, Req2, St0}
+
+    try
+        Token = parse_token(Req0),
+        Claims = bondy_oauth2:decode_jwt(Token),
+        UserId = maps:get(<<"sub">>, Claims, undefined),
+
+        case bondy_auth:init(SessionId, RealmUri, UserId, all, Peer) of
+            {ok, Ctxt} ->
+                authenticate(Token, Ctxt, Req0, St0);
+            {error, Reason} ->
+                throw(Reason)
+        end
+
+        catch
+            throw:EReason ->
+                Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
+                Req2 = reply_auth_error(
+                    EReason, <<"Bearer">>, RealmUri, json, Req1
+                ),
+                {stop, Req2, St0}
     end;
 
 is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
@@ -311,12 +321,16 @@ authenticate(Token, Ctxt0, Req0, St0) ->
                 {security, Claims}, maps:get(api_context, St0)
             ),
             St1 = maps:update(api_context, Ctxt, St0),
-            St2 = maps:put(authid, maps:get(<<"sub">>, Claims), St1),
+            St2 = St1#{
+                is_anonymous => false,
+                authid => maps:get(<<"sub">>, Claims)
+            },
             {true, Req0, St2};
         {ok, _, Ctxt1} ->
             %% TODO Here we need the token or the session with the
             %% token grants and not the Claim
             St1 = St0#{
+                is_anonymous => false,
                 authid => bondy_auth:user_id(Ctxt1)
             },
             %% TODO update context
@@ -557,7 +571,13 @@ init_context(Req) ->
 %%             false
 %%     end.
 
-
+parse_token(Req) ->
+    case cowboy_req:parse_header(<<"authorization">>, Req) of
+        {bearer, Token} ->
+            Token;
+        _ ->
+            throw(invalid_token)
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @private
@@ -766,8 +786,11 @@ perform_action(
 
 %% @private
 wamp_context(RealmUri, Peer, St1) ->
+    IsAnonymous = maps:get(is_anonymous, St1),
+    Authid = authid(St1),
     SessionOpts = #{
-        is_anonymous => maps:get(is_anonymous, St1),
+        is_anonymous => IsAnonymous,
+        authid => Authid,
         security_enabled => bondy_realm:is_security_enabled(RealmUri),
         roles => #{
             caller => #{
@@ -782,23 +805,21 @@ wamp_context(RealmUri, Peer, St1) ->
         }
     },
     Session = bondy_session:new(Peer, RealmUri, SessionOpts),
+
     Subprotocol = {http, text, maps:get(encoding, St1)},
     Ctxt0 = bondy_context:new(Peer, Subprotocol),
     Ctxt1 = bondy_context:set_realm_uri(Ctxt0, RealmUri),
     Ctxt2 = bondy_context:set_session(Ctxt1, Session),
-    maybe_anonymous(Ctxt2, St1).
+    Ctxt3 = bondy_context:set_authid(Ctxt2, Authid),
+    bondy_context:set_is_anonymous(Ctxt3, IsAnonymous).
 
 
 %% @private
-maybe_anonymous(Ctxt0, #{is_anonymous := true}) ->
-    AuthId = bondy_utils:uuid(),
-    Ctxt1 = bondy_context:set_is_anonymous(Ctxt0, true),
-    bondy_context:set_authid(Ctxt1, AuthId);
+authid(#{is_anonymous := true}) ->
+    bondy_utils:uuid();
 
-maybe_anonymous(Ctxt0, St) ->
-    AuthId = maps:get(authid, St),
-    Ctxt1 = bondy_context:set_authid(Ctxt0, AuthId),
-    bondy_context:set_is_anonymous(Ctxt1, false).
+authid(St) ->
+    maps:get(authid, St).
 
 
 %% @private
