@@ -26,6 +26,7 @@
 -include("bondy_uris.hrl").
 
 -export([handle_call/2]).
+-export([resolve/1]).
 
 
 %% =============================================================================
@@ -146,7 +147,7 @@ do_handle(_, _, _) ->
 
 resolve(<<"com.leapsight.bondy.", _/binary>> = Uri) ->
     <<"com.leapsight.", Rest/binary>> = Uri,
-    Rest;
+    resolve(Rest);
 resolve(?BONDY_HTTP_GATEWAY_GET_OLD) ->
 	?BONDY_HTTP_GATEWAY_GET;
 resolve(?BONDY_HTTP_GATEWAY_LIST_OLD) ->
