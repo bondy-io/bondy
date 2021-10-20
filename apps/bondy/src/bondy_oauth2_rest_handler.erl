@@ -402,6 +402,8 @@ authenticate(
 
 %% @private
 do_authenticate(Password, Ctxt) ->
+    %% TODO If the user configured realm authmethods with OAUTH2 but not
+    %% PASSWORD this will fail.  We need to ask bondy_auth to authenticate using password even if password is not an allowed method (this)
     case bondy_auth:authenticate(?PASSWORD_AUTH, Password, undefined, Ctxt) of
         {ok, _, NewCtxt} ->
             NewCtxt;
@@ -449,7 +451,8 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
         throw:EReason ->
             BinIP = inet_utils:ip_address_to_binary(IP),
             ?LOG_INFO(#{
-                description => "Resource Owner login failed. The grant is invalid", reason => EReason,
+                description => "Resource Owner login failed. The grant is invalid",
+                reason => EReason,
                 client_device_id => DeviceId,
                 realm_uri => RealmUri,
                 cient_ip => BinIP

@@ -221,6 +221,15 @@ map({no_such_realm, Uri}) ->
         <<"description">> => <<"A realm named ", $', Uri/binary, $', "could not be found.">>
     };
 
+map({no_such_user, _User}) ->
+
+    #{
+        <<"code">> => ?WAMP_NO_SUCH_PRINCIPAL,
+        <<"message">> => <<"The request failed because the authid provided does not exist.">>,
+        <<"description">> => <<"">>
+    };
+
+
 map({badarg, {decoding, json}}) ->
     #{
         <<"status_code">> => ?HTTP_BAD_REQUEST,

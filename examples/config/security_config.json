@@ -206,7 +206,7 @@
                 ],
                 "uri" : "",
                 "match": "prefix",
-                "roles" : ["anonymous"]
+                "roles" : ["anonymous", "resource_owners"]
             },
             {
                 "permissions" : [
