@@ -27,7 +27,7 @@
 -define(WAMP_COOKIE_AUTH,       <<"cookie">>).
 -define(WAMP_CRA_AUTH,          <<"wampcra">>).
 -define(WAMP_CRYPTOSIGN_AUTH,   <<"cryptosign">>).
--define(WAMP_OAUTH2_AUTH,       <<"oauth2">>).
+-define(WAMP_OAUTH2_AUTH,       ?OAUTH2_AUTH).
 -define(WAMP_SCRAM_AUTH,        <<"wamp-scram">>).
 -define(WAMP_TICKET_AUTH,       <<"ticket">>).
 -define(WAMP_TLS_AUTH,          <<"tls">>).
