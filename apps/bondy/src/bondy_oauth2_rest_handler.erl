@@ -523,7 +523,8 @@ issue_token(Type, Req0, St0) ->
     User = bondy_auth:user(AuthCtxt),
     Authid = bondy_auth:user_id(AuthCtxt),
     Gs = bondy_auth:roles(AuthCtxt),
-    Meta = prepare_meta(Type, maps:get(<<"meta">>, User, #{}), St0),
+    Meta0 = bondy_rbac_user:meta(User),
+    Meta = prepare_meta(Type, Meta0, St0),
 
     case bondy_oauth2:issue_token(Type, RealmUri, Issuer, Authid, Gs, Meta) of
         {ok, JWT, RefreshToken, Claims} ->
