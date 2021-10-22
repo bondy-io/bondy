@@ -597,15 +597,16 @@
     authmethods                     ::  maybe([binary()]),
     security_enabled                ::  maybe(boolean()),
     password_opts                   ::  maybe(bondy_password:opts()),
-    private_keys = #{}              ::  keyset(),
-    public_keys = #{}               ::  keyset(),
-    encryption_keys = #{}           ::  keyset(),
+    private_keys = #{}              ::  keymap(),
+    public_keys = #{}               ::  keymap(),
+    encryption_keys = #{}           ::  keymap(),
     info = #{}                      ::  map()
 }).
 
 -opaque t()                         ::  #realm{}.
 -type kid()                         ::  binary().
--type keyset()                      ::  #{kid() => map()}.
+-type keymap()                      ::  #{kid() => map()}.
+-type keyset()                      ::  [map()].
 -type external()                    ::  #{
     uri                     :=  uri(),
     is_prototype            :=  boolean(),
@@ -614,7 +615,7 @@
     authmethods             :=  [binary()],
     is_sso_realm            :=  boolean(),
     allow_connections       :=  boolean(),
-    public_keys             :=  [term()],
+    public_keys             :=  keyset(),
     security_status         :=  enabled | disabled
 }.
 
@@ -628,6 +629,7 @@
 -export([authmethods/1]).
 -export([create/1]).
 -export([delete/1]).
+-export([description/1]).
 -export([disable_security/1]).
 -export([enable_security/1]).
 -export([encryption_keys/1]).
@@ -641,6 +643,7 @@
 -export([get_public_key/2]).
 -export([get_random_encryption_kid/1]).
 -export([get_random_kid/1]).
+-export([info/1]).
 -export([is_allowed_authmethod/2]).
 -export([is_allowed_sso_realm/2]).
 -export([is_prototype/1]).
@@ -685,6 +688,17 @@
 uri(#realm{uri = Uri}) ->
     Uri.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec description(t() | uri()) ->  map().
+
+description(#realm{description = Value}) ->
+    Value;
+
+description(Uri) when is_binary(Uri) ->
+    description(fetch(Uri)).
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns `true' if realm `Realm' is a prototype. Otherwise, returns
@@ -1020,6 +1034,11 @@ password_opts(RealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec private_keys(t() | uri()) -> [map()].
 
+private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
+    Data = #{private_keys => gen_keys()},
+    Realm = merge_and_store(Realm0, Data),
+    private_keys(Realm);
+
 private_keys(#realm{private_keys = Keys}) ->
     [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
 
@@ -1032,6 +1051,11 @@ private_keys(Uri) when is_binary(Uri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec public_keys(t() | uri()) -> [map()].
+
+public_keys(#realm{public_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
+    Data = #{private_keys => gen_keys()},
+    Realm = merge_and_store(Realm0, Data),
+    private_keys(Realm);
 
 public_keys(#realm{public_keys = Keys}) ->
     [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
@@ -1135,6 +1159,18 @@ get_random_encryption_kid(Uri) when is_binary(Uri) ->
     get_random_encryption_kid(fetch(Uri)).
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec info(t() | uri()) ->  map().
+
+info(#realm{info = Info}) ->
+    Info;
+
+info(Uri) when is_binary(Uri) ->
+    info(fetch(Uri)).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1143,7 +1179,7 @@ get_random_encryption_kid(Uri) when is_binary(Uri) ->
 -spec exists(uri()) -> boolean().
 
 exists(Uri) ->
-    do_lookup(Uri) =/= {error, not_found}.
+    do_lookup(string:casefold(Uri)) =/= {error, not_found}.
 
 
 %% -----------------------------------------------------------------------------
@@ -1155,7 +1191,7 @@ exists(Uri) ->
 -spec lookup(uri()) -> t() | {error, not_found}.
 
 lookup(Uri) ->
-    case do_lookup(Uri)  of
+    case do_lookup(string:casefold(Uri))  of
         #realm{} = Realm ->
             Realm;
         Error ->
@@ -1868,13 +1904,19 @@ do_lookup(Uri) ->
             Realm;
         undefined ->
             {error, not_found};
-        Data ->
-            ?LOG_WARNING(#{
-                description => "Invalid realm data retrieved from store",
-                reason => "Possibly a previous version",
-                data => Data
-            }),
-            {error, not_found}
+        Term ->
+            try
+                Realm = from_term(Term),
+                ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
+                Realm
+            catch
+                throw:badarg ->
+                    ?LOG_WARNING(#{
+                        description => "Invalid realm data retrieved from store",
+                        data => Term
+                    }),
+                    {error, not_found}
+            end
     end.
 
 
@@ -2186,6 +2228,70 @@ check_realm_type(Uri, Type) ->
             is_prototype(Realm) orelse error(badarg(Uri, Type, badtype))
     end,
     ok.
+
+
+%% @private
+from_term(Term)
+when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
+    %% 0.9.SNAPSHOT-SSO
+    %% -record(realm, {
+    %%     [2] uri                      ::  uri(),
+    %%     [3] description              ::  binary(),
+    %%     [4] authmethods              ::  [binary()],
+    %%     [5] security_enabled = true  ::  boolean(),
+    %%     [6] is_sso_realm = false     ::  boolean(),
+    %%     [7] allow_connections = true ::  boolean(),
+    %%     [8] sso_realm_uri            ::  maybe(uri()),
+    %%     [9] private_keys = #{}       ::  keyset(),
+    %%     [10] public_keys = #{}        ::  keyset(),
+    %%     [11] password_opts            ::  bondy_password:opts() | undefined,
+    %%     [12] encryption_keys = #{}    ::  keyset(),
+    %%     [13] info = #{}               ::  map()
+    %% }).
+
+    #realm{
+        uri = element(2, Term),
+        description = element(3, Term),
+        is_prototype = false,
+        prototype_uri = undefined,
+        is_sso_realm = element(6, Term),
+        sso_realm_uri = element(8, Term),
+        allow_connections = element(7, Term),
+        authmethods = element(4, Term),
+        security_enabled = element(5, Term),
+        password_opts = element(11, Term),
+        private_keys = element(9, Term),
+        public_keys = element(10, Term),
+        encryption_keys = element(12, Term),
+        info = element(13, Term)
+    };
+
+from_term({realm, Uri, Desc, Authmethods, PrivKeys, PubKeys, PassOpts}) ->
+    %% At the moment we will not get this one as it is store in a different prefix
+    _PDBPrefix = {security, realms},
+    IsSecEnabled = case plum_db:get({security_status, Uri}, enabled) of
+        undefined -> false;
+        Value when is_boolean(Value) -> Value
+    end,
+    #realm{
+        uri = Uri,
+        description = Desc,
+        is_prototype = false,
+        prototype_uri = undefined,
+        is_sso_realm = false,
+        sso_realm_uri = undefined,
+        allow_connections = true,
+        authmethods = Authmethods,
+        security_enabled = IsSecEnabled,
+        password_opts = PassOpts,
+        private_keys = PrivKeys,
+        public_keys = PubKeys,
+        encryption_keys = #{},
+        info = #{}
+    };
+
+from_term(_) ->
+    throw(badarg).
 
 
 %% @private
