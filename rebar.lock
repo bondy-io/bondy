@@ -83,7 +83,7 @@
  {<<"pbkdf2">>,{pkg,<<"pbkdf2">>,<<"2.0.0">>},0},
  {<<"plum_db">>,
   {git,"https://gitlab.com/leapsight/plum_db.git",
-       {ref,"85d2055ee64ab89897bdd574b773fbecb5af7c39"}},
+       {ref,"643e912595055c7afdc5ccaad82527437bbd4e0f"}},
   0},
  {<<"plumtree">>,
   {git,"https://github.com/aramallo/plumtree.git",
