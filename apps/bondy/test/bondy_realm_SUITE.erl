@@ -20,8 +20,9 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
--include("bondy_security.hrl").
 -include("bondy.hrl").
+-include("bondy_plum_db.hrl").
+-include("bondy_security.hrl").
 
 -define(U1, <<"user_1">>).
 -define(U2, <<"user_2">>).
@@ -46,7 +47,9 @@ all() ->
         prototype_uri_not_found_error,
         is_prototype,
         prototype_uri,
-        prototype_inheritance
+        prototype_inheritance,
+
+        migration
 
     ].
 
@@ -60,9 +63,12 @@ end_per_suite(Config) ->
     % common:stop_bondy(),
     {save_config, Config}.
 
+gen_uri() ->
+    string:casefold(bondy_utils:generate_fragment(6)).
+
 
 uri(_) ->
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     R = bondy_realm:create(#{uri => Uri}),
 
     ?assertEqual(Uri, bondy_realm:uri(R)),
@@ -81,13 +87,13 @@ uri(_) ->
 
     ?assertMatch(
         R,
-        bondy_realm:update(Uri, #{uri => bondy_utils:generate_fragment(6)}),
+        bondy_realm:update(Uri, #{uri => gen_uri()}),
         "Property is immutable"
     ),
 
     ?assertMatch(
         R,
-        bondy_realm:update(R, #{uri => bondy_utils:generate_fragment(6)}),
+        bondy_realm:update(R, #{uri => gen_uri()}),
         "Property is immutable"
     ).
 
@@ -149,9 +155,9 @@ sso_inconsistency_error(_) ->
     ?assertError(
         {inconsistency_error, [is_sso_realm, sso_realm_uri]},
         bondy_realm:create(#{
-            uri => bondy_utils:generate_fragment(6),
+            uri => gen_uri(),
             is_sso_realm => true,
-            sso_realm_uri => bondy_utils:generate_fragment(6)
+            sso_realm_uri => gen_uri()
         }),
         "An sso realm cannot itself have an sso realm"
     ).
@@ -161,15 +167,15 @@ sso_uri_not_found_error(_) ->
     ?assertError(
         {badarg, _},
         bondy_realm:create(#{
-            uri => bondy_utils:generate_fragment(6),
-            sso_realm_uri => bondy_utils:generate_fragment(6)
+            uri => gen_uri(),
+            sso_realm_uri => gen_uri()
         }),
         "SSO realm should exist"
     ).
 
 
 is_sso_realm(_) ->
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     R = bondy_realm:create(#{
         uri => Uri,
         is_sso_realm => true
@@ -192,15 +198,15 @@ prototype_inconsistency_error(_) ->
     ?assertError(
         {inconsistency_error, [is_prototype, prototype_uri]},
         bondy_realm:create(#{
-            uri => bondy_utils:generate_fragment(6),
+            uri => gen_uri(),
             is_prototype => true,
-            prototype_uri => bondy_utils:generate_fragment(6)
+            prototype_uri => gen_uri()
         }),
         "a prototype cannot have a prototype"
     ).
 
 prototype_badarg(_) ->
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     ?assertError(
         {badarg, [uri, prototype_uri], _},
         bondy_realm:create(#{
@@ -215,15 +221,15 @@ prototype_uri_not_found_error(_) ->
     ?assertError(
         {badarg, _},
         bondy_realm:create(#{
-            uri => bondy_utils:generate_fragment(6),
-            prototype_uri => bondy_utils:generate_fragment(6)
+            uri => gen_uri(),
+            prototype_uri => gen_uri()
         }),
         "Prototype realm should exist"
     ).
 
 
 is_prototype(_) ->
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     R = bondy_realm:create(#{
         uri => Uri,
         is_prototype => true
@@ -246,13 +252,13 @@ is_prototype(_) ->
 
 
 prototype_uri(_) ->
-    ProtoUri = bondy_utils:generate_fragment(6),
+    ProtoUri = gen_uri(),
     _ = bondy_realm:create(#{
         uri => ProtoUri,
         is_prototype => true
     }),
 
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     R = bondy_realm:create(#{
         uri => Uri,
         prototype_uri => ProtoUri
@@ -272,20 +278,20 @@ prototype_uri(_) ->
     ?assertError(
         {badarg, _},
         bondy_realm:update(Uri, #{
-            prototype_uri => bondy_utils:generate_fragment(6)
+            prototype_uri => gen_uri()
         }),
         "Property is immutable"
     ).
 
 
 prototype_inheritance(_) ->
-    SSOUri = bondy_utils:generate_fragment(6),
+    SSOUri = gen_uri(),
     _SSO = bondy_realm:create(#{
         uri => SSOUri,
         is_sso_realm => true
     }),
 
-    ProtoUri = bondy_utils:generate_fragment(6),
+    ProtoUri = gen_uri(),
     P = bondy_realm:create(#{
         uri => ProtoUri,
         is_prototype => true,
@@ -296,7 +302,7 @@ prototype_inheritance(_) ->
         sso_realm_uri => SSOUri
     }),
 
-    Uri = bondy_utils:generate_fragment(6),
+    Uri = gen_uri(),
     R = bondy_realm:create(#{
         uri => Uri,
         prototype_uri => ProtoUri
@@ -323,6 +329,100 @@ prototype_inheritance(_) ->
     ?assertEqual(false, bondy_realm:is_value_inherited(P, is_security_enabled)),
     ?assertEqual(true, bondy_realm:is_value_inherited(R, is_security_enabled)).
 
+migration(_) ->
+    Uri = gen_uri(),
+    Prefix = {?PLUM_DB_REALM_TAB, Uri},
+    %% 0.9.SNAPSHOT-SSO
+    %% -record(realm, {
+    %%     [2] uri                      ::  gen_uri(),
+    %%     [3] description              ::  binary(),
+    %%     [4] authmethods              ::  [binary()],
+    %%     [5] security_enabled = true  ::  boolean(),
+    %%     [6] is_sso_realm = false     ::  boolean(),
+    %%     [7] allow_connections = true ::  boolean(),
+    %%     [8] sso_realm_uri            ::  maybe(gen_uri()),
+    %%     [9] private_keys = #{}       ::  keyset(),
+    %%     [10] public_keys = #{}        ::  keyset(),
+    %%     [11] password_opts            ::  bondy_password:opts() | undefined,
+    %%     [12] encryption_keys = #{}    ::  keyset(),
+    %%     [13] info = #{}               ::  map()
+    %% }).
+    Desc = bondy_utils:generate_fragment(10),
+    Authmethods = [?WAMP_CRYPTOSIGN_AUTH],
+    Sec = true,
+    IsSSO = false,
+    AllowConnections = true,
+    SSOUri = undefined,
+    PrivKeys = #{},
+    PubKeys = #{},
+    PassOpts = #{},
+    EncKeys = #{},
+    Info = #{},
+
+    Old = {realm,
+        Uri,
+        Desc,
+        Authmethods,
+        Sec,
+        IsSSO,
+        AllowConnections,
+        SSOUri,
+        PrivKeys,
+        PubKeys,
+        PassOpts,
+        EncKeys,
+        Info
+    },
+    %% We store and olger version realm
+    ok = plum_db:put(Prefix, Uri, Old),
+
+    %% We should not have a migrated realm
+    New = bondy_realm:fetch(Uri),
+
+    ?assertMatch(
+        Uri,
+        bondy_realm:uri(New)
+    ),
+    ?assertMatch(
+        Desc,
+        bondy_realm:description(New)
+    ),
+    ?assertMatch(
+        Authmethods,
+        bondy_realm:authmethods(New)
+    ),
+    ?assertMatch(
+        Sec,
+        bondy_realm:is_security_enabled(New)
+    ),
+    ?assertMatch(
+        AllowConnections,
+        bondy_realm:allow_connections(New)
+    ),
+    ?assertMatch(
+        SSOUri,
+        bondy_realm:sso_realm_uri(New)
+    ),
+    ?assertMatch(
+        [_, _, _],
+        bondy_realm:private_keys(New)
+    ),
+    ?assertMatch(
+        [_, _, _],
+        bondy_realm:public_keys(New)
+    ),
+    ?assertMatch(
+        PassOpts,
+        bondy_realm:password_opts(New)
+    ),
+    ?assertMatch(
+        [_, _, _],
+        bondy_realm:encryption_keys(New)
+    ),
+    ?assertMatch(
+        Info,
+        bondy_realm:info(New)
+    ).
 
 test(_) ->
     Config = #{
@@ -406,3 +506,5 @@ test(_) ->
         ]
     },
     _ = bondy_realm:create(Config).
+
+
