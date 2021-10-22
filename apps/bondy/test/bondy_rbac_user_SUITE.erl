@@ -41,7 +41,8 @@ all() ->
         change_password,
         update_groups,
         add_group,
-        remove_group
+        remove_group,
+        remove_user
     ].
 
 
@@ -470,3 +471,33 @@ remove_group(_) ->
         [<<"sso_g1">>],
         bondy_rbac_user:groups(bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1))
     ).
+
+
+
+remove_user(_) ->
+    _Local = bondy_rbac_user:fetch(?REALM1_URI, ?LU1),
+    _SSO1 = bondy_rbac_user:fetch(?REALM1_URI, ?SSOU1),
+    _SSO2 = bondy_rbac_user:fetch(?SSO_REALM_URI, ?SSOU1),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:remove(?REALM1_URI, ?LU1)
+    ),
+    ?assertMatch(
+        {error, {no_such_user, _}},
+        bondy_rbac_user:remove(?REALM1_URI, ?LU1)
+    ),
+
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:remove(?REALM1_URI, ?SSOU1)
+    ),
+    ?assertMatch(
+        {error, {no_such_user, _}},
+        bondy_rbac_user:remove(?REALM1_URI, ?SSOU1)
+    ),
+    ?assertEqual(
+        ok,
+        bondy_rbac_user:remove(?SSO_REALM_URI, ?SSOU1)
+    ).
+
