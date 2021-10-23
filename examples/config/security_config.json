@@ -124,6 +124,11 @@
                 "meta" : {}
             },
             {
+                "name" : "resource_owners",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
                 "name" : "microservices",
                 "groups" : [],
                 "meta" : {}
