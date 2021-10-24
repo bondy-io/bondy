@@ -3,25 +3,31 @@ REBAR = rebar3
 BONDY_ERL_NODENAME ?= bondy@127.0.0.1
 BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
 
-.PHONY: genvars compile test xref dialyzer
+.PHONY: genvars compile test xref dialyzer tar
 
 genvars:
 	@cp config/prod/legacy_vars.config config/prod/vars.generated
 
-compile-no-deps:
+compile:
 	${REBAR} compile
 
-docs: compile
+docs:
 	${REBAR} as docs edoc
 
-test: compile
-	${REBAR} ct
+test:
+	${REBAR} as test ct
 
-xref: compile
+xref:
 	${REBAR} xref skip_deps=true
 
-dialyzer: compile
+dialyzer:
 	${REBAR} dialyzer
+
+tar:
+	rm -rf _build/tar
+	${REBAR} as prod tar
+	mkdir -p _build/tar
+	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
 
 devrun:
 	${REBAR} as dev release
@@ -34,14 +40,10 @@ devrun:
 
 prodrun:
 	${REBAR} as prod release
-	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
+	ERL_DIST_PORT=11972 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
 
-prodtarrun:
-	rm -rf _build/tar
-	${REBAR} as prod tar
-	mkdir -p _build/tar
-	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
-	BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
+prodtarrun: tar
+	ERL_DIST_PORT=11972 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
 
 
 node1:
