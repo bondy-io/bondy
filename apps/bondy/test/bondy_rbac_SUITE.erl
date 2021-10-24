@@ -400,9 +400,24 @@ group_topsort(_) ->
             meta => #{}
         }
     ]],
-    ?assertEqual(
-        [<<"a">>, <<"b">>, <<"d">>, <<"c">>],
-        [maps:get(name, G) || G <- bondy_rbac_group:topsort(Groups)]
+
+    {_, L} = lists:foldl(
+        fun(X, {Cnt, Acc}) ->
+            NewCnt = Cnt + 1,
+            {NewCnt, [{maps:get(name, X), NewCnt}|Acc]} end,
+        {1, []},
+        bondy_rbac_group:topsort(Groups)
+    ),
+    Map = maps:from_list(L),
+
+    ?assert(
+        maps:get(<<"a">>, Map) < maps:get(<<"b">>, Map)
+    ),
+    ?assert(
+        maps:get(<<"b">>, Map) < maps:get(<<"c">>, Map)
+    ),
+    ?assert(
+        maps:get(<<"d">>, Map) < maps:get(<<"c">>, Map)
     ).
 
 
