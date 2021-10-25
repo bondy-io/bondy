@@ -1,0 +1,3 @@
+#!/bin/bash
+bin/bondy eval "bondy_app:status()."
+exit 0

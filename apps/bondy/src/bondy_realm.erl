@@ -1417,7 +1417,7 @@ from_file(Filename) ->
 
 list() ->
     Opts = [{remove_tombstones, true}, {resolver, lww}],
-    [V || {_K, V} <- plum_db:match(?PLUM_DB_PREFIX('_'), '_', Opts)].
+    [from_term(V) || {_K, V} <- plum_db:match(?PLUM_DB_PREFIX('_'), '_', Opts)].
 
 
 %% -----------------------------------------------------------------------------
@@ -2231,6 +2231,9 @@ check_realm_type(Uri, Type) ->
 
 
 %% @private
+from_term(#realm{} = Realm) ->
+    Realm;
+
 from_term(Term)
 when is_tuple(Term), element(1, Term) == realm, tuple_size(Term) == 13 ->
     %% 0.9.SNAPSHOT-SSO

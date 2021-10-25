@@ -914,7 +914,7 @@ prepare_request(Enc, Response, Req0) ->
 
 %% @private
 maybe_location(<<"post">>, #{<<"uri">> := Uri}) when Uri =/= <<>> ->
-    {true, Uri};
+    {created, Uri};
 
 maybe_location(_, _) ->
     true.
