@@ -181,7 +181,7 @@ maybe_encode(json, Term) when is_binary(Term) ->
     %% TODO this is wrong, we should be pasing the metadada so that we know in
     %% which encoding the Term is
     case jsone:try_decode(Term) of
-        {ok, JSON} ->
+        {ok, JSON, _} ->
             JSON;
         {error, _} ->
             jsone:encode(Term, [undefined_as_null, {object_key_type, string}])
