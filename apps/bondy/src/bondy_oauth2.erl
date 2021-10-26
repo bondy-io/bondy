@@ -212,6 +212,7 @@ refresh_token(RealmUri, Issuer, Token) ->
             %% The refresh token expired, the user will need to login again and
             %% get a new one
             {error, oauth2_invalid_grant};
+
         #bondy_oauth2_token{username = Username} = Data0 ->
             %% We double check the user still exists
             case bondy_rbac_user:lookup(RealmUri, Username) of
@@ -225,6 +226,7 @@ refresh_token(RealmUri, Issuer, Token) ->
                     %% We remove all refresh tokens for this user
                     _ = revoke_tokens(refresh_token, RealmUri, Username),
                     {error, oauth2_invalid_grant};
+
                 _ ->
                     %% Issue new tokens
                     %% We revoke the previous refresh token first because this
@@ -232,15 +234,17 @@ refresh_token(RealmUri, Issuer, Token) ->
                     %% if we do it later we would be deleting the new
                     %% client_device_id index
                     ok = revoke_refresh_token(RealmUri, Issuer, Token),
-                    case
-                        do_issue_token(bondy_realm:fetch(RealmUri), Data0, true)
-                    of
+
+                    Realm = bondy_realm:fetch(RealmUri),
+
+                    case do_issue_token(Realm, Data0, true) of
                         {ok, _, _, _} = OK ->
                             OK;
                         {error, _} = Error ->
                             Error
                     end
                 end;
+
         {error, not_found} ->
             {error, oauth2_invalid_grant}
     end.
