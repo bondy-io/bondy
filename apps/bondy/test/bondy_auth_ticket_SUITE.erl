@@ -220,8 +220,8 @@ local_scope(Config) ->
     }),
     ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
 
-    ?assertError(
-        {not_authorized, _},
+    ?assertMatch(
+        {error, {not_authorized, _}},
         bondy_ticket:issue(Session, #{})
     ),
 
