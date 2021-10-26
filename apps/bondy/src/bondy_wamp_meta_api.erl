@@ -52,7 +52,12 @@ handle_call(M, Ctxt) ->
         Reply = do_handle(M, Ctxt),
         bondy:send(PeerId, Reply)
     catch
-        _:Reason ->
+        _:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+				description => <<"Error while handling WAMP call">>,
+				reason => Reason,
+				stacktrace => Stacktrace
+			}),
             %% We catch any exception from do_handle and turn it
             %% into a WAMP Error
             Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
@@ -77,7 +82,7 @@ do_handle(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
             wamp_message:result(
                 M#call.request_id,
                 #{},
-                [bondy_session:to_external(Session)]
+                [bondy_session:info(Session)]
             )
     end;
 
@@ -289,11 +294,7 @@ list(Type, RealmUri, Fun) ->
     catch
         Class:Reason:Stacktrace ->
             ?LOG_ERROR(#{
-    class => Class,
-    reason => Reason,
-    stacktrace => Stacktrace
-}),
-            ?LOG_ERROR(#{
+                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
             }),

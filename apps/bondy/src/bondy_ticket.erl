@@ -279,6 +279,8 @@ issue(Session, Opts0) ->
         do_issue(Session, Opts)
     catch
         throw:Reason ->
+            {error, Reason};
+        error:{not_authorized, _} = Reason ->
             {error, Reason}
     end.
 

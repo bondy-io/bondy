@@ -21,6 +21,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_api).
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
@@ -66,7 +68,14 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
         throw:no_such_procedure ->
             Error = bondy_wamp_utils:no_such_procedure_error(M),
             bondy:send(PeerId, Error);
-        _:Reason ->
+        Class:Reason:Stacktrace ->
+			?LOG_ERROR(#{
+				description => <<"Error while handling WAMP call">>,
+				procedure => Proc,
+				class => Class,
+				reason => Reason,
+				stacktrace => Stacktrace
+			}),
             %% We catch any exception from handle/3 and turn it
             %% into a WAMP Error
             Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
