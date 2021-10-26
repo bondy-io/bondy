@@ -416,6 +416,15 @@
             },
             {
                 "permissions" : [
+                    "wamp.call"
+                ],
+                "resources": [
+                    {"uri" : "wamp.", "match": "prefix"}
+                ],
+                "roles" : ["linda"]
+            },
+            {
+                "permissions" : [
                     "bondy.issue"
                 ],
                 "resources": [
