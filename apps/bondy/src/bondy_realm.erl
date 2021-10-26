@@ -136,6 +136,7 @@
 -module(bondy_realm).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include_lib("jose/include/jose_jwk.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").
 -include("bondy_security.hrl").
@@ -1040,7 +1041,7 @@ private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
     private_keys(Realm);
 
 private_keys(#realm{private_keys = Keys}) ->
-    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
+    [to_key(K) || {_, K} <- maps:to_list(Keys)];
 
 private_keys(Uri) when is_binary(Uri) ->
     private_keys(fetch(Uri)).
@@ -1053,12 +1054,13 @@ private_keys(Uri) when is_binary(Uri) ->
 -spec public_keys(t() | uri()) -> [map()].
 
 public_keys(#realm{public_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
+    %% Public keys are generated from priv keys
     Data = #{private_keys => gen_keys()},
     Realm = merge_and_store(Realm0, Data),
-    private_keys(Realm);
+    public_keys(Realm);
 
 public_keys(#realm{public_keys = Keys}) ->
-    [jose_jwk:to_map(K) || {_, K} <- maps:to_list(Keys)];
+    [K || {_, K} <- maps:to_list(Keys)];
 
 public_keys(Uri) when is_binary(Uri) ->
     public_keys(fetch(Uri)).
@@ -1073,7 +1075,7 @@ public_keys(Uri) when is_binary(Uri) ->
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
-        Map -> jose_jwk:to_map(Map)
+        Key -> to_key(Key)
     end;
 
 get_private_key(Uri, Kid) when is_binary(Uri) ->
@@ -1089,7 +1091,7 @@ get_private_key(Uri, Kid) when is_binary(Uri) ->
 get_public_key(#realm{public_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
-        Map -> jose_jwk:to_map(Map)
+        Key -> Key
     end;
 
 get_public_key(Uri, Kid) when is_binary(Uri) ->
@@ -2337,3 +2339,17 @@ badarg(Uri, sso, badtype) ->
             "') that isn't a Same Sign-on Realm."
         >>
     }.
+
+
+
+%% In Erlang 24 Keys have an additional field, so until we have a migration
+%% tool we do this lazily
+to_key(#jose_jwk{kty = {Mod, PK0}} = JWK)
+when element(1, PK0) == 'ECPrivateKey', tuple_size(PK0) == 5 ->
+    PK1 = list_to_tuple(
+        tuple_to_list(PK0) ++ [asn1_NOVALUE]
+    ),
+    JWK#jose_jwk{kty = {Mod, PK1}};
+
+to_key(Term) ->
+    Term.
