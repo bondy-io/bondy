@@ -530,7 +530,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authprovider = bondy_auth:provider(AuthCtxt),
         Authmethod = bondy_auth:method(AuthCtxt),
         Agent = maps:get(agent, ReqDetails, undefined),
-
+        UserMeta = bondy_rbac_user:meta(bondy_auth:user(AuthCtxt)),
 
         InDetails = #{
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
@@ -562,8 +562,11 @@ open_session(Extra, St0) when is_map(Extra) ->
                 authprovider => Authprovider,
                 authmethod => Authmethod,
                 authrole => to_bin(Authrole),
-                authid => maybe_gen_authid(bondy_auth:user_id(AuthCtxt)),
-                authextra => Extra
+                authid => maybe_gen_authid(Authid),
+                authextra => Extra#{
+                    'x_authroles' => [to_bin(R) || R <- Authroles],
+                    'x_meta' => UserMeta
+                }
             }
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),

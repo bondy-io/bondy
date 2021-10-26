@@ -48,6 +48,12 @@ test(Config) ->
 
     {ok, Ctxt} = bondy_auth:init(1, RealmUri, anonymous, Roles, Peer),
 
+    ?assertMatch(
+        {ok, _},
+        bondy_auth:challenge(?WAMP_ANON_AUTH, undefined, Ctxt)
+    ),
+
+
     ?assertEqual(
         true,
         lists:member(?WAMP_ANON_AUTH, bondy_auth:available_methods(Ctxt))

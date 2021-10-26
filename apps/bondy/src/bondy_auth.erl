@@ -335,7 +335,7 @@ challenge(Method, DataIn, #{method := Method} = Ctxt0) ->
     try CBMod:challenge(DataIn, Ctxt0, CBModState0) of
         {ok, CBModState1} ->
             Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-            {ok, auth_extra(#{}, Ctxt), Ctxt};
+            {ok, Ctxt};
         {ok, ChallengeData, CBModState1} ->
             Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
             {ok, ChallengeData, Ctxt};
@@ -389,8 +389,7 @@ authenticate(Method, Signature, DataIn, #{method := Method} = Ctxt0) ->
         case CBMod:authenticate(Signature, DataIn, Ctxt0, CBModState0) of
             {ok, DataOut, CBModState1} ->
                 Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-                AuthExtra = auth_extra(DataOut, Ctxt),
-                {ok, AuthExtra, Ctxt};
+                {ok, DataOut, Ctxt};
             {error, Reason, _} ->
                 {error, Reason}
         end
@@ -635,18 +634,3 @@ maybe_set_method(Method, Ctxt) ->
             throw(Reason)
     end.
 
-
-%% @private
-to_bin(Term) when is_atom(Term) ->
-    atom_to_binary(Term, utf8);
-
-to_bin(Term) when is_binary(Term) ->
-    Term.
-
-
-%% @private
-auth_extra(Data, Ctxt) ->
-    Data#{
-        'x_authroles' => [to_bin(R) || R <- roles(Ctxt)],
-        'x_meta' => bondy_rbac_user:meta(user(Ctxt))
-    }.
