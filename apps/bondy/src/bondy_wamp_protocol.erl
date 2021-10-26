@@ -499,9 +499,9 @@ maybe_open_session({send_challenge, AuthMethod, Challenge, St0}) ->
     },
     {reply, Bin, St1};
 
-maybe_open_session({ok, Extra, St}) ->
+maybe_open_session({ok, St}) ->
     %% No need for a challenge, anonymous|trust or security disabled
-    open_session(Extra, St);
+    open_session(#{}, St);
 
 maybe_open_session({error, Reason, St}) ->
     stop(Reason, St).
@@ -699,13 +699,13 @@ auth_challenge(Method, St0) ->
     Details = bondy_context:request_details(Ctxt),
 
     case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-        {ok, AuthExtra, AuthCtxt1} ->
+        {ok, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
-            {ok, AuthExtra, St1};
-        {challenge, ChallengeExtra, AuthCtxt1} ->
+            {ok, St1};
+        {ok, ChallengeExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)

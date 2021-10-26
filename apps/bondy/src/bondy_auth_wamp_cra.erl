@@ -99,8 +99,9 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, DataOut :: map(), CBState :: term()}
-    | {error, challenge_error(), CBState :: term()}.
+    {ok, NewState :: state()}
+    | {ok, Extra :: map(), NewState :: state()}
+    | {error, Reason :: challenge_error(), NewState :: state()}.
 
 challenge(_, Ctxt, #{password := PWD} = State) ->
     try
