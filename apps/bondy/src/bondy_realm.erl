@@ -1036,12 +1036,11 @@ password_opts(RealmUri) ->
 -spec private_keys(t() | uri()) -> [map()].
 
 private_keys(#realm{private_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
-    Data = #{private_keys => gen_keys()},
-    Realm = merge_and_store(Realm0, Data),
+    Realm = init_keys(Realm0),
     private_keys(Realm);
 
 private_keys(#realm{private_keys = Keys}) ->
-    [to_key(K) || {_, K} <- maps:to_list(Keys)];
+    [to_private_key(K) || {_, K} <- maps:to_list(Keys)];
 
 private_keys(Uri) when is_binary(Uri) ->
     private_keys(fetch(Uri)).
@@ -1054,9 +1053,7 @@ private_keys(Uri) when is_binary(Uri) ->
 -spec public_keys(t() | uri()) -> [map()].
 
 public_keys(#realm{public_keys = Keys} = Realm0) when map_size(Keys) == 0 ->
-    %% Public keys are generated from priv keys
-    Data = #{private_keys => gen_keys()},
-    Realm = merge_and_store(Realm0, Data),
+    Realm = init_keys(Realm0),
     public_keys(Realm);
 
 public_keys(#realm{public_keys = Keys}) ->
@@ -1075,7 +1072,7 @@ public_keys(Uri) when is_binary(Uri) ->
 get_private_key(#realm{private_keys = Keys}, Kid) ->
     case maps:get(Kid, Keys, undefined) of
         undefined -> undefined;
-        Key -> to_key(Key)
+        Key -> to_private_key(Key)
     end;
 
 get_private_key(Uri, Kid) when is_binary(Uri) ->
@@ -1741,6 +1738,31 @@ do_create(#{uri := Uri} = Map) ->
 
 
 %% @private
+-spec do_lookup(uri()) -> t() | {error, not_found}.
+
+do_lookup(Uri) ->
+    case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
+        #realm{} = Realm ->
+            Realm;
+        undefined ->
+            {error, not_found};
+        Term ->
+            try
+                Realm = from_term(Term),
+                ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
+                Realm
+            catch
+                throw:badarg ->
+                    ?LOG_WARNING(#{
+                        description => "Invalid realm data retrieved from store",
+                        data => Term
+                    }),
+                    {error, not_found}
+            end
+    end.
+
+
+%% @private
 do_update(Realm0, Map) ->
     Realm = merge_and_store(Realm0, Map),
     ok = on_update(Realm),
@@ -1897,31 +1919,6 @@ keys_to_jwts(Old, New) ->
     ]).
 
 
-%% @private
--spec do_lookup(uri()) -> t() | {error, not_found}.
-
-do_lookup(Uri) ->
-    case plum_db:get(?PLUM_DB_PREFIX(Uri), Uri) of
-        #realm{} = Realm ->
-            Realm;
-        undefined ->
-            {error, not_found};
-        Term ->
-            try
-                Realm = from_term(Term),
-                ok = plum_db:put(?PLUM_DB_PREFIX(Uri), Uri, Realm),
-                Realm
-            catch
-                throw:badarg ->
-                    ?LOG_WARNING(#{
-                        description => "Invalid realm data retrieved from store",
-                        data => Term
-                    }),
-                    {error, not_found}
-            end
-    end.
-
-
 %% private
 validate_keys([]) ->
     {ok, gen_keys()};
@@ -1931,6 +1928,13 @@ validate_keys(L) when is_list(L) ->
 
 validate_keys(_) ->
     false.
+
+
+%% @private
+%% @doc This updates the realm and stores it.
+init_keys(Realm) ->
+    Data = #{private_keys => gen_keys()},
+    merge_and_store(Realm, Data).
 
 
 %% @private
@@ -2344,12 +2348,9 @@ badarg(Uri, sso, badtype) ->
 
 %% In Erlang 24 Keys have an additional field, so until we have a migration
 %% tool we do this lazily
-to_key(#jose_jwk{kty = {Mod, PK0}} = JWK)
+to_private_key(#jose_jwk{kty = {Mod, PK0}} = JWK)
 when element(1, PK0) == 'ECPrivateKey', tuple_size(PK0) == 5 ->
-    PK1 = list_to_tuple(
-        tuple_to_list(PK0) ++ [asn1_NOVALUE]
-    ),
-    JWK#jose_jwk{kty = {Mod, PK1}};
+    JWK#jose_jwk{kty = {Mod, erlang:append_element(PK0, asn1_NOVALUE)}};
 
-to_key(Term) ->
+to_private_key(Term) ->
     Term.
