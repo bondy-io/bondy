@@ -336,16 +336,23 @@ do_is_authorized(Req0, St0) ->
     ClientIP = bondy_http_utils:client_ip(Req0),
 
     try
-        {basic, ClientId, Password} = cowboy_req:parse_header(
-            <<"authorization">>, Req0
-        ),
+        Auth = cowboy_req:parse_header(<<"authorization">>, Req0),
+
+        {ClientId, Password} = case Auth of
+            {basic, A, B} ->
+                {A, B};
+            _ ->
+                Txt = <<"The authorization header should use the 'basic' scheme">>,
+                throw({request_error, {header, <<"authorization">>}, Txt})
+        end,
 
         RealmUri = St0#state.realm_uri,
         SessionId = bondy_utils:get_id(global),
+
         case bondy_auth:init(SessionId, RealmUri, ClientId, all, Peer) of
             {ok, AuthCtxt} ->
                 St1 = St0#state{
-                    client_id = bondy_auth:user_id(AuthCtxt),
+                    client_id = ClientId,
                     client_auth_ctxt = AuthCtxt
                 },
                 St2 = authenticate(client, Password, St1),
@@ -387,7 +394,6 @@ do_is_authorized(Req0, St0) ->
 authenticate(client, Password, #state{client_auth_ctxt = Ctxt} = St) ->
     NewCtxt = do_authenticate(Password, Ctxt),
     St#state{
-        client_id = bondy_auth:user_id(NewCtxt),
         client_auth_ctxt = NewCtxt
     };
 
@@ -395,7 +401,6 @@ authenticate(
     resource_owner, Password, #state{owner_auth_ctxt = Ctxt} = St) ->
     NewCtxt = do_authenticate(Password, Ctxt),
     St#state{
-        % client_id = bondy_auth:user_id(NewCtxt),
         owner_auth_ctxt = NewCtxt
     }.
 
@@ -439,7 +444,6 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
             {ok, Ctxt} ->
                 St1 = St0#state{
                     device_id = DeviceId,
-                    client_id = bondy_auth:user_id(Ctxt),
                     owner_auth_ctxt = Ctxt
                 },
                 St2 = authenticate(resource_owner, Password, St1),
@@ -517,11 +521,11 @@ auth_context(password, #state{owner_auth_ctxt = Val}) ->
 %% @private
 issue_token(Type, Req0, St0) ->
     RealmUri = St0#state.realm_uri,
-    Issuer = St0#state.client_id,
-    AuthCtxt = auth_context(Type, St0),
+    Issuer = bondy_auth:user_id(St0#state.client_auth_ctxt),
 
-    User = bondy_auth:user(AuthCtxt),
+    AuthCtxt = auth_context(Type, St0),
     Authid = bondy_auth:user_id(AuthCtxt),
+    User = bondy_auth:user(AuthCtxt),
     Gs = bondy_auth:roles(AuthCtxt),
     Meta0 = bondy_rbac_user:meta(User),
     Meta = prepare_meta(Type, Meta0, St0),
