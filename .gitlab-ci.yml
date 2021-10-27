@@ -6,7 +6,7 @@ before_script:
 
 test:
   script:
-    - rm -rf _build/test
+    - rm -rf _build/
     - make test
 
   cache:
