@@ -135,8 +135,8 @@ remove(RealmUri, ClientId) ->
 %% -----------------------------------------------------------------------------
 -spec to_external(t()) -> map().
 
-to_external(Map) ->
-    Map.
+to_external(Client) ->
+    bondy_rbac_user:to_external(Client).
 
 
 %% =============================================================================
