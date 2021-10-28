@@ -147,8 +147,8 @@ issued_at(#bondy_oauth2_token{issued_at = Val}) -> Val.
 
 issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta) ->
     Data = #bondy_oauth2_token{
-        issuer = Issuer,
-        username = Username,
+        issuer = string:casefold(Issuer),
+        username = string:casefold(Username),
         groups = Groups,
         meta = Meta
     },
@@ -185,7 +185,9 @@ issue_token(GrantType, RealmUri, Data0) ->
     Realm :: bondy_realm:uri(), Issuer :: binary(), Token :: binary()) ->
     token_data() | {error, not_found}.
 
-lookup_token(RealmUri, Issuer, Token) ->
+lookup_token(RealmUri, Issuer0, Token) ->
+    Issuer = string:casefold(Issuer0),
+
     case plum_db:get(?REFRESH_TOKENS_PREFIX(RealmUri, Issuer), Token) of
         #bondy_oauth2_token{} = Data -> Data;
         undefined -> {error, not_found}
@@ -202,9 +204,10 @@ lookup_token(RealmUri, Issuer, Token) ->
     {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()}
     | {error, oauth2_invalid_grant}.
 
-refresh_token(RealmUri, Issuer, Token) ->
+refresh_token(RealmUri, Issuer0, Token) ->
     Now = ?NOW,
     Secs = ?REFRESH_TOKEN_TTL,
+    Issuer = string:casefold(Issuer0),
 
     case lookup_token(RealmUri, Issuer, Token) of
         #bondy_oauth2_token{issued_at = Ts}
@@ -303,7 +306,8 @@ revoke_refresh_token(RealmUri, #bondy_oauth2_token{} = Data, Token) ->
     Issuer = Data#bondy_oauth2_token.issuer,
     revoke_refresh_token(RealmUri, Issuer, Token);
 
-revoke_refresh_token(RealmUri, Issuer, Token) ->
+revoke_refresh_token(RealmUri, Issuer0, Token) ->
+    Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
     case plum_db:get(Prefix, Token) of
         undefined ->
@@ -325,8 +329,10 @@ revoke_refresh_token(RealmUri, Issuer, Token) ->
     Username :: binary(),
     DeviceId :: binary()) -> ok.
 
-revoke_refresh_token(RealmUri, Issuer, Username, DeviceId) ->
+revoke_refresh_token(RealmUri, Issuer0, Username, DeviceId) ->
+    Issuer = string:casefold(Issuer0),
     UserPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
+
     case plum_db:get(UserPrefix, DeviceId) of
         undefined ->
             ok;
@@ -376,7 +382,9 @@ revoke_tokens(access_token, _RealmUri, _Issuer, _Username) ->
 %% -----------------------------------------------------------------------------
 -spec revoke_refresh_tokens(bondy_realm:uri(), Username :: binary()) -> ok.
 
-revoke_refresh_tokens(RealmUri, Username) ->
+revoke_refresh_tokens(RealmUri, Username0) ->
+    Username = string:casefold(Username0),
+
     AllPrefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Username),
     Get = fun
         ({_, ?TOMBSTONE}, Acc) ->
@@ -384,7 +392,9 @@ revoke_refresh_tokens(RealmUri, Username) ->
         (Tuple, Acc) ->
             [Tuple | Acc]
     end,
+
     UserTokens = plum_db:fold(Get, [], AllPrefix, ?FOLD_OPTS),
+
     _ = [
         revoke_refresh_token(RealmUri, Issuer, Token)
         || {Token, Issuer} <- UserTokens
@@ -399,7 +409,10 @@ revoke_refresh_tokens(RealmUri, Username) ->
 -spec revoke_refresh_tokens(
     bondy_realm:uri(), Issuer :: binary(), Username :: binary()) -> ok.
 
-revoke_refresh_tokens(RealmUri, Issuer, Username) ->
+revoke_refresh_tokens(RealmUri, Issuer0, Username0) ->
+    Issuer = string:casefold(Issuer0),
+    Username = string:casefold(Username0),
+
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer, Username),
     Get = fun
         ({_, ?TOMBSTONE}, Acc) ->
@@ -408,6 +421,7 @@ revoke_refresh_tokens(RealmUri, Issuer, Username) ->
             [{DeviceId, Token} | Acc]
     end,
     DeviceTokens = plum_db:fold(Get, [], Prefix, ?FOLD_OPTS),
+
     _ = [
         revoke_refresh_token(RealmUri, Issuer, Token)
         || {_DeviceId, Token} <- DeviceTokens
@@ -420,8 +434,10 @@ revoke_refresh_tokens(RealmUri, Issuer, Username) ->
 %% This function is used for db maintenance.
 %% @end
 %% -----------------------------------------------------------------------------
-revoke_dangling_tokens(RealmUri, Issuer) ->
+revoke_dangling_tokens(RealmUri, Issuer0) ->
+    Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
+
     Fun = fun
         ({_, ?TOMBSTONE}) ->
             ok;
@@ -442,8 +458,10 @@ revoke_dangling_tokens(RealmUri, Issuer) ->
 %% This function is used for db maintenance.
 %% @end
 %% -----------------------------------------------------------------------------
-rebuild_token_indices(RealmUri, Issuer) ->
+rebuild_token_indices(RealmUri, Issuer0) ->
+    Issuer = string:casefold(Issuer0),
     Prefix = ?REFRESH_TOKENS_PREFIX(RealmUri, Issuer),
+
     Fun = fun
         ({_, ?TOMBSTONE}) ->
             ok;
