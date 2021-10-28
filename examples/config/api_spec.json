@@ -1,0 +1,98 @@
+{
+    "id": "com.leapsight.test",
+    "name": "Test API",
+    "host": "_",
+    "realm_uri": "com.leapsight.test",
+    "status_codes": {
+        "bondy.error.badarg": 400,
+        "bondy.error.not_found": 404,
+        "bondy.error.already_exists": 400,
+        "bondy.error.no_such_user": 400
+    },
+    "variables": {
+        "oauth2": {
+            "type": "oauth2",
+            "flow": "resource_owner_password_credentials",
+            "token_path": "/oauth/token",
+            "revoke_token_path": "/oauth/revoke",
+            "schemes": "{{variables.schemes}}"
+        },
+        "schemes": [
+            "http",
+            "https"
+        ],
+        "headers": {
+            "access-control-allow-origin": "*",
+            "access-control-allow-credentials": "true",
+            "access-control-allow-methods": "GET,HEAD,PUT,PATCH,POST,DELETE",
+            "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
+            "access-control-max-age": "86400"
+        },
+        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}})}}"
+    },
+    "defaults": {
+        "retries": 0,
+        "timeout": 5000,
+        "connect_timeout": 5000,
+        "schemes": "{{variables.schemes}}",
+        "headers": "{{variables.headers}}",
+        "security": {}
+    },
+    "versions": {
+        "1.0.0": {
+            "base_path": "/[v1.0]",
+            "variables": {},
+            "defaults": {
+                "timeout": 20000
+            },
+            "languages": [
+                "en"
+            ],
+            "paths": {
+                "services/call": {
+                    "summary": "Allows to perform an arbitrary WAMP call.",
+                    "description": "",
+                    "is_collection": false,
+                    "options": {
+                        "action": {},
+                        "response": {
+                            "on_error": {
+                                "body": ""
+                            },
+                            "on_result": {
+                                "body": ""
+                            }
+                        }
+                    },
+                    "post": {
+                        "action": {
+                            "type": "wamp_call",
+                            "procedure": "{{request.body.procedure}}",
+                            "options": "{{request.body.options}}",
+                            "arguments": "{{request.body.arguments}}",
+                            "arguments_kw": "{{request.body.arguments_kw}}"
+                        },
+                        "response": {
+                            "on_error": {
+                                "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
+                                "body": {
+                                    "error_uri": "{{action.error.error_uri}}",
+                                    "arguments": "{{action.error.arguments}}",
+                                    "arguments_kw": "{{action.error.arguments_kw}}",
+                                    "details": "{{action.error.details}}"
+                                }
+                            },
+                            "on_result": {
+                                "body": {
+                                    "arguments": "{{action.result.arguments}}",
+                                    "arguments_kw": "{{action.result.arguments_kw}}",
+                                    "details": "{{action.result.details}}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
