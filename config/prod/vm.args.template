@@ -1,8 +1,7 @@
 ## Name of the node
 -name ${BONDY_ERL_NODENAME}
 
-## Cookie for distributed erlang
-## -setcookie ${BONDY_ERL_DISTRIBUTED_COOKIE}
+## No Cookie as we do not want distributed erlang but Partisan
 
 ## Explicit connections only.
 -connect_all false
