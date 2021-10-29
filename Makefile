@@ -34,6 +34,8 @@ devrun:
 
 	cp examples/config/security_config.json _build/dev/rel/bondy/etc/security_config.json
 
+	cp examples/config/api_spec.json _build/dev/rel/bondy/etc/api_spec.json
+
 	cp examples/config/broker_bridge_config.json _build/dev/rel/bondy/etc/broker_bridge_config.json
 
 	_build/dev/rel/bondy/bin/bondy console

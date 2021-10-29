@@ -174,8 +174,8 @@ resume_admin_listeners() ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Parses the apis provided by the configuration file
-%% ('bondy.api_gateway.config_file'), stores the apis in the metadata store
-%% and calls rebuild_dispatch_tables/0.
+%% ('bondy.api_gateway.config_file'), stores the apis in the metadata store.
+%% This call does not load the spec in the HTTP server dispatch tables.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec apply_config() ->
@@ -187,7 +187,7 @@ apply_config() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Parses the provided Spec, stores it in the metadata store and calls
+%% Parses the provided Spec, adds it to the store and calls
 %% rebuild_dispatch_tables/0.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -575,8 +575,7 @@ do_apply_config(FName) ->
     try
         case bondy_utils:json_consult(FName) of
             {ok, Spec} when is_map(Spec) ->
-                ok = load_spec(Spec),
-                rebuild_dispatch_tables();
+                load_spec(Spec);
             {ok, []} ->
                 ok;
             {ok, Specs} when is_list(Specs) ->
@@ -585,7 +584,7 @@ do_apply_config(FName) ->
                     filename => FName
                 }),
                 _ = [load_spec(Spec) || Spec <- Specs],
-                rebuild_dispatch_tables();
+                ok;
             {error, enoent} ->
                 ?LOG_WARNING(#{
                     description => "No configuration file found",
@@ -804,8 +803,7 @@ validate_spec(Map) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Loads  API specs from metadata store, parses them and generates a
+%% @doc Loads all the existing API specs from store, parses them and generates a
 %% dispatch table per scheme.
 %% @end
 %% -----------------------------------------------------------------------------
