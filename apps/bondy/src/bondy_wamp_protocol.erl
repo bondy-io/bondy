@@ -372,13 +372,6 @@ handle_inbound_messages(Messages, St) ->
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
 
-handle_inbound_messages([], St, []) ->
-    %% We have no replies
-    {ok, St};
-
-handle_inbound_messages([], St, Acc) ->
-    {reply, lists:reverse(Acc), St};
-
 handle_inbound_messages(
     [#abort{} = M|_], #wamp_state{state_name = Name} = St0, [])
     when Name =/= established ->
@@ -504,6 +497,18 @@ handle_inbound_messages(
             Bin = wamp_encoding:encode(M, encoding(St)),
             {stop, [Bin | Acc], update_context(Ctxt, St)}
     end;
+
+handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
+    %% TODO should we reply with ERROR and keep on waiting for the client GOODBYE?
+    Reason = <<"Router is shutting down. You should have replied with GOODBYE message.">>,
+    stop({protocol_violation, Reason}, St);
+
+handle_inbound_messages([], St, []) ->
+    %% We have no replies
+    {ok, St};
+
+handle_inbound_messages([], St, Acc) ->
+    {reply, lists:reverse(Acc), St};
 
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO
