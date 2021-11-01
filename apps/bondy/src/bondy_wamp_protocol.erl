@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
+-behaviour(bondy_sensitive).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -60,6 +61,11 @@
 -export_type([subprotocol/0]).
 -export_type([state/0]).
 
+
+%% BONDY_SENSITIVE CALLBACKS
+-export([format_status/2]).
+
+%% API
 -export([init/3]).
 -export([peer/1]).
 -export([agent/1]).
@@ -71,6 +77,29 @@
 -export([handle_outbound/2]).
 -export([terminate/1]).
 -export([validate_subprotocol/1]).
+
+
+
+
+%% =============================================================================
+%% BONDY_SENSITIVE CALLBACKS
+%% =============================================================================
+
+
+
+-spec format_status(Opts :: normal | terminate, State :: state()) -> term().
+
+format_status(Opt, #wamp_state{} = State) ->
+    NewAuthCtxt = bondy_sensitive:format_status(
+        Opt, bondy_auth, State#wamp_state.auth_context
+    ),
+    NewCtxt = bondy_sensitive:format_status(
+        Opt, bondy_context, State#wamp_state.context
+    ),
+    State#wamp_state{
+        auth_context = NewAuthCtxt,
+        context = NewCtxt
+    }.
 
 
 
