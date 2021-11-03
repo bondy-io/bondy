@@ -666,7 +666,7 @@ do_revoke_refresh_token(RealmUri, Token, #bondy_oauth2_token{} = Data) ->
 
 
 %% @private
-supports_refresh_token(client_credentials) -> true; %% should be false
+supports_refresh_token(client_credentials) -> false;
 supports_refresh_token(application_code) -> true;
 supports_refresh_token(password) -> true;
 supports_refresh_token(Grant) -> error({oauth2_unsupported_grant_type, Grant}).
