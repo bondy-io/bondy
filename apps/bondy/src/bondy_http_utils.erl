@@ -124,7 +124,7 @@ parse_authorization(Req) ->
                     %% separator between username and password
                     {Pos, 1} = lists:last(L),
                     Rest = binary_part(B, 0, Pos),
-                    Username = <<A/binary, Rest/binary>>,
+                    Username = <<A/binary, $:, Rest/binary>>,
                     Password = binary_part(B, Pos + 1, byte_size(B) - Pos - 1),
                     {basic, Username, Password}
             end;
