@@ -432,7 +432,7 @@ on_load() ->
     %% Illegal = lists:seq(0, 32) ++ [60, 62] ++ lists:seq(127, 191),
     %% [Bin] =/= string:tokens(Bin, Illegal).
     {ok, Regex} = re:compile(
-        "^.*([\\o{000}-\\o{040}\\o{074}-\\o{076}\\o{0177}-\\o{277}])+.*$"
+        "^.*([\\o{000}-\\o{040}\\o{072}-\\o{076}\\o{0177}-\\o{277}])+.*$"
     ),
     ok = persistent_term:put({?MODULE, regex}, Regex),
     ok.

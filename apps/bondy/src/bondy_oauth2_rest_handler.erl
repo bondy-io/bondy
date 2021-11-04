@@ -336,7 +336,7 @@ do_is_authorized(Req0, St0) ->
     ClientIP = bondy_http_utils:client_ip(Req0),
 
     try
-        Auth = cowboy_req:parse_header(<<"authorization">>, Req0),
+        Auth = bondy_http_utils:parse_authorization(Req0),
 
         {ClientId, Password} = case Auth of
             {basic, A, B} ->
