@@ -29,6 +29,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_context).
+-behaviour(bondy_sensitive).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
@@ -60,6 +61,11 @@
 }.
 -export_type([t/0]).
 
+
+%% BONDY_SENSITIVE CALLBACKS
+-export([format_status/2]).
+
+%% API
 -export([agent/1]).
 -export([authid/1]).
 -export([call_timeout/1]).
@@ -103,6 +109,23 @@
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
 
+
+
+%% =============================================================================
+%% BONDY_SENSITIVE CALLBACKS
+%% =============================================================================
+
+
+
+-spec format_status(Opts :: normal | terminate, Ctxt :: t()) -> term().
+
+format_status(Opt, Ctxt) ->
+    Ctxt#{
+        authid => bondy_sensitive:wrap(authid(Ctxt)),
+        session => bondy_sensitive:format_status(
+            Opt, bondy_session, session(Ctxt)
+        )
+    }.
 
 
 

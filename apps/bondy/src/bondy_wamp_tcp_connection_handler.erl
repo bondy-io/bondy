@@ -46,7 +46,7 @@
     hibernate = false       ::  boolean(),
     start_time              ::  integer(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
-    active_n = once          ::  once | -32768..32767,
+    active_n = once         ::  once | -32768..32767,
     buffer = <<>>           ::  binary(),
     shutdown_reason         ::  term() | undefined
 }).
@@ -62,6 +62,7 @@
 -export([handle_info/2]).
 -export([terminate/2]).
 -export([code_change/3]).
+-export([format_status/2]).
 
 
 
@@ -293,10 +294,28 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
+format_status(Opt, [_PDict, #state{} = State]) ->
+    ProtocolState = bondy_sensitive:format_status(
+        Opt, bondy_wamp_protocol, State#state.protocol_state
+    ),
+    gen_format(Opt, State#state{protocol_state = ProtocolState}).
+
 
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Use format recommended by gen_server:format_status/2
+%% @end
+%% -----------------------------------------------------------------------------
+gen_format(normal, Term) ->
+    [{data, [{"State", Term}]}];
+
+gen_format(terminate, Term) ->
+    Term.
 
 
 %% @private

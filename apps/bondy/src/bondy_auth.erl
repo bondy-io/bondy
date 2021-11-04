@@ -27,6 +27,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_auth).
+-behaviour(bondy_sensitive).
 -include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
@@ -63,7 +64,10 @@
 -export_type([context/0]).
 -export_type([requirements/0]).
 
+%% BONDY_SENSITIVE CALLBACKS
+-export([format_status/2]).
 
+%% API
 -export([authenticate/4]).
 -export([method/1]).
 -export([provider/1]).
@@ -113,6 +117,25 @@
     CBState :: term()) ->
     {ok, DataOut :: map(), CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
+
+
+
+%% =============================================================================
+%% BONDY_SENSITIVE CALLBACKS
+%% =============================================================================
+
+
+
+-spec format_status(Opt :: normal | terminate, Ctxt :: context()) -> term().
+
+format_status(_Opt, Ctxt) ->
+    #{user_id := Id, user := User, callback_mod_state := CBModState} = Ctxt,
+
+    Ctxt#{
+        user_id => bondy_sensitive:wrap(Id),
+        user => bondy_sensitive:wrap(User),
+        callback_mod_state => bondy_sensitive:wrap(CBModState)
+    }.
 
 
 

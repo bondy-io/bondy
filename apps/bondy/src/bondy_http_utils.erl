@@ -28,6 +28,7 @@
 -export([forwarded_for/1]).
 -export([set_meta_headers/1]).
 -export([meta_headers/0]).
+-export([parse_authorization/1]).
 
 -on_load(on_load/0).
 
@@ -95,6 +96,41 @@ meta_headers() ->
     persistent_term:get({?MODULE, meta_headers}).
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec parse_authorization(Req :: cowboy_req:req()) ->
+    {basic, binary(), binary()}
+    | {bearer, binary()}
+    | {digest, [{binary(), binary()}]}.
+
+parse_authorization(Req) ->
+    %% The authorization header has the based64 encoding of the
+    %% string username ++ ":" ++ password.
+    %% We allow Usernames with colons (as opposed to the HTTP Basic RFC
+    %% standard) but we do not allow colons in passwords.
+    %% cowboy_req:parse_header/2 follows the RFC standard, so we need
+    %% to make sure to split the username and password correctly
+    case cowboy_req:parse_header(<<"authorization">>, Req) of
+        {basic, A, B} = Basic ->
+            case binary:matches(B, <<$:>>) of
+                [] ->
+                    %% No additional colons
+                    Basic;
+                L ->
+                    %% We found at least one colon, the last one is the
+                    %% separator between username and password
+                    {Pos, 1} = lists:last(L),
+                    Rest = binary_part(B, 0, Pos),
+                    Username = <<A/binary, $:, Rest/binary>>,
+                    Password = binary_part(B, Pos + 1, byte_size(B) - Pos - 1),
+                    {basic, Username, Password}
+            end;
+        Other ->
+            Other
+    end.
 
 
 

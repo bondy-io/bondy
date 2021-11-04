@@ -145,7 +145,7 @@ to_existing_atom_keys(Map) when is_map(Map) ->
 -spec uuid() -> bitstring().
 
 uuid() ->
-    list_to_bitstring(uuid:uuid_to_string(uuid:get_v4())).
+    list_to_binary(uuid:uuid_to_string(uuid:get_v4())).
 
 
 %% -----------------------------------------------------------------------------
@@ -155,7 +155,7 @@ uuid() ->
 -spec is_uuid(any()) -> boolean().
 
 is_uuid(Term) when is_bitstring(Term) ->
-    uuid:is_v4(uuid:string_to_uuid(bitstring_to_list(Term)));
+    uuid:is_v4(uuid:string_to_uuid(binary_to_list(Term)));
 
 is_uuid(_) ->
     false.

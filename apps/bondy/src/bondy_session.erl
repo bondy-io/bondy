@@ -36,6 +36,7 @@
 %% @end
 %% =============================================================================
 -module(bondy_session).
+-behaviour(bondy_sensitive).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -92,6 +93,10 @@
 -export_type([details/0]).
 
 
+%% BONDY_SENSITIVE CALLBACKS
+-export([format_status/2]).
+
+%% API
 -export([agent/1]).
 -export([authid/1]).
 -export([authmethod/1]).
@@ -131,6 +136,24 @@
 -endif.
 
 -on_load(on_load/0).
+
+
+
+%% =============================================================================
+%% BONDY_SENSITIVE CALLBACKS
+%% =============================================================================
+
+
+
+-spec format_status(Opt :: normal | terminate, Session :: t()) -> term().
+
+format_status(_Opt, #session{} = S) ->
+    S#session{
+        authid = bondy_sensitive:wrap(S#session.authid),
+        rbac_context = bondy_sensitive:wrap(S#session.rbac_context),
+        meta = bondy_sensitive:wrap(S#session.meta)
+    }.
+
 
 
 %% =============================================================================

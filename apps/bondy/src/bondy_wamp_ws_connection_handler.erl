@@ -177,11 +177,11 @@ websocket_init(#state{protocol_state = undefined} = St) ->
         1002,
         <<"Missing value for header 'sec-websocket-protocol'.">>
     },
-    {reply, Frame, St};
+    {[Frame], St};
 
 websocket_init(St) ->
     _ = log(info, #{description => "Established connection with peer"}, St),
-    {ok, reset_ping_interval(St)}.
+    {[], reset_ping_interval(St)}.
 
 
 %% -----------------------------------------------------------------------------
@@ -198,29 +198,29 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
         reason => unsupported_message,
         data => Data
     }),
-    {stop, St};
+    {[close], St};
 
 websocket_handle(ping, St) ->
     %% Cowboy already replies to pings for us, we do nothing
-    {ok, St};
+    {[], St};
 
 websocket_handle({ping, _}, St) ->
     %% Cowboy already replies to pings for us, we do nothing
-    {ok, St};
+    {[], St};
 
 websocket_handle({pong, <<"bondy">>}, St0) ->
     %% We've got an answer to a Bondy-initiated ping.
-    {ok, reset_ping_attempts(St0)};
+    {[], reset_ping_attempts(St0)};
 
 
 websocket_handle({T, Data}, #state{frame_type = T} = St0) ->
     case bondy_wamp_protocol:handle_inbound(Data, St0#state.protocol_state) of
         {ok, PSt} ->
-            {ok, St0#state{protocol_state = PSt}};
+            {[], St0#state{protocol_state = PSt}};
         {reply, L, PSt} ->
             reply(T, L, St0#state{protocol_state = PSt});
         {stop, PSt} ->
-            {stop, St0#state{protocol_state = PSt}};
+            {[close], St0#state{protocol_state = PSt}};
         {stop, L, PSt} ->
             self() ! {stop, normal},
             reply(T, L, St0#state{protocol_state = PSt});
@@ -238,7 +238,7 @@ websocket_handle(Data, St) ->
         },
         St
     ),
-    {ok, St}.
+    {[], St}.
 
 
 %% -----------------------------------------------------------------------------
@@ -269,7 +269,7 @@ websocket_info({timeout, _Ref, Msg}, St) ->
         },
         St
     ),
-    {ok, St};
+    {[], St};
 
 websocket_info({stop, shutdown = Reason}, St) ->
     _ = log(
@@ -280,7 +280,7 @@ websocket_info({stop, shutdown = Reason}, St) ->
         },
         St
     ),
-    {stop, St};
+    {[{shutdown_reason, Reason}, close], St};
 
 websocket_info({stop, Reason}, St) ->
     _ = log(
@@ -291,11 +291,11 @@ websocket_info({stop, Reason}, St) ->
         },
         St
     ),
-    {stop, St};
+    {[{shutdown_reason, Reason}, close], St};
 
 websocket_info(_, St0) ->
     %% Any other unwanted erlang messages
-    {ok, St0}.
+    {[], St0}.
 
 
 %% -----------------------------------------------------------------------------
@@ -431,15 +431,14 @@ terminate(Other, _Req, St) ->
 handle_outbound(T, M, St) ->
     case bondy_wamp_protocol:handle_outbound(M, St#state.protocol_state) of
         {ok, Bin, PSt} ->
-            {reply, frame(T, Bin), St#state{protocol_state = PSt}};
+            {frames(T, Bin), St#state{protocol_state = PSt}};
         {stop, PSt} ->
-            {stop, St#state{protocol_state = PSt}};
+            {[close], St#state{protocol_state = PSt}};
         {stop, Bin, PSt} ->
             self() ! {stop, normal},
             reply(T, [Bin], St#state{protocol_state = PSt});
         {stop, Bin, PSt, Time} when is_integer(Time), Time > 0 ->
-            erlang:send_after(
-                Time, self(), {stop, normal}),
+            erlang:send_after(Time, self(), {stop, normal}),
             reply(T, [Bin], St#state{protocol_state = PSt})
     end.
 
@@ -523,23 +522,22 @@ do_terminate(St) ->
 
 %% @private
 reply(FrameType, Frames, #state{hibernate = true} = St) ->
-    {reply, frame(FrameType, Frames), St, hibernate};
+    {frames(FrameType, Frames), St, hibernate};
 
 reply(FrameType, Frames, #state{hibernate = false} = St) ->
-    {reply, frame(FrameType, Frames), St}.
+    {frames(FrameType, Frames), St}.
 
 
 %% @private
-frame(Type, L) when is_list(L) ->
-    [frame(Type, E) || E <- L];
+frames(Type, L) when is_list(L) ->
+    Type == text orelse Type == binary orelse error({badarg, Type}),
+    [{Type, E} || E <- L];
 
-frame(Type, E) when Type == text orelse Type == binary ->
-    {Type, E}.
+frames(Type, Term) ->
+    frames(Type, [Term]).
 
 
 %% @private
-
-
 log(Level, Msg0, #state{} = St) ->
     ProtocolState = St#state.protocol_state,
     Ctxt = bondy_wamp_protocol:context(ProtocolState),
@@ -594,12 +592,12 @@ send_ping(#state{ping_attempts = N, ping_max_attempts = M} = St) when N > M ->
         },
         St
     ),
-    {stop, St};
+    {[close], St};
 
 send_ping(St0) ->
     St1 = reset_ping_interval(St0),
     St2 = St1#state{ping_attempts = St0#state.ping_attempts + 1},
-    {reply, {ping, <<"bondy">>}, St2}.
+    {[{ping, <<"bondy">>}], St2}.
 
 
 %% @private

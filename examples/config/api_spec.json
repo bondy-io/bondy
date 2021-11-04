@@ -49,7 +49,7 @@
                 "en"
             ],
             "paths": {
-                "services/call": {
+                "/services/call": {
                     "summary": "Allows to perform an arbitrary WAMP call.",
                     "description": "",
                     "is_collection": false,

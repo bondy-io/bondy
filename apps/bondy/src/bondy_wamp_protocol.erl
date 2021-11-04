@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_protocol).
+-behaviour(bondy_sensitive).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
@@ -60,6 +61,11 @@
 -export_type([subprotocol/0]).
 -export_type([state/0]).
 
+
+%% BONDY_SENSITIVE CALLBACKS
+-export([format_status/2]).
+
+%% API
 -export([init/3]).
 -export([peer/1]).
 -export([agent/1]).
@@ -71,6 +77,29 @@
 -export([handle_outbound/2]).
 -export([terminate/1]).
 -export([validate_subprotocol/1]).
+
+
+
+
+%% =============================================================================
+%% BONDY_SENSITIVE CALLBACKS
+%% =============================================================================
+
+
+
+-spec format_status(Opts :: normal | terminate, State :: state()) -> term().
+
+format_status(Opt, #wamp_state{} = State) ->
+    NewAuthCtxt = bondy_sensitive:format_status(
+        Opt, bondy_auth, State#wamp_state.auth_context
+    ),
+    NewCtxt = bondy_sensitive:format_status(
+        Opt, bondy_context, State#wamp_state.context
+    ),
+    State#wamp_state{
+        auth_context = NewAuthCtxt,
+        context = NewCtxt
+    }.
 
 
 
@@ -343,13 +372,6 @@ handle_inbound_messages(Messages, St) ->
     | {stop, [binary()], state()}
     | {reply, [binary()], state()}.
 
-handle_inbound_messages([], St, []) ->
-    %% We have no replies
-    {ok, St};
-
-handle_inbound_messages([], St, Acc) ->
-    {reply, lists:reverse(Acc), St};
-
 handle_inbound_messages(
     [#abort{} = M|_], #wamp_state{state_name = Name} = St0, [])
     when Name =/= established ->
@@ -475,6 +497,18 @@ handle_inbound_messages(
             Bin = wamp_encoding:encode(M, encoding(St)),
             {stop, [Bin | Acc], update_context(Ctxt, St)}
     end;
+
+handle_inbound_messages(_, #wamp_state{state_name = shutting_down} = St, _) ->
+    %% TODO should we reply with ERROR and keep on waiting for the client GOODBYE?
+    Reason = <<"Router is shutting down. You should have replied with GOODBYE message.">>,
+    stop({protocol_violation, Reason}, St);
+
+handle_inbound_messages([], St, []) ->
+    %% We have no replies
+    {ok, St};
+
+handle_inbound_messages([], St, Acc) ->
+    {reply, lists:reverse(Acc), St};
 
 handle_inbound_messages(_, St, _) ->
     %% Client does not have a session and message is not HELLO

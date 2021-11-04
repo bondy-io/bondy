@@ -19,15 +19,10 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc A user is a role that is able to log into a Bondy Realm.
-%% They  have attributes associated with themelves like username, credentials
+%% Users have attributes associated with themelves like username, credentials
 %% (password or authorized keys) and metadata determined by the client
 %% applications. Users can be assigned group memberships.
 %%
-%% **Note:**
-%% Usernames and group names are stored in lower case. All functions in this
-%% module are case sensitice so when using the functions in this module make
-%% sure the inputs you provide are in lowercase to. If you need to convert your
-%% input to lowercase use {@link string:casefold/1}.
 %%
 
 %% @end
@@ -458,6 +453,7 @@ authorized_keys(#{type := ?TYPE, authorized_keys := Val}) ->
 
 authorized_keys(#{type := ?TYPE}) ->
     [].
+
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the metadata map associated with the user `User'.
