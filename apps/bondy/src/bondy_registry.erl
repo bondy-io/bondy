@@ -77,7 +77,6 @@
 
 
 -export([add/4]).
--export([add_local_subscription/4]).
 -export([entries/1]).
 -export([entries/2]).
 -export([entries/4]).
@@ -151,46 +150,6 @@ info(?REGISTRATION_TRIE) ->
 
 info(?SUBSCRIPTION_TRIE) ->
     art:info(?SUBSCRIPTION_TRIE).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc A function used internally by Bondy to register local subscribers
-%% and callees.
-%% @end
-%% -----------------------------------------------------------------------------
--spec add_local_subscription(uri(), uri(), map(), pid()) ->
-    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:t()}}.
-
-add_local_subscription(RealmUri, Uri, Opts, Pid) ->
-    Node = bondy_peer_service:mynode(),
-    Type = subscription,
-
-    Pattern = bondy_registry_entry:pattern(
-        Type, RealmUri, Node, undefined, Uri, Opts
-    ),
-
-    TrieKey = trie_key(Pattern),
-    Trie = trie(Type),
-
-    case art_server:match(TrieKey, Trie) of
-        [] ->
-            PeerId = {RealmUri, Node, undefined, Pid},
-            RegId = registration_id(Type, Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
-            %% REVIEW this  will broadcast the local subscription to other nodes
-            %% se we need to be sure not to duplicate events
-            do_add(Entry);
-
-        [{_, EntryKey}] ->
-            %% In case of receiving a "SUBSCRIBE" message from the same
-            %% _Subscriber_ and to already added topic, _Broker_ should
-            %% answer with "SUBSCRIBED" message, containing the existing
-            %% "Subscription|id".
-            FullPrefix = full_prefix(Type, RealmUri),
-            Entry =  plum_db:get(FullPrefix, EntryKey),
-            {error, {already_exists, Entry}}
-    end.
 
 
 %% -----------------------------------------------------------------------------
