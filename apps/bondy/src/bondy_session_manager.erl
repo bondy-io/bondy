@@ -58,7 +58,7 @@ pool() ->
 -spec pool_size() -> integer().
 
 pool_size() ->
-    bondy_config:get([session_manager_pool, size], 50).
+    bondy_config:get([session_manager_pool, size]).
 
 
 %% -----------------------------------------------------------------------------
