@@ -446,8 +446,9 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     end;
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
+    %% Add a local subscription
     case
-        bondy_registry:add_local_subscription(RealmUri, Topic, Opts, Pid)
+        bondy_registry:add(subscription, Topic, Opts, {RealmUri, Pid})
     of
         {ok, Entry, _} ->
             {ok, bondy_registry_entry:id(Entry)};

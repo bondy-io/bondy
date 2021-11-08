@@ -153,7 +153,6 @@ info(?SUBSCRIPTION_TRIE) ->
     art:info(?SUBSCRIPTION_TRIE).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc A function used internally by Bondy to register local subscribers
 %% and callees.
@@ -177,10 +176,7 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     case art_server:match(TrieKey, Trie) of
         [] ->
             PeerId = {RealmUri, Node, undefined, Pid},
-            RegId = case maps:find(subscription_id, Opts) of
-                {ok, N} -> N;
-                error -> bondy_utils:get_id(global)
-            end,
+            RegId = registration_id(Type, Opts),
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
             %% REVIEW this  will broadcast the local subscription to other nodes
             %% se we need to be sure not to duplicate events
@@ -229,21 +225,19 @@ add_local_subscription(RealmUri, Uri, Opts, Pid) ->
     {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
     | {error, {already_exists, bondy_registry_entry:t()}}.
 
-
-add(Type, Uri, Options, Ctxt) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    PeerId = bondy_context:peer_id(Ctxt),
-    {RealmUri, Node, SessionId, _} = PeerId,
+add(Type, Uri, Options, {RealmUri, Node, SessionId, _} = PeerId) ->
     Pattern = case Type of
         registration ->
             %% A session can register a procedure even if it is already
             %% registered if shared_registration is enabled.
             %% So we do not match SessionId
             bondy_registry_entry:pattern(
-                Type, RealmUri, '_', '_', Uri, Options);
+                Type, RealmUri, '_', '_', Uri, Options
+            );
         subscription ->
             bondy_registry_entry:pattern(
-                    Type, RealmUri, Node, SessionId, Uri, Options)
+                Type, RealmUri, Node, SessionId, Uri, Options
+            )
     end,
 
     TrieKey = trie_key(Pattern),
@@ -256,7 +250,8 @@ add(Type, Uri, Options, Ctxt) ->
         [] ->
             %% No matching registrations at all exists or
             %% No matching subscriptions for this SessionId exists
-            Entry = bondy_registry_entry:new(Type, PeerId, Uri, Options),
+            RegId = registration_id(Type, Options),
+            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Options),
             do_add(Entry);
 
         [{_, EntryKey}] when Type == subscription ->
@@ -270,11 +265,9 @@ add(Type, Uri, Options, Ctxt) ->
 
         [{_, EntryKey} | _] when Type == registration ->
             EOpts = bondy_registry_entry:options(EntryKey),
-            SharedEnabled = bondy_context:is_feature_enabled(
-                Ctxt, callee, shared_registration
-            ),
-            NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
+            NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
+
             %% Shared Registration (RFC 13.3.9)
             %% When shared registrations are supported, then the first
             %% Callee to register a procedure for a particular URI
@@ -285,9 +278,10 @@ add(Type, Uri, Options, Ctxt) ->
             %% all subsequent attempts to register a procedure for the URI
             %% where the value for the invoke option does not match that of
             %% the initial registration.
-            Flag = SharedEnabled andalso
+            Flag = maps:get(shared_registration, Options, false) andalso
                 NewPolicy =/= ?INVOKE_SINGLE andalso
                 NewPolicy =:= PrevPolicy,
+
             case Flag of
                 true ->
                     NewEntry = bondy_registry_entry:new(
@@ -299,8 +293,21 @@ add(Type, Uri, Options, Ctxt) ->
                     Entry =  plum_db:get(FullPrefix, EntryKey),
                     {error, {already_exists, Entry}}
             end
-    end.
+    end;
 
+add(Type, Uri, Options, {RealmUri, Pid}) when is_pid(Pid) ->
+    %% Adds a local/internal subcription|registration
+    Node = bondy_peer_service:mynode(),
+    add(Type, Uri, Options, {RealmUri, Node, undefined, Pid});
+
+add(Type, Uri, Options0, Ctxt) ->
+    SharedEnabled = bondy_context:is_feature_enabled(
+        Ctxt, callee, shared_registration
+    ),
+    Options = Options0#{
+        shared_registration => SharedEnabled
+    },
+    add(Type, Uri, Options, bondy_context:peer_id(Ctxt)).
 
 
 %% -----------------------------------------------------------------------------
@@ -1137,3 +1144,13 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
 
+
+
+registration_id(subscription, #{subscription_id := Id}) ->
+    Id;
+
+registration_id(registration, #{registration_id := Id}) ->
+    Id;
+
+registration_id(_, _) ->
+    bondy_utils:get_id(global).
