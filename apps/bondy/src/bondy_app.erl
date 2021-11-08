@@ -236,7 +236,7 @@ setup_event_handlers() ->
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
     ),
     _ = bondy_event_manager:add_watched_handler(
-        bondy_wamp_router_event_handler, []
+        bondy_event_wamp_publisher, []
     ),
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
     ok.
