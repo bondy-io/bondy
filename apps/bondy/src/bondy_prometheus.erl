@@ -188,18 +188,21 @@ handle_event({socket_error, Procotol, Transport, _Peername}, State) ->
     ok = prometheus_gauge:dec(bondy_sockets_total, Labels),
     {ok, State};
 
-handle_event({session_opened, RealmUri, _Id, _Agent, _Peer, _Pid}, State) ->
+handle_event({session_opened, Session}, State) ->
+    RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_opened_total, Labels),
     ok = prometheus_gauge:inc(bondy_sessions_total, Labels),
     {ok, State};
 
-handle_event({session_closed, RealmUri, _Id, _Agent, _Peer, Secs}, State) ->
+handle_event({session_closed, Session, DurationSecs}, State) ->
+    RealmUri = bondy_session:realm_uri(Session),
     Labels = get_session_labels(RealmUri),
     ok = prometheus_counter:inc(bondy_sessions_closed_total, Labels),
     ok = prometheus_gauge:dec(bondy_sessions_total, Labels),
     ok = prometheus_histogram:observe(
-        bondy_session_duration_seconds, Labels, Secs),
+        bondy_session_duration_seconds, Labels, DurationSecs
+    ),
     {ok, State};
 
 handle_event({wamp, #abort{} = M, Ctxt}, State) ->

@@ -134,6 +134,7 @@
 -define(BONDY_USER_CREDENTIALS_CHANGED, <<"bondy.user.credentials_changed">>).
 -define(BONDY_USER_UPDATED,        <<"bondy.user.updated">>).
 -define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
+-define(BONDY_REALM_UPDATED,            <<"bondy.realm.updated">>).
 -define(BONDY_REALM_DELETED,          <<"bondy.realm.deleted">>).
 
 

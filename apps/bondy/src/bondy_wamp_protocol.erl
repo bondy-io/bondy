@@ -386,6 +386,7 @@ handle_inbound_messages(
         state_name => Name,
         details => Details
     }),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, St1};
 
@@ -399,13 +400,15 @@ handle_inbound_messages(
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
+    ok = bondy_event_manager:notify({wamp, Reply, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, normal, lists:reverse([Bin|Acc]), St1};
 
 handle_inbound_messages(
-    [#goodbye{}|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
+    [#goodbye{} = M|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
     %% Client is replying to our goodbye, we ignore any subsequent messages
     %% We reply all previous messages and close
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, shutdown, lists:reverse(Acc), St1};
 

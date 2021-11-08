@@ -249,33 +249,6 @@ setup_event_handlers() ->
 %% @end
 %% -----------------------------------------------------------------------------
 setup_wamp_subscriptions() ->
-    %% TODO move this into each app when we finish restructuring
-    Opts = #{match => <<"exact">>},
-
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_ADDED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_DELETED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_UPDATED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_CREDENTIALS_CHANGED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
     ok.
 
 

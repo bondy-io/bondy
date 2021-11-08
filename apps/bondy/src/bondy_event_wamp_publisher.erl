@@ -1,5 +1,6 @@
 %% =============================================================================
-%%  bondy_wamp_events - An event handler to turn bondy events into WAMP events.
+%%  bondy_event_wamp_publisher - An event handler to turn bondy events into
+%% WAMP events.
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -21,14 +22,15 @@
 %% Bondy events
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_router_event_handler).
+-module(bondy_event_wamp_publisher).
 -behaviour(gen_event).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
--record(state, {}).
+-record(state, {
+}).
 
 %% GEN_EVENT CALLBACKS
 -export([init/1]).
@@ -53,116 +55,135 @@ init([]) ->
 
 handle_event({realm_created, Uri}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?MASTER_REALM_URI
+    ),
+    {ok, State};
+
+handle_event({realm_updated, Uri}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_REALM_UPDATED, [Uri], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({realm_deleted, Uri}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
-handle_event({rbac_group_added, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_GROUP_ADDED, [RealmUri, Name], #{}, R
-        )
-        || R <- [RealmUri, ?CONTROL_REALM_URI]
-    ],
+handle_event({session_opened, Session}, State) ->
+    Uri = bondy_session:realm_uri(Session),
+    Args = [bondy_session:to_external(Session)],
+    _ = bondy:publish(#{}, ?WAMP_SESSION_ON_JOIN, Args, #{}, Uri),
     {ok, State};
 
-handle_event({rbac_group_updated, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_GROUP_UPDATED, [RealmUri, Name], #{}, R
-        )
-        || R <- [RealmUri, ?CONTROL_REALM_URI]
-    ],
+handle_event({session_closed, Session, _DurationSecs}, State) ->
+    Uri = bondy_session:realm_uri(Session),
+    Id = bondy_session:id(Session),
+    Authid = bondy_session:authid(Session),
+    Authrole = bondy_session:authrole(Session),
+
+    Args = [Id, Authid, Authrole],
+
+    _ = bondy:publish(#{}, ?WAMP_SESSION_ON_LEAVE, Args, #{}, Uri),
     {ok, State};
 
-handle_event({rbac_group_deleted, RealmUri, Name}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, R
-        )
-        || R <- [RealmUri, ?CONTROL_REALM_URI]
-    ],
+handle_event({group_added, RealmUri, Name}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_GROUP_ADDED, [RealmUri, Name], #{}, RealmUri
+    ),
     {ok, State};
 
-handle_event({rbac_user_added, RealmUri, Username}, State) ->
+handle_event({group_updated, RealmUri, Name}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_GROUP_UPDATED, [RealmUri, Name], #{}, RealmUri
+    ),
+    {ok, State};
+
+handle_event({group_deleted, RealmUri, Name}, State) ->
+    _ = bondy:publish(
+        #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, RealmUri
+    ),
+    {ok, State};
+
+handle_event({user_added, RealmUri, Username}, State) ->
     _ = bondy:publish(
         #{}, ?BONDY_USER_ADDED, [Username], #{}, RealmUri
     ),
+    {ok, State};
+
+handle_event({user_updated, RealmUri, Username}, State) ->
+    ok = bondy_ticket:revoke_all(RealmUri, Username),
+    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+
     _ = bondy:publish(
-        #{}, ?BONDY_USER_ADDED, [RealmUri, Username], #{},
-        ?CONTROL_REALM_URI
+        #{}, ?BONDY_USER_UPDATED, [RealmUri, Username], #{}, RealmUri
     ),
+    %% TODO Refresh any sessions' rbac_ctxt caches this user has in this node
+    %% for other realms. This is because
     {ok, State};
 
-handle_event({rbac_user_updated, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_USER_UPDATED, [RealmUri, Username], #{}, R
-        )
-        || R <- [RealmUri, ?CONTROL_REALM_URI]
-    ],
+handle_event({user_deleted, RealmUri, Username}, State) ->
+    %% The effect of revoking tickets and tokens will be replicated through
+    %% plum_db
+    ok = bondy_ticket:revoke_all(RealmUri, Username),
+    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
+
+    _ = bondy:publish(
+        #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, RealmUri
+    ),
+
     {ok, State};
 
-handle_event({rbac_user_deleted, RealmUri, Username}, State) ->
-    _ = [
-        _ = bondy:publish(
-            #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, R
-        )
-        || R <- [RealmUri, ?CONTROL_REALM_URI]
-    ],
-    {ok, State};
+handle_event({user_credentials_updated, RealmUri, Username}, State) ->
+    ok = bondy_ticket:revoke_all(RealmUri, Username),
+    ok = bondy_oauth2:revoke_refresh_tokens(RealmUri, Username),
 
-handle_event({rbac_user_credentials_changed, RealmUri, Username}, State) ->
     Uri = ?BONDY_USER_CREDENTIALS_CHANGED,
     _ = bondy:publish(
-        #{}, Uri, [RealmUri, Username], #{}, ?CONTROL_REALM_URI
+        #{}, Uri, [RealmUri, Username], #{}, RealmUri
     ),
+
     {ok, State};
 
-handle_event({rbac_user_logged_in, RealmUri, Username, Meta}, State) ->
+handle_event({user_log_in, RealmUri, Username, Meta}, State) ->
     Uri = ?BONDY_USER_LOGGED_IN,
     _ = bondy:publish(#{}, Uri, [Username, Meta], #{}, RealmUri),
     {ok, State};
 
-handle_event({backup_started, File}, State) ->
+handle_event({backup_started, #{filename := File}}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_finished, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_failed, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_started, File}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_finished, Args}, State) ->
     _ = bondy:publish(
-        #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?CONTROL_REALM_URI
+        #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
 
 handle_event({backup_restore_failed, Args}, State) ->
     Uri = ?BONDY_BACKUP_RESTORE_FAILED,
-    _ = bondy:publish(#{}, Uri, Args, #{}, ?CONTROL_REALM_URI),
+    _ = bondy:publish(#{}, Uri, Args, #{}, ?MASTER_REALM_URI),
     {ok, State};
 
 %% REGISTRATION META API
@@ -175,7 +196,8 @@ handle_event({registration_created, Entry, Ctxt}, State) ->
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+                #{}, Uri, [SessionId, RegId], Map, Ctxt
+            ),
             {ok, State};
         false ->
             {ok, State}
@@ -203,7 +225,8 @@ handle_event({registration_deleted, Entry, Ctxt}, State) ->
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+                #{}, Uri, [SessionId, RegId], Map, Ctxt
+            ),
             {ok, State};
         false ->
             {ok, State}
@@ -217,7 +240,8 @@ handle_event({registration_removed, Entry, Ctxt}, State) ->
             RegId = bondy_registry_entry:id(Entry),
             Map = bondy_registry_entry:to_details_map(Entry),
             {ok, _} = bondy_broker:publish(
-                #{}, Uri, [SessionId, RegId], Map, Ctxt),
+                #{}, Uri, [SessionId, RegId], Map, Ctxt
+            ),
             {ok, State};
         false ->
             {ok, State}

@@ -205,7 +205,6 @@ forward(M, #{session := _} = Ctxt0) ->
 
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
-    ok = bondy_event_manager:notify({wamp, M, Ctxt1}),
     do_forward(M, Ctxt1).
 
 
@@ -374,7 +373,6 @@ async_forward(M, Ctxt0) ->
                 [maps:get(<<"message">>, ErrorMap)],
                 #{error => ErrorMap}
             ),
-            ok = bondy_event_manager:notify({wamp, Reply, Ctxt0}),
             {reply, Reply, Ctxt0};
         Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
