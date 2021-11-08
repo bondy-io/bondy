@@ -134,17 +134,21 @@ handle_event_sync(Subscriber, Event) ->
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
     Meta = maps:get(meta, Opts0, #{}),
-    {ok, Id} = bondy_broker:subscribe(RealmUri, Opts, Topic, self()),
+    case bondy_broker:subscribe(RealmUri, Opts, Topic, self()) of
+        {ok, Id} ->
+            State = #state{
+                realm_uri = RealmUri,
+                opts = maps:without([meta], Opts),
+                meta = Meta,
+                topic = Topic,
+                callback_fun = Fun,
+                subscription_id = Id
+            },
+            {ok, State};
+        {error, already_exists} = Error ->
+            Error
+    end.
 
-    State = #state{
-        realm_uri = RealmUri,
-        opts = maps:without([meta], Opts),
-        meta = Meta,
-        topic = Topic,
-        callback_fun = Fun,
-        subscription_id = Id
-    },
-    {ok, State}.
 
 
 handle_call(info, _From, State) ->
