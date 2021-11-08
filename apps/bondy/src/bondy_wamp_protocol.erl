@@ -196,7 +196,9 @@ terminate(#wamp_state{context = undefined}) ->
     ok;
 
 terminate(#wamp_state{context = Ctxt}) ->
-    bondy_context:close(Ctxt).
+    Session = bondy_context:session(Ctxt),
+    bondy_context:close(Ctxt),
+    bondy_session_manager:close(Session).
 
 
 %% -----------------------------------------------------------------------------

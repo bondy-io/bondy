@@ -213,14 +213,7 @@ close(Ctxt0, Reason) ->
         is_closing => true,
         is_shutting_down => Reason =:= shutdown
     },
-    %% We cleanup router first as cleanup requires the session
-    case maps:find(session, Ctxt) of
-        {ok, Session} ->
-            _ = bondy_router:close_context(Ctxt),
-            bondy_session_manager:close(Session);
-        error ->
-            ok
-    end.
+    bondy_router:close_context(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
