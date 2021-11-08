@@ -367,7 +367,8 @@ remove_all(_, _, _) ->
 
 remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, '_'),
+        Type, RealmUri, Node, SessionId, '_'
+    ),
     MatchOpts = [
         {limit, 100},
         {remove_tombstones, true},
@@ -873,20 +874,18 @@ do_remove_all(Matches, SessionId, Fun) ->
     do_remove_all(Matches, SessionId, Fun, []).
 
 
-do_remove_all(?EOT, _, _, _) ->
-    ok;
-
-do_remove_all({[], ?EOT}, _, _, _) ->
-    ok;
-
-do_remove_all({[], Cont}, SessionId, Fun, Acc) when length(Acc) > 0 ->
-    %% Finally, we perform the Fun if any.
-    %% We do it here as opposed to in every iteration to minimise art trie
-    %% concurrency access,
+do_remove_all(?EOT, _, Fun, Acc) ->
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    do_remove_all(plum_db:match(Cont), SessionId, Fun, []);
+    ok;
+
+do_remove_all({[], ?EOT}, _, Fun, Acc) ->
+    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
+    ok;
 
 do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
+    %% We apply the Fun here as opposed to in every iteration to minimise art
+    %% trie concurrency access,
+    _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
     do_remove_all(plum_db:match(Cont), SessionId, Fun, Acc);
 
 do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
