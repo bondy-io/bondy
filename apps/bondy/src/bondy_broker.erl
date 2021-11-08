@@ -350,17 +350,19 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     Fun = fun(Entry, NodeAcc) ->
         case bondy_registry_entry:node(Entry) of
             MyNode ->
-                %% We publish to a local subscriber
+                %% A local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
                 Pid = bondy_registry_entry:pid(Entry),
+
                 case bondy_registry_entry:session_id(Entry) of
                     undefined ->
                         %% An internal bondy_subscriber
                         Event = MakeEvent(SubsId),
                         ok = bondy_subscriber:handle_event(Pid, Event),
                         NodeAcc;
+
                     ESessionId ->
-                        %% A wamp peer
+                        %% A WAMP session
                         case bondy_session:lookup(ESessionId) of
                             {error, not_found} ->
                                 NodeAcc;
@@ -373,7 +375,9 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                                 NodeAcc
                         end
                 end;
+
             Node ->
+                %% A remote subscriber.
                 %% We just acummulate the subscribers per peer, later we will
                 %% forward a single message to each peer.
                 maps:update_with(Node, fun(V) -> V + 1 end, 1, NodeAcc)

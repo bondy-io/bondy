@@ -508,7 +508,8 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
-                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
+                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw
+                ),
                 ok = bondy:send(Callee, Caller, Error, #{}),
 
                 Interrupt = wamp_message:interrupt(InvocationId, Opts),
