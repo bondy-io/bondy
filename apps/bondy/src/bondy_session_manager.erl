@@ -5,10 +5,14 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--record(state, {}).
+-record(state, {
+    name :: atom()
+}).
 
 %% API
--export([start_link/0]).
+-export([start_link/2]).
+-export([pool/0]).
+-export([pool_size/0]).
 -export([open/4]).
 -export([close/1]).
 
@@ -33,8 +37,28 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+start_link(Pool, Name) ->
+    gen_server:start_link({local, Name}, ?MODULE, [Pool, Name], []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec pool() -> term().
+
+pool() ->
+    {?MODULE, pool}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec pool_size() -> integer().
+
+pool_size() ->
+    bondy_config:get([session_manager_pool, size], 50).
 
 
 %% -----------------------------------------------------------------------------
@@ -58,7 +82,9 @@ start_link() ->
 
 open(Id, Peer, RealmOrUri, Opts) ->
     Session = bondy_session:open(Id, Peer, RealmOrUri, Opts),
-    case gen_server:call(?MODULE, {open, Session}, 5000) of
+    Uri = bondy_session:realm_uri(Session),
+    Name = gproc_pool:pick_worker(pool(), Uri),
+    case gen_server:call(Name, {open, Session}, 5000) of
         ok ->
             Session;
         Error ->
@@ -73,8 +99,9 @@ open(Id, Peer, RealmOrUri, Opts) ->
 -spec close(bondy_session:t()) -> ok.
 
 close(Session) ->
-    ok = bondy_session:close(Session),
-    gen_server:cast(?MODULE, {close, Session}).
+    Uri = bondy_session:realm_uri(Session),
+    Name = gproc_pool:pick_worker(pool(), Uri),
+    gen_server:cast(Name, {close, Session}).
 
 
 
@@ -84,14 +111,14 @@ close(Session) ->
 
 
 
-init([]) ->
-    {ok, #state{}}.
+init([Pool, Name]) ->
+    true = gproc_pool:connect_worker(Pool, Name),
+    {ok, #state{name = Name}}.
 
 
 handle_call({open, Session}, _From, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
-
     %% We monitor the session owner so that we can cleanup when the process
     %% terminates
     ok = gproc_monitor:subscribe({n, l, {session, Uri, Id}}),
@@ -111,10 +138,11 @@ handle_cast({close, Session}, State) ->
     Uri = bondy_session:realm_uri(Session),
     ok = gproc_monitor:unsubscribe({n, l, {session, Uri, Id}}),
     ?LOG_DEBUG(#{
-        description => "Demonitoring session connection",
+        description => "Session closing, demonitoring session connection",
         realm => Uri,
         session_id => Id
     }),
+    ok = bondy_session:close(Session),
     {noreply, State};
 
 handle_cast(Event, State) ->
@@ -158,7 +186,8 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 
-terminate(_Reason, _State) ->
+terminate(_Reason, State) ->
+    _ = gproc_pool:disconnect_worker(pool(), State#state.name),
     ok.
 
 
@@ -185,4 +214,5 @@ cleanup(Session) ->
         session => Session
     },
     %% We close the session too
-    bondy_context:close(FakeCtxt, crash).
+    bondy_context:close(FakeCtxt, crash),
+    ok.

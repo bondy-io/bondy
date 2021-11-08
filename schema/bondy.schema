@@ -588,7 +588,6 @@ hidden
   hidden
 ]}.
 
-
 %% -----------------------------------------------------------------------------
 %% @doc The capacity of the router process pool, i.e. the maximum number of
 %% active erlang processes handling router events (default = 10000).
@@ -600,6 +599,16 @@ hidden
   {datatype, integer}
 ]}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc The capacity of the session manager process pool, i.e. the maximum
+%% number of active erlang processes handling session events (default = 50).
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "load_regulation.session_manager.pool.size", "bondy.session_manager_pool.size", [
+  {default, 50},
+  {datatype, integer}
+]}.
 
 
 
