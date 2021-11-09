@@ -626,17 +626,22 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 
 %% @private
 handle_call(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    %% Deprecated API prefix. Now "bondy."
-    maybe_callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(
     #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    maybe_callback(M, Ctxt, bondy_wamp_api);
+    callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(
     #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    maybe_callback(M, Ctxt, bondy_wamp_meta_api);
+    callback(M, Ctxt, bondy_wamp_meta_api);
+
+handle_call(
+    #call{procedure_uri = <<"com.bondy.", _/binary>>} = M, Ctxt) ->
+    %% Alias for "bondy"
+    callback(M, Ctxt, bondy_wamp_api);
+
+handle_call(
+    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
+    %% Deprecated API prefix. Now "bondy"
+    callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
     do_handle_call(M, Ctxt, Uri).
@@ -648,11 +653,36 @@ handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
 %% registry
 %% @end
 %% -----------------------------------------------------------------------------
-maybe_callback(#call{procedure_uri = Uri} = M, Ctxt, Mod) ->
-    case Mod:handle_call(M, Ctxt) of
-        ok -> ok;
-        ignore -> do_handle_call(M, Ctxt, Uri);
-        {redirect, OtherUri} -> do_handle_call(M, Ctxt, OtherUri)
+callback(#call{} = M, Ctxt, Mod) ->
+    PeerId = bondy_context:peer_id(Ctxt),
+
+    try Mod:handle_call(M, Ctxt) of
+        ok ->
+            ok;
+        ignore ->
+            do_handle_call(M, Ctxt, M#call.procedure_uri);
+        {redirect, OtherUri} ->
+            do_handle_call(M, Ctxt, OtherUri);
+        {reply, Reply} ->
+            bondy:send(PeerId, Reply)
+    catch
+        throw:no_such_procedure ->
+            Error = bondy_wamp_utils:no_such_procedure_error(M),
+            bondy:send(PeerId, Error);
+
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => <<"Error while handling WAMP call">>,
+                procedure => M#call.procedure_uri,
+                caller => bondy_context:session_id(Ctxt),
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            %% We catch any exception from handle/3 and turn it
+            %% into a WAMP Error
+            Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
+            bondy:send(PeerId, Error)
     end.
 
 

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_cluster_api.erl -
+%%  bondy_rbac_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,19 +16,18 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_cluster_api).
+-module(bondy_rbac_wamp_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/3]).
+-export([handle_event/2]).
 
 
 
@@ -36,31 +35,30 @@
 %% API
 %% =============================================================================
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec handle_call(
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+    ok
+    | ignore
+    | {redirect, uri()}
+    | {reply, wamp_messsage:result() | wamp_message:error()}.
+
+handle_call(_, #call{} = M, _) ->
+    E = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, E}.
+
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
+
+handle_event(_, _) ->
+    ok.
 
 
-handle_call(?BONDY_CLUSTER_CONNECTIONS, #call{} = M, _Ctxt) ->
-    %% TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
 
-handle_call(?BONDY_CLUSTER_MEMBERS, #call{} = M, _Ctxt) ->
-    %% TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
-
-handle_call(?BONDY_CLUSTER_PEER_INFO, #call{} = M, _Ctxt) ->
-    %% TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
-
-handle_call(?BONDY_CLUSTER_STATUS, #call{} = M, _Ctxt) ->
-    %% TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
-
-handle_call(_, #call{} = M, _) ->
-    bondy_wamp_utils:no_such_procedure_error(M).

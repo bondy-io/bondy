@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_telemetry_api.erl -
+%%  bondy_telemetry_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -21,11 +21,10 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_wamp_telemetry_api).
+-module(bondy_telemetry_wamp_api).
 -behaviour(bondy_wamp_api).
 
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/3]).
@@ -43,12 +42,17 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> wamp_messsage:result() | wamp_message:error().
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok
+    | ignore
+    | {redirect, uri()}
+    | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 
 handle_call(?BONDY_TELEMETRY_METRICS, #call{} = M, _Ctxt) ->
     %% TODO
-    bondy_wamp_utils:no_such_procedure_error(M);
+    E = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, E};
 
 handle_call(_, #call{} = M, _) ->
-    bondy_wamp_utils:no_such_procedure_error(M).
+    E = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, E}.

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_realm_api.erl -
+%%  bondy_realm_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -22,9 +22,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_api).
 
--include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 -include("bondy_uris.hrl").
 
 -export([handle_call/2]).
@@ -40,7 +38,11 @@
 -callback handle_call(
     Procedure :: uri(),
     M :: wamp_message:call(),
-    Ctxt :: bony_context:t()) -> wamp_message:result() | wamp_message:error().
+    Ctxt :: bony_context:t()) ->
+	ok
+    | ignore
+    | {redirect, uri()}
+    | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 
 
@@ -56,31 +58,13 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
-	ok | ignore | {redirect, uri()}.
+	ok
+    | ignore
+    | {redirect, uri()}
+    | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
-    PeerId = bondy_context:peer_id(Ctxt),
-
-    try
-        Reply = handle(resolve(Proc), M, Ctxt),
-        bondy:send(PeerId, Reply)
-    catch
-        throw:no_such_procedure ->
-            Error = bondy_wamp_utils:no_such_procedure_error(M),
-            bondy:send(PeerId, Error);
-        Class:Reason:Stacktrace ->
-			?LOG_ERROR(#{
-				description => <<"Error while handling WAMP call">>,
-				procedure => Proc,
-				class => Class,
-				reason => Reason,
-				stacktrace => Stacktrace
-			}),
-            %% We catch any exception from handle/3 and turn it
-            %% into a WAMP Error
-            Error = bondy_wamp_utils:maybe_error({error, Reason}, M),
-            bondy:send(PeerId, Error)
-    end.
+    do_handle_call(resolve(Proc), M, Ctxt).
 
 
 
@@ -91,59 +75,53 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
 
 
 %% @private
--spec handle(
+-spec do_handle_call(
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
-    wamp_messsage:result() | wamp_message:error().
+    ok
+    | ignore
+    | {redirect, uri()}
+    | {reply, wamp_messsage:result() | wamp_message:error()}.
 
-handle(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
-	bondy_wamp_backup_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_backup_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_cluster_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_cluster_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_http_gateway_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_realm_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_oauth2_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_rbac_user_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.user.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_rbac_group_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.group.", _/binary>> = Proc, M, Ctxt) ->
-	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_rbac_source_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.source.", _/binary>> = Proc, M, Ctxt) ->
-	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_rbac_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
-	bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.ticket.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_ticket_wamp_api:handle_call(Proc, M, Ctxt);
 
-% handle(<<"bondy.permission.", _/binary>> = Proc, M, Ctxt) ->
-% bondy_wamp_rbac_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.http_gateway.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_http_gateway_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_realm_api:handle_call(Proc, M, Ctxt);
+do_handle_call(<<"bondy.oauth2.", _/binary>> = Proc, M, Ctxt) ->
+	bondy_oauth2_wamp_api:handle_call(Proc, M, Ctxt);
 
-handle(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
-    bondy_wamp_telemetry_api:handle_call(Proc, M, Ctxt);
-
-handle(<<"bondy.wamp.", _/binary>> = Proc, M, Ctxt) ->
-    do_handle(Proc, M, Ctxt);
-
-handle(<<"bondy.", _/binary>>, _, _) ->
-    throw(no_such_procedure).
+do_handle_call(<<"bondy.telemetry.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_telemetry_wamp_api:handle_call(Proc, M, Ctxt);
 
 
+% do_handle_call(<<"bondy.registry.", _/binary>> = Proc, M, Ctxt) ->
+%     do_do_handle_call(Proc, M, Ctxt);
 
-%% @private
--spec do_handle(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
-    wamp_messsage:result() | wamp_message:error().
-
-do_handle(_, _, _) ->
-    %% TODO implement bondy.wamp.*
-    throw(no_such_procedure).
+do_handle_call(<<"bondy.", _/binary>>, M, _) ->
+	E = bondy_wamp_utils:no_such_procedure_error(M),
+	{reply, E}.
 
 
 
@@ -154,6 +132,9 @@ do_handle(_, _, _) ->
 %% -----------------------------------------------------------------------------
 -spec resolve(Uri :: uri()) -> uri() | no_return().
 
+resolve(<<"com.bondy.", _/binary>> = Uri) ->
+	<<"com.", Rest/binary>> = Uri,
+	resolve(Rest);
 resolve(<<"com.leapsight.bondy.", _/binary>> = Uri) ->
     <<"com.leapsight.", Rest/binary>> = Uri,
     resolve(Rest);
