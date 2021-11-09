@@ -23,11 +23,11 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_event_manager).
+-behaviour(gen_event).
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 
--behaviour(gen_event).
 
 %% API
 
