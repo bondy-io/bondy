@@ -589,7 +589,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         ),
 
         %% We set the session in the context
-        Ctxt1 = Ctxt0#{session => Session},
+        Ctxt1 = bondy_context:set_session(Ctxt0, Session),
         St1 = update_context(Ctxt1, St0),
 
         %% We send the WELCOME message

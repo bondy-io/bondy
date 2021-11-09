@@ -310,8 +310,14 @@ roles(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(t()) -> maybe(uri()).
-realm_uri(#{realm_uri := Val}) -> Val;
-realm_uri(_) -> undefined.
+realm_uri(#{session := S}) ->
+    bondy_session:realm_uri(S);
+
+realm_uri(#{realm_uri := Val}) ->
+    Val;
+
+realm_uri(_) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -560,7 +566,6 @@ set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
 
 is_feature_enabled(Ctxt, Role, Feature) ->
     maps_utils:get_path([Role, Feature], roles(Ctxt), false).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc

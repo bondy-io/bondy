@@ -20,6 +20,8 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-include("bondy_security.hrl").
+
 -compile([nowarn_export_all, export_all]).
 
 all() ->
@@ -41,11 +43,21 @@ init_per_suite(Config) ->
     Realm = bondy_realm:create(<<"com.foobar">>),
     RealmUri = bondy_realm:uri(Realm),
     ok = bondy_realm:disable_security(Realm),
-    Ctxt = bondy_context:local_context(RealmUri),
+    Peer = {{127, 0, 0, 1}, 10000},
+    Session = bondy_session:new(Peer, RealmUri, #{
+        authid => <<"foo">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => true,
+        authroles => [<<"anonymous">>],
+        roles => #{
+            caller => #{},
+            subscriber => #{}
+        }
+    }),
+    Ctxt0 = bondy_context:new(Peer, {ws, text, json}),
+    Ctxt = bondy_context:set_session(Ctxt0, Session),
 
-    meck:expect(bondy_context, peer_id, fun(_Map)->
-        {RealmUri, bondy_peer_service:mynode(), undefined, self()}
-    end),
 
     [{context, Ctxt}, {realm, Realm}, {realm_uri, RealmUri} |Config].
 

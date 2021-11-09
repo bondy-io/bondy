@@ -124,6 +124,9 @@
            {enabled,true}]},
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
+      {session_manager_pool, [
+          {size, 50}
+      ]},
       {security,[
           {ticket, [
               {expiry_time_secs, 300},
