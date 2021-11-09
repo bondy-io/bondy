@@ -109,7 +109,6 @@
 
 
 
-
 %% =============================================================================
 %% API
 %% =============================================================================
@@ -130,7 +129,6 @@ start_link() ->
 %% -----------------------------------------------------------------------------
 init_tries() ->
     gen_server:call(?MODULE, init_tries, 10*60*1000).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -480,8 +478,6 @@ entries(Type, RealmUri, Node, SessionId) ->
     [V || {_, V} <- Matches].
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Works like {@link entries/3}, but only returns a limited (Limit) number of
@@ -503,7 +499,6 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
     Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
     Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts),
     [V || {_, V} <- Matches].
-
 
 
 %% -----------------------------------------------------------------------------
@@ -532,7 +527,6 @@ entries({Type, Cont}) when Type == registration orelse Type == subscription ->
         {L, NewCont} ->
             {[V || {_, V} <- L], {Type, NewCont}}
     end.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -785,7 +779,6 @@ delete_from_trie(Entry) ->
             }),
             ok
     end.
-
 
 
 %% @private
@@ -1102,7 +1095,6 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
         Entry ->
             do_lookup_entries(T, Type, [Entry|Acc])
     end.
-
 
 
 registration_id(subscription, #{subscription_id := Id}) ->
