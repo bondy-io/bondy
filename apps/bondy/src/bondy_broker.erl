@@ -416,6 +416,8 @@ do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec subscribe(RealmUri :: uri(), Opts :: map(), Topic :: uri()) ->
+    {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
 subscribe(RealmUri, Opts, Topic) ->
     subscribe(RealmUri, Opts, Topic, self()).
 
@@ -430,7 +432,11 @@ subscribe(RealmUri, Opts, Topic) ->
 %% (a.k.a a local subscription)
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscribe(uri(), map(), uri(), pid() | function()) ->
+-spec subscribe(
+    RealmUri :: uri(),
+    Opts :: map(),
+    Topic :: uri(),
+    SubscriberOrFun :: pid() | function()) ->
     {ok, id()} | {ok, id(), pid()} | {error, already_exists | any()}.
 
 subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
@@ -441,9 +447,10 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
         error -> bondy_utils:get_id(global)
     end,
 
-    case
-        bondy_subscribers_sup:start_subscriber(Id, RealmUri, Opts, Topic, Fun)
-    of
+    Result = bondy_subscribers_sup:start_subscriber(
+        Id, RealmUri, Opts, Topic, Fun
+    ),
+    case Result of
         {ok, Pid} -> {ok, Id, Pid};
         Error -> Error
     end;
