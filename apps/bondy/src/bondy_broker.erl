@@ -164,7 +164,6 @@ handle_message(#publish{} = M, Ctxt) ->
     maybe_publish(M, Ctxt).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Handles a message sent by a peer node through the
 %% bondy_peer_wamp_forwarder.
@@ -507,9 +506,6 @@ unsubscribe(SubsId, Ctxt) ->
 
 
 
-
-
-
 %% =============================================================================
 %% PRIVATE: AUTHORIZATION
 %% =============================================================================
@@ -677,7 +673,6 @@ subscribe(M, Ctxt) ->
     end.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -688,7 +683,6 @@ subscribe(M, Ctxt) ->
 
 unsubscribe_all(Ctxt) ->
     bondy_registry:remove_all(subscription, Ctxt, fun on_unsubscribe/2).
-
 
 
 %% @private
@@ -715,7 +709,6 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
             )
     end,
     ok.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -839,7 +832,6 @@ publish_fold([], Fun, Acc) when is_function(Fun, 2) ->
 
 
 
-
 %% =============================================================================
 %% PRIVATE: META EVENTS
 %% =============================================================================
@@ -867,7 +859,6 @@ on_subscribe(Entry, Ctxt) ->
 
 on_unsubscribe(Entry, Ctxt) ->
     bondy_event_manager:notify({subscription_removed, Entry, Ctxt}).
-
 
 
 %% @private
