@@ -1544,6 +1544,13 @@ hidden
   {datatype, flag}
 ]}.
 
+%% The time the agent will wait to initiate the lookup.
+{mapping, "cluster.peer_discovery.initial_delay", "bondy.peer_discovery.initial_delay", [
+  {default, "30s"},
+  {datatype, {duration, ms}}
+]}.
+
+
 %% If enabled Bondy will try to automatically join a random peer from the
 %% defined cluster.peer_discovery.type
 {mapping, "cluster.peer_discovery.automatic_join", "bondy.peer_discovery.automatic_join", [
@@ -1551,12 +1558,7 @@ hidden
   {datatype, flag}
 ]}.
 
-{mapping, "cluster.peer_discovery.join_retry_interval", "bondy.peer_discovery.join_retry_interval", [
-  {default, "5s"},
-  {datatype, {duration, ms}}
-]}.
-
-
+%% The time the agent will wait till polling for results after the last one
 {mapping, "cluster.peer_discovery.polling_interval", "bondy.peer_discovery.polling_interval", [
   {default, "10s"},
   {datatype, {duration, ms}}
@@ -1566,6 +1568,16 @@ hidden
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
+
+%% The time the agent will wait to initiate the next join attempt. For this to
+%% take effect cluster.peer_discovery.automatic_join needs to be on.
+{mapping, "cluster.peer_discovery.join_retry_interval", "bondy.peer_discovery.join_retry_interval", [
+  {default, "5s"},
+  {datatype, {duration, ms}}
+]}.
+
+
+
 
 %% The name of a module implementing the bondy_peer_discovery_agent behaviour.
 %% At the moment Bondy provides only the `bondy_peer_discovery_dns_agent', which

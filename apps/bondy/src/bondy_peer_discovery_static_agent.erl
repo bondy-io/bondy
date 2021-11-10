@@ -48,6 +48,10 @@
     }
 }).
 
+-record(state, {
+    peers = []  :: [bondy_peer_service:peer()]
+}).
+
 -export([init/1]).
 -export([lookup/2]).
 
@@ -67,7 +71,14 @@
 
 init(Opts) ->
     try
-        {ok, maps_utils:validate(Opts, ?OPTS_SPEC)}
+        #{nodes := All} = maps_utils:validate(Opts, ?OPTS_SPEC),
+        Myself = bondy_peer_service:mynode(),
+
+        State = #state{
+            peers = [Node || Node <- All, Node =/= Myself]
+        },
+        {ok, State}
+
     catch
         _:Reason ->
             {error, Reason}
@@ -83,7 +94,7 @@ init(Opts) ->
     | {error, Reason :: any(), NewState :: any()}.
 
 lookup(State, _Timeout) ->
-    {ok, maps:get(nodes, State), State}.
+    {ok, State#state.peers, State}.
 
 
 

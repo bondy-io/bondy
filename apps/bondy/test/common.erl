@@ -37,6 +37,7 @@
           [{type,bondy_peer_discovery_dns_agent},
            {timeout,5000},
            {polling_interval,10000},
+           {initial_delay, 30000},
            {join_retry_interval,5000},
            {automatic_join,true},
            {enabled,false},
