@@ -123,7 +123,7 @@
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.2">>},0},
  {<<"wamp">>,
   {git,"https://gitlab.com/leapsight/wamp.git",
-       {ref,"8d412c7bbd45e8603e4eb76413afa603efd732d7"}},
+       {ref,"1e2a9c4b8edabcd5fda6cf545b1ce424c7ca8ff1"}},
   0}]}.
 [
 {pkg_hash,[
