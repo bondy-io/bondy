@@ -36,20 +36,19 @@
 
 -export_type([wamp_error_map/0]).
 
-
+-export([aae_exchanges/0]).
 -export([ack/2]).
 -export([call/5]).
 -export([cast/5]).
+-export([check_response/4]).
+-export([is_remote_peer/1]).
 -export([publish/5]).
--export([subscribe/3]).
--export([subscribe/4]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
 -export([start/0]).
--export([aae_exchanges/0]).
--export([is_remote_peer/1]).
-
+-export([subscribe/3]).
+-export([subscribe/4]).
 
 
 %% =============================================================================
@@ -217,52 +216,56 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
     {ok, map(), bondy_context:t()}
     | {error, wamp_error_map(), bondy_context:t()}.
 
-call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
+call(Uri, Opts, Args, ArgsKw, Ctxt0) ->
     Timeout = case maps:find(timeout, Opts) of
         {ok, 0} -> bondy_config:get(wamp_call_timeout);
         {ok, Val} -> Val;
         error -> bondy_config:get(wamp_call_timeout)
     end,
 
-    case cast(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) of
+    case cast(Uri, Opts, Args, ArgsKw, Ctxt0) of
         {ok, ReqId, Ctxt1} ->
-            receive
-                {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
-                when Ref == ReqId ->
-                    %% ok = bondy:ack(Pid, Ref),
-                    {ok, message_to_map(R), Ctxt1};
-                {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
-                when Ref == ReqId ->
-                    %% ok = bondy:ack(Pid, Ref),
-                    {error, message_to_map(R), Ctxt1}
-            after
-                Timeout ->
-                    Mssg = iolist_to_binary(
-                        io_lib:format(
-                            "The operation could not be completed in time"
-                            " (~p milliseconds).",
-                            [Timeout]
-                        )
-                    ),
-                    ErrorDetails = maps:new(),
-                    ErrorArgs = [Mssg],
-                    ErrorArgsKw = #{
-                        procedure_uri => ProcedureUri,
-                        timeout => Timeout
-                    },
-                    Error = wamp_message:error(
-                        ?CALL,
-                        ReqId,
-                        ErrorDetails,
-                        ?BONDY_ERROR_TIMEOUT,
-                        ErrorArgs,
-                        ErrorArgsKw
-                    ),
-                    ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-                    {error, message_to_map(Error), Ctxt1}
-            end;
+            check_response(Uri, ReqId, Timeout, Ctxt1);
         {error, _, _} = Error ->
             Error
+    end.
+
+
+check_response(Uri, ReqId, Timeout, Ctxt) ->
+    receive
+        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
+        when Ref == ReqId ->
+            %% ok = bondy:ack(Pid, Ref),
+            {ok, message_to_map(R), Ctxt};
+        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
+        when Ref == ReqId ->
+            %% ok = bondy:ack(Pid, Ref),
+            {error, message_to_map(R), Ctxt}
+    after
+        Timeout ->
+            Mssg = iolist_to_binary(
+                io_lib:format(
+                    "The operation could not be completed in time"
+                    " (~p milliseconds).",
+                    [Timeout]
+                )
+            ),
+            ErrorDetails = maps:new(),
+            ErrorArgs = [Mssg],
+            ErrorArgsKw = #{
+                procedure_uri => Uri,
+                timeout => Timeout
+            },
+            Error = wamp_message:error(
+                ?CALL,
+                ReqId,
+                ErrorDetails,
+                ?BONDY_ERROR_TIMEOUT,
+                ErrorArgs,
+                ErrorArgsKw
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
+            {error, message_to_map(Error), Ctxt}
     end.
 
 
