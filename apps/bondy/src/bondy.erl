@@ -39,6 +39,7 @@
 
 -export([ack/2]).
 -export([call/5]).
+-export([cast/5]).
 -export([publish/5]).
 -export([subscribe/3]).
 -export([subscribe/4]).
@@ -202,7 +203,6 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
 %% API - CALLER ROLE
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% A blocking call.
@@ -218,26 +218,21 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
     | {error, wamp_error_map(), bondy_context:t()}.
 
 call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
-    %% @TODO ID should be session scoped and not global
-    %% FIXME we need to fix the wamp.hrl timeout
-    %% TODO also, according to WAMP the default is 0 which deactivates
-    %% the Call Timeout Feature
     Timeout = case maps:find(timeout, Opts) of
         {ok, 0} -> bondy_config:get(wamp_call_timeout);
         {ok, Val} -> Val;
         error -> bondy_config:get(wamp_call_timeout)
     end,
-    ReqId = bondy_utils:get_id(global),
 
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
-
-    case bondy_router:forward(M, Ctxt0) of
-        {ok, Ctxt1} ->
+    case cast(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) of
+        {ok, ReqId, Ctxt1} ->
             receive
-                {?BONDY_PEER_REQUEST, {_Pid, _Ref}, #result{} = R} ->
+                {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
+                when Ref == ReqId ->
                     %% ok = bondy:ack(Pid, Ref),
                     {ok, message_to_map(R), Ctxt1};
-                {?BONDY_PEER_REQUEST, {_Pid, _Ref}, #error{} = R} ->
+                {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
+                when Ref == ReqId ->
                     %% ok = bondy:ack(Pid, Ref),
                     {error, message_to_map(R), Ctxt1}
             after
@@ -266,6 +261,37 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
                     ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
                     {error, message_to_map(Error), Ctxt1}
             end;
+        {error, _, _} = Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% A non-blocking call.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec cast(
+    binary(),
+    map(),
+    list() | undefined,
+    map() | undefined,
+    bondy_context:t()) ->
+    {ok, bondy_context:t()}
+    | {error, wamp_error_map(), bondy_context:t()}.
+
+cast(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
+    %% @TODO ID should be session scoped and not global
+    %% FIXME we need to fix the wamp.hrl timeout
+    %% TODO also, according to WAMP the default is 0 which deactivates
+    %% the Call Timeout Feature
+    ReqId = bondy_utils:get_id(global),
+
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
+
+    case bondy_router:forward(M, Ctxt0) of
+        {ok, Ctxt1} ->
+            {ok, ReqId, Ctxt1};
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, message_to_map(Error), Ctxt1};
@@ -341,7 +367,7 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
         false ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    Ref = erlang:make_ref(),
+                    Ref = ref(M),
                     Pid ! {?BONDY_PEER_REQUEST, {self(), Ref}, M},
                     ok;
                 false ->
@@ -353,6 +379,16 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
                     ok
             end
     end.
+
+
+ref(M) ->
+    try
+        wamp_message:request_id(M)
+    catch
+        error:badarg ->
+            erlang:make_ref()
+    end.
+
 
 
 %% @private
