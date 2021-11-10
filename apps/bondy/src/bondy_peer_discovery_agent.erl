@@ -339,12 +339,11 @@ do_maybe_join([H|T], State) ->
         {error, _} ->
             do_maybe_join(T, State)
     catch
-        Class:Reason ->
+        Class:_ ->
             ?LOG_ERROR(#{
-                description => "Could not join node, the node might be down or not reachable",
-                node => H,
-                clase => Class,
-                reason => Reason
+                description => "Could not join peer, the node might be down or not reachable",
+                peer => H,
+                class => Class
             }),
             do_maybe_join(T, State)
     end.
