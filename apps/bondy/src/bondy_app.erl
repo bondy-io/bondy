@@ -235,9 +235,20 @@ setup_event_handlers() ->
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
     ),
+
+    %% An event handler that republishes some internal events to WAMP
     _ = bondy_event_manager:add_watched_handler(
         bondy_event_wamp_publisher, []
     ),
+
+    % Used for debugging
+    % _ = bondy_event_manager:add_watched_handler(
+    %     bondy_event_logger, []
+    % ),
+    % _ = plum_db_events:add_handler(
+    %     bondy_event_logger, []
+    % ),
+
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
     ok.
 

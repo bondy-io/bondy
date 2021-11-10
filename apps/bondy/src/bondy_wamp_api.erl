@@ -40,8 +40,8 @@
     M :: wamp_message:call(),
     Ctxt :: bony_context:t()) ->
 	ok
-    | ignore
-    | {redirect, uri()}
+    | continue
+    | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 
@@ -59,8 +59,8 @@
 %% -----------------------------------------------------------------------------
 -spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
 	ok
-    | ignore
-    | {redirect, uri()}
+    | continue
+    | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
@@ -78,8 +78,8 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
 -spec do_handle_call(
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     ok
-    | ignore
-    | {redirect, uri()}
+    | continue
+    | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->

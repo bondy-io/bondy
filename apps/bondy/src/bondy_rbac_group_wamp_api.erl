@@ -42,8 +42,8 @@
 -spec handle_call(
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
     ok
-    | ignore
-    | {redirect, uri()}
+    | continue
+    | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 

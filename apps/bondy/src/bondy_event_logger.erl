@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_telemetry_wamp_api.erl -
+%%  bondy_event_logger - An event handler to turn bondy events into WAMP events.
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,43 +16,63 @@
 %%  limitations under the License.
 %% =============================================================================
 
-
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc An event handler to generates WAMP Meta Events based on internal
+%% Bondy events
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_telemetry_wamp_api).
--behaviour(bondy_wamp_api).
+-module(bondy_event_logger).
+-behaviour(gen_event).
+-include_lib("kernel/include/logger.hrl").
 
--include_lib("wamp/include/wamp.hrl").
--include("bondy_uris.hrl").
+-record(state, {}).
 
--export([handle_call/3]).
+%% GEN_EVENT CALLBACKS
+-export([init/1]).
+-export([handle_event/2]).
+-export([handle_call/2]).
+-export([handle_info/2]).
+-export([terminate/2]).
+-export([code_change/3]).
 
 
 
 %% =============================================================================
-%% API
+%% GEN_EVENT CALLBACKS
 %% =============================================================================
 
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok
-    | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+init([]) ->
+    State = #state{},
+    {ok, State}.
 
 
-handle_call(?BONDY_TELEMETRY_METRICS, #call{} = M, _Ctxt) ->
-    %% TODO
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E};
+handle_event(Event, State) when element(1, Event) =/= wamp ->
+    ?LOG_NOTICE(#{
+        event => Event
+    }),
+    {ok, State};
 
-handle_call(_, #call{} = M, _) ->
-    E = bondy_wamp_utils:no_such_procedure_error(M),
-    {reply, E}.
+handle_event(_, State) ->
+    {ok, State}.
+
+
+handle_call(Event, State) ->
+    ?LOG_ERROR(#{
+        reason => unsupported_event,
+        event => Event
+    }),
+    {reply, {error, {unsupported_call, Event}}, State}.
+
+
+handle_info(_Info, State) ->
+    {ok, State}.
+
+
+terminate(_Reason, _State) ->
+    ok.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.

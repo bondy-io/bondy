@@ -625,16 +625,13 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 
 
 %% @private
-handle_call(
-    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
     callback(M, Ctxt, bondy_wamp_api);
 
-handle_call(
-    #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
     callback(M, Ctxt, bondy_wamp_meta_api);
 
-handle_call(
-    #call{procedure_uri = <<"com.bondy.", _/binary>>} = M, Ctxt) ->
+handle_call(#call{procedure_uri = <<"com.bondy.", _/binary>>} = M, Ctxt) ->
     %% Alias for "bondy"
     callback(M, Ctxt, bondy_wamp_api);
 
@@ -659,9 +656,9 @@ callback(#call{} = M, Ctxt, Mod) ->
     try Mod:handle_call(M, Ctxt) of
         ok ->
             ok;
-        ignore ->
+        continue ->
             do_handle_call(M, Ctxt, M#call.procedure_uri);
-        {redirect, OtherUri} ->
+        {continue, OtherUri} ->
             do_handle_call(M, Ctxt, OtherUri);
         {reply, Reply} ->
             bondy:send(PeerId, Reply)
@@ -694,26 +691,37 @@ do_handle_call(#call{} = M, Ctxt0, Uri) ->
     %% determine how many invocations and to whom we should do.
 
     Caller = bondy_context:peer_id(Ctxt0),
+
     Fun = fun
-        (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
-        when is_integer(SessionId), is_pid(Pid) ->
-            %% TODO Revert to session-scoped Ids
-            %% ReqId = bondy_utils:get_id({session, SessionId}),
-            ReqId = bondy_utils:get_id(global),
-            Args = M#call.arguments,
-            Payload = M#call.arguments_kw,
-            RegId = bondy_registry_entry:id(Entry),
-            RegOpts = bondy_registry_entry:options(Entry),
-            CallOpts = M#call.options,
-            Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
-            R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
+        (Entry, {_, _, undefined, Pid} = Callee, Ctxt1) when is_pid(Pid) ->
+            %% An internal callee e.g. WAMP Session APIs
+            R = call_to_invocation(M, Uri, Entry, Ctxt1),
             ok = bondy:send(Caller, Callee, R, #{}),
-            {ok, ReqId, Ctxt1}
+            {ok, R#invocation.request_id, Ctxt1};
+
+        (Entry, {_, _, SessionId, Pid} = Callee, Ctxt1)
+        when is_integer(SessionId), is_pid(Pid) ->
+            R = call_to_invocation(M, Uri, Entry, Ctxt1),
+            ok = bondy:send(Caller, Callee, R, #{}),
+            {ok, R#invocation.request_id, Ctxt1}
     end,
 
-    %% A response will be send asynchronously by another router process instance
+    %% A response will be send asynchronously
     invoke(M#call.request_id, Uri, Fun, M#call.options, Ctxt0).
 
+
+%% @private
+call_to_invocation(M, Uri, Entry, Ctxt1) ->
+    %% TODO Revert to session-scoped Ids
+    %% ReqId = bondy_utils:get_id({session, SessionId}),
+    ReqId = bondy_utils:get_id(global),
+    Args = M#call.arguments,
+    Payload = M#call.arguments_kw,
+    RegId = bondy_registry_entry:id(Entry),
+    RegOpts = bondy_registry_entry:options(Entry),
+    CallOpts = M#call.options,
+    Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
+    wamp_message:invocation(ReqId, RegId, Details, Args, Payload).
 
 
 %% @private
