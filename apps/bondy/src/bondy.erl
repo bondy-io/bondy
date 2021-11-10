@@ -341,8 +341,8 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
         false ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    Mref = erlang:monitor(process, Pid),
-                    Pid ! {?BONDY_PEER_REQUEST, {self(), Mref}, M},
+                    Ref = erlang:make_ref(),
+                    Pid ! {?BONDY_PEER_REQUEST, {self(), Ref}, M},
                     ok;
                 false ->
                     ?LOG_DEBUG(#{
