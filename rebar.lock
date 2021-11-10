@@ -118,7 +118,7 @@
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.7.0">>},1},
  {<<"utils">>,
   {git,"https://gitlab.com/leapsight/utils.git",
-       {ref,"ed1ab20c0b5dde691958cb8f8714ff3566096a64"}},
+       {ref,"2a3c460f5b9eeb6ea6580ee234da6c3f37be7674"}},
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.2">>},0},
  {<<"wamp">>,
