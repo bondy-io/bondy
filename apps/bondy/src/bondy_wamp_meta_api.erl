@@ -51,9 +51,6 @@
 
 handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
 
-% To use as {lookup, redirect_uri(?WAMP_SESSION_GET, SessionId)};
-% redirect_uri(<<"wamp.session.", Rest/binary>>, Id) when is_integer(Id) ->
-%     <<"wamp.session.", (integer_to_binary(Id))/binary, $., Rest>>.
 
     [RealmUri, SessionId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
 
