@@ -1581,22 +1581,44 @@ hidden
 %% cluster.peer_discovery.config.keyA = valueA
 %% cluster.peer_discovery.config.keyB = valueB
 %%
+%% Example: Using arrays
+%% cluster.peer_discovery.config.keyA.# = value1
+%% cluster.peer_discovery.config.keyA.# = value2
+%%
 %% Refer to each strategy documentation
 {mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [
   {datatype, string}
+]}.
+
+{mapping, "cluster.peer_discovery.config.$name.$_", "bondy.peer_discovery.config", [
+{datatype, string}
 ]}.
 
 {translation,
 "bondy.peer_discovery.config",
 fun(Conf0) ->
     Conf = cuttlefish_variable:filter_by_prefix(
-      "cluster.peer_discovery.config", Conf0),
-    lists:foldl(
-        fun({[_, _, _, Key], Value}, Acc) ->
-          [{list_to_binary(Key), list_to_binary(Value)} | Acc]
+      "cluster.peer_discovery.config", Conf0
+    ),
+    Dict = lists:foldl(
+        fun
+          ({[_, _, _, Key], Value}, Acc) ->
+            dict:store(list_to_binary(Key), list_to_binary(Value), Acc);
+          ({[_, _, _, Key, _], Value}, Acc) ->
+            dict:append(list_to_binary(Key), list_to_binary(Value), Acc)
         end,
-        [],
+        dict:new(),
         Conf
+    ),
+    dict:fold(
+      fun
+        (K, V, Acc) when is_list(V) ->
+          [{K, lists:reverse(V)} | Acc];
+        (K, V, Acc) ->
+          [{K, V} | Acc]
+      end,
+      [],
+      Dict
     )
 end}.
 
