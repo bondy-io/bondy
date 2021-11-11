@@ -217,7 +217,15 @@ decode(json, <<>>) ->
     <<>>;
 
 decode(json, Term) ->
-    jsone:decode(Term, [undefined_as_null]);
+    Opts = [undefined_as_null],
+    %% This is code specific to support a customer legacy code which sends
+    %% single quote strings as JSON, which is not a valid JSON string
+    try
+        jsone:decode(Term, Opts)
+    catch
+        error:badarg ->
+            jsone:decode(remove_single_quotes(Term), Opts)
+    end;
 
 decode(msgpack, Term) ->
     Opts = [{map_format, map}, {unpack_str, as_binary}],
@@ -228,8 +236,9 @@ decode(ContentType, Term) ->
     %% We cannot decode this so create a wrapped data object
     #{<<"type">> => ContentType, <<"content">> => Term}.
 
-
-
+%% @private
+remove_single_quotes(Term) ->
+    binary:replace(Term, <<$'>>, <<$">>, [global]).
 
 
 %% -----------------------------------------------------------------------------
