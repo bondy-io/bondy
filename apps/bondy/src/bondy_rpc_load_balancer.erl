@@ -276,8 +276,10 @@ do_get({error, _} = Error, _) ->
 do_get({Entry, Iter}, Node) ->
     case bondy_registry_entry:node(Entry) =:= Node of
         true ->
-            %% The wamp peer is local
+            %% The wamp peer is local, so we should have a peer
+            %% Callback peers are not allowed to be used on shared registration
             Pid = bondy_registry_entry:pid(Entry),
+
             case erlang:is_process_alive(Pid) of
                 true ->
                     Entry;

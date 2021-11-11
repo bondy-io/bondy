@@ -21,6 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_meta_api).
+-behaviour(bondy_wamp_callback).
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").

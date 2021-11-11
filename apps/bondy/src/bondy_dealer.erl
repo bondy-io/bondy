@@ -184,6 +184,9 @@
 -export([callees/1]).
 -export([callees/2]).
 -export([callees/3]).
+-export([register/4]).
+-export([unregister/1]).
+-export([unregister/2]).
 
 -compile({no_auto_import, [register/2]}).
 
@@ -193,6 +196,85 @@
 %% API
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Creates a local registration.
+%% If the registration is done using a callback module, only the invoke single
+%% strategy can be used (i.e. shared_registration and sharded_registration are
+%% also disabled). Also the callback module needs to conform to the
+%% wamp_api_callback behaviour, otherwise the call fails with a badarg
+%% exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register(
+    RealmUri :: uri(),
+    Opts :: map(),
+    Procedure :: uri(),
+    Term :: pid() | function() | module()) ->
+    {ok, id()}
+    | {ok, id(), pid()}
+    | {error, already_exists | any()}
+    | no_return().
+
+register(_RealmUri, _Opts, _Procedure, Fun) when is_function(Fun, 2) ->
+    error(not_implemented);
+
+register(RealmUri, Opts, Procedure, Pid) when is_pid(Pid) ->
+    do_register(Procedure, Opts, {RealmUri, Pid});
+
+register(RealmUri, Opts0, Procedure, Mod) when is_atom(Mod) ->
+    bondy_wamp_callback:conforms(Mod) orelse error({badarg, Mod}),
+
+    Opts = Opts0#{
+        invoke => ?INVOKE_SINGLE,
+        shared_registration => false
+    },
+    do_register(Procedure, Opts, {RealmUri, Mod}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc For internal Bondy use.
+%% Terminates the process identified by Pid by
+%% bondy_subscribers_sup:terminate_subscriber/1
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(pid()) -> ok | {error, not_found}.
+
+unregister(Callee) when is_integer(Callee) ->
+    error(not_implemented);
+
+unregister(Callee) when is_pid(Callee) ->
+    error(not_implemented).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(RegId :: id(), bondy_context:t() | uri()) ->
+    ok | {error, not_found}.
+
+unregister(RegId, RealmUri) when is_binary(RealmUri) ->
+    unregister(RegId, bondy_context:local_context(RealmUri));
+
+unregister(RegId, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
+    case bondy_registry:lookup(registration, RegId, RealmUri) of
+        {error, not_found} = Error ->
+            Error;
+        Entry ->
+            case bondy_registry:remove(Entry) of
+                ok ->
+                    on_unregister(Entry, Ctxt);
+                {ok, false} ->
+                    on_unregister(Entry, Ctxt);
+                {ok, true} ->
+                    on_delete(Entry, Ctxt);
+                Error ->
+                    Error
+            end
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -437,6 +519,20 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
 %% =============================================================================
 
 
+
+
+
+%% @private
+do_register(Procedure, Opts, Term) ->
+    case
+        bondy_registry:add(registration, Procedure, Opts, Term)
+    of
+        {ok, Entry, _} ->
+            {ok, bondy_registry_entry:id(Entry)};
+
+        {error, {already_exists, _}} ->
+            {error, already_exists}
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -1239,8 +1335,8 @@ on_unregister(Entry, Ctxt) ->
 
 
 %% @private
-%% on_delete(Map, Ctxt) ->
-%%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
+on_delete(Map, Ctxt) ->
+    bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
 
 error_from_map(Error, CallId) ->

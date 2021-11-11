@@ -28,7 +28,8 @@
 %% Entries are immutable.
 -record(entry, {
     key                     ::  entry_key(),
-    pid                     ::  pid(),
+    pid                     ::  maybe(pid()),
+    mod                     ::  maybe(module()),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     created                 ::  pos_integer() | atom(),
@@ -38,11 +39,10 @@
 -record(entry_key, {
     realm_uri               ::  uri() | '_',
     node                    ::  node(),
-    session_id              ::  id() | '_' | undefined,   % the owner
+    session_id              ::  maybe(id() | '_'),   % the owner
     entry_id                ::  id() | '_',
     type                    ::  entry_type()
 }).
-
 
 -opaque t()                 ::  #entry{}.
 -type entry_key()           ::  #entry_key{}.
@@ -58,10 +58,13 @@
 -export_type([entry_type/0]).
 -export_type([details_map/0]).
 
+-export([callback_mod/1]).
 -export([created/1]).
 -export([get_option/3]).
 -export([id/1]).
+-export([is_callback/1]).
 -export([is_entry/1]).
+-export([is_local/1]).
 -export([key/1]).
 -export([key_pattern/3]).
 -export([key_pattern/5]).
@@ -69,7 +72,6 @@
 -export([new/4]).
 -export([new/5]).
 -export([node/1]).
--export([is_local/1]).
 -export([options/1]).
 -export([pattern/4]).
 -export([pattern/6]).
@@ -83,9 +85,11 @@
 -export([uri/1]).
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -94,9 +98,9 @@
 %% -----------------------------------------------------------------------------
 -spec new(entry_type(), peer_id(), uri(), map()) -> t().
 
-new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
+new(Type, {RealmUri, Node, SessionId, Term}, Uri, Options) ->
     RegId = bondy_utils:get_id(global),
-    new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options).
+    new(Type, RegId, {RealmUri, Node, SessionId, Term}, Uri, Options).
 
 
 %% -----------------------------------------------------------------------------
@@ -105,8 +109,21 @@ new(Type, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
 %% -----------------------------------------------------------------------------
 -spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
 
-new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
+new(Type, RegId, {RealmUri, Node, SessionId, Term}, Uri, Options) ->
+    %% For RPC we support Term being a pid, callback module or undefined
+    Entry = case Term of
+        undefined ->
+            #entry{};
+        Pid when is_pid(Pid) ->
+            #entry{pid = Pid};
+        Mod when is_atom(Mod), Type == registration ->
+            #entry{mod = Mod};
+        Other ->
+            error({badarg, Other})
+    end,
+
     MatchPolicy = validate_match_policy(Options),
+
     Key = #entry_key{
         realm_uri = RealmUri,
         node = Node,
@@ -114,9 +131,9 @@ new(Type, RegId, {RealmUri, Node, SessionId, Pid}, Uri, Options) ->
         entry_id = RegId,
         type = Type
     },
-    #entry{
+
+    Entry#entry{
         key = Key,
-        pid = Pid,
         uri = Uri,
         match_policy = MatchPolicy,
         created = erlang:system_time(seconds),
@@ -135,11 +152,13 @@ pattern(Type, RealmUri, EntryId, Options) ->
     #entry{
         key = key_pattern(Type, RealmUri, '_', '_', EntryId),
         pid = '_',
+        mod = '_',
         uri = '_',
         match_policy = MatchPolicy,
         created = '_',
         options = '_'
     }.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -152,6 +171,7 @@ pattern(Type, RealmUri, Node, SessionId, Uri, Options) ->
     #entry{
         key = key_pattern(Type, RealmUri, Node, SessionId, '_'),
         pid = '_',
+        mod = '_',
         uri = Uri,
         match_policy = MatchPolicy,
         created = '_',
@@ -202,6 +222,7 @@ is_entry(_) -> false.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec key(t()) -> uri().
+
 key(#entry{key = Key}) ->
     Key.
 
@@ -211,7 +232,8 @@ key(#entry{key = Key}) ->
 %% Returns the value of the subscription's or registration's realm_uri property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(t() | entry_key()) -> uri() | undefined.
+-spec realm_uri(t() | entry_key()) -> maybe(uri()).
+
 realm_uri(#entry{key = Key}) ->
     Key#entry_key.realm_uri;
 
@@ -226,6 +248,7 @@ realm_uri(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec node(t() | entry_key()) -> atom().
+
 node(#entry{key = Key}) ->
     Key#entry_key.node;
 
@@ -238,11 +261,32 @@ node(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_local(t() | entry_key()) -> boolean().
+
 is_local(#entry{key = Key}) ->
     is_local(Key);
 
 is_local(#entry_key{} = Key) ->
     bondy_peer_service:mynode() =:= Key#entry_key.node.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns true if the entry represents a local callback registration
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_callback(t()) -> boolean().
+
+is_callback(#entry{mod = Mod}) ->
+    Mod =/= undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns true if the entry represents a local callback registration
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callback_mod(t()) -> maybe(module()).
+
+callback_mod(#entry{mod = Mod}) ->
+    Mod.
 
 
 %% -----------------------------------------------------------------------------
@@ -252,7 +296,9 @@ is_local(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec pid(t() | entry_key()) -> pid().
-pid(#entry{pid = Val}) -> Val.
+
+pid(#entry{pid = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -261,7 +307,8 @@ pid(#entry{pid = Val}) -> Val.
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t() | entry_key()) -> id() | undefined.
+-spec session_id(t() | entry_key()) -> maybe(id()).
+
 session_id(#entry{key = Key}) ->
     Key#entry_key.session_id;
 
@@ -275,12 +322,20 @@ session_id(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec peer_id(t() | entry_key()) -> peer_id().
-peer_id(#entry{key = Key} = Entry) ->
+
+peer_id(#entry{key = Key} = E) ->
+    Term = case is_callback(E) of
+        true ->
+            E#entry.mod;
+        false ->
+            E#entry.pid
+    end,
+
     {
         Key#entry_key.realm_uri,
         Key#entry_key.node,
         Key#entry_key.session_id,
-        Entry#entry.pid
+        Term
     }.
 
 
@@ -291,6 +346,7 @@ peer_id(#entry{key = Key} = Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec id(t() | entry_key()) -> id() | '_'.
+
 id(#entry{key = Key}) ->
     Key#entry_key.entry_id;
 
@@ -304,6 +360,7 @@ id(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec type(t() | entry_key()) -> entry_type().
+
 type(#entry{key = Key}) ->
     Key#entry_key.type;
 
@@ -318,6 +375,7 @@ type(#entry_key{} = Key) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec uri(t()) -> uri().
+
 uri(#entry{uri = Val}) -> Val.
 
 
@@ -327,6 +385,7 @@ uri(#entry{uri = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec match_policy(t()) -> binary().
+
 match_policy(#entry{match_policy = Val}) -> Val.
 
 
@@ -355,6 +414,7 @@ options(#entry{options = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec get_option(t(), any(), any()) -> any().
+
 get_option(#entry{options = Opts}, Key, Default) ->
     maps:get(Key, Opts, Default).
 
@@ -398,17 +458,33 @@ to_map(#entry{key = Key} = E) ->
         node => Key#entry_key.node,
         created => created_format(E#entry.created),
         uri => E#entry.uri,
-        pid => list_to_binary(pid_to_list(E#entry.pid)),
+        pid => pid_to_binary(E#entry.pid),
+        mod => mod_to_binary(E#entry.mod),
         match => E#entry.match_policy,
         options => E#entry.options
     }.
 
 
 
-
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+
+
+pid_to_binary(undefined) ->
+    <<"undefined">>;
+
+pid_to_binary(Pid) ->
+    list_to_binary(pid_to_list(Pid)).
+
+
+mod_to_binary(#entry{} = E)->
+    atom_to_binary(E#entry.mod, utf8).
+
+
+
 
 validate_match_policy(Options) ->
     validate_match_policy(key, Options).
@@ -419,9 +495,12 @@ validate_match_policy(pattern, '_') ->
 
 validate_match_policy(_, Options) when is_map(Options) ->
     case maps:get(match, Options, ?EXACT_MATCH) of
-        ?EXACT_MATCH = P -> P;
-        ?PREFIX_MATCH = P -> P;
-        ?WILDCARD_MATCH = P -> P;
+        ?EXACT_MATCH = P ->
+            P;
+        ?PREFIX_MATCH = P ->
+            P;
+        ?WILDCARD_MATCH = P ->
+            P;
         P ->
             error({invalid_match_policy, P})
     end.

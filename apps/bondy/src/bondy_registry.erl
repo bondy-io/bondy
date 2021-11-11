@@ -255,6 +255,11 @@ add(Type, Uri, Options, {RealmUri, Node, SessionId, _} = PeerId) ->
             end
     end;
 
+add(registration = Type, Uri, Options, {RealmUri, Mod}) when is_atom(Mod) ->
+    %% Adds a local/internal callback registration
+    Node = bondy_peer_service:mynode(),
+    add(Type, Uri, Options, {RealmUri, Node, undefined, Mod});
+
 add(Type, Uri, Options, {RealmUri, Pid}) when is_pid(Pid) ->
     %% Adds a local/internal subcription|registration
     Node = bondy_peer_service:mynode(),
