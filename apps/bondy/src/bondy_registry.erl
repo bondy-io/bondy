@@ -973,7 +973,7 @@ trie_key(Entry) ->
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
 
-    Node = case bondy_registry_entry:session_id(Entry) of
+    Node = case bondy_registry_entry:node(Entry) of
         '_' ->
             <<>>;
         Node0 ->
