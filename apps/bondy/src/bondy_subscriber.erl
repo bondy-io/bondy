@@ -28,7 +28,6 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 
 -record(state, {
     realm_uri           ::  uri(),
@@ -79,7 +78,8 @@
 
 start_link(Id, RealmUri, Opts, Topic, Fun) ->
     gen_server:start_link(
-        {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []).
+        {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []
+    ).
 
 
 %% -----------------------------------------------------------------------------
