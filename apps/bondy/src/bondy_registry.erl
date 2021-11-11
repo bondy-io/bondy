@@ -221,7 +221,10 @@ add(Type, Uri, Options, {RealmUri, Node, SessionId, _} = PeerId) ->
             {error, {already_exists, Entry}};
 
         [{_, EntryKey} | _] when Type == registration ->
-            EOpts = bondy_registry_entry:options(EntryKey),
+            %% We fetch the entry from plum_db, this should not fail, if it
+            %% does we have an inconsistency between plum_db and the trie.
+            Entry = lookup(EntryKey),
+            EOpts = bondy_registry_entry:options(Entry),
             PrevPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
             NewPolicy = maps:get(invoke, Options, ?INVOKE_SINGLE),
 
@@ -964,15 +967,23 @@ trie_key(Entry) ->
 
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Node = list_to_binary(atom_to_list(bondy_registry_entry:node(Entry))),
+
+    Node = case bondy_registry_entry:session_id(Entry) of
+        '_' ->
+            <<>>;
+        Node0 ->
+            atom_to_binary(Node0, utf8)
+    end,
+
     SessionId = case bondy_registry_entry:session_id(Entry) of
         '_' ->
             <<>>;
         undefined ->
             <<"undefined">>;
-        X ->
-            integer_to_binary(X)
+        SessionId0 ->
+            integer_to_binary(SessionId0)
     end,
+
     Id = case bondy_registry_entry:id(Entry) of
         '_' ->
             %% This will act as a pattern
@@ -981,9 +992,10 @@ trie_key(Entry, Policy) ->
             %% As we currently do not support wildcard matching in art, we turn
             %% this into a prefix matching query
             <<>>;
-        Y ->
-            integer_to_binary(Y)
+        Id0 ->
+            integer_to_binary(Id0)
     end,
+
     Uri = bondy_registry_entry:uri(Entry),
 
     %% art uses $\31 for separating the suffixes of the key so we cannot
