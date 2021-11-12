@@ -511,6 +511,7 @@ hidden
 %% A value of 0 means no limit is enforced.
 {mapping, "wamp.message_retention.max_messages", "bondy.wamp_message_retention.max_messages", [
   {default, "1000000"},
+  {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
@@ -584,6 +585,7 @@ hidden
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.size", "bondy.router_pool.size", [
   {default, 8},
+  {validators, [pos_integer]},
   {datatype, integer},
   hidden
 ]}.
@@ -596,6 +598,7 @@ hidden
 %% -----------------------------------------------------------------------------
 {mapping, "load_regulation.router.pool.capacity", "bondy.router_pool.capacity", [
   {default, 100000},
+  {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
@@ -627,6 +630,7 @@ hidden
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.http.port", "bondy.admin_api_http.port", [
   {default, 18081},
+  {validators, [port_number]},
   {datatype, integer},
   hidden
 ]}.
@@ -634,12 +638,14 @@ hidden
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.http.acceptors_pool_size", "bondy.admin_api_http.acceptors_pool_size", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "admin_api.http.max_connections", "bondy.admin_api_http.max_connections", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 250000}
 ]}.
 
@@ -648,6 +654,7 @@ hidden
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "admin_api.http.backlog", "bondy.admin_api_http.backlog", [
 {datatype, integer},
+{validators, [pos_integer]},
 {default, 1024}
 ]}.
 
@@ -704,6 +711,7 @@ hidden
 %% exposing the Admin Rest APIs.
 {mapping, "admin_api.https.port", "bondy.admin_api_https.port", [
   {default, 18084},
+  {validators, [port_number]},
   {datatype, integer},
   hidden
 ]}.
@@ -711,18 +719,21 @@ hidden
 %% The Cowboy acceptors_pool_size for the Admin API https listener
 {mapping, "admin_api.https.acceptors_pool_size", "bondy.admin_api_https.acceptors_pool_size", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "admin_api.https.max_connections", "bondy.admin_api_https.max_connections", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 250000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "admin_api.https.backlog", "bondy.admin_api_https.backlog", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 1024}
 ]}.
 
@@ -837,6 +848,7 @@ hidden
 %% exposing the API Gateway managed APIs.
 {mapping, "api_gateway.http.port", "bondy.api_gateway_http.port", [
   {default, 18080},
+  {validators, [port_number]},
   {datatype, integer},
   hidden
 ]}.
@@ -845,6 +857,7 @@ hidden
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.http.acceptors_pool_size", "bondy.api_gateway_http.acceptors_pool_size", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 200}
 ]}.
 
@@ -852,12 +865,14 @@ hidden
 %% The Cowboy max number of connections for the Admin API http listener
 {mapping, "api_gateway.http.max_connections", "bondy.api_gateway_http.max_connections", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 500000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "api_gateway.http.backlog", "bondy.api_gateway_http.backlog", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 4096}
 ]}.
 
@@ -930,6 +945,7 @@ hidden
 {mapping, "api_gateway.https.port", "bondy.api_gateway_https.port", [
   {default, 18083},
   {datatype, integer},
+  {validators, [port_number]},
   hidden
 ]}.
 
@@ -937,18 +953,21 @@ hidden
 %% The Cowboy acceptors_pool_size for the API Gateway's http listener
 {mapping, "api_gateway.https.acceptors_pool_size", "bondy.api_gateway_https.acceptors_pool_size", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 200}
 ]}.
 
 %% The Cowboy max number of connections for the Admin API https listener
 {mapping, "api_gateway.https.max_connections", "bondy.api_gateway_https.max_connections", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 500000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
 {mapping, "api_gateway.https.backlog", "bondy.api_gateway_https.backlog", [
   {datatype, integer},
+  {validators, [pos_integer]},
   {default, 4096}
 ]}.
 
@@ -1298,8 +1317,6 @@ hidden
 %% =============================================================================
 %% WAMP RAW SOCKET
 %% =============================================================================
-
-
 
 
 
@@ -1782,6 +1799,7 @@ end}.
 
 {mapping, "store.open_retry_Limit", "plum_db.store_open_retry_limit", [
   {default, 30},
+  {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
@@ -1852,4 +1870,15 @@ end}.
 %% =============================================================================
 
 
-{validator, "pos_integer", "greater than 1", fun(Size) -> Size >= 1 end}.
+{validator,
+  "pos_integer",
+  "greater than 1",
+  fun(Size) -> Size >= 1 end
+}.
+
+
+{validator,
+  "port_number",
+  "greater than 1024 and less or equal to 65535",
+  fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+}.
