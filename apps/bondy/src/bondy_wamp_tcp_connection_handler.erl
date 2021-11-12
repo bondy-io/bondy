@@ -77,8 +77,13 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Ref, Socket, Transport, Opts) ->
-    {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
+-spec start_link(
+    Ref :: ranch:ref(), _, Transport :: module(), ProtoOpts :: any()) ->
+    {ok, ConnPid :: pid()}
+    | {ok, SupPid :: pid(), ConnPid :: pid()}.
+
+start_link(Ref, _, Transport, Opts) ->
+    {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Transport, Opts}])}.
 
 
 
@@ -88,21 +93,22 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 
-init({Ref, Socket, Transport, _Opts0}) ->
+init({Ref, Transport, _Opts0}) ->
     St0 = #state{
         start_time = erlang:monotonic_time(second),
         transport = Transport
     },
 
-    %% We must call ranch:accept_ack/1 before doing any socket operation.
-    %% This will ensure the connection process is the owner of the socket.
-    %% It expects the listener’s name as argument.
-    ok = ranch:accept_ack(Ref),
+    Opts = [
+        {active, active_n(St0)},
+        {packet, 0}
+        | bondy_config:get([Ref, socket_opts], [])
+    ],
 
-    Opts = bondy_config:get([Ref, socket_opts], []),
-    Res = Transport:setopts(
-        Socket, [{active, active_n(St0)}, {packet, 0} | Opts]
-    ),
+    {ok, Socket} = ranch:handshake(Ref),
+
+    Res = Transport:setopts(Socket, Opts),
+
     ok = maybe_error(Res),
 
     {ok, Peername} = inet:peername(Socket),
