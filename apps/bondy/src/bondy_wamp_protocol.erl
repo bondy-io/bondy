@@ -596,6 +596,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         Welcome = wamp_message:welcome(
             Id,
             #{
+                realm => RealmUri,
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles(),
                 authprovider => Authprovider,
