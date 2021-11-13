@@ -39,7 +39,7 @@
 -callback handle_call(
     Procedure :: uri(),
     M :: wamp_message:call(),
-    Ctxt :: bony_context:t()) ->
+    Ctxt :: bondy_context:t()) ->
 	ok
     | continue
     | {continue, uri()}
@@ -58,7 +58,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
 	ok
     | continue
     | {continue, uri()}
@@ -77,7 +77,7 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
 
 %% @private
 -spec do_handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri()}

@@ -42,7 +42,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_call(
-    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bony_context:t()) -> ok
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
     | continue
     | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.

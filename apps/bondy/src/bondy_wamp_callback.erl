@@ -13,11 +13,12 @@
 
 -callback handle_call(
     M :: wamp_message:call(),
-    Ctxt :: bony_context:t()) ->
+    Ctxt :: bondy_context:t()) ->
 	ok
     | continue
     | {continue, uri()}
     | {reply, wamp_messsage:result() | wamp_message:error()}.
+
 
 
 
@@ -35,6 +36,3 @@
 
 conforms(Mod) ->
     erlang:function_exported(Mod, handle_call, 2).
-
-
-

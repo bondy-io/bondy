@@ -43,7 +43,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_call(M :: wamp_message:call(), Ctxt :: bony_context:t()) ->
+-spec handle_call(M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
     | {continue, uri()}
