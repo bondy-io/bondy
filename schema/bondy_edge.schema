@@ -1,0 +1,247 @@
+%% =============================================================================
+%%  bondy.schema - Bondy configuration schema for Cuttlefish
+%%
+%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
+
+%% =============================================================================
+%% EGDE TCP CONNECTIONS
+%% =============================================================================
+
+
+%% @doc Enables or disables Bondy edge nodes to connect to Bondy.
+{mapping, "edge.tcp.enabled", "bondy.edge_tcp.enabled", [
+{default, off},
+{datatype, {flag, on, off}}
+]}.
+
+%% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
+{mapping, "edge.tcp.port", "bondy.edge_tcp.port", [
+{default, 18085},
+{validators, [port_number]},
+{datatype, integer}
+]}.
+
+%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
+{mapping, "edge.tcp.acceptors_pool_size", "bondy.edge_tcp.acceptors_pool_size", [
+{datatype, integer},
+{validators, [pos_integer]},
+{default, 200}
+]}.
+
+%% The ranch max number of connections for the WAMP raw socket tcp listener
+{mapping, "edge.tcp.max_connections", "bondy.edge_tcp.max_connections", [
+{datatype, integer},
+{validators, [pos_integer]},
+{default, 100000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "edge.tcp.backlog", "bondy.edge_tcp.backlog", [
+{datatype, integer},
+{validators, [pos_integer]},
+{default, 1024}
+]}.
+
+
+%% Enables/disables periodic transmission on a connected socket when no other
+%% data is exchanged. If the other end does not respond, the connection is
+%% considered broken and an error message is sent to the controlling process.
+{mapping, "edge.tcp.keepalive", "bondy.edge_tcp.socket_opts.keepalive", [
+{datatype, {flag, on, off}},
+{default, on}
+]}.
+
+%% The minimum size of the send buffer to use for the socket.
+{mapping, "edge.tcp.sndbuf", "bondy.edge_tcp.socket_opts.sndbuf", [
+{datatype, bytesize}
+]}.
+
+%% The minimum size of the receive buffer to use for the socket.
+{mapping, "edge.tcp.recbuf", "bondy.edge_tcp.socket_opts.recbuf", [
+{datatype, bytesize}
+]}.
+
+%% The size of the user-level software buffer used by the driver.
+%% Not to be confused with options sndbuf and recbuf, which correspond to the
+%% Kernel socket buffers.
+%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
+%% avoid performance issues because of unnecessary copying.
+%% val(buffer) is automatically set to the above maximum when values sndbuf or
+%% recbuf are set.
+{mapping, "edge.tcp.buffer", "bondy.edge_tcp.socket_opts.buffer", [
+{datatype, bytesize}
+]}.
+
+%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
+%% means that also small amounts of data are sent immediately.
+{mapping, "edge.tcp.nodelay", "bondy.edge_tcp.socket_opts.nodelay", [
+{datatype, {flag, on, off}},
+{default, on}
+]}.
+
+
+%% =============================================================================
+%% EGDE TLS CONNECTIONS
+%% =============================================================================
+
+
+%% @doc Enables or disables Bondy edge nodes to connect to Bondy.
+{mapping, "edge.tls.enabled", "bondy.edge_tls.enabled", [
+{default, off},
+{datatype, {flag, on, off}}
+]}.
+
+%% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
+{mapping, "edge.tls.port", "bondy.edge_tls.port", [
+{default, 18085},
+{validators, [port_number]},
+{datatype, integer}
+]}.
+
+%% The ranch acceptors_pool_size for the WAMP raw socket tcp listener
+{mapping, "edge.tls.acceptors_pool_size", "bondy.edge_tls.acceptors_pool_size", [
+{datatype, integer},
+{validators, [pos_integer]},
+{default, 200}
+]}.
+
+%% The ranch max number of connections for the WAMP raw socket tcp listener
+{mapping, "edge.tls.max_connections", "bondy.edge_tls.max_connections", [
+{datatype, integer},
+{validators, [pos_integer]},
+{default, 100000}
+]}.
+
+%% The maximum length that the queue of pending connections can grow to.
+{mapping, "edge.tls.backlog", "bondy.edge_tls.backlog", [
+{datatype, integer},
+{default, 1024}
+]}.
+
+
+%% Enables/disables periodic transmission on a connected socket when no other
+%% data is exchanged. If the other end does not respond, the connection is
+%% considered broken and an error message is sent to the controlling process.
+{mapping, "edge.tls.keepalive", "bondy.edge_tls.socket_opts.keepalive", [
+{datatype, {flag, on, off}},
+{default, on}
+]}.
+
+%% The minimum size of the send buffer to use for the socket.
+{mapping, "edge.tls.sndbuf", "bondy.edge_tls.socket_opts.sndbuf", [
+{datatype, bytesize}
+]}.
+
+%% The minimum size of the receive buffer to use for the socket.
+{mapping, "edge.tls.recbuf", "bondy.edge_tls.socket_opts.recbuf", [
+{datatype, bytesize}
+]}.
+
+%% The size of the user-level software buffer used by the driver.
+%% Not to be confused with options sndbuf and recbuf, which correspond to the
+%% Kernel socket buffers.
+%% It is recommended to have val(buffer) >= max(val(sndbuf),val(recbuf)) to
+%% avoid performance issues because of unnecessary copying.
+%% val(buffer) is automatically set to the above maximum when values sndbuf or
+%% recbuf are set.
+{mapping, "edge.tls.buffer", "bondy.edge_tls.socket_opts.buffer", [
+{datatype, bytesize}
+]}.
+
+%% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
+%% means that also small amounts of data are sent immediately.
+{mapping, "edge.tls.nodelay", "bondy.edge_tls.socket_opts.nodelay", [
+{datatype, {flag, on, off}},
+{default, on}
+]}.
+
+%% @doc Default cert location for https can be overridden
+%% with the edge.tls config variable, for example:
+{mapping, "edge.tls.certfile", "bondy.edge_tls.socket_opts.certfile", [
+{datatype, file},
+{default, "$(platform_etc_dir)/cert.pem"}
+]}.
+
+%% @doc Default key location for https can be overridden with the
+%%edge.tls config variable, for example:
+{mapping, "edge.tls.keyfile", "bondy.edge_tls.socket_opts.keyfile", [
+{datatype, file},
+{default, "$(platform_etc_dir)/key.pem"}
+]}.
+
+%% @doc Default signing authority location for https can be overridden
+%% with the edge.tls config variable, for example:
+{mapping, "edge.tls.cacertfile", "bondy.edge_tls.socket_opts.cacertfile", [
+{datatype, file},
+{default, "$(platform_etc_dir)/cacert.pem"}
+]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "edge.tls.versions", "bondy.edge_tls.socket_opts.versions", [
+{datatype, string},
+{default, "1.3"}
+]}.
+
+
+{translation, "bondy.edge_tls.socket_opts.versions",
+fun(Conf) ->
+  case cuttlefish:conf_get("edge.tls.versions", Conf) of
+      Value when is_list(Value) ->
+        try
+          [
+            begin
+              case string:strip(Version) of
+                "1.2" -> 'tlsv1.2';
+                "1.3" -> 'tlsv1.3';
+                _ -> throw({invalid_version, Version})
+              end
+            end || Version <- string:split(Value, ",")
+          ]
+        catch
+          throw:{invalid_version, Version} ->
+            cuttlefish:invalid("invalid TLS version " ++ Version)
+        end;
+      _ ->
+          cuttlefish:invalid(
+            "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+          )
+  end
+end
+}.
+
+
+
+
+%% =============================================================================
+%% VALIDATORS
+%% =============================================================================
+
+
+{validator,
+  "pos_integer",
+  "greater than 1",
+  fun(Size) -> Size >= 1 end
+}.
+
+
+{validator,
+  "port_number",
+  "greater than 1024 and less or equal to 65535",
+  fun(Port) -> Port >= 1024 andalso Port =< 65535 end
+}.
