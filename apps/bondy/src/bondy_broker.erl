@@ -180,8 +180,8 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     PubId = maps:get(publication_id, Opts),
     RealmUri = RealmUri = element(1, PeerId),
     TopicUri = M#publish.topic_uri,
-    Args = M#publish.arguments,
-    ArgsKW = M#publish.arguments_kw,
+    Args = M#publish.args,
+    ArgsKW = M#publish.kwargs,
     Subs = match_subscriptions(TopicUri, RealmUri, #{}),
 
     Node = bondy_peer_service:mynode(),
@@ -586,8 +586,8 @@ maybe_publish(M, Ctxt) ->
         %% published event even if the _Publisher_ is also a _Subscriber_ of the
         %% topic published to.
         ReqId = M#publish.request_id,
-        Args = M#publish.arguments,
-        Payload = M#publish.arguments_kw,
+        Args = M#publish.args,
+        Payload = M#publish.kwargs,
         %% (RFC) By default, publications are unacknowledged, and the _Broker_
         %% will not respond, whether the publication was successful indeed or
         %% not.
@@ -891,11 +891,11 @@ maybe_retain(_, _, _, _, _) ->
 %% @private
 send_retained(Entry) ->
     Realm = bondy_registry_entry:realm_uri(Entry),
+    SubsId = bondy_registry_entry:id(Entry),
     Topic = bondy_registry_entry:uri(Entry),
-    SubsId = bondy_registry_entry:id(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),
-    SubsId = bondy_registry_entry:id(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
+
     Session = bondy_session:lookup(SessionId),
 
     Matches = to_bondy_utils_cont(

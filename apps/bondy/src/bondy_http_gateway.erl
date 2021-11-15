@@ -322,7 +322,7 @@ handle_cast(#event{} = Event, State) ->
     %% We informally implement bondy_subscriber
     Id = Event#event.subscription_id,
     Topic = maps:get(Id, State#state.subscriptions, undefined),
-    NewState = case {Topic, Event#event.arguments} of
+    NewState = case {Topic, Event#event.args} of
         {undefined, _} ->
             State;
         {?BONDY_REALM_DELETED, [Uri]} ->

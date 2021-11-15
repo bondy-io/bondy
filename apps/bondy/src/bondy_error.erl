@@ -84,8 +84,8 @@ map(#error{} = Err) ->
     map(#{
         error_uri => Err#error.error_uri,
         details => Err#error.details,
-        arguments => Err#error.arguments,
-        arguments_kw => Err#error.arguments_kw
+        args => Err#error.args,
+        kwargs => Err#error.kwargs
     });
 
 map(#{error_uri := Uri} = M) ->
@@ -334,7 +334,7 @@ map(Code, Term) when is_binary(Code) ->
 
 
 %% @private
-get_error(#{arguments_kw := #{<<"error">> := Map}}) ->
+get_error(#{kwargs := #{<<"error">> := Map}}) ->
     Map;
 
 get_error(_) ->
@@ -342,22 +342,22 @@ get_error(_) ->
 
 
 %% @private
-get_message(#{arguments := undefined}) ->
+get_message(#{args := undefined}) ->
     <<>>;
 
-get_message(#{arguments := []}) ->
+get_message(#{args := []}) ->
     <<>>;
 
-get_message(#{arguments := L}) when is_list(L) ->
+get_message(#{args := L}) when is_list(L) ->
     hd(L);
 
-get_message(#{arguments_kw := undefined}) ->
+get_message(#{kwargs := undefined}) ->
     <<>>;
 
-get_message(#{arguments_kw := #{}}) ->
+get_message(#{kwargs := #{}}) ->
     <<>>;
 
-get_message(#{arguments_kw := #{<<"error">> := Map}}) when is_map(Map) ->
+get_message(#{kwargs := #{<<"error">> := Map}}) when is_map(Map) ->
     case maps:find(<<"message">>, Map) of
         {ok, Val} -> Val;
         error -> <<>>

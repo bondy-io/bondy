@@ -29,7 +29,7 @@
             "access-control-allow-headers": "origin,x-requested-with,content-type,accept",
             "access-control-max-age": "86400"
         },
-        "wamp_error_body": "{{action.error.arguments_kw |> put(code, {{action.error.error_uri}})}}"
+        "wamp_error_body": "{{action.error.kwargs |> put(code, {{action.error.error_uri}})}}"
     },
     "defaults" : {
         "retries" : 0,
@@ -68,23 +68,23 @@
                             "type" : "wamp_call",
                             "procedure" : "{{request.body.procedure}}",
                             "options" : "{{request.body.options}}",
-                            "arguments" : "{{request.body.arguments}}",
-                            "arguments_kw" : "{{request.body.arguments_kw}}"
+                            "args" : "{{request.body.args}}",
+                            "kwargs" : "{{request.body.kwargs}}"
                         },
                         "response": {
                             "on_error": {
                                 "status_code": "{{status_codes |> get({{action.error.error_uri}}, 500) |> integer}}",
                                 "body": {
                                     "error_uri": "{{action.error.error_uri}}",
-                                    "arguments" : "{{action.error.arguments}}",
-                                    "arguments_kw" : "{{action.error.arguments_kw}}",
+                                    "args" : "{{action.error.args}}",
+                                    "kwargs" : "{{action.error.kwargs}}",
                                     "details": "{{action.error.details}}"
                                 }
                             },
                             "on_result": {
                                 "body": {
-                                    "arguments" : "{{action.result.arguments}}",
-                                    "arguments_kw" : "{{action.result.arguments_kw}}",
+                                    "args" : "{{action.result.args}}",
+                                    "kwargs" : "{{action.result.kwargs}}",
                                     "details": "{{action.result.details}}"
                                 }
                             }
@@ -109,7 +109,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.backup.create",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.body}}"
                             ]
                         },
@@ -120,7 +120,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -143,8 +143,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.backup.status",
                             "options" : {},
-                            "arguments" : ["{{variables.query_match}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{variables.query_match}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -153,7 +153,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -176,8 +176,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.backup.restore",
                             "options" : {},
-                            "arguments" : ["{{request.body}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.body}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -186,7 +186,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -208,10 +208,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.http_gateway.api.load",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -221,7 +221,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -244,8 +244,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.http_gateway.api.list",
                             "options" : {},
-                            "arguments" : [],
-                            "arguments_kw" : {}
+                            "args" : [],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -253,7 +253,7 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
+                                "body" : "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -262,10 +262,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.http_gateway.api.load",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -275,7 +275,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -298,8 +298,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.http_gateway.api.get",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.id}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -307,7 +307,7 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
+                                "body" : "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -330,8 +330,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.http_gateway.api.get",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.id}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.bindings.id}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -339,7 +339,7 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head |> with([id, name, host, realm_uri, meta, ts])}}"
+                                "body" : "{{action.result.args |> head |> with([id, name, host, realm_uri, meta, ts])}}"
                             }
                         }
                     }
@@ -362,8 +362,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.list",
                             "options" : {},
-                            "arguments" : [],
-                            "arguments_kw" : {}
+                            "args" : [],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -372,7 +372,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -381,8 +381,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.create",
                             "options" : {},
-                            "arguments" : ["{{request.body}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.body}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -390,9 +390,9 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "uri": "\"{{request.path}}/{{action.result.arguments |> head |> get('uri')}}\"",
+                                "uri": "\"{{request.path}}/{{action.result.args |> head |> get('uri')}}\"",
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -415,8 +415,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.get",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.realm_uri}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -425,7 +425,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -434,11 +434,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.update",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -448,7 +448,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -457,8 +457,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.delete",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.realm_uri}}"],
-                            "arguments_kw" : {
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -468,7 +468,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -491,8 +491,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.security.is_enabled",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.realm_uri}}"],
-                            "arguments_kw" : {}
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {}
                         },
                         "response" : {
                            "on_error" : {
@@ -501,7 +501,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -510,8 +510,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.security.enable",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.realm_uri}}"],
-                            "arguments_kw" : {
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -521,7 +521,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -530,8 +530,8 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.realm.security.disable",
                             "options" : {},
-                            "arguments" : ["{{request.bindings.realm_uri}}"],
-                            "arguments_kw" : {
+                            "args" : ["{{request.bindings.realm_uri}}"],
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -541,7 +541,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -564,11 +564,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.client.add",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -578,7 +578,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -601,7 +601,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.client.update",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
@@ -614,7 +614,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -623,7 +623,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.client.delete",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -635,7 +635,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -658,11 +658,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.resource_owner.add",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -672,7 +672,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -695,7 +695,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.resource_owner.update",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
@@ -708,7 +708,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -717,7 +717,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.oauth2.resource_owner.delete",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -729,7 +729,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -752,11 +752,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.user.add",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -766,7 +766,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -775,10 +775,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.user.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -787,7 +787,7 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
+                                "body" : "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -810,7 +810,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.user.get",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -822,7 +822,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -831,7 +831,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.user.update",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
@@ -844,7 +844,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -853,7 +853,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.user.delete",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -865,7 +865,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -888,12 +888,12 @@
                             "type": "wamp_call",
                             "procedure": "bondy.user.change_password",
                             "options": {},
-                            "arguments": [
+                            "args": [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body.new_password}}"
                             ],
-                            "arguments_kw": {}
+                            "kwargs": {}
                         },
                         "response": {
                             "on_error": {
@@ -901,7 +901,7 @@
                                 "body": "{{variables.wamp_error_body}}"
                             },
                             "on_result": {
-                                "body": "{{action.result.arguments |> head}}"
+                                "body": "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -924,11 +924,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.group.add",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -938,7 +938,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -947,10 +947,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.group.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -959,7 +959,7 @@
                                 "body" : "{{variables.wamp_error_body}}"
                             },
                             "on_result" : {
-                                "body" : "{{action.result.arguments |> head}}"
+                                "body" : "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -982,7 +982,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.group.get",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -994,7 +994,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -1003,7 +1003,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.group.update",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}",
                                 "{{request.body}}"
@@ -1016,7 +1016,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     },
@@ -1025,7 +1025,7 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.group.delete",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id}}"
                             ]
@@ -1037,7 +1037,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1060,12 +1060,12 @@
                             "type": "wamp_call",
                             "procedure": "bondy.user.change_password",
                             "options": {},
-                            "arguments": [
+                            "args": [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.body.username}}",
                                 "{{request.body.new_password}}"
                             ],
-                            "arguments_kw": {}
+                            "kwargs": {}
                         },
                         "response": {
                             "on_error": {
@@ -1073,7 +1073,7 @@
                                 "body": "{{variables.wamp_error_body}}"
                             },
                             "on_result": {
-                                "body": "{{action.result.arguments |> head}}"
+                                "body": "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1096,10 +1096,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.wamp.callee.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1108,7 +1108,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1131,11 +1131,11 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.wamp.callee.get",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.session_id |> integer}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1144,7 +1144,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1167,10 +1167,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.registration.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1179,7 +1179,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1202,10 +1202,10 @@
                             "type" : "wamp_call",
                             "procedure" : "wamp.registration.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1214,7 +1214,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1237,11 +1237,11 @@
                             "type" : "wamp_call",
                             "procedure" : "wamp.registration.get",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id |> integer}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1250,7 +1250,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1273,11 +1273,11 @@
                             "type" : "wamp_call",
                             "procedure" : "wamp.registration.list_callees",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}",
                                 "{{request.bindings.id |> integer}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1286,7 +1286,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1309,10 +1309,10 @@
                             "type" : "wamp_call",
                             "procedure" : "bondy.subscription.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1321,7 +1321,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }
@@ -1344,10 +1344,10 @@
                             "type" : "wamp_call",
                             "procedure" : "wamp.subscription.list",
                             "options" : {},
-                            "arguments" : [
+                            "args" : [
                                 "{{request.bindings.realm_uri}}"
                             ],
-                            "arguments_kw" : {
+                            "kwargs" : {
                             }
                         },
                         "response" : {
@@ -1356,7 +1356,7 @@
                             },
                             "on_result" : {
                                 "body" :
-                                    "{{action.result.arguments |> head}}"
+                                    "{{action.result.args |> head}}"
                             }
                         }
                     }

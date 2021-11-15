@@ -44,7 +44,7 @@ new(RealmUri, Topic, #event{} = Event) ->
         <<"subscription_id">> => Event#event.subscription_id,
         <<"publication_id">> => Event#event.publication_id,
         <<"details">> => Event#event.details,
-        <<"arguments">> => Event#event.arguments,
-        <<"arguments_kw">> => Event#event.arguments_kw,
+        <<"args">> => Event#event.args,
+        <<"kwargs">> => Event#event.kwargs,
         <<"ingestion_timestamp">> => erlang:system_time(millisecond)
     }.

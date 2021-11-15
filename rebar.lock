@@ -70,7 +70,7 @@
  {<<"mimerl">>,{pkg,<<"mimerl">>,<<"1.2.0">>},1},
  {<<"mops">>,
   {git,"https://gitlab.com/leapsight/mops.git",
-       {ref,"e375f1955ff713ece4bea28d42a6e10b955b2d65"}},
+       {ref,"3955142d3720dc5b7a481e28124a2c5421dcd078"}},
   0},
  {<<"msgpack">>,{pkg,<<"msgpack">>,<<"0.7.0">>},0},
  {<<"observer_cli">>,{pkg,<<"observer_cli">>,<<"1.7.1">>},0},
@@ -118,12 +118,12 @@
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.7.0">>},1},
  {<<"utils">>,
   {git,"https://gitlab.com/leapsight/utils.git",
-       {ref,"2a3c460f5b9eeb6ea6580ee234da6c3f37be7674"}},
+       {ref,"3520129c26238fd0961e83ab621f4ed3b00a5796"}},
   0},
  {<<"uuid">>,{pkg,<<"uuid_erl">>,<<"2.0.2">>},0},
  {<<"wamp">>,
   {git,"https://gitlab.com/leapsight/wamp.git",
-       {ref,"1e2a9c4b8edabcd5fda6cf545b1ce424c7ca8ff1"}},
+       {ref,"11e96bd14c6b5dfd5a827f6681e76bc6d1a5535c"}},
   0}]}.
 [
 {pkg_hash,[

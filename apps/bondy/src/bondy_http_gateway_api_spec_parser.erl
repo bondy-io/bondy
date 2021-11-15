@@ -800,8 +800,8 @@ end).
 
 -define(DEFAULT_WAMP_ACTION, #{
     <<"options">> => #{},
-    <<"arguments">> => [],
-    <<"arguments_kw">> => #{},
+    <<"args">> => [],
+    <<"kwargs">> => #{},
     <<"timeout">> => <<"{{defaults.timeout}}">>,
     <<"connect_timeout">> => <<"{{defaults.connect_timeout}}">>,
     <<"retries">> => <<"{{defaults.retries}}">>,
@@ -848,17 +848,23 @@ end).
         allow_null => true,
         datatype => [map, ?MOPS_PROXY_FUN_TYPE]
     },
-    <<"arguments">> => #{
-        alias => arguments,
+    <<"args">> => #{
+        aliases => [args, <<"arguments">>, arguments],
         required => true,
         allow_null => true,
         datatype => [list, ?MOPS_PROXY_FUN_TYPE]
     },
-    <<"arguments_kw">> => #{
-        alias => arguments_kw,
+    <<"kwargs">> => #{
+        aliases => [kwargs, <<"arguments_kw">>, arguments_kw],
         required => true,
         allow_null => true,
         datatype => [map, ?MOPS_PROXY_FUN_TYPE]
+    },
+    <<"payload">> => #{
+        aliases => [payload],
+        required => false,
+        allow_null => true,
+        datatype => [binary, ?MOPS_PROXY_FUN_TYPE]
     }
 }).
 

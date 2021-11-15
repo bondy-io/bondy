@@ -59,7 +59,7 @@ validate_call_args(Msg, Ctxt, Min) ->
 %% @end
 %% -----------------------------------------------------------------------------
 validate_call_args(Msg, Ctxt, Min, Max) ->
-    Len = args_len(Msg#call.arguments),
+    Len = args_len(Msg#call.args),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, false).
 
 
@@ -76,7 +76,7 @@ validate_admin_call_args(Msg, Ctxt, Min) ->
 %% @end
 %% -----------------------------------------------------------------------------
 validate_admin_call_args(Msg, Ctxt, Min, Max) ->
-    Len = args_len(Msg#call.arguments),
+    Len = args_len(Msg#call.args),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, true).
 
 
@@ -249,7 +249,7 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     end;
 
 do_validate_call_args(
-    #call{arguments = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
+    #call{args = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
     when Len >= Min ->
     %% A call can only proceed if the session's Realm matches the one passed in
     %% the arguments, unless the session's Realm is the Root Realm which allows
@@ -257,10 +257,10 @@ do_validate_call_args(
     case bondy_context:realm_uri(Ctxt) of
         Uri when AdminOnly == false ->
             %% Matches arg URI
-            to_list(Msg#call.arguments);
+            to_list(Msg#call.args);
         ?MASTER_REALM_URI ->
             %% Users logged in root realm can operate on any realm
-            to_list(Msg#call.arguments);
+            to_list(Msg#call.args);
         _ ->
             error(unauthorized(Msg, Ctxt))
     end;
@@ -272,9 +272,9 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     %% operations on other realms
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            [Uri | to_list(Msg#call.arguments)];
+            [Uri | to_list(Msg#call.args)];
         {_, ?MASTER_REALM_URI} ->
-            [?MASTER_REALM_URI | to_list(Msg#call.arguments)];
+            [?MASTER_REALM_URI | to_list(Msg#call.args)];
         {_, _} ->
             error(unauthorized(Msg, Ctxt))
     end.

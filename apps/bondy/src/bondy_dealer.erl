@@ -811,8 +811,8 @@ call_to_invocation(M, Uri, Entry, Ctxt1) ->
     %% TODO Revert to session-scoped Ids
     %% ReqId = bondy_utils:get_id({session, SessionId}),
     ReqId = bondy_utils:get_id(global),
-    Args = M#call.arguments,
-    Payload = M#call.arguments_kw,
+    Args = M#call.args,
+    Payload = M#call.kwargs,
     RegId = bondy_registry_entry:id(Entry),
     RegOpts = bondy_registry_entry:options(Entry),
     CallOpts = M#call.options,
@@ -1404,8 +1404,8 @@ yield_to_result(CallId, M) ->
         CallId,
         %% TODO check if yield.options should be assigned to result.details
         M#yield.options,
-        M#yield.arguments,
-        M#yield.arguments_kw
+        M#yield.args,
+        M#yield.kwargs
     ).
 
 

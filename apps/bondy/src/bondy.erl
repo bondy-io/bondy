@@ -30,8 +30,9 @@
 -type wamp_error_map() :: #{
     error_uri => uri(),
     details => map(),
-    arguments => list(),
-    arguments_kw => map()
+    args => list(),
+    kwargs => map(),
+    payload => binary()
 }.
 
 -export_type([wamp_error_map/0]).
@@ -193,8 +194,8 @@ subscribe(RealmUri, Opts, TopicUri, Fun) ->
 
 
 
-publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
-    bondy_broker:publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm).
+publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
+    bondy_broker:publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
 
 
 
@@ -216,14 +217,14 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
     {ok, map(), bondy_context:t()}
     | {error, wamp_error_map(), bondy_context:t()}.
 
-call(Uri, Opts, Args, ArgsKw, Ctxt0) ->
+call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     Timeout = case maps:find(timeout, Opts) of
         {ok, 0} -> bondy_config:get(wamp_call_timeout);
         {ok, Val} -> Val;
         error -> bondy_config:get(wamp_call_timeout)
     end,
 
-    case cast(Uri, Opts, Args, ArgsKw, Ctxt0) of
+    case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
         {ok, ReqId, Ctxt1} ->
             check_response(Uri, ReqId, Timeout, Ctxt1);
         {error, _, _} = Error ->
@@ -252,7 +253,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
             ),
             ErrorDetails = maps:new(),
             ErrorArgs = [Mssg],
-            ErrorArgsKw = #{
+            ErrorKWArgs = #{
                 procedure_uri => Uri,
                 timeout => Timeout
             },
@@ -262,7 +263,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
                 ErrorDetails,
                 ?BONDY_ERROR_TIMEOUT,
                 ErrorArgs,
-                ErrorArgsKw
+                ErrorKWArgs
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
             {error, message_to_map(Error), Ctxt}
@@ -283,14 +284,14 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
     {ok, bondy_context:t()}
     | {error, wamp_error_map(), bondy_context:t()}.
 
-cast(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
+cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
     %% FIXME we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
     ReqId = bondy_utils:get_id(global),
 
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
@@ -325,7 +326,6 @@ cast(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% =============================================================================
 %% API - CALLEE ROLE
 %% =============================================================================
-
 
 
 
@@ -412,14 +412,14 @@ message_to_map(#result{} = M) ->
     #result{
         request_id = Id,
         details = Details,
-        arguments = Args,
-        arguments_kw = ArgsKw
+        args = Args,
+        kwargs = KWArgs
     } = M,
     #{
         request_id => Id,
         details => Details,
-        arguments => args(Args),
-        arguments_kw => args_kw(ArgsKw)
+        args => args(Args),
+        kwargs => kwargs(KWArgs)
     };
 
 message_to_map(#error{} = M) ->
@@ -428,8 +428,8 @@ message_to_map(#error{} = M) ->
         request_id = Id,
         details = Details,
         error_uri = Uri,
-        arguments = Args,
-        arguments_kw = ArgsKw
+        args = Args,
+        kwargs = KWArgs
     } = M,
     %% We need these keys to be binaries, becuase we will
     %% inject this in a mops context.
@@ -438,8 +438,8 @@ message_to_map(#error{} = M) ->
         request_id => Id,
         details => Details,
         error_uri => Uri,
-        arguments => args(Args),
-        arguments_kw => args_kw(ArgsKw)
+        args => args(Args),
+        kwargs => kwargs(KWArgs)
     }.
 
 
@@ -448,5 +448,5 @@ args(undefined) -> [];
 args(L) -> L.
 
 %% @private
-args_kw(undefined) -> #{};
-args_kw(M) -> M.
+kwargs(undefined) -> #{};
+kwargs(M) -> M.

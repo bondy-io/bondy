@@ -15,8 +15,8 @@
     match_opts          ::  map(),
     %% Decoded payload
     details             ::  map(),
-    arguments           ::  list() | undefined,
-    arguments_kw        ::  map() | undefined,
+    args                ::  list() | undefined,
+    kwargs              ::  map() | undefined,
     %% Encoded payload
     payload             ::  binary() | undefined
 }).
@@ -278,8 +278,8 @@ to_event(Retained, SubscriptionId) ->
         SubscriptionId,
         Retained#bondy_retained_message.publication_id,
         maps:put(retained, true, Retained#bondy_retained_message.details),
-        Retained#bondy_retained_message.arguments,
-        Retained#bondy_retained_message.arguments_kw
+        Retained#bondy_retained_message.args,
+        Retained#bondy_retained_message.kwargs
     ).
 
 
@@ -346,8 +346,8 @@ when is_map(MatchOps) andalso is_integer(TTL) andalso TTL >= 0 ->
         publication_id = Event#event.publication_id,
         match_opts = MatchOps,
         details = Event#event.details,
-        arguments = Event#event.arguments,
-        arguments_kw = Event#event.arguments_kw
+        args = Event#event.args,
+        kwargs = Event#event.kwargs
     }.
 
 

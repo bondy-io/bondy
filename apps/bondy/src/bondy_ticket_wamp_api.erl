@@ -50,7 +50,7 @@ handle_call(?BONDY_TICKET_ISSUE, #call{} = M, Ctxt) ->
     [_Uri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 0),
     Session = bondy_context:session(Ctxt),
 
-    Opts = case M#call.arguments_kw of
+    Opts = case M#call.kwargs of
         undefined -> maps:new();
         Map -> Map
     end,
