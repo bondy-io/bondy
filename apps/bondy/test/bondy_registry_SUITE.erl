@@ -20,17 +20,24 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-include_lib("wamp/include/wamp.hrl").
 -include("bondy_security.hrl").
 
 -compile([nowarn_export_all, export_all]).
 
 all() ->
     [
-        {group, exact_matching}
+        {group, exact_matching},
+        {group, rpc}
     ].
 
 groups() ->
     [
+        {rpc, [sequence], [
+            register_invoke_single,
+            register_shared,
+            register_callback
+        ]},
         {exact_matching, [sequence], [
             add_subscription,
             match_prefix
@@ -164,3 +171,59 @@ match_prefix(Config) ->
         )
     ).
 
+
+register_invoke_single(Config) ->
+    Realm = ?config(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_SINGLE},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(
+            Realm, #{invoke => ?INVOKE_ROUND_ROBIN}, Uri, self()
+        )
+    ).
+
+
+register_shared(Config) ->
+    Realm = ?config(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ).
+
+
+register_callback(Config) ->
+    Realm = ?config(realm_uri, Config),
+
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, bondy_wamp_api)
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Realm, Opts, Uri, bondy_wamp_api),
+        "Callbacks cannot use shared registration"
+    ).

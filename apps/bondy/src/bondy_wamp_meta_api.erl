@@ -18,6 +18,15 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%%
+%% Handles the following META API wamp calls:
+%%
+%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
+%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
+%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
+%% * "wamp.subscription.get": Retrieves information on a particular subscription.
+%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
+%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_wamp_meta_api).
@@ -30,6 +39,8 @@
 
 
 -export([handle_call/2]).
+-export([handle_invocation/2]).
+
 
 
 
@@ -50,33 +61,18 @@
     | {reply, wamp_messsage:result() | wamp_message:error()}.
 
 
-handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M, Ctxt) ->
+handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
+    [_, SessionId] = bondy_wamp_utils:validate_call_args(M0, Ctxt, 2),
+    %% Session data is local to each node, so when a session is created we
+    %% register a the following URI and ask the dealer to lookup the entry in
+    %% the registry and forward to the existing session's node.
+    %% In the other node we will handle this call in the following clause.
+    %% Part is a 16 byte binary.
+    Part = bondy_utils:session_id_to_uri_part(SessionId),
+    Uri = <<"wamp.session.", Part/binary, ".get">>,
+    M1 = M0#call{procedure_uri = Uri},
+    {continue, M1};
 
-
-    [RealmUri, SessionId] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
-
-    %% TODO to be replaced by
-    %% {lookup, <<"wamp.session.", (integer_to_binary(Id))/binary, ".get">>};
-    %%
-    %%
-
-    case bondy_session:lookup(RealmUri, SessionId) of
-        {error, not_found} ->
-            E = bondy_wamp_utils:no_such_session_error(SessionId),
-            {reply, E};
-        Session ->
-            R = wamp_message:result(
-                M#call.request_id,
-                #{},
-                [bondy_session:info(Session)]
-            ),
-            {reply, R}
-    end;
-
-
-%% -----------------------------------------------------------------------------
-%% WAMP REGISTRATION META PROCEDURES
-%% -----------------------------------------------------------------------------
 handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     case summary(registration, RealmUri) of
@@ -180,36 +176,9 @@ handle_call(#call{procedure_uri = ?BONDY_WAMP_CALLEE_LIST} = M, Ctxt) ->
             {reply, E}
     end;
 
-%% -----------------------------------------------------------------------------
-%% WAMP SUBSCRIPTION META PROCEDURES
-%% -----------------------------------------------------------------------------
-
-%% -----------------------------------------------------------------------------
-%% Handles the following META API wamp calls:
-%%
-%% * "wamp.subscription.list": Retrieves subscription IDs listed according to match policies.
-%% * "wamp.subscription.lookup": Obtains the subscription (if any) managing a topic, according to some match policy.
-%% * "wamp.subscription.match": Retrieves a list of IDs of subscriptions matching a topic URI, irrespective of match policy.
-%% * "wamp.subscription.get": Retrieves information on a particular subscription.
-%% * "wamp.subscription.list_subscribers": Retrieves a list of session IDs for sessions currently attached to the subscription.
-%% * "wamp.subscription.count_subscribers": Obtains the number of sessions currently attached to the subscription.
-%% @end
-%% -----------------------------------------------------------------------------
-
 handle_call(#call{procedure_uri = ?WAMP_SUBSCRIPTION_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
     case summary(subscription, RealmUri) of
-        {ok, Result} ->
-            R = wamp_message:result(M#call.request_id, #{}, [Result]),
-            {reply, R};
-        {error, Reason} ->
-            E = bondy_wamp_utils:error(Reason, M),
-            {reply, E}
-    end;
-
-handle_call(#call{procedure_uri = ?BONDY_SUBSCRIPTION_LIST} = M, Ctxt) ->
-    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
-    case list(subscription, RealmUri) of
         {ok, Result} ->
             R = wamp_message:result(M#call.request_id, #{}, [Result]),
             {reply, R};
@@ -287,9 +256,69 @@ handle_call(
             {reply, E}
     end;
 
+handle_call(#call{procedure_uri = ?BONDY_SUBSCRIPTION_LIST} = M, Ctxt) ->
+    [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
+    case list(subscription, RealmUri) of
+        {ok, Result} ->
+            R = wamp_message:result(M#call.request_id, #{}, [Result]),
+            {reply, R};
+        {error, Reason} ->
+            E = bondy_wamp_utils:error(Reason, M),
+            {reply, E}
+    end;
+
 handle_call(#call{} = M, _) ->
     E = bondy_wamp_utils:no_such_procedure_error(M),
     {reply, E}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+handle_invocation(#invocation{} = M, Ctxt) ->
+    Procedure = maps:get(procedure, M#invocation.details),
+    do_handle(M, Ctxt, Procedure).
+
+
+
+do_handle(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
+    Args = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
+    [RealmUri, SessionId] = Args,
+
+    case binary_to_integer(Part) == SessionId of
+        true ->
+            case bondy_session:lookup(RealmUri, SessionId) of
+                {error, not_found} ->
+                    E = wamp_message:error_from(
+                        M,
+                        #{},
+                        ?WAMP_NO_SUCH_SESSION,
+                        [
+                            <<"No session exists for the supplied identifier">>
+                        ]
+                    ),
+                    {reply, E};
+                Session ->
+                    R = wamp_message:yield(
+                        M#invocation.request_id,
+                        #{},
+                        [bondy_session:info(Session)]
+                    ),
+                    {reply, R}
+            end;
+        false ->
+            E = wamp_message:error_from(
+                M,
+                #{},
+                ?BONDY_ERROR_INTERNAL,
+                [
+                    <<"Bondy callback procedure malformed. Uri session_id part does not match session_id argument.">>
+                ]
+            ),
+            {reply, E}
+    end.
+
 
 
 
@@ -351,7 +380,8 @@ summary(Type, RealmUri) ->
                     } || E <- Entries
                 ],
                 Summary = leap_tuples:summarize(
-                    Tuples, {2, {function, collect, [1]}}, #{}),
+                    Tuples, {2, {function, collect, [1]}}, #{}
+                ),
                 Map = maps:merge(Default, maps:from_list(Summary)),
                 {ok, Map}
         end

@@ -439,6 +439,12 @@ authid(Id) when is_integer(Id) ->
 %% -----------------------------------------------------------------------------
 -spec authrole(t()) -> bondy_rbac_group:name().
 
+authrole(#session{authrole = undefined, authroles = []}) ->
+    undefined;
+
+authrole(#session{authrole = undefined}) ->
+    <<"">>;
+
 authrole(#session{authrole = Val}) ->
     Val;
 

@@ -108,6 +108,7 @@ send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
 when is_binary(RealmUri)
 andalso is_integer(SessionId)
 andalso is_pid(Pid) ->
+    %% Send a message to a local peer
     Node =:= bondy_peer_service:mynode() orelse error(not_my_node),
 
     %% We validate the message and the opts
@@ -121,6 +122,7 @@ andalso is_pid(Pid) ->
 
 send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
 when is_binary(RealmUri) ->
+    %% Send a message to a remote peer
     %% We validate the message and the opts
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
     Opts = validate_send_opts(Opts0),
@@ -363,7 +365,7 @@ do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
     %% so we will not get an ack, the ack is implicit
     ok;
 
-do_send({_, _, SessionId, Pid}, M, Opts) ->
+do_send({_, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
     case maybe_enqueue(SessionId, M, Opts) of
         true ->
             ok;

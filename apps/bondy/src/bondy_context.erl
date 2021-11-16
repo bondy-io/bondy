@@ -68,6 +68,8 @@
 %% API
 -export([agent/1]).
 -export([authid/1]).
+-export([authrole/1]).
+-export([authroles/1]).
 -export([call_timeout/1]).
 -export([close/1]).
 -export([close/2]).
@@ -371,8 +373,44 @@ is_security_enabled(#{realm_uri := Uri}) ->
 authid(#{authid := Val}) ->
     Val;
 
+authid(#{session := Session}) ->
+    bondy_session:authid(Session);
+
 authid(#{}) ->
     undefined.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authrole(t()) -> binary() | anonymous | undefined.
+
+authrole(#{authrole := Val}) ->
+    Val;
+
+authrole(#{session := Session}) ->
+    bondy_session:authrole(Session);
+
+authrole(#{}) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authroles(t()) -> [binary()].
+
+authroles(#{authroles := Val}) ->
+    Val;
+
+authroles(#{session := Session}) ->
+    bondy_session:authroles(Session);
+
+authroles(#{}) ->
+    [].
 
 
 %% -----------------------------------------------------------------------------

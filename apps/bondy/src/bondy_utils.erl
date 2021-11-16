@@ -40,12 +40,13 @@
 -export([maybe_slice/3]).
 -export([merge_map_flags/2]).
 -export([pid_to_bin/1]).
+-export([session_id_to_uri_part/1]).
+-export([system_time_to_rfc3339/2]).
+-export([tc/3]).
 -export([timeout/1]).
 -export([to_binary_keys/1]).
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
--export([system_time_to_rfc3339/2]).
--export([tc/3]).
 
 
 
@@ -253,6 +254,17 @@ get_id({session, SessionId}) when is_integer(SessionId) ->
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)
     bondy_session:incr_seq(SessionId).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Converts a session identifier into a 0-padded binary string.
+%% @end
+%% -----------------------------------------------------------------------------
+
+-spec session_id_to_uri_part(id()) -> binary().
+
+session_id_to_uri_part(SessionId) ->
+    list_to_binary(io_lib:format("~16..0B", [SessionId])).
 
 
 %% -----------------------------------------------------------------------------

@@ -123,6 +123,9 @@ handle_call({open, Session}, _From, State) ->
     %% terminates
     ok = gproc_monitor:subscribe({n, l, {session, Uri, Id}}),
 
+    %% We register WAMP procedures
+    ok = register_procedures(Uri, Id),
+
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
@@ -202,6 +205,20 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
+%% @private
+register_procedures(RealmUri, SessionId) ->
+    %% We register wamp.session.{id}.get since we need to route the wamp.
+    %% session.get call to the node where the session lives and we use the
+    %% Registry to do that.
+    Part = bondy_utils:session_id_to_uri_part(SessionId),
+    Uri = <<"wamp.session.", Part/binary, ".get">>,
+    Opts = #{match => ?PREFIX_MATCH},
+    Mod = bondy_wamp_meta_api,
+    {ok, _} = bondy_dealer:register(RealmUri, Opts, Uri, Mod),
+    ok.
+
+
+%% @private
 cleanup(Session) ->
     %% TODO We need a new API to be the underlying cleanup function behind
     %% bondy_context:close/1. In the meantime we create a fakce context,
