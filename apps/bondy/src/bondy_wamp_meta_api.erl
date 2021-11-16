@@ -57,8 +57,11 @@
 -spec handle_call(M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 
 handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
@@ -70,8 +73,19 @@ handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     %% Part is a 16 byte binary.
     Part = bondy_utils:session_id_to_uri_part(SessionId),
     Uri = <<"wamp.session.", Part/binary, ".get">>,
-    M1 = M0#call{procedure_uri = Uri},
-    {continue, M1};
+    Opts = maps:put(x_procedure, ?WAMP_SESSION_GET, M0#call.options),
+    M1 = M0#call{procedure_uri = Uri, options = Opts},
+
+    %5 As we are rewriting the call, if the session does not exist we will get
+    %% either noproc or no_such_procedure and we want to reply not_found
+    MakeError = fun
+        (no_such_procedure) ->
+            no_such_session_error(M0#call.request_id);
+        (_) ->
+            undefined
+    end,
+
+    {continue, M1, MakeError};
 
 handle_call(#call{procedure_uri = ?WAMP_REG_LIST} = M, Ctxt) ->
     [RealmUri] = bondy_wamp_utils:validate_call_args(M, Ctxt, 1),
@@ -278,11 +292,11 @@ handle_call(#call{} = M, _) ->
 %% -----------------------------------------------------------------------------
 handle_invocation(#invocation{} = M, Ctxt) ->
     Procedure = maps:get(procedure, M#invocation.details),
-    do_handle(M, Ctxt, Procedure).
+    do_handle_invocation(M, Ctxt, Procedure).
 
 
 
-do_handle(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
+do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
     Args = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
     [RealmUri, SessionId] = Args,
 
@@ -290,14 +304,7 @@ do_handle(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
         true ->
             case bondy_session:lookup(RealmUri, SessionId) of
                 {error, not_found} ->
-                    E = wamp_message:error_from(
-                        M,
-                        #{},
-                        ?WAMP_NO_SUCH_SESSION,
-                        [
-                            <<"No session exists for the supplied identifier">>
-                        ]
-                    ),
+                    E = no_such_session_error(M#invocation.request_id),
                     {reply, E};
                 Session ->
                     R = wamp_message:yield(
@@ -326,6 +333,18 @@ do_handle(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+no_such_session_error(ReqId) ->
+    wamp_message:error(
+        ?CALL,
+        ReqId,
+        #{},
+        ?WAMP_NO_SUCH_SESSION,
+        [
+            <<"No session exists for the supplied identifier">>
+        ]
+    ).
 
 
 list(Type, RealmUri) ->

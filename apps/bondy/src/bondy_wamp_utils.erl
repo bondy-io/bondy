@@ -28,6 +28,7 @@
 -export([maybe_error/2]).
 -export([error/2]).
 -export([no_such_procedure_error/1]).
+-export([no_such_procedure_error/3]).
 -export([no_such_registration_error/1]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
@@ -136,18 +137,29 @@ error(Reason, #call{} = M) ->
 %% @doc Creates a wamp_error() based on a wamp_call().
 %% @end
 %% -----------------------------------------------------------------------------
-no_such_procedure_error(M) ->
+no_such_procedure_error(#call{procedure_uri = Uri} = M) ->
+    no_such_procedure_error(Uri, ?CALL, M#call.request_id);
+
+no_such_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
+    no_such_procedure_error(Uri, ?CALL, M#invocation.request_id).
+
+
+no_such_procedure_error(ProcUri, MType, ReqId) ->
     Mssg = <<
         "There are no registered procedures matching the uri",
-        $\s, $', (procedure_uri(M))/binary, $', $.
+        $\s, $', ProcUri/binary, $', $.
     >>,
-    wamp_message:error_from(
-        M,
+    wamp_message:error(
+        MType,
+        ReqId,
         #{},
         ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg]
+        [Mssg],
+        #{
+            message => Mssg,
+            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
+        }
     ).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -311,19 +323,15 @@ unauthorized(Type, ReqId, Ctxt) ->
     ).
 
 
+%% @private
 args(#call{args = Args}) -> Args;
 args(#invocation{args = Args}) -> Args.
+
 
 %% @private
 args_len(undefined) -> 0;
 args_len(L) when is_list(L) -> length(L).
 
-
-procedure_uri(#call{procedure_uri = Uri}) ->
-    Uri;
-
-procedure_uri(#invocation{details = #{procedure := Uri}}) ->
-    Uri.
 
 %% @private
 to_list(undefined) -> [];

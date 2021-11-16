@@ -16,8 +16,11 @@
     Ctxt :: bondy_context:t()) ->
 	ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 
 

@@ -42,8 +42,11 @@
     Ctxt :: bondy_context:t()) ->
 	ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 
 
@@ -61,8 +64,11 @@
 -spec handle_call(M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
 	ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     do_handle_call(resolve(Proc), M, Ctxt).
@@ -80,8 +86,11 @@ handle_call(#call{procedure_uri = Proc} = M, Ctxt) ->
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
 	bondy_backup_wamp_api:handle_call(Proc, M, Ctxt);

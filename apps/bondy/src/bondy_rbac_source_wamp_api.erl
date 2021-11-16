@@ -43,8 +43,11 @@
     Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) ->
     ok
     | continue
-    | {continue, uri()}
-    | {reply, wamp_messsage:result() | wamp_message:error()}.
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
 handle_call(?BONDY_SOURCE_ADD, #call{} = M, Ctxt) ->
     [Uri, Data] = bondy_wamp_utils:validate_call_args(M, Ctxt, 2),
