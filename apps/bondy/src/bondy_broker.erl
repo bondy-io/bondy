@@ -305,8 +305,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 
     %% Subscriber Exclusion: we only support sessionIds for now
     %% TODO Add support for eligible_authid, eligible_authrole, exclude_authid
-    %% and exclude_authrole, We need to add authid and authrole to the registry
-    %% entries so that we can match
+    %% and exclude_authrole.
     Exclusions0 = maps:get(exclude, Opts, []),
 
     %% Publisher exclusion: enabled by default
@@ -326,7 +325,8 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
             MatchOpts0;
         {ok, L} when is_list(L) ->
             Eligible = sets:subtract(
-                sets:from_list(L), sets:from_list(Exclusions)),
+                sets:from_list(L), sets:from_list(Exclusions)
+            ),
             MatchOpts0#{eligible => sets:to_list(Eligible)}
     end,
 
