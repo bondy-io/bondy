@@ -483,7 +483,8 @@ handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
     ok;
 
 handle_peer_message(
-    #invocation{} = M, {RealmUri, _, undefined, Mod} = Callee, Caller, _Opts) ->
+    #invocation{} = M, {RealmUri, _, undefined, Mod} = Callee, Caller, _Opts)
+    when is_atom(Mod) ->
     Ctxt = bondy_context:local_context(RealmUri),
     {reply, Reply} = Mod:handle_invocation(M, Ctxt),
     bondy:send(Callee, Caller, Reply, #{});
@@ -808,6 +809,7 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
             %% We send here as we do not need invoke/5 to enqueue a promise,
             %% we will call the module sequentially.
             Invocation = call_to_invocation(M, Uri, Entry, Ctxt1),
+
             case Mod:handle_invocation(Invocation, Ctxt1) of
                 ok ->
                     %% No reply needed

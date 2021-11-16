@@ -80,7 +80,7 @@ handle_call(#call{procedure_uri = ?WAMP_SESSION_GET} = M0, Ctxt) ->
     %% either noproc or no_such_procedure and we want to reply not_found
     MakeError = fun
         (no_such_procedure) ->
-            no_such_session_error(M0#call.request_id);
+            no_such_session_error(?CALL, M0#call.request_id);
         (_) ->
             undefined
     end,
@@ -304,7 +304,9 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
         true ->
             case bondy_session:lookup(RealmUri, SessionId) of
                 {error, not_found} ->
-                    E = no_such_session_error(M#invocation.request_id),
+                    E = no_such_session_error(
+                        ?INVOCATION, M#invocation.request_id
+                    ),
                     {reply, E};
                 Session ->
                     R = wamp_message:yield(
@@ -335,9 +337,9 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
 
 
 
-no_such_session_error(ReqId) ->
+no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
     wamp_message:error(
-        ?CALL,
+        Type,
         ReqId,
         #{},
         ?WAMP_NO_SUCH_SESSION,
