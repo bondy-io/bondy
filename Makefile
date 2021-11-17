@@ -61,3 +61,7 @@ node3:
 	_build/node3/rel/bondy/bin/bondy console
 
 
+edge1:
+	${REBAR} as edge1 release
+	_build/edge1/rel/bondy/bin/bondy console
+

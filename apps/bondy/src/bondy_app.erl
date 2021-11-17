@@ -23,9 +23,7 @@
 -module(bondy_app).
 -behaviour(application).
 -include_lib("kernel/include/logger.hrl").
--include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
--include("bondy_uris.hrl").
 
 
 
@@ -160,13 +158,21 @@ start_phase(aae_exchange, normal, []) ->
     ok;
 
 start_phase(init_listeners, normal, []) ->
+    ?LOG_NOTICE(#{
+        description => "Starting listeners"
+    }),
     %% Now that the registry has been initialised we can initialise
     %% the remaining listeners for clients to connect
     %% WAMP TCP listeners
     ok = bondy_wamp_tcp:start_listeners(),
+
     %% WAMP Websocket and REST Gateway HTTP listeners
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
+
+    %% Bondy Edge downlink connection listeners
+    ok = bondy_edge:start_listeners(),
+
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),
     ok.

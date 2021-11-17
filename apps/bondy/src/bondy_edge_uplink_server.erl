@@ -1,23 +1,28 @@
--module(bondy_edge_server).
+-module(bondy_edge_uplink_server).
 -behaviour(gen_statem).
 -behaviour(ranch_protocol).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("bondy.hrl").
 
--define(TIMEOUT, 60000).
+-define(TIMEOUT, 5000).
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
+% -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
 
 
 -record(state, {
     ref                     ::  atom(),
     transport               ::  module(),
-    socket                  ::  gen_tcp:socket()
+    socket                  ::  gen_tcp:socket() | ssl:sslsocket()
 }).
 
+% -type t()                   ::  #state{}.
+
 %% API.
+-export([start_link/3]).
 -export([start_link/4]).
 
 %% GEN_STATEM CALLBACKS
@@ -41,9 +46,17 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Ref, _, Transport, Opts) ->
-    %% Receiving the socket as 2nd arg is deprecated, see init/1
+start_link(Ref, Transport, Opts) ->
 	gen_statem:start_link(?MODULE, {Ref, Transport, Opts}, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% This will be deprecated with Ranch 2.0
+%% @end
+%% -----------------------------------------------------------------------------
+start_link(Ref, _, Transport, Opts) ->
+    start_link(Ref, Transport, Opts).
 
 
 

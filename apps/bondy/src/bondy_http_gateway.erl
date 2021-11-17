@@ -490,7 +490,7 @@ unsubscribe(State) ->
 
 %% @private
 do_start_listeners(public) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Starting public HTTP/S listeners"
     }),
     DTables = load_dispatch_tables(),
@@ -498,7 +498,7 @@ do_start_listeners(public) ->
     ok;
 
 do_start_listeners(admin) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Starting admin HTTP/S listeners"
     }),
     DTables = parse_specs([admin_spec()], admin_base_routes()),
@@ -508,7 +508,7 @@ do_start_listeners(admin) ->
 
 %% @private
 do_suspend_listeners(public) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Suspending public HTTP/S listeners"
     }),
     catch ranch:suspend_listener(?HTTP),
@@ -516,7 +516,7 @@ do_suspend_listeners(public) ->
     ok;
 
 do_suspend_listeners(admin) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Suspending admin HTTP/S listeners"
     }),
     catch ranch:suspend_listener(?ADMIN_HTTP),
@@ -526,7 +526,7 @@ do_suspend_listeners(admin) ->
 
 %% @private
 do_resume_listeners(public) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Resuming public HTTP/S listeners"
     }),
     catch ranch:resume_listener(?HTTP),
@@ -534,7 +534,7 @@ do_resume_listeners(public) ->
     ok;
 
 do_resume_listeners(admin) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Resuming admin HTTP/S listeners"
     }),
     catch ranch:resume_listener(?ADMIN_HTTP),
@@ -544,7 +544,7 @@ do_resume_listeners(admin) ->
 
 %% @private
 do_stop_listeners(public) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Stopping public HTTP/S listeners"
     }),
     catch cowboy:stop_listener(?HTTP),
@@ -552,7 +552,7 @@ do_stop_listeners(public) ->
     ok;
 
 do_stop_listeners(admin) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Stopping admin HTTP/S listeners"
     }),
     catch cowboy:stop_listener(?ADMIN_HTTP),

@@ -1,1 +1,0 @@
--module(bondy_edge_client).

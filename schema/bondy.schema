@@ -26,17 +26,6 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc The period in seconds that Bondy will waith for clients to gracefully
-%% terminate their connections when the router is shutting down.
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "shutdown_grace_period", "bondy.shutdown_grace_period", [
-  {default, "30s"},
-  {datatype, {duration, s}}
-]}.
-
-
-%% -----------------------------------------------------------------------------
 %% @doc Defines whether Bondy will wait for the db partitions to be initialised
 %% before continuing with initialisation.
 %% @end
@@ -66,6 +55,16 @@
   {default, on}
 ]}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc The period in seconds that Bondy will waith for clients to gracefully
+%% terminate their connections when the router is shutting down.
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "shutdown.grace_period", "bondy.shutdown_grace_period", [
+{default, "30s"},
+{datatype, {duration, s}}
+]}.
 
 
 %% =============================================================================
@@ -648,7 +647,6 @@ hidden
   {validators, [pos_integer]},
   {default, 250000}
 ]}.
-
 
 
 %% The maximum length that the queue of pending connections can grow to.
@@ -1611,8 +1609,8 @@ hidden
 %% cluster.peer_discovery.config.keyB = valueB
 %%
 %% Example: Using arrays
-%% cluster.peer_discovery.config.keyA.# = value1
-%% cluster.peer_discovery.config.keyA.# = value2
+%% cluster.peer_discovery.config.keyA._ = value1
+%% cluster.peer_discovery.config.keyA._ = value2
 %%
 %% Refer to each strategy documentation
 {mapping, "cluster.peer_discovery.config.$name", "bondy.peer_discovery.config", [

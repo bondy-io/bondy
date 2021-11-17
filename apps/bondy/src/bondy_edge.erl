@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_wamp_tcp.erl -
+%%  bondy_edge_listener.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,11 +16,11 @@
 %%  limitations under the License.
 %% =============================================================================
 
--module(bondy_wamp_tcp).
+-module(bondy_edge).
 
 
--define(TCP, wamp_tcp).
--define(TLS, wamp_tls).
+-define(TCP, edge_tcp).
+-define(TLS, edge_tls).
 
 
 -export([connections/0]).
@@ -47,9 +47,10 @@
 -spec start_listeners() -> ok.
 
 start_listeners() ->
-    Protocol = bondy_wamp_tcp_connection_handler,
-    ok = bondy_ranch_listener:start(?TCP, Protocol, []),
-    bondy_ranch_listener:start(?TLS, Protocol, []).
+    Protocol = bondy_edge_uplink_server,
+    ProtocolOpts = [],
+    ok = bondy_ranch_listener:start(?TCP, Protocol, ProtocolOpts),
+    bondy_ranch_listener:start(?TLS, Protocol, ProtocolOpts).
 
 
 %% -----------------------------------------------------------------------------

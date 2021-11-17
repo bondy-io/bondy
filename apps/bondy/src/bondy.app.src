@@ -62,6 +62,7 @@
         %% 3rd-party Web Sevrver|client
         cowboy,
         hackney,
+        backoff,
         %% 3rd-party Utils
         %% 3rd-party Instrumentation
         bear,
