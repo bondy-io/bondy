@@ -112,11 +112,6 @@ init({Ref, Transport, _Opts0}) ->
     ok = maybe_error(Res),
 
     {ok, Peername} = inet:peername(Socket),
-    ok = bondy_logger_utils:set_process_metadata(#{
-        transport => Transport,
-        socket => Socket,
-        peername => inet_utils:peername_to_binary(Peername)
-    }),
 
     St1 = St0#state{socket = Socket},
 

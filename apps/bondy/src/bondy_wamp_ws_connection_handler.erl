@@ -106,7 +106,6 @@ init(Req0, _) ->
         client_ip => ClientIP
     }),
 
-
     try
 
         {ok, Subproto, BinProto} = select_subprotocol(Subprotocols),
