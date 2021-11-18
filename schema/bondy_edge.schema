@@ -56,18 +56,14 @@
 ]}.
 
 {mapping, "edge.uplink.reconnect.backoff.min", "bondy.edge.uplink.reconnect.backoff_min", [
-  {default, 10},
-  {validators, [pos_integer]},
-  {datatype, integer}
+  {default, "5s"},
+  {datatype, {duration, ms}}
 ]}.
 
 {mapping, "edge.uplink.reconnect.backoff.max", "bondy.edge.uplink.reconnect.backoff_max", [
-  {default, 120000},
-  {validators, [pos_integer]},
-  {datatype, integer}
+  {default, "60s"},
+  {datatype, {duration, ms}}
 ]}.
-
-
 
 %% @doc Defines the number of TCP connections for the edge-remote connection
 {mapping, "edge.uplink.parallelism", "bondy.edge.uplink.parallelism", [
@@ -80,6 +76,19 @@
   {default, "5s"},
   {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
+
+
+%% @doc Drops the connection after a period of inactivity. This option does not
+%% take effect when edge.uplink.ping.enabled is 'off'  and
+%% edge.uplink.ping.interval times edge.uplink.ping.max_retries
+%% results in a value higher than this option.
+%% Notice that for some clients using this option alone is not enough to keep
+%% a connection alive as the client will drop the connection due to inactivity.
+{mapping, "edge.uplink.idle_timeout", "bondy.edge.uplink.idle_timeout", [
+{default, "1h"},
+{datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
 
 %% @doc Defines if PING control message functionality is enabled or
 %% not. This option affects client (Bondy Edge) initiated pings only. The
@@ -105,21 +114,10 @@
 %% If the value is 'infinity' Bondy Edge will never timeout based on missed
 %% pings.
 {mapping,
-"edge.uplink.ping.max_attempts",
-"bondy.edge.uplink.ping.max_attempts", [
+"edge.uplink.ping.max_retries",
+"bondy.edge.uplink.ping.max_retries", [
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
-]}.
-
-%% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when edge.uplink.ping.enabled is 'off'  and
-%% edge.uplink.ping.interval times edge.uplink.ping.max_attempts
-%% results in a value higher than this option.
-%% Notice that for some clients using this option alone is not enough to keep
-%% a connection alive as the client will drop the connection due to inactivity.
-{mapping, "edge.uplink.idle_timeout", "bondy.edge.uplink.idle_timeout", [
-  {default, "1h"},
-  {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
 
 
@@ -406,8 +404,8 @@ end}.
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"edge.listener.tcp.ping.max_attempts",
-"bondy.edge_tcp.ping.max_attempts",[
+"edge.listener.tcp.ping.max_retries",
+"bondy.edge_tcp.ping.max_retries",[
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
 ]}.
@@ -415,7 +413,7 @@ end}.
 %% @doc Drops the connection after a period of inactivity. This option does not
 %% take effect when edge.listener.tcp.ping.enabled is 'on'
 %% and edge.listener.tcp.ping.interval times
-%% edge.listener.tcp.ping.max_attempts results in a value higher than this
+%% edge.listener.tcp.ping.max_retries results in a value higher than this
 %% option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
@@ -536,15 +534,15 @@ end}.
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"edge.listener.tls.ping.max_attempts",
-"bondy.edge_tls.ping.max_attempts", [
+"edge.listener.tls.ping.max_retries",
+"bondy.edge_tls.ping.max_retries", [
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
 ]}.
 
 %% @doc Drops the connection after a period of inactivity. This option does not
 %% take effect when edge.listener.tls.ping.enabled is 'on' and edge.listener.tls.ping.
-%% interval times edge.listener.tls.ping.max_attempts results in a value higher
+%% interval times edge.listener.tls.ping.max_retries results in a value higher
 %% than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.

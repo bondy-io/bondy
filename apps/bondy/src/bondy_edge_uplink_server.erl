@@ -5,7 +5,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("bondy.hrl").
 
--define(TIMEOUT, 5000).
+-define(TIMEOUT, 30000).
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -89,6 +89,10 @@ init({Ref, Transport, _Opts = []}) ->
 %% -----------------------------------------------------------------------------
 terminate(Reason, StateName, #state{transport = T, socket = S} = State)
 when T =/= undefined andalso S =/= undefined ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => Reason
+    }),
     catch T:close(S),
     ok = on_close(Reason, State),
     NewState = State#state{transport = undefined, socket = undefined},
@@ -147,7 +151,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
 	{stop, Reason};
 
 connected(info, Msg, _) ->
-    ?LOG_DEBUG(#{
+    ?LOG_INFO(#{
         description => "Received unknown message",
         type => info,
         event => Msg
@@ -155,7 +159,7 @@ connected(info, Msg, _) ->
 	keep_state_and_data;
 
 connected({call, From}, Request, _) ->
-    ?LOG_DEBUG(#{
+    ?LOG_INFO(#{
         description => "Received unknown request",
         type => call,
         event => Request
@@ -164,7 +168,7 @@ connected({call, From}, Request, _) ->
 	keep_state_and_data;
 
 connected(cast, Msg, _) ->
-    ?LOG_DEBUG(#{
+    ?LOG_INFO(#{
         description => "Received unknown message",
         type => cast,
         event => Msg
@@ -172,6 +176,10 @@ connected(cast, Msg, _) ->
 	keep_state_and_data;
 
 connected(timeout, _Msg, _) ->
+    ?LOG_INFO(#{
+        description => "Closing connection",
+        reason => timeout
+    }),
 	{stop, normal};
 
 connected(_EventType, _Msg, _) ->
