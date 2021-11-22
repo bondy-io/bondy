@@ -18,6 +18,23 @@
 
 -module(bondy_edge).
 
+-include_lib("wamp/include/wamp.hrl").
+
+-type session()             ::  #{
+    %% Common to client and server
+    id => id(),
+    realm := uri(),
+    authid := binary(),
+    pubkey := binary(),
+    x_authroles => [binary()],
+    %% Client-side
+    signer => fun((Challenge :: binary()) -> Signature :: binary()),
+    %% Server-side
+    auth_context => bondy_auth:context(),
+    start_ts => integer()
+}.
+
+-export_type([session/0]).
 
 -define(TCP, edge_tcp).
 -define(TLS, edge_tls).
@@ -26,6 +43,7 @@
 -export([connections/0]).
 -export([resume_listeners/0]).
 -export([start_listeners/0]).
+-export([start_uplinks/0]).
 -export([stop_listeners/0]).
 -export([suspend_listeners/0]).
 -export([tcp_connections/0]).
@@ -109,3 +127,23 @@ tls_connections() ->
 %% -----------------------------------------------------------------------------
 tcp_connections() ->
     bondy_ranch_listener:connections(?TCP).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Starts the tcp and tls raw socket listeners
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_uplinks() -> ok.
+
+start_uplinks() ->
+    Spec = #{
+        id => bondy_edge_uplink_client_sup,
+        start => {bondy_edge_uplink_client_sup, start_link, []},
+        restart => permanent,
+        shutdown => infinity,
+        type => supervisor,
+        modules => [bondy_edge_uplink_client_sup]
+    },
+    _ = supervisor:start_child(bondy_sup, Spec),
+    ok.

@@ -170,8 +170,11 @@ start_phase(init_listeners, normal, []) ->
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
 
-    %% Bondy Edge downlink connection listeners
+    %% Bondy Edge (server) downlink connection listeners
     ok = bondy_edge:start_listeners(),
+
+    %% Bondy Edge (client) uplink connection
+    ok = bondy_edge:start_uplinks(),
 
     %% We flag the status, the /ready path will now return true.
     ok = bondy_config:set(status, ready),

@@ -2,6 +2,7 @@
 -behaviour(gen_statem).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy.hrl").
 
 -define(CONNECTION_FAILED_MESSAGE,
@@ -18,7 +19,6 @@
     endpoint                ::  {inet:ip_address(), inet:port_number()},
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
-    start_time              ::  integer(),
     idle_timeout            ::  pos_integer(),
     reconnect_retry         ::  maybe(bondy_retry:t()),
     reconnect_retry_tref    ::  maybe(timer:ref()),
@@ -28,11 +28,12 @@
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     hibernate = false       ::  boolean(),
     realms                  ::  map(),
-    sessions = #{}          ::  map()
+    sessions = #{}          ::  #{uri() => bondy_edge:session()},
+    session                 ::  maybe(map()),
+    start_ts                ::  integer()
 }).
 
 -type t()                   ::  #state{}.
-
 
 %% API.
 -export([start_link/3]).
@@ -85,16 +86,17 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init({Transport0, Endpoint, Opts}) ->
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(?MODULE, '_', x),
     TransportMod = transport_mod(Transport0),
+
+    %% TODO Validate realms
 
     State0 = #state{
         transport = TransportMod,
         endpoint = Endpoint,
         opts = Opts,
         realms = key_value:get(realms, Opts, #{}),
-        idle_timeout = key_value:get(idle_timeout, Opts, 60000)
+        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
+        start_ts = erlang:system_time(millisecond)
     },
 
     %% Setup reconnect
@@ -121,12 +123,6 @@ init({Transport0, Endpoint, Opts}) ->
         false ->
             State1
     end,
-
-    ok = bondy_logger_utils:set_process_metadata(#{
-        transport => TransportMod,
-        endpoint => Endpoint,
-        reconnect => State#state.reconnect_retry =/= undefined
-    }),
 
     {ok, connecting, State}.
 
@@ -181,7 +177,12 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% If reconnect is configured it will retry using the reconnect options defined.
 %% @end
 %% -----------------------------------------------------------------------------
-connecting(enter, _, _) ->
+connecting(enter, _, State) ->
+    ok = bondy_logger_utils:set_process_metadata(#{
+        transport => State#state.transport,
+        endpoint => State#state.endpoint,
+        reconnect => State#state.reconnect_retry =/= undefined
+    }),
     {keep_state_and_data, [{state_timeout, 0, connect}]};
 
 connecting(state_timeout, connect, State0) ->
@@ -214,22 +215,87 @@ connected(enter, connecting, #state{} = State0) ->
     ok = on_connect(State0),
 
     %% We join any realms defined by the config
-    State = join(State0),
+    case maps:to_list(State0#state.realms) of
+        [] ->
+            keep_state_and_data;
+        [{Uri, H}|_T] ->
+            %% POC, we join only the first realm
+            %% TODO join all
+            AuthId = key_value:get(authid, H),
+            PubKey = key_value:get([cryptosign, pubkey], H),
 
-    {keep_state, State};
+            Details = #{
+                authid => AuthId,
+                authextra => #{
+                    <<"pubkey">> => PubKey,
+                    <<"trustroot">> => undefined,
+                    <<"challenge">> => undefined,
+                    <<"channel_binding">> => undefined
+                }
+            },
+
+            ok = send_message({hello, Uri, Details}, State0),
+
+            Session = #{
+                realm => Uri,
+                authid => AuthId,
+                pubkey => PubKey,
+                signer => signer(PubKey, H),
+                x_authroles => []
+            },
+
+            State = State0#state{session = Session},
+
+            {keep_state, State}
+    end;
+
+connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
+    ?LOG_INFO(#{
+        description => "Got challenge",
+        extra => ChallengeExtra
+    }),
+    HexMessage = maps:get(challenge, ChallengeExtra, undefined),
+    Message = hex_utils:hexstr_to_bin(HexMessage),
+    Signer = maps:get(signer, State#state.session),
+
+    Signature = Signer(Message),
+    Extra = #{},
+    ok = send_message({authenticate, Signature, Extra}, State),
+
+    {keep_state_and_data, idle_timeout(State)};
+
+connected(internal, {welcome, SessionId, Details}, State0) ->
+    ?LOG_INFO(#{
+        description => "Got welcome",
+        session_id => SessionId,
+        details => Details
+    }),
+
+    Sessions0 = State0#state.sessions,
+    Session0 = State0#state.session,
+    Session = Session0#{
+        id => SessionId
+    },
+    Uri = maps:get(realm, Session),
+    Sessions = maps:put(Uri, Session, Sessions0),
+    State = State0#state{sessions = Sessions},
+
+    {keep_state, State, idle_timeout(State)};
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
-    Transport = State#state.transport,
-	Transport:setopts(Socket, [{active, once}]),
+    ok = set_socket_active(State),
+
     ?LOG_INFO(#{
         description => "Got TCP message",
         message => Data
     }),
-	% handle_message(binary_to_term(Data), State),
-	% {keep_state_and_data, State#state.idle_timeout};
 
-    keep_state_and_data;
+    Actions = [
+        {next_event, internal, binary_to_term(Data)},
+        idle_timeout(State)
+    ],
+    {keep_state_and_data, Actions};
 
 connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
@@ -398,6 +464,17 @@ transport_mod(ssl) -> ssl.
 
 
 %% @private
+set_socket_active(State) ->
+    inet:setopts(State#state.socket, [{active, once}]).
+
+
+%% @private
+send_message(Message, State) ->
+    Data = term_to_binary(Message),
+    (State#state.transport):send(State#state.socket, Data).
+
+
+%% @private
 on_connect(_State) ->
     ?LOG_NOTICE(#{
         description => "Established uplink connection to core router"
@@ -426,19 +503,80 @@ send_ping(St) ->
 %% sent ourselves a ping_timeout message in the future.
 %% @end
 %% -----------------------------------------------------------------------------
-send_ping(Data, St0) ->
-    Transport = St0#state.transport,
-    Transport:send(St0#state.socket, {ping, Data}),
-    Timeout = St0#state.idle_timeout,
+send_ping(Data, State0) ->
+    ok = send_message({ping, Data}, State0),
+    Timeout = State0#state.idle_timeout,
 
     TimerRef = erlang:send_after(Timeout, self(), ping_timeout),
 
-    St1 = St0#state{
+    State = State0#state{
         ping_sent = {TimerRef, Data}
         % ping_retry =
     },
-    {ok, St1}.
+    {ok, State}.
 
 
-join(State) ->
-    State.
+% join(State) ->
+%     State.
+
+
+%% @private
+idle_timeout(State) ->
+    {state_timeout, State#state.idle_timeout, idle_timeout}.
+
+
+%% @private
+signer(_, #{cryptosign := #{procedure := _}}) ->
+    error(not_implemented);
+
+signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
+
+    SignerFun = fun(Message) ->
+        try
+            Port = erlang:open_port(
+                {spawn_executable, Filename}, [{args, [PubKey, Message]}]
+            ),
+            receive
+                {Port, {data, Signature}} ->
+                    %% Signature should be a hex string
+                    erlang:port_close(Port),
+                    list_to_binary(Signature)
+            after
+                10000 ->
+                    erlang:port_close(Port),
+                    throw(timeout)
+            end
+        catch
+            error:Reason ->
+                error({invalid_executable, Reason})
+        end
+    end,
+
+    %% We call it first to validate
+    try SignerFun(<<"foo">>) of
+        Val when is_binary(Val) ->
+            SignerFun
+    catch
+        error:Reason ->
+            error(Reason)
+    end;
+
+signer(_, #{cryptosign := #{privkey_env_var := Bin}}) ->
+    Var = binary_to_list(Bin),
+
+    case os:getenv(Var) of
+        false ->
+            error({invalid_config, {privkey_env_var, Var}});
+        HexString ->
+            PrivKey = hex_utils:hexstr_to_bin(HexString),
+            fun(Message) ->
+                list_to_binary(
+                    hex_utils:bin_to_hexstr(
+                        enacl:sign_detached(Message, PrivKey)
+                    )
+                )
+            end
+    end;
+
+signer(_, _) ->
+    error(invalid_cryptosign_config).
