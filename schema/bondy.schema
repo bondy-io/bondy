@@ -1795,7 +1795,7 @@ end}.
   hidden
 ]}.
 
-{mapping, "store.open_retry_Limit", "plum_db.store_open_retry_limit", [
+{mapping, "store.open_retry_limit", "plum_db.store_open_retry_limit", [
   {default, 30},
   {validators, [pos_integer]},
   {datatype, integer}

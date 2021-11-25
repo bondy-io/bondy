@@ -183,7 +183,7 @@
             {data_exchange_timeout,60000},
             {data_dir,"./data"},
             {store_open_retries_delay,2000},
-            {store_open_retry_Limit,30},
+            {store_open_retry_limit,30},
             {shard_by,prefix},
             {partitions,16},
             {wait_for_aae_exchange,false},
