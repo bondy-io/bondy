@@ -215,7 +215,8 @@ close(Ctxt0, Reason) ->
         is_closing => true,
         is_shutting_down => Reason =:= shutdown
     },
-    bondy_router:close_context(Ctxt).
+    _ = bondy_router:close_context(Ctxt),
+    ok.
 
 
 %% -----------------------------------------------------------------------------

@@ -735,7 +735,7 @@ handle_call(
     callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
-    do_handle_call(M, Ctxt, Uri, undefined).
+    do_handle_call(M, Ctxt, Uri).
 
 
 %% -----------------------------------------------------------------------------
@@ -790,6 +790,10 @@ callback(#call{} = M0, Ctxt, Mod) ->
             bondy:send(PeerId, Error)
     end.
 
+
+%% @private
+do_handle_call(M, Ctxt, Uri) ->
+    do_handle_call(M, Ctxt, Uri, #{error_formatter => undefined}).
 
 
 %% @private
