@@ -150,6 +150,9 @@
 -define(NOW, erlang:system_time(second)).
 -define(LEEWAY_SECS, 120). % 2 mins
 
+%% TODO revie, using a dynamic prefix is a bad idea, turn this into
+%% {?PLUM_DB_TICKET_TAB, Realm} and use key composition which allow for
+%% iteration using first prefixes
 -define(PLUM_DB_PREFIX(L),
     {?PLUM_DB_TICKET_TAB, binary_utils:join(L, <<",">>)}
 ).
