@@ -277,6 +277,8 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 
     Details0 = #{
         <<"timestamp">> => erlang:system_time(millisecond), %% added by us
+        %% This is mandatory only for pattern-based subscriptions but we prefer
+        %% to always have it
         <<"topic">> => TopicUri
     },
     Details = case maps:get(disclose_me, Opts, true) of
@@ -357,7 +359,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                     undefined ->
                         %% An internal bondy_subscriber
                         Event = MakeEvent(SubsId),
-                        ok = bondy_subscriber:handle_event(Pid, Event),
+                        Pid ! Event,
                         NodeAcc;
 
                     ESessionId ->
@@ -505,6 +507,7 @@ unsubscribe(SubsId, Ctxt) ->
                 {ok, false} ->
                     on_unsubscribe(Entry, Ctxt);
                 {ok, true} ->
+                    ok = on_unsubscribe(Entry, Ctxt),
                     on_delete(Entry, Ctxt);
                 Error ->
                     Error
@@ -689,6 +692,7 @@ subscribe(M, Ctxt) ->
 -spec unsubscribe_all(bondy_context:t()) -> ok.
 
 unsubscribe_all(Ctxt) ->
+    %% TODO If subscription is deleted we need to also call on_delete/2
     bondy_registry:remove_all(subscription, Ctxt, fun on_unsubscribe/2).
 
 
