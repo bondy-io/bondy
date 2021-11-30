@@ -825,7 +825,7 @@ match_subscriptions(Cont) ->
 
 
 %% @private
-publish_fold({[], ?EOT}, _Fun, Acc) ->
+publish_fold(?EOT, _Fun, Acc) ->
     Acc;
 
 publish_fold({L, ?EOT}, Fun, Acc) ->

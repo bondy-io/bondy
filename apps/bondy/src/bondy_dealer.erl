@@ -1049,7 +1049,10 @@ registrations({registration, _} = Cont) ->
 %% number of registrations returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec registrations(RealmUri :: uri(), Node :: atom(), SessionId :: id()) ->
+-spec registrations(
+    RealmUri :: uri(),
+    Node :: atom() | '_',
+    SessionId :: id() | '_') ->
     [bondy_registry_entry:t()].
 
 registrations(RealmUri, Node, SessionId) ->
@@ -1065,7 +1068,10 @@ registrations(RealmUri, Node, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec registrations(
-    RealmUri :: uri(), Node :: atom(), SessionId :: id(), non_neg_integer()) ->
+    RealmUri :: uri(),
+    Node :: atom() | '_',
+    SessionId :: id() | '_',
+    Limit :: non_neg_integer()) ->
     {
         [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
@@ -1217,7 +1223,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
     %% for that procedure.
 
     case match_registrations(ProcUri, Ctxt0, #{}) of
-        {[], ?EOT} ->
+        ?EOT ->
             Error = case format_error(no_such_procedure, Opts) of
                 undefined ->
                     bondy_wamp_utils:no_such_procedure_error(
@@ -1301,7 +1307,7 @@ call_opts(_) -> #{}.
 
 
 %% @private
-invoke_aux({[], ?EOT}, _, _, _) ->
+invoke_aux(?EOT, _, _, _) ->
     ok;
 
 invoke_aux({L, ?EOT}, Fun, Opts, Ctxt) ->

@@ -297,12 +297,14 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
     try
         bondy_peer_message:is_message(Mssg) orelse throw(badarg),
 
+        %% This in theory breaks the CALL order guarantee!!!
+        %% We either implement causality or we just use hashing over a pool of
+        %% workers by {CallerID, CalleeId}
         Job = fun() ->
             ok = bondy_router:handle_peer_message(Mssg),
             %% We send the ack to the remote node
             cast_message(peer_ack(Mssg), BinPid)
         end,
-
         ok = case bondy_router_worker:cast(Job) of
             ok ->
                 ok;

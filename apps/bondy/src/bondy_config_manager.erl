@@ -24,6 +24,7 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_config_manager).
 -behaviour(gen_server).
+
 -include_lib("kernel/include/logger.hrl").
 -include("bondy.hrl").
 -include("bondy_plum_db.hrl").

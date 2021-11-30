@@ -362,7 +362,8 @@ when is_function(Task, 2) orelse Task == undefined ->
                 {remove_tombstones, true}
             ],
             Matches = plum_db:match(
-                full_prefix(Type, RealmUri), Pattern, MatchOpts),
+                full_prefix(Type, RealmUri), Pattern, MatchOpts
+            ),
             do_remove_all(Matches, SessionId, MaybeFun)
     end;
 
@@ -540,17 +541,22 @@ entries(Type, RealmUri, Node, SessionId) ->
 -spec entries(
     bondy_registry_entry:entry_type(),
     Realm :: uri(),
-    Node :: atom(),
-    SessionId :: id(),
+    Node :: atom() | '_',
+    SessionId :: id() | '_',
     Limit :: pos_integer()) ->
-    {[bondy_registry_entry:t()], continuation() | eot()}.
+    {[bondy_registry_entry:t()], continuation() | eot()} | eot().
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, '_'),
+        Type, RealmUri, Node, SessionId, '_'
+    ),
     Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
-    Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts),
-    [V || {_, V} <- Matches].
+    case plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts) of
+        ?EOT ->
+            ?EOT;
+        {L, NewCont} ->
+            {[V || {_, V} <- L], {Type, NewCont}}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -567,15 +573,15 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(continuation()) ->
-    {[bondy_registry_entry:t()], continuation() | eot()}.
+    {[bondy_registry_entry:t()], continuation() | eot()} | eot().
 
 entries(?EOT) ->
-    {[], ?EOT};
+    ?EOT;
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
     case plum_db:match(Cont) of
         ?EOT ->
-            {[], ?EOT};
+            ?EOT;
         {L, NewCont} ->
             {[V || {_, V} <- L], {Type, NewCont}}
     end.
@@ -606,7 +612,7 @@ match(Type, Uri, RealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec match(
     bondy_registry_entry:entry_type(), uri(), RealmUri :: uri(), map()) ->
-    {[bondy_registry_entry:t()], continuation()} | eot().
+        {[bondy_registry_entry:t()], continuation() | eot()} | eot().
 
 match(Type, Uri, RealmUri, Opts) ->
     try
@@ -617,7 +623,7 @@ match(Type, Uri, RealmUri, Opts) ->
         lookup_entries(Type, {Result, ?EOT})
     catch
         throw:non_eligible_entries ->
-            {[], ?EOT};
+            ?EOT;
         error:badarg:Stacktrace ->
             %% @TODO this will be fixed when art provides persistent tries
             ?LOG_DEBUG(#{
@@ -625,7 +631,7 @@ match(Type, Uri, RealmUri, Opts) ->
                 reason => badarg,
                 stacktrace => Stacktrace
             }),
-            {[], ?EOT}
+            ?EOT
     end.
 
 
@@ -637,10 +643,10 @@ match(Type, Uri, RealmUri, Opts) ->
     {[bondy_registry_entry:t()], continuation()} | eot().
 
 match(?EOT) ->
-    {[], ?EOT};
+    ?EOT;
 
 match({_, ?EOT}) ->
-    {[], ?EOT}.
+    ?EOT.
 
 
 

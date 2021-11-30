@@ -114,20 +114,20 @@
 
 -type callback_peer_id()  ::  {
     Realm       ::  binary(),
-    Node        ::  atom(),
+    Node        ::  node(),
     SessionId   ::  undefined,
     Mod         ::  module()
 }.
 -type local_peer_id()   ::  {
     Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  maybe(integer()),
+    Node        ::  node(),
+    SessionId   ::  maybe(pos_integer()),
     Pid         ::  pid()
 }.
 -type remote_peer_id()  ::  {
     Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  maybe(integer()),
+    Node        ::  node(),
+    SessionId   ::  maybe(pos_integer()),
     Pid         ::  maybe(pid() | binary())
 }.
 -type peer_id()         ::  callback_peer_id()

@@ -17,7 +17,9 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc An entry is a record of a RPC registration or PubSub subscription. It
+%% is stored in-memory in the Registry {@link bondy_registry} and replicated
+%% globally and is immutable.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
@@ -33,15 +35,14 @@
     type                    ::  entry_type()
 }).
 
-%% An entry denotes a registration or a subscription.
-%% Entries are immutable.
 -record(entry, {
     key                     ::  key(),
     pid                     ::  wildcard(maybe(pid())),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     created                 ::  pos_integer() | atom(),
-    options                 ::  map()
+    options                 ::  map(),
+    hash                    ::  maybe(integer())
 }).
 
 
@@ -50,6 +51,7 @@
 -type t_or_key()            ::  t_or_key().
 -type entry_type()          ::  registration | subscription.
 
+%% Owner is either a session (id()), an internal process or a module
 -type owner()               ::  wildcard(id() | pid() | module()).
 -type wildcard(T)           ::  T | '_'.
 -type details_map()         ::  #{
@@ -74,6 +76,8 @@
 -export([is_callback/1]).
 -export([is_entry/1]).
 -export([is_local/1]).
+-export([is_proxy/1]).
+-export([is_proxy/2]).
 -export([key/1]).
 -export([key_pattern/5]).
 -export([match_policy/1]).
@@ -90,6 +94,7 @@
 -export([session_id/1]).
 -export([to_details_map/1]).
 -export([to_map/1]).
+-export([to_proxy/3]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -518,6 +523,52 @@ to_map(#entry{key = Key} = E) ->
         options => E#entry.options,
         created => created_format(E#entry.created)
     }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a copy of the entry where the node component of the peer_id has
+%% been replaced with the node of the calling process, the session identifier
+%% replaced with `SessionId' and the pid with `Pid'.
+%%
+%% The entry is used by a router node to create a proxy of an entry originated
+%% in an edge router.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_proxy(Entry :: t(), SessionId :: maybe(id()), Pid :: pid()) -> t().
+
+to_proxy(#entry{} = Entry, SessionId, Pid) ->
+    {Owner, Pid} = owner_pid(SessionId, Pid),
+    Key = Entry#entry.key,
+
+    Entry#entry{
+        key = Key#entry_key{
+            node = bondy_peer_service:mynode(),
+            owner = Owner
+        },
+        pid = Pid,
+        hash = erlang:phash2(Entry)
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_proxy(Entry :: t()) -> boolean().
+
+is_proxy(#entry{hash = Val}) ->
+    Val =/= undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_proxy(Proxy :: t(), Entry :: t()) -> boolean().
+
+is_proxy(#entry{hash = Val}, #entry_key{} = Entry) ->
+    Val == erlang:phash2(Entry).
+
 
 
 
