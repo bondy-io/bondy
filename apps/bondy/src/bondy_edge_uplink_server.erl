@@ -5,6 +5,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy.hrl").
+-include_lib("bondy_plum_db.hrl").
 
 -define(TIMEOUT, 30000).
 
@@ -23,7 +24,8 @@
     ping_retry              ::  maybe(bondy_retry:t()),
     ping_retry_tref         ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
-    sessions = #{}          ::  #{uri() => bondy_edge:session()},
+    sessions = #{}          ::  #{id() => bondy_edge_session:t()},
+    sessions_by_uri = #{}   ::  #{uri() => id()},
     session                 ::  maybe(map()),
     auth_realm              ::  binary(),
     start_ts                ::  pos_integer()
@@ -184,71 +186,14 @@ connected(enter, connected, State) ->
 
     ok = on_connect(State),
 
-    {keep_state, State#state{socket = Socket}};
+    {keep_state, State#state{socket = Socket}, [idle_timeout(State)]};
 
-connected(internal, {hello, _, _}, #state{session = Session} = State)
-when Session =/= undefined ->
-    %% Session already being established, wrong message
-    ok = send_message({abort, #{}, protocol_violation}, State),
-    {stop, State};
-
-connected(internal, {hello, Uri, Details}, State0) ->
-    %% TODO validate Details
-    ?LOG_DEBUG(#{
-        description => "Got hello",
-        details => Details
-    }),
-    try
-
-        Realm = bondy_realm:get(Uri),
-
-        bondy_realm:allow_connections(Realm)
-            orelse throw(connections_not_allowed),
-
-        State = challenge(Realm, Details, State0),
-        {keep_state, State, [idle_timeout(State)]}
-
-    catch
-        error:{not_found, Uri} ->
-            Reason = no_such_realm,
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0};
-
-        throw:Reason ->
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
-
-    end;
-
-connected(internal, {authenticate, Signature, Extra}, State0) ->
-    %% TODO validate Details
-    ?LOG_DEBUG(#{
-        description => "Got authenticate",
-        signature => Signature,
-        extra => Extra
-    }),
-
-    try
-
-        State = authenticate(<<"cryptosign">>, Signature, Extra, State0),
-        {keep_state, State, [idle_timeout(State)]}
-
-    catch
-        throw:Reason ->
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
-    end,
-
-    keep_state_and_data;
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
-	Actions = [
-        {next_event, internal, binary_to_term(Data)},
-        idle_timeout(State)
-    ],
-	{keep_state_and_data, Actions};
+
+    handle_message(binary_to_term(Data), State);
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
 	{stop, normal};
@@ -260,30 +205,34 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
 	{stop, Reason};
 
-connected(info, Msg, _) ->
+connected(info, Msg, State) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
         type => info,
         event => Msg
     }),
-	keep_state_and_data;
+	{keep_state_and_data, [idle_timeout(State)]};
 
-connected({call, From}, Request, _) ->
+connected({call, From}, Request, State) ->
     ?LOG_INFO(#{
         description => "Received unknown request",
         type => call,
         event => Request
     }),
 	gen_statem:reply(From, {error, badcall}),
-	keep_state_and_data;
+	{keep_state_and_data, [idle_timeout(State)]};
 
-connected(cast, Msg, _) ->
+connected(cast, {forward, Msg}, State) ->
+    ok = send_message(Msg, State),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+connected(cast, Msg, State) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
         type => cast,
         event => Msg
     }),
-	keep_state_and_data;
+	{keep_state_and_data, [idle_timeout(State)]};
 
 connected(timeout, _Msg, _) ->
     ?LOG_INFO(#{
@@ -303,9 +252,11 @@ connected(_EventType, _Msg, _) ->
 
 
 
+%% @private
 challenge(Realm, Details, State0) ->
     {ok, Peer} = inet:peername(State0#state.socket),
     Sessions0 = State0#state.sessions,
+    SessionsByUri0 = State0#state.sessions_by_uri,
 
     Uri = bondy_realm:uri(Realm),
     SessionId = bondy_utils:get_id(global),
@@ -328,11 +279,15 @@ challenge(Realm, Details, State0) ->
                         auth_context => AuthCtxt
                     },
 
+                    Sessions = maps:put(SessionId, Session, Sessions0),
+                    SessionsByUri = maps:put(Uri, SessionId, SessionsByUri0),
+
                     State = State0#state{
                         session = Session,
-                        sessions = maps:put(Uri, Session, Sessions0)
+                        sessions = Sessions,
+                        sessions_by_uri = SessionsByUri
                     },
-                    do_challenge(Uri, Details, Method, State)
+                    do_challenge(SessionId, Details, Method, State)
             end;
 
         {error, Reason0} ->
@@ -340,9 +295,9 @@ challenge(Realm, Details, State0) ->
     end.
 
 
-do_challenge(Uri, Details, Method, State0) ->
-    Session0 = maps:get(Uri, State0#state.sessions),
-    SessionId = maps:get(id, Session0),
+%% @private
+do_challenge(SessionId, Details, Method, State0) ->
+    Session0 = maps:get(SessionId, State0#state.sessions),
     AuthCtxt0 = maps:get(auth_context, Session0),
 
     {AuthCtxt, Reply} =
@@ -365,7 +320,7 @@ do_challenge(Uri, Details, Method, State0) ->
     },
 
     State = State0#state{
-        sessions = maps:put(Uri, Session, State0#state.sessions)
+        sessions = maps:put(SessionId, Session, State0#state.sessions)
     },
 
     ok = send_message(Reply, State),
@@ -373,10 +328,11 @@ do_challenge(Uri, Details, Method, State0) ->
     State.
 
 
+%% @private
 authenticate(AuthMethod, Signature, Extra, State0) ->
-    Uri = maps:get(realm, State0#state.session),
-    Session0 = maps:get(Uri, State0#state.sessions),
-    SessionId = maps:get(id, Session0),
+    SessionId = maps:get(id, State0#state.session),
+
+    Session0 = maps:get(SessionId, State0#state.sessions),
     AuthCtxt0 = maps:get(auth_context, Session0),
 
     {AuthCtxt, Reply} =
@@ -394,7 +350,7 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
     },
 
     State = State0#state{
-        sessions = maps:put(Uri, Session, State0#state.sessions),
+        sessions = maps:put(SessionId, Session, State0#state.sessions),
         session = undefined
     },
 
@@ -429,4 +385,160 @@ on_close(_Reason, _State) ->
 
 %% @private
 idle_timeout(State) ->
-    {state_timeout, State#state.idle_timeout, idle_timeout}.
+    {timeout, State#state.idle_timeout, idle_timeout}.
+
+
+%% @private
+handle_message({hello, _, _}, #state{session = Session} = State)
+when Session =/= undefined ->
+    %% Session already being established, wrong message
+    ok = send_message({abort, #{}, protocol_violation}, State),
+    {stop, State};
+
+handle_message({hello, Uri, Details}, State0) ->
+    %% TODO validate Details
+    ?LOG_DEBUG(#{
+        description => "Got hello",
+        details => Details
+    }),
+    try
+
+        Realm = bondy_realm:get(Uri),
+
+        bondy_realm:allow_connections(Realm)
+            orelse throw(connections_not_allowed),
+
+        State = challenge(Realm, Details, State0),
+        {keep_state, State, [idle_timeout(State)]}
+
+    catch
+        error:{not_found, Uri} ->
+            Reason = no_such_realm,
+            ok = send_message({abort, #{}, Reason}, State0),
+            {stop, State0};
+
+        throw:Reason ->
+            ok = send_message({abort, #{}, Reason}, State0),
+            {stop, State0}
+
+    end;
+
+handle_message({authenticate, Signature, Extra}, State0) ->
+    %% TODO validate Details
+    ?LOG_DEBUG(#{
+        description => "Got authenticate",
+        signature => Signature,
+        extra => Extra
+    }),
+
+    try
+
+        State = authenticate(<<"cryptosign">>, Signature, Extra, State0),
+        {keep_state, State, [idle_timeout(State)]}
+
+    catch
+        throw:Reason ->
+            ok = send_message({abort, #{}, Reason}, State0),
+            {stop, State0}
+    end;
+
+handle_message({aae_sync, SessionId, Opts}, State) ->
+    RealmUri = session_realm(SessionId, State),
+    ok = full_sync(SessionId, RealmUri, Opts, State),
+    {keep_state_and_data, [idle_timeout(State)]}.
+
+
+
+full_sync(SessionId, RealmUri, Opts, State) ->
+    Realm = bondy_realm:fetch(RealmUri),
+
+    %% If the realm has a prototype we sync the prototype first
+    case bondy_realm:prototype_uri(Realm) of
+        undefined ->
+            ok;
+        ProtoUri ->
+            full_sync(SessionId, ProtoUri, Opts, State)
+    end,
+
+    %% If the realm or prototype has a SSO Realm we sync the SSO realm first
+    case bondy_realm:sso_realm_uri(Realm) of
+        undefined ->
+            ok;
+        SSOUri ->
+            full_sync(SessionId, SSOUri, Opts, State)
+    end,
+
+    %% Finally we sync the realm
+    ok = do_full_sync(SessionId, RealmUri, Opts, State),
+
+    Finish = {aae_sync, SessionId, finished},
+    gen_statem:cast(self(), {forward, Finish}).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc A temporary POC of full sync, not elegant at all.
+%% This should be resolved at the plum_db layer and not here, but we are
+%% interested in having a POC ASAP.
+%% @end
+%% -----------------------------------------------------------------------------
+do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
+    %% TODO we should spawn an exchange statem for this
+    Me = self(),
+
+    Prefixes = [
+        %% TODO We should NOT sync the priv keys!!
+        %% We might need to split the realm from the priv keys to simplify AAE
+        %% compare operation. But we should be doing some form of Key exchange
+        %% anyways
+        {?PLUM_DB_REALM_TAB, RealmUri},
+        {?PLUM_DB_GROUP_TAB, RealmUri},
+        %% TODO we should not sync passwords!
+        %% We might need to split the password from the user object to simplify
+        %% AAE compare operation
+        {?PLUM_DB_USER_TAB, RealmUri},
+        {?PLUM_DB_SOURCE_TAB, RealmUri},
+        {?PLUM_DB_USER_GRANT_TAB, RealmUri},
+        {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}
+    ],
+
+    _ = lists:foreach(
+        fun(Prefix) ->
+            lists:foreach(
+                fun(O) ->
+                    Msg = {aae_data, SessionId, {Prefix, O}},
+                    gen_statem:cast(Me, {forward, Msg})
+                end,
+                pdb_objects(Prefix)
+            )
+        end,
+        Prefixes
+    ),
+    ok.
+
+
+pdb_objects(FullPrefix) ->
+    It = plum_db:iterator(FullPrefix, []),
+    try
+        pdb_objects(It, [])
+    catch
+        {break, Result} -> Result
+    after
+        ok = plum_db:iterator_close(It)
+    end.
+
+
+%% @private
+pdb_objects(It, Acc0) ->
+    case plum_db:iterator_done(It) of
+        true ->
+            Acc0;
+        false ->
+            Acc = [plum_db:iterator_element(It) | Acc0],
+            pdb_objects(plum_db:iterate(It), Acc)
+    end.
+
+
+session_realm(SessionId, #state{sessions = Map}) ->
+    maps:get(realm, maps:get(SessionId, Map)).

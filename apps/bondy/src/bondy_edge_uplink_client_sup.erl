@@ -24,6 +24,15 @@
 
 -behaviour(supervisor).
 
+-define(SUPERVISOR(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => supervisor,
+    modules => [Id]
+}).
+
 -define(WORKER(Id, Args, Restart, Timeout), #{
     id => Id,
     start => {Id, start_link, Args},
@@ -74,10 +83,17 @@ init([]) ->
                 Opts
             ],
 
+            % Children = [
+            %     ?WORKER(bondy_edge_uplink_client, Args, permanent, 5000),
+            %     ?SUPERVISOR(
+            %         bondy_edge_exchanges_sup, Args, permanent, infinity
+            %     )
+            % ],
+            % {ok, {{rest_for_one, 5, 60}, Children}};
+
             Children = [
                 ?WORKER(bondy_edge_uplink_client, Args, permanent, 5000)
             ],
-
             {ok, {{one_for_one, 5, 60}, Children}};
 
         false ->

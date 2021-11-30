@@ -21,17 +21,19 @@
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
     reconnect_retry         ::  maybe(bondy_retry:t()),
-    reconnect_retry_tref    ::  maybe(timer:ref()),
     reconnect_retry_reason  ::  maybe(any()),
     ping_retry              ::  maybe(bondy_retry:t()),
     ping_retry_tref         ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     hibernate = false       ::  boolean(),
     realms                  ::  map(),
-    sessions = #{}          ::  #{uri() => bondy_edge:session()},
+    sessions = #{}          ::  #{id() => bondy_edge_session:t()},
+    sessions_by_uri = #{}   ::  #{uri() => id()},
+    tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
 }).
+
 
 -type t()                   ::  #state{}.
 
@@ -47,8 +49,6 @@
 %% STATE FUNCTIONS
 -export([connecting/3]).
 -export([connected/3]).
-% -export([establishing/3]).
-% -export([established/3]).
 
 
 
@@ -63,6 +63,9 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Transport, Endpoint, Opts) ->
+    % dbg:tracer(), dbg:p(all,c),
+    % dbg:tpl(?MODULE, '_', x),
+    % dbg:tpl(gen_tcp, 'connect', x),
 	gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
 
 
@@ -86,6 +89,8 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init({Transport0, Endpoint, Opts}) ->
+
+    ?LOG_INFO(#{description => "Starting edge client"}),
     TransportMod = transport_mod(Transport0),
 
     %% TODO Validate realms
@@ -96,6 +101,7 @@ init({Transport0, Endpoint, Opts}) ->
         opts = Opts,
         realms = key_value:get(realms, Opts, #{}),
         idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
+        tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -148,11 +154,24 @@ when T =/= undefined andalso S =/= undefined ->
 
     terminate(Reason, StateName, State);
 
-terminate(Reason, _StateName, _State) ->
+terminate(Reason, _StateName, State0) ->
+
+    %% We unsubscribe from all
+    bondy_broker:unsubscribe(self()),
+
+    _State = maps:fold(
+        fun(Id, _, Acc) ->
+            leave_session(Id, Acc)
+        end,
+        State0,
+        State0#state.sessions
+    ),
+
     ?LOG_ERROR(#{
         description => "Process terminated",
         reason => Reason
     }),
+
 	ok.
 
 
@@ -189,7 +208,6 @@ connecting(state_timeout, connect, State0) ->
     case connect(State0) of
         {ok, Socket} ->
             State = State0#state{socket = Socket},
-            ok = on_connect(State),
             {next_state, connected, State};
 
         {error, Reason} ->
@@ -215,52 +233,16 @@ connected(enter, connecting, #state{} = State0) ->
     ok = on_connect(State0),
 
     %% We join any realms defined by the config
-    case maps:to_list(State0#state.realms) of
-        [] ->
-            keep_state_and_data;
-        [{Uri, H}|_T] ->
-            %% POC, we join only the first realm
-            %% TODO join all
-            AuthId = key_value:get(authid, H),
-            PubKey = key_value:get([cryptosign, pubkey], H),
+    State = open_sessions(State0),
 
-            Details = #{
-                authid => AuthId,
-                authextra => #{
-                    <<"pubkey">> => PubKey,
-                    <<"trustroot">> => undefined,
-                    <<"challenge">> => undefined,
-                    <<"channel_binding">> => undefined
-                }
-            },
-
-            ok = send_message({hello, Uri, Details}, State0),
-
-            Session = #{
-                realm => Uri,
-                authid => AuthId,
-                pubkey => PubKey,
-                signer => signer(PubKey, H),
-                x_authroles => []
-            },
-
-            State = State0#state{session = Session},
-
-            {keep_state, State}
-    end;
+    {keep_state, State};
 
 connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
     ?LOG_INFO(#{
         description => "Got challenge",
         extra => ChallengeExtra
     }),
-    HexMessage = maps:get(challenge, ChallengeExtra, undefined),
-    Message = hex_utils:hexstr_to_bin(HexMessage),
-    Signer = maps:get(signer, State#state.session),
-
-    Signature = Signer(Message),
-    Extra = #{},
-    ok = send_message({authenticate, Signature, Extra}, State),
+    ok = authenticate(ChallengeExtra, State),
 
     {keep_state_and_data, idle_timeout(State)};
 
@@ -271,22 +253,39 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
         details => Details
     }),
 
-    Sessions0 = State0#state.sessions,
-    Session0 = State0#state.session,
-    Session = Session0#{
-        id => SessionId
-    },
-    Uri = maps:get(realm, Session),
-    Sessions = maps:put(Uri, Session, Sessions0),
-    State = State0#state{sessions = Sessions},
+    State = init_session(SessionId, State0),
+
+    %% TODO open sessions on remaning realms
+    {keep_state, State, idle_timeout(State)};
+
+
+connected(internal, {aae_sync, SessionId, finished}, State0) ->
+    ?LOG_INFO(#{
+        description => "AAE sync finished",
+        session_id => SessionId
+    }),
+
+    State = State0,
 
     {keep_state, State, idle_timeout(State)};
+
+connected(internal, {aae_data, SessionId, Data}, State) ->
+    ?LOG_INFO(#{
+        description => "Got aae_sync data",
+        session_id => SessionId,
+        data => Data
+    }),
+
+    ok = handle_aae_data(Data, State),
+
+    {keep_state, State, idle_timeout(State)};
+
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
 
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got TCP message",
         message => Data
     }),
@@ -298,24 +297,17 @@ when ?SOCKET_DATA(Tag) ->
     {keep_state_and_data, Actions};
 
 connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
-    ?LOG_INFO(#{
-        description => "Socket closed"
-    }),
+    ?LOG_INFO(#{description => "Socket closed", reason => normal}),
     ok = on_disconnect(State),
 	{stop, normal};
 
 connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
-    ?LOG_INFO(#{
-        description => "Socket error",
-        reason => Reason
-    }),
+    ?LOG_INFO(#{description => "Socket error", reason => Reason}),
     ok = on_disconnect(State),
 	{stop, Reason};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_INFO(#{
-        description => "Connection timeout, sending first ping"
-    }),
+    ?LOG_INFO(#{description => "Connection timeout, sending first ping"}),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {ok, State1} = send_ping(State0),
     {keep_state, State1};
@@ -358,6 +350,21 @@ connected({call, From}, Request, _) ->
 	gen_statem:reply(From, {error, badcall}),
 	keep_state_and_data;
 
+connected(cast, {forward, Msg, RealmUri}, State) ->
+    case has_session(RealmUri, State) of
+        true ->
+            send_message(Msg, State);
+        _ ->
+            ?LOG_INFO(#{
+                description => "Received message for a realm for which no session has been established",
+                type => cast,
+                event => Msg,
+                realm_uri => RealmUri
+            }),
+            ok
+    end,
+    keep_state_and_data;
+
 connected(cast, Msg, _) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
@@ -385,7 +392,7 @@ connected(EventType, Msg, _) ->
 
 
 %% =============================================================================
-%% PRIVATE
+%% PRIVATE: CONNECT
 %% =============================================================================
 
 
@@ -407,7 +414,7 @@ maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
     case Res of
         Delay when is_integer(Delay) ->
             ?LOG_ERROR(#{
-                description => "Will retry",
+                description => ?CONNECTION_FAILED_MESSAGE ++ ". Will retry.",
                 delay => Delay
             }),
             {keep_state, State, [{state_timeout, Delay, connect}]};
@@ -432,7 +439,8 @@ connect(State) ->
 
 
 %% @private
-connect(Transport, {Host, Port}, Opts) ->
+connect(Transport, {Host, PortNumber}, Opts) ->
+
     Timeout = key_value:get(timeout, Opts, 5000),
     SocketOpts = key_value:get(socket_opts, Opts, []),
 
@@ -448,11 +456,23 @@ connect(Transport, {Host, Port}, Opts) ->
         | SocketOpts
     ],
 
-    case Transport:connect(Host, Port, TransportOpts, Timeout) of
-        {ok, _Socket} = OK ->
-            OK;
-        {error, _} = Error ->
-            Error
+    try
+
+        case Transport:connect(Host, PortNumber, TransportOpts, Timeout) of
+            {ok, _} = OK ->
+                OK;
+            {error, Reason} ->
+                throw(Reason)
+        end
+
+    catch
+        Class:EReason ->
+            ?LOG_WARNING(#{
+                description => "Error while trying to establish uplink connection",
+                class => Class,
+                reason => EReason
+            }),
+            {error, EReason}
     end.
 
 
@@ -476,9 +496,7 @@ send_message(Message, State) ->
 
 %% @private
 on_connect(_State) ->
-    ?LOG_NOTICE(#{
-        description => "Established uplink connection to core router"
-    }),
+    ?LOG_NOTICE(#{description => "Uplink connection established"}),
     ok.
 
 
@@ -516,13 +534,18 @@ send_ping(Data, State0) ->
     {ok, State}.
 
 
-% join(State) ->
-%     State.
-
-
 %% @private
 idle_timeout(State) ->
-    {state_timeout, State#state.idle_timeout, idle_timeout}.
+    %% We use an event timeout meaning any event received will cancel it
+    {timeout, State#state.idle_timeout, idle_timeout}.
+
+
+
+
+%% =============================================================================
+%% PRIVATE: AUTHN
+%% =============================================================================
+
 
 
 %% @private
@@ -580,3 +603,250 @@ signer(_, #{cryptosign := #{privkey_env_var := Bin}}) ->
 
 signer(_, _) ->
     error(invalid_cryptosign_config).
+
+
+%% @private
+authenticate(ChallengeExtra, State) ->
+    HexMessage = maps:get(challenge, ChallengeExtra, undefined),
+    Message = hex_utils:hexstr_to_bin(HexMessage),
+    Signer = maps:get(signer, State#state.session),
+
+    Signature = Signer(Message),
+    Extra = #{},
+    send_message({authenticate, Signature, Extra}, State).
+
+
+
+%% =============================================================================
+%% PRIVATE: ESTABLISH SESSIONS
+%% =============================================================================
+
+
+
+%% @private
+open_sessions(State0) ->
+    case maps:to_list(State0#state.realms) of
+        [] ->
+            State0;
+        [{Uri, H}|_T] ->
+            %% POC, we join only the first realm
+            %% TODO join all
+            AuthId = key_value:get(authid, H),
+            PubKey = key_value:get([cryptosign, pubkey], H),
+
+            Details = #{
+                authid => AuthId,
+                authextra => #{
+                    <<"pubkey">> => PubKey,
+                    <<"trustroot">> => undefined,
+                    <<"challenge">> => undefined,
+                    <<"channel_binding">> => undefined
+                }
+            },
+
+            ok = send_message({hello, Uri, Details}, State0),
+
+            Session = #{
+                realm => Uri,
+                authid => AuthId,
+                pubkey => PubKey,
+                signer => signer(PubKey, H),
+                x_authroles => []
+            },
+
+            State0#state{session = Session}
+        end.
+
+
+%% @private
+init_session(Id, #state{} = State0) ->
+    Session = maps:put(id, Id, State0#state.session),
+    State1 = add_session(Session, State0),
+
+    %% Synchronise the realm configuraiton state before proxying
+    State2 = sync(Session, State1),
+
+    %% Setup the meta subscriptions so that we can dynamically proxy
+    %% subscriptions and registrations
+    State3 = subscribe(Session, State2),
+
+    %% Get the already registered registrations and subscriptions and proxy them
+    State4 = proxy_existing(Session, State3),
+
+    State4#state{
+        session = undefined
+    }.
+
+
+%% @private
+leave_session(Id, #state{} = State) ->
+    Sessions0 = State#state.sessions,
+    {#{realm := Uri}, Sessions} = maps:take(Id, Sessions0),
+    State#state{
+        sessions = Sessions,
+        sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
+    }.
+
+
+%% @private
+has_session(RealmUri, #state{sessions = Sessions}) ->
+    maps:is_key(RealmUri, Sessions).
+
+
+%% @private
+add_session(#{id := Id, realm := Uri} = Session, #state{} = State) ->
+    State#state{
+        sessions = maps:put(Id, Session, State#state.sessions),
+        sessions_by_uri = maps:put(Uri, Id, State#state.sessions_by_uri)
+    }.
+
+
+% update_session(Key, Value, Id, #state{} = State) ->
+%     Sessions = State#state.sessions,
+%     Session0 =  maps:get(Id, Sessions),
+%     Session = maps:put(Key, Value, Session0),
+%     State#state{sessions = maps:put(Id, Session, Sessions)}.
+
+
+
+%% =============================================================================
+%% PRIVATE: SYNC
+%% =============================================================================
+
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc A temporary POC of full sync, not elegant at all.
+%% This should be resolved at the plum_db layer and not here, but we are
+%% interested in having a POC ASAP.
+%% @end
+%% -----------------------------------------------------------------------------
+sync(#{id := SessionId}, State) ->
+    % Ref = make_ref(),
+    % State = update_session(sync_ref, Ref, SessionId, State0),
+    Msg = {aae_sync, SessionId, #{}},
+    ok = send_message(Msg, State),
+    State.
+
+handle_aae_data({FullPrefix, {Key, RemoteObj}}, _State) ->
+    %% We should be getting plum_db_object instances to be able to sync, for
+    %% now we do this
+    PKey = {FullPrefix, Key},
+    _ = plum_db:merge({PKey, undefined}, RemoteObj),
+    ok.
+
+
+
+%% =============================================================================
+%% PRIVATE: PROXYING
+%% =============================================================================
+
+
+
+%% @private
+subscribe(Session, State) ->
+    SessionId = maps:get(id, Session),
+    RealmUri = maps:get(realm, Session),
+
+    % Opts = #{
+    %     match => ?PREFIX_MATCH,
+    %     exclude_me => true
+    % },
+
+    %% We subscribe to all subscriptions
+    % {ok, Id1} = bondy:subscribe(RealmUri, Opts, <<"">>),
+
+    % true = ets:insert(State#state.tab, [
+    %     {{subscription, Id1}, RealmUri, SessionId}
+    % ]),
+
+    _ = bondy_event_manager:add_sup_handler(
+        {bondy_event_wamp_publisher, SessionId},
+        [RealmUri]
+    ),
+
+    State.
+
+
+%% @private
+proxy_existing(Session, State0) ->
+    RealmUri = maps:get(realm, Session),
+
+    %% We want only the entries done in this node
+    Node = bondy_peer_service:mynode(),
+
+    %% We want all sessions, callback modules or processes
+    SessionId = '_',
+    Limit = 100,
+
+    %% We proxy all existing registrations
+    Regs = bondy_dealer:registrations(RealmUri, Node, SessionId, Limit),
+    GetRegs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
+    State1 = proxy_existing(Session, State0, GetRegs, Regs),
+
+    %% We proxy all existing subscriptions
+    Subs = bondy_broker:subscriptions(RealmUri, Node, SessionId, Limit),
+    GetSubs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
+    proxy_existing(Session, State1, GetSubs, Subs).
+
+
+%% @private
+proxy_existing(_, State, _, ?EOT) ->
+    State;
+
+proxy_existing(Session, State, Get, {[], Cont}) ->
+    proxy_existing(Session, State, Get, Get(Cont));
+
+
+proxy_existing(Session, State0, Get, {[H|T], Cont}) ->
+    State = proxy_entry(Session, State0, H),
+    proxy_existing(Session, State, Get, {T, Cont}).
+
+
+%% @private
+proxy_entry(_Session, State, Entry) ->
+    Type = bondy_registry_entry:type(Entry),
+    Owner = bondy_registry_entry:owner(Entry),
+
+    case Owner =/= self() of
+        true ->
+            %% We do not want to proxy our own subscriptions
+            State;
+        false when Type == registration ->
+            %% TODO
+            Message = {add_registration, Entry},
+            ok = send_message(Message, State),
+            State;
+
+        false when Type == subscription ->
+            Message = {add_subscription, Entry},
+            ok = send_message(Message, State),
+            State
+    end.
+
+
+
+% new_request_id(Type, RealmUri, State) ->
+%     Tab = State#state.tab,
+%     Pos = case Type of
+%         subscribe -> #session_data.subscribe_req_id;
+%         unsubscribe -> #session_data.unsubscribe_req_id;
+%         publish -> #session_data.publish_req_id;
+%         register -> #session_data.register_req_id;
+%         unregister -> #session_data.unregister_req_id;
+%         call -> #session_data.call_req_id
+%     end,
+%     ets:update_counter(Tab, RealmUri, {Pos, 1}).
+
+
+
+%% =============================================================================
+%% PRIVATE: HANDLING WAMP EVENTS
+%% =============================================================================
+
+
+
+% handle_event(#event{} = Event, State) ->
+%     case maps:get(topic, Event#event.details) of
+
