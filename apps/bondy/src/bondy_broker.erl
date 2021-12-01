@@ -737,6 +737,8 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
+subscriptions(?EOT) ->
+    ?EOT;
 subscriptions({subscription, _} = Cont) ->
     bondy_registry:entries(Cont).
 

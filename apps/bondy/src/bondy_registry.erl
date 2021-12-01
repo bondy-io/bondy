@@ -554,6 +554,8 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
     case plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts) of
         ?EOT ->
             ?EOT;
+        {L, ?EOT} ->
+            {[V || {_, V} <- L], ?EOT};
         {L, NewCont} ->
             {[V || {_, V} <- L], {Type, NewCont}}
     end.
@@ -578,10 +580,15 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
 entries(?EOT) ->
     ?EOT;
 
+entries({_, ?EOT}) ->
+    ?EOT;
+
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
     case plum_db:match(Cont) of
         ?EOT ->
             ?EOT;
+        {L, ?EOT} ->
+            {[V || {_, V} <- L], ?EOT};
         {L, NewCont} ->
             {[V || {_, V} <- L], {Type, NewCont}}
     end.
@@ -647,6 +654,8 @@ match(?EOT) ->
 
 match({_, ?EOT}) ->
     ?EOT.
+
+%%TODO Implement match continuation
 
 
 

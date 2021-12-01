@@ -1033,7 +1033,11 @@ unregister_all(Ctxt) ->
     {
         [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
-    }.
+    }
+    | bondy_registry:eot().
+
+registrations(?EOT) ->
+    ?EOT;
 
 registrations({registration, _} = Cont) ->
     bondy_registry:entries(Cont).
