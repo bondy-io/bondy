@@ -79,6 +79,7 @@
 -export([is_proxy/1]).
 -export([is_proxy/2]).
 -export([key/1]).
+-export([key_field/1]).
 -export([key_pattern/5]).
 -export([match_policy/1]).
 -export([new/4]).
@@ -230,6 +231,26 @@ key_pattern(Type, RealmUri, Node, Owner, EntryId) ->
         entry_id = EntryId,
         type = Type
     }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+key_field(realm_uri) ->
+    #entry_key.realm_uri;
+
+key_field(node) ->
+    #entry_key.node;
+
+key_field(owner) ->
+    #entry_key.owner;
+
+key_field(entry_id) ->
+    #entry_key.entry_id;
+
+key_field(type) ->
+    #entry_key.type.
 
 
 %% -----------------------------------------------------------------------------

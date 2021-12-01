@@ -264,9 +264,12 @@ add(registration = Type, Uri, Opts, {RealmUri, Mod}) when is_atom(Mod) ->
             {error, {already_exists, Entry}}
     end;
 
-add(registration = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
+add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
     %% A client callee registration
     {RealmUri, _, _, _} = PeerId,
+
+    %% plum_db prefix to fetch entries
+    FullPrefix = full_prefix(Type, RealmUri),
 
     %% A session can register a procedure even if it is already
     %% registered if shared_registration is enabled.
@@ -286,46 +289,80 @@ add(registration = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
             do_add(Entry);
 
-        [{_, EntryKey} | _] ->
-            %% We fetch the entry from plum_db, this should not fail, if it
-            %% does we have an inconsistency between plum_db and the trie.
-            FullPrefix = full_prefix(Type, RealmUri),
-            Entry = plum_db:get(FullPrefix, EntryKey),
+        All ->
+            %% TODO here we need to explore all and resolve any inconsistencies
+            %% that might have ocurred during a net split. There are two cases:
+            %% 1. Multiple invoke == single registrations
+            %% 2. Multiple registrations with differring invoke values
+            %% If we do we need to decide which registrations to revoke.
+            DuplicateKeys =
+                case SessionId == undefined of
+                    true ->
+                        [];
+                    false ->
+                        leap_tuples:join(
+                            [EKey || {_, EKey} <- All],
+                            [{SessionId}],
+                            {bondy_registry_entry:key_field(owner), 1},
+                            []
+                        )
+                end,
 
-            EOpts = bondy_registry_entry:options(Entry),
-            EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-            Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
+            %% We check this callee has not already registered this same
+            %% procedure and if it did, we return the same registration Id.
+            case DuplicateKeys of
+                [] ->
+                    %% No duplicates but there are existing registrations done
+                    %% by other calles.
+                    %% We take the first one (we should have checked for
+                    %% incosistencies above).
+                    {_, EntryKey} = hd(All),
 
-            %% Shared Registration (RFC 13.3.9)
-            %% When shared registrations are supported, then the first
-            %% Callee to register a procedure for a particular URI
-            %% MAY determine that additional registrations for this URI
-            %% are allowed, and what Invocation Rules to apply in case
-            %% such additional registrations are made.
-            %% When invoke is not 'single', Dealer MUST fail
-            %% all subsequent attempts to register a procedure for the URI
-            %% where the value for the invoke option does not match that of
-            %% the initial registration.
-            SharedRegAllowed = maps:get(shared_registration, Opts, false),
-
-            %% Notice we are allowing a session to register the same URI
-            %% multiple times i.e. we are not checking
-            Allow =
-                SharedRegAllowed
-                andalso EPolicy =/= ?INVOKE_SINGLE
-                andalso EPolicy =:= Policy,
-
-            case Allow of
-                true ->
-                    NewOpts = maps:without([shared_registration], Opts),
-                    NewEntry = bondy_registry_entry:new(
-                        Type, PeerId, Uri, NewOpts
-                    ),
-                    do_add(NewEntry);
-                false ->
-                    FullPrefix = full_prefix(Type, RealmUri),
+                    %% The trie stores plum_db keys, so we fetch the entry from
+                    %% plum_db, this should not fail, if it does we have an
+                    %% inconsistency between plum_db and the trie.
                     Entry = plum_db:get(FullPrefix, EntryKey),
-                    {error, {already_exists, Entry}}
+
+                    EOpts = bondy_registry_entry:options(Entry),
+                    EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
+                    Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
+
+                    %% Shared Registration (RFC 13.3.9)
+                    %% When shared registrations are supported, then the first
+                    %% Callee to register a procedure for a particular URI
+                    %% MAY determine that additional registrations for this URI
+                    %% are allowed, and what Invocation Rules to apply in case
+                    %% such additional registrations are made.
+                    %% When invoke is not 'single', Dealer MUST fail
+                    %% all subsequent attempts to register a procedure for the
+                    %% URI where the value for the invoke option does not match
+                    %% that of the initial registration.
+                    SharedRegAllowed = maps:get(shared_registration, Opts, false),
+
+                    %% Notice we are allowing a session to register the same URI
+                    %% multiple times i.e. we are not checking
+                    Allow =
+                        SharedRegAllowed
+                        andalso EPolicy =/= ?INVOKE_SINGLE
+                        andalso EPolicy =:= Policy,
+
+                    case Allow of
+                        true ->
+                            NewOpts = maps:without([shared_registration], Opts),
+                            NewEntry = bondy_registry_entry:new(
+                                Type, PeerId, Uri, NewOpts
+                            ),
+                            do_add(NewEntry);
+                        false ->
+                            {error, {already_exists, Entry}}
+                    end;
+
+                _ ->
+                    %% The callee has already registered this procedure, we
+                    %% return the existing
+                    EntryKey = hd(DuplicateKeys),
+                    Entry = plum_db:get(FullPrefix, EntryKey),
+                    {ok, Entry, false}
             end
     end;
 
