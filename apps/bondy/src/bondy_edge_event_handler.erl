@@ -30,6 +30,7 @@
 
 -record(state, {
     realm_uri       ::  uri(),
+    session_id      ::  id(),
     pid             ::  pid()
 }).
 
@@ -50,9 +51,10 @@
 
 
 
-init([RealmUri, Pid]) ->
+init([RealmUri, SessionId, Pid]) ->
     State = #state{
         realm_uri = RealmUri,
+        session_id = SessionId,
         pid = Pid
     },
     {ok, State}.
@@ -97,12 +99,16 @@ code_change(_OldVsn, State, _Extra) ->
 %% =============================================================================
 
 
+
 forward(Msg, State) ->
-    Uri = State#state.realm_uri,
     Pid = State#state.pid,
-    gen_statem:cast(Pid, {forward, Msg, Uri}).
+    SessionId = State#state.session_id,
+    bondy_edge_uplink_client:forward(Pid, Msg, SessionId).
 
 
+do_handle_event({registration_created = T, Entry, _}, State) ->
+    ok = forward({T, Entry}, State),
+    {ok, State};
 
 do_handle_event({registration_added = T, Entry, _}, State) ->
     ok = forward({T, Entry}, State),

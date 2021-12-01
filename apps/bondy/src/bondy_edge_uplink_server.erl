@@ -22,7 +22,7 @@
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
     ping_retry              ::  maybe(bondy_retry:t()),
-    ping_retry_tref         ::  maybe(timer:ref()),
+    ping_tref               ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     sessions = #{}          ::  #{id() => bondy_edge_session:t()},
     sessions_by_uri = #{}   ::  #{uri() => id()},
@@ -192,8 +192,21 @@ connected(enter, connected, State) ->
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
-
-    handle_message(binary_to_term(Data), State);
+    case binary_to_term(Data) of
+        {receive_message, SessionId, Msg} ->
+            ?LOG_INFO(#{
+                description => "Got session message",
+                reason => Msg,
+                session_id => SessionId
+            }),
+            handle_session_message(Msg, SessionId, State);
+        Msg ->
+            ?LOG_INFO(#{
+                description => "Got message",
+                reason => Msg
+            }),
+            handle_message(Msg, State)
+    end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
 	{stop, normal};
@@ -413,7 +426,7 @@ handle_message({hello, Uri, Details}, State0) ->
 
     catch
         error:{not_found, Uri} ->
-            Reason = no_such_realm,
+            Reason = {no_such_realm, Uri},
             ok = send_message({abort, #{}, Reason}, State0),
             {stop, State0};
 
@@ -448,7 +461,60 @@ handle_message({aae_sync, SessionId, Opts}, State) ->
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
+%% @private
+handle_session_message({registration_created, Entry}, SessionId, State) ->
+    ok = add_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
 
+handle_session_message({registration_added, Entry}, SessionId, State) ->
+    ok = add_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({registration_removed, Entry}, SessionId, State) ->
+    ok = remove_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({registration_deleted, Entry}, SessionId, State) ->
+    ok = remove_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({subscription_created, Entry}, SessionId, State) ->
+    ok = add_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({subscription_added, Entry}, SessionId, State) ->
+    ok = add_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({subscription_removed, Entry}, SessionId, State) ->
+    ok = remove_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message({subscription_deleted, Entry}, SessionId, State) ->
+    ok = remove_registry_entry(SessionId, Entry),
+    {keep_state_and_data, [idle_timeout(State)]}.
+
+
+%% @private
+add_registry_entry(SessionId, Entry) ->
+    ProxyEntry = bondy_registry_entry:to_proxy(Entry, SessionId, self()),
+
+    case bondy_registry:add(ProxyEntry) of
+        {ok, _} ->
+            ok;
+        {error, already_exists} ->
+            ok
+    end.
+
+
+%% @private
+remove_registry_entry(SessionId, Entry) ->
+    ProxyEntry = bondy_registry_entry:to_proxy(Entry, SessionId, self()),
+    bondy_registry:remove(ProxyEntry).
+
+
+
+%% @private
 full_sync(SessionId, RealmUri, Opts, State) ->
     Realm = bondy_realm:fetch(RealmUri),
 
@@ -501,13 +567,14 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
         {?PLUM_DB_SOURCE_TAB, RealmUri},
         {?PLUM_DB_USER_GRANT_TAB, RealmUri},
         {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}
+        % ,{?PLUM_DB_TICKET_TAB, RealmUri}
     ],
 
     _ = lists:foreach(
         fun(Prefix) ->
             lists:foreach(
                 fun(O) ->
-                    Msg = {aae_data, SessionId, {Prefix, O}},
+                    Msg = {aae_data, SessionId, O},
                     gen_statem:cast(Me, {forward, Msg})
                 end,
                 pdb_objects(Prefix)
@@ -540,5 +607,6 @@ pdb_objects(It, Acc0) ->
     end.
 
 
+%% @private
 session_realm(SessionId, #state{sessions = Map}) ->
     maps:get(realm, maps:get(SessionId, Map)).

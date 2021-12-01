@@ -39,6 +39,7 @@
 
 %% API.
 -export([start_link/3]).
+-export([forward/3]).
 
 %% GEN_STATEM CALLBACKS
 -export([callback_mode/0]).
@@ -67,6 +68,17 @@ start_link(Transport, Endpoint, Opts) ->
     % dbg:tpl(?MODULE, '_', x),
     % dbg:tpl(gen_tcp, 'connect', x),
 	gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec forward(Pid :: pid(), Msg :: any(), SessionId :: id()) -> ok.
+
+forward(Pid, Msg, SessionId) ->
+    gen_statem:cast(Pid, {forward_message, Msg, SessionId}).
 
 
 
@@ -350,16 +362,16 @@ connected({call, From}, Request, _) ->
 	gen_statem:reply(From, {error, badcall}),
 	keep_state_and_data;
 
-connected(cast, {forward, Msg, RealmUri}, State) ->
-    case has_session(RealmUri, State) of
+connected(cast, {forward_message, Msg, SessionId}, State) ->
+    case has_session(SessionId, State) of
         true ->
-            send_message(Msg, State);
+            send_message({receive_message, SessionId, Msg}, State);
         _ ->
             ?LOG_INFO(#{
-                description => "Received message for a realm for which no session has been established",
+                description => "Received message for an uplink session that doesn't exist",
                 type => cast,
                 event => Msg,
-                realm_uri => RealmUri
+                session_id => SessionId
             }),
             ok
     end,
@@ -664,7 +676,7 @@ init_session(Id, #state{} = State0) ->
     State1 = add_session(Session, State0),
 
     %% Synchronise the realm configuraiton state before proxying
-    State2 = sync(Session, State1),
+    State2 = aae_sync(Session, State1),
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% subscriptions and registrations
@@ -689,8 +701,8 @@ leave_session(Id, #state{} = State) ->
 
 
 %% @private
-has_session(RealmUri, #state{sessions = Sessions}) ->
-    maps:is_key(RealmUri, Sessions).
+has_session(SessionId, #state{sessions = Sessions}) ->
+    maps:is_key(SessionId, Sessions).
 
 
 %% @private
@@ -722,17 +734,17 @@ add_session(#{id := Id, realm := Uri} = Session, #state{} = State) ->
 %% interested in having a POC ASAP.
 %% @end
 %% -----------------------------------------------------------------------------
-sync(#{id := SessionId}, State) ->
+aae_sync(#{id := SessionId}, State) ->
     % Ref = make_ref(),
     % State = update_session(sync_ref, Ref, SessionId, State0),
     Msg = {aae_sync, SessionId, #{}},
     ok = send_message(Msg, State),
     State.
 
-handle_aae_data({FullPrefix, {Key, RemoteObj}}, _State) ->
+
+handle_aae_data({PKey, RemoteObj}, _State) ->
     %% We should be getting plum_db_object instances to be able to sync, for
     %% now we do this
-    PKey = {FullPrefix, Key},
     _ = plum_db:merge({PKey, undefined}, RemoteObj),
     ok.
 
@@ -761,9 +773,14 @@ subscribe(Session, State) ->
     %     {{subscription, Id1}, RealmUri, SessionId}
     % ]),
 
+    %% We subscribe to registration and subscription meta events
+    %% The event handler will call
+    %% gen_statem:cast(Pid, {forward_message, Msg, SessionId})
+    Pid = self(),
+
     _ = bondy_event_manager:add_sup_handler(
-        {bondy_event_wamp_publisher, SessionId},
-        [RealmUri]
+        {bondy_edge_event_handler, SessionId},
+        [RealmUri, SessionId, Pid]
     ),
 
     State.

@@ -76,6 +76,7 @@
 -export_type([continuation/0]).
 
 
+-export([add/1]).
 -export([add/4]).
 -export([entries/1]).
 -export([entries/2]).
@@ -148,6 +149,46 @@ info(?REGISTRATION_TRIE) ->
 
 info(?SUBSCRIPTION_TRIE) ->
     art:info(?SUBSCRIPTION_TRIE).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Adds an existing entry to the registry.
+%%
+%% Adding an already existing entry is treated differently based on whether the
+%% entry is a registration or a subscription.
+%%
+%% According to the WAMP specification, in the case of a subscription that was
+%% already added before by the same _Subscriber_, the _Broker_ should not fail
+%% and answer with a "SUBSCRIBED" message, containing the existing
+%% "Subscription|id". So in this case this function returns
+%% {ok, bondy_registry_entry:t(), boolean()}.
+%%
+%% In case of a registration, as a default, only a single Callee may
+%% register a procedure for an URI. However, when shared registrations are
+%% supported, then the first Callee to register a procedure for a particular URI
+%% MAY determine that additional registrations for this URI are allowed, and
+%% what Invocation Rules to apply in case such additional registrations are
+%% made.
+%%
+%% This is configured through the 'invoke' options.
+%% When invoke is not 'single', Dealer MUST fail all subsequent attempts to
+%% register a procedure for the URI where the value for the invoke option does
+%% not match that of the initial registration. Accordingly this function might
+%% return an error tuple.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec add(bondy_registry_entry:t()) ->
+    {ok, IsFirstEntry :: boolean()} | {error, already_exists} | no_return().
+
+add(Entry) ->
+    bondy_registry_entry:is_entry(Entry) orelse error(badarg),
+    case do_add(Entry) of
+        {ok, _, IsFirstEntry} ->
+            {ok, IsFirstEntry};
+        {error, {already_exists, _}} ->
+            {error, already_exists}
+    end.
 
 
 %% -----------------------------------------------------------------------------
