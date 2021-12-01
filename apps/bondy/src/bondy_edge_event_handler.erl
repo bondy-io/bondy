@@ -65,7 +65,10 @@ handle_event({_, _, Ctxt} = Event, State) ->
             do_handle_event(Event, State);
         false ->
             {ok, State}
-    end.
+    end;
+
+handle_event(_, State) ->
+    {ok, State}.
 
 
 handle_call(Event, State) ->
