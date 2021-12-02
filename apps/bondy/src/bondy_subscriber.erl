@@ -62,6 +62,12 @@
 %% =============================================================================
 
 
+% -callback init(Args :: any()) ->
+%     {ok, NewState :: any()} | {error, Reason :: any()}.
+
+% -callback handle_event(Event :: wamp_event(), State :: any()) ->
+%     {ok, NewState :: any()}.
+
 
 %% =============================================================================
 %% API
@@ -179,7 +185,7 @@ handle_call(#event{} = Event, _From, State) ->
     end;
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
