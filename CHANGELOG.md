@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## 1.0.0-beta
+
+### Added
+
+#### General
+* Upgraded to OTP 24
+
+#### Security
+* WAMP Cryptosign authentication
+* WAMP Ticket-based authentication
+* Same Sign-on and Single Sign-on (SSO Realms)
+* Realm Prototypes
+* Added libsodium (enacl lib)
+
+#### Bondy Edge
+
+### Fixed
+* Fixes group ordering issue in processing of security (realm) configuration files.
+    - bondy_realm topological ordering of groups within each realm according to their group membership relationship. If any cycles are found amongst groups, an error is raised.
+    - Existing groups referred by name in the group's 'group' property are not fetched, so cycles might still be created once the new groups are stored on the database.
+* Fixes a concurrency issue with busy clients, in particular when they end up calling themselves. This was produced by an unnecesary used of internal acknowledgments which have been removed
+
+### WAMP
+* Erlang encoding now enforces WAMP-compatible data structures and tries to convert certain types e.g. pids while it fails with others.
+
+### Changed
+* Realm database representation
+* User database representation
+* Error types and description improvements
+* Logging improvements
+* Removed high cardinality labels in promethues metrics (before we would tag each WAMP message stats with realm, session, message type etc. this is not good for stats databases like Promethues).
+* Added RBAC context caching to avoid computing the user grants on every request.
+
+## Known Issues
+
+#### Security
+* The RBAC context cache is not evicted or refreshed when a user is assigned to new realms or granted new permissions.
+
 ## 0.9.0
 ### Added
 
