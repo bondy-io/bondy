@@ -48,7 +48,7 @@
 %% -----------------------------------------------------------------------------
 init() ->
     ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
-    ?LOG_INFO(#{description => "Bondy configuration initialised"}),
+    ?LOG_NOTICE(#{description => "Bondy configuration initialised"}),
     ok.
 
 

@@ -60,7 +60,7 @@ start(Ref, Protocol, ProtocolOpts) ->
                 Protocol,
                 ProtocolOpts
             ),
-            ?LOG_INFO(#{
+            ?LOG_NOTICE(#{
                 description => "Starting listener",
                 ref => Ref,
                 transport => Transport,

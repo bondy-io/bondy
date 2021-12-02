@@ -668,7 +668,7 @@ do_read_head(Log, Acc0) ->
 
 %% @private
 notify_backup_started(File) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Started backup",
         filename => File
     }),
@@ -677,7 +677,7 @@ notify_backup_started(File) ->
 
 %% @private
 notify_backup_finished([Filename, Time] = Args) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Finished creating backup",
         filename => Filename,
         elapsed_time_secs => Time
@@ -698,7 +698,7 @@ notify_backup_error([Reason, Filename, Time] = Args)  ->
 
 %% @private
 notify_restore_started([Filename, Rec, Bad]) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Backup restore started",
         filename => Filename,
         recovered => Rec,
@@ -709,7 +709,7 @@ notify_restore_started([Filename, Rec, Bad]) ->
 
 %% @private
 notify_restore_finished([Filename, Time, Read, Merged] = Args) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Backup restore finished",
         filename => Filename,
         elapsed_time_secs => Time,

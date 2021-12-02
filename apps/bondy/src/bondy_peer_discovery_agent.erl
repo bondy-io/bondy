@@ -258,7 +258,7 @@ discovering(EventType, EventContent, State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 joined(cast, left, State) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Received cluster leave event, disabling automatic join."
     }),
     {next_state, disabled, State};

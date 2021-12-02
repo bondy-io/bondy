@@ -301,7 +301,7 @@ is_authorized(
 is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
     %% TODO get auth method and status from St and validate
     %% check scopes vs action requirements
-    ?LOG_INFO(#{
+    ?LOG_WARNING(#{
         description => "Request is using unsupported api_key authentication scheme",
         request => Req
     }),

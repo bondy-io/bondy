@@ -353,7 +353,7 @@ async_forward(M, Ctxt0) ->
         ok ->
             {ok, Ctxt0};
         {error, overload} ->
-            ?LOG_INFO(#{
+            ?LOG_WARNING(#{
                 description => "Router pool overloaded, will route message synchronously"
             }),
             %% @TODO publish metaevent and stats

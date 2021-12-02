@@ -192,7 +192,7 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above,
     %% review and eliminate.
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Connection closing",
         reason => unsupported_message,
         data => Data

@@ -469,7 +469,7 @@ rebuild_token_indices(RealmUri, Issuer0) ->
         when Iss == Issuer ->
             store_token_indices(RealmUri, Token, Data);
         ({Token, #bondy_oauth2_token{issuer = Iss}}) ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Found invalid token",
                 token => Token,
                 reason => issuer_mismatch,

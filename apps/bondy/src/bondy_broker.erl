@@ -248,7 +248,7 @@ when is_map(Ctxt) ->
         do_publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt)
     catch
         _:Reason:Stacktrace->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Error while publishing",
                 reason => Reason,
                 session_id => bondy_context:session_id(Ctxt),

@@ -176,7 +176,7 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Error handling call",
         reason => unsupported_event,
         event => Event,
@@ -186,7 +186,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Error handling cast",
         reason => unsupported_event,
         event => Event
@@ -195,7 +195,7 @@ handle_cast(Event, State) ->
 
 
 handle_info(Info, State) ->
-    ?LOG_DEBUG(#{
+    ?LOG_WARNING(#{
         description => "Error handling info",
         reason => unsupported_event,
         event => Info
@@ -283,7 +283,7 @@ apply_private_config({ok, Config}, State) ->
             ok = application:set_env(App, Param, Val)
             || {App, Params} <- Config, {Param, Val} <- Params
         ],
-        ?LOG_INFO("Bondy private configuration initialised"),
+        ?LOG_NOTICE("Bondy private configuration initialised"),
         {ok, State}
     catch
         error:Reason:Stacktrace ->

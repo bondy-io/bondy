@@ -218,7 +218,7 @@ dispatch_table(Listener) ->
 %% @end
 %% -----------------------------------------------------------------------------
 rebuild_dispatch_tables() ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Rebuilding HTTP Gateway dispatch tables"
     }),
     _ = [
@@ -310,7 +310,7 @@ handle_call({load, Map}, _From, State) ->
     end;
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -331,7 +331,7 @@ handle_cast(#event{} = Event, State) ->
     {noreply, NewState};
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -410,7 +410,7 @@ handle_info(
     {noreply, State1};
 
 handle_info(Info, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),

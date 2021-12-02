@@ -74,7 +74,7 @@ handle_event(_, State) ->
 
 
 handle_call(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),

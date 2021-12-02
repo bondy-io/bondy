@@ -127,7 +127,7 @@ init({Ref, Transport, _Opts0}) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -136,7 +136,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -167,7 +167,7 @@ handle_info(
     %% RawSocket request. Unless the _Router_ also supports other
     %% transports on the connecting port (such as WebSocket), the
     %% _Router_ MUST *fail the connection*.
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Received data before WAMP protocol handshake",
         reason => invalid_handshake,
         peername => St#state.peername,
@@ -270,7 +270,7 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, State) ->
     {noreply, State};
 
 handle_info(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),

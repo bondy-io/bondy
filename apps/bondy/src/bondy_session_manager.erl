@@ -129,7 +129,7 @@ handle_call({open, Session}, _From, State) ->
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -149,7 +149,7 @@ handle_cast({close, Session}, State) ->
     {noreply, State};
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -182,7 +182,7 @@ handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, Pid}, State) ->
     {noreply, State};
 
 handle_info(Info, State) ->
-    ?LOG_DEBUG(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),

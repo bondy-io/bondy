@@ -70,7 +70,7 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -79,7 +79,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -104,7 +104,7 @@ handle_info({plum_db_event, object_update, {{FP, _Key}, _Obj, _Prev}}, State) ->
 
 
 handle_info(Info, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),

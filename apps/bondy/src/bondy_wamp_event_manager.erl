@@ -134,7 +134,7 @@ handle_event({event, Topic, #event{} = Event}, State) ->
 
 
 handle_call(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Error handling call",
         reason => unsupported_event,
         event => Event

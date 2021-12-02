@@ -102,7 +102,7 @@ callback_mode() ->
 %% -----------------------------------------------------------------------------
 init({Transport0, Endpoint, Opts}) ->
 
-    ?LOG_INFO(#{description => "Starting edge client"}),
+    ?LOG_NOTICE(#{description => "Starting edge client"}),
     TransportMod = transport_mod(Transport0),
 
     %% TODO Validate realms
@@ -155,7 +155,7 @@ terminate(Reason, StateName, #state{transport = T, socket = S} = State0)
 when T =/= undefined andalso S =/= undefined ->
     catch T:close(S),
 
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Connection terminated",
         reason => Reason
     }),
@@ -179,7 +179,7 @@ terminate(Reason, _StateName, State0) ->
         State0#state.sessions
     ),
 
-    ?LOG_ERROR(#{
+    ?LOG_NOTICE(#{
         description => "Process terminated",
         reason => Reason
     }),
@@ -314,12 +314,12 @@ connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
 	{stop, normal};
 
 connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
-    ?LOG_INFO(#{description => "Socket error", reason => Reason}),
+    ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
     ok = on_disconnect(State),
 	{stop, Reason};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_INFO(#{description => "Connection timeout, sending first ping"}),
+    ?LOG_WARNING(#{description => "Connection timeout, sending first ping"}),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {ok, State1} = send_ping(State0),
     {keep_state, State1};
@@ -342,7 +342,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     {keep_state, State1};
 
 connected(info, Msg, _) ->
-    ?LOG_INFO(#{
+    ?LOG_WARNING(#{
         description => "Received unknown message",
         type => info,
         event => Msg
@@ -354,7 +354,7 @@ connected({call, _From}, {join, _Realms, _AuthId, _PubKey}, _State) ->
     keep_state_and_data;
 
 connected({call, From}, Request, _) ->
-    ?LOG_INFO(#{
+    ?LOG_WARNING(#{
         description => "Received unknown request",
         type => call,
         event => Request
@@ -367,7 +367,7 @@ connected(cast, {forward_message, Msg, SessionId}, State) ->
         true ->
             send_message({receive_message, SessionId, Msg}, State);
         _ ->
-            ?LOG_INFO(#{
+            ?LOG_WARNING(#{
                 description => "Received message for an uplink session that doesn't exist",
                 type => cast,
                 event => Msg,
@@ -425,7 +425,7 @@ maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
 
     case Res of
         Delay when is_integer(Delay) ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => ?CONNECTION_FAILED_MESSAGE ++ ". Will retry.",
                 delay => Delay
             }),

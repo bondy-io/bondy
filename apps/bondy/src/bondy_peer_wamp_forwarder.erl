@@ -243,7 +243,7 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -284,7 +284,7 @@ when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
             Pid = bondy_utils:bin_to_pid(BinPid),
             Pid ! AckOrError;
         false ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Received a message targetted to another node",
                 realm_uri => RealmUri,
                 wamp_message => AckOrError

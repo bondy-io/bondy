@@ -355,7 +355,7 @@ close_context(Ctxt) ->
         Ctxt
     catch
         Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Error while closing context",
                 class => Class,
                 reason => Reason,
@@ -776,7 +776,7 @@ callback(#call{} = M0, Ctxt, Mod) ->
             bondy:send(PeerId, Error);
 
         Class:Reason:Stacktrace ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => <<"Error while handling WAMP call">>,
                 procedure => M0#call.procedure_uri,
                 caller => bondy_context:session_id(Ctxt),

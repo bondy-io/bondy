@@ -774,7 +774,7 @@ handle_call(init_tries, _From, State0) ->
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -783,7 +783,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -850,7 +850,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 init_tries(State0) ->
-    ?LOG_INFO(#{
+    ?LOG_NOTICE(#{
         description => "Initialising in-memory registry tries from store."
     }),
     Opts = [{resolver, lww}],

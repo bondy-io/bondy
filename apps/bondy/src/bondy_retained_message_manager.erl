@@ -183,7 +183,7 @@ put(Realm, Topic, Event, MatchOpts, TTL) ->
                         )
                     catch
                         Class:Reason:Stacktrace ->
-                            ?LOG_INFO(#{
+                            ?LOG_WARNING(#{
                                 class => Class,
                                 reason => Reason,
                                 stacktrace => Stacktrace
@@ -308,7 +308,7 @@ init([]) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -317,7 +317,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -326,7 +326,7 @@ handle_cast(Event, State) ->
 handle_info(
     {plum_db_event, object_update, {{{_, Realm}, _Key}, Obj, PrevObj}},
     State) ->
-    ?LOG_ERROR(#{
+    ?LOG_DEBUG(#{
         description => "Object update notification",
         object => Obj,
         previous => PrevObj
@@ -348,7 +348,7 @@ handle_info(
     {noreply, State};
 
 handle_info(Info, State) ->
-    ?LOG_DEBUG(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Info
     }),
@@ -407,7 +407,7 @@ init_evictor() ->
         ]}
     ]),
 
-    ?LOG_INFO(#{description => "Retained message evictor initialised"}),
+    ?LOG_NOTICE(#{description => "Retained message evictor initialised"}),
     ok.
 
 
