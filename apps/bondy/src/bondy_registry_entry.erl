@@ -125,9 +125,9 @@ new(Type, {_, _, _, _} = PeerId, Uri, Options) ->
 -spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
 
 new(Type, RegId, {RealmUri, Node, SessionId, Term}, Uri, Options) when
-(is_integer(SessionId) andalso is_pid(Term)) orelse
-(SessionId == undefined andalso is_pid(Term)) orelse
-(SessionId == undefined andalso is_atom(Term)) ->
+(is_integer(SessionId) andalso is_pid(Term))
+orelse (SessionId == undefined andalso is_pid(Term))
+orelse (SessionId == undefined andalso is_atom(Term)) ->
     %% Term could be undefined for remote?
     %% For registrations we support Term being a pid, callback module or
     %% undefined
