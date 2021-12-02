@@ -817,12 +817,10 @@ sso_realm_uri(Uri) when is_binary(Uri) ->
 -spec is_allowed_sso_realm(Realm :: t() | uri(), SSORealmUri :: uri()) ->
     boolean().
 
-is_allowed_sso_realm(#realm{sso_realm_uri = Val}, SSORealmUri) ->
+is_allowed_sso_realm(Realm, SSORealmUri) ->
     %% TODO change sso_realm_uri to allowed_sso_realms
-    Val =:= SSORealmUri;
-
-is_allowed_sso_realm(Uri, SSORealmUri) when is_binary(Uri) ->
-    is_allowed_sso_realm(fetch(Uri), SSORealmUri).
+    %% We call sso_realm_uri to resolve prototype inheritance
+    SSORealmUri =:= sso_realm_uri(Realm).
 
 
 %% -----------------------------------------------------------------------------
