@@ -567,7 +567,10 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
         {?PLUM_DB_SOURCE_TAB, RealmUri},
         {?PLUM_DB_USER_GRANT_TAB, RealmUri},
         {?PLUM_DB_GROUP_GRANT_TAB, RealmUri}
-        % ,{?PLUM_DB_TICKET_TAB, RealmUri}
+        % ,
+        % {?PLUM_DB_REGISTRATION_TAB, RealmUri},
+        % {?PLUM_DB_SUBSCRIPTION_TAB, RealmUri},
+        % {?PLUM_DB_TICKET_TAB, RealmUri}
     ],
 
     _ = lists:foreach(
