@@ -91,6 +91,9 @@
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
 init(Req0, _) ->
+    %% This callback is called from the temporary (HTTP) request process and
+    %% the websocket_ callbacks from the connection process.
+
     %% From Cowboy's
     %% [Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
     %% If the sec-websocket-protocol header was sent with the request for
@@ -469,7 +472,10 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
                 ping_max_attempts = maps:get(max_attempts, PingOpts)
             },
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
+
+            %% We upgrade the HTTP connection to Websockets
             {cowboy_websocket, Req1, St, Opts};
+
         {error, _Reason} ->
             %% Returning ok will cause the handler to
             %% stop in websocket_handle
