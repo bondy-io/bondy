@@ -165,20 +165,43 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 %% -----------------------------------------------------------------------------
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
+    ProcUri = P#bondy_rpc_promise.procedure_uri,
     CallId = P#bondy_rpc_promise.call_id,
-    {_, _, CallerSessionId, _} = P#bondy_rpc_promise.caller,
+    {_, _, CallerSessionId, _} = Caller = P#bondy_rpc_promise.caller,
     %% We match realm_uri for extra validation
     Key = key(RealmUri, P),
+
     OnEvict = fun(_) ->
         ?LOG_DEBUG(#{
             description => "RPC Promise evicted from queue",
             realm_uri => RealmUri,
             caller_session_id => CallerSessionId,
             invocation_id => InvocationId,
+            procedure_uri => ProcUri,
             call_id => CallId,
             timeout => Timeout
-        })
+        }),
+        Mssg = iolist_to_binary(
+            io_lib:format(
+                "The operation could not be completed in time"
+                " (~p milliseconds).",
+                [Timeout]
+            )
+        ),
+        Error = wamp_message:error(
+            ?CALL,
+            CallId,
+            #{
+
+                procedure_uri => ProcUri,
+                timeout => Timeout
+            },
+            ?WAMP_TIMEOUT,
+            [Mssg]
+        ),
+        bondy:send(Caller, Error)
     end,
+
     Secs = erlang:round(Timeout / 1000),
     Opts = #{key => Key, ttl => Secs, on_evict => OnEvict},
     tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts).
