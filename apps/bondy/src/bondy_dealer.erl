@@ -869,6 +869,9 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
 format_error(_, undefined) ->
     undefined;
 
+format_error(_, #{error_formatter := undefined}) ->
+    undefined;
+
 format_error(Error, #{error_formatter := Fun}) ->
     Fun(Error).
 
@@ -1076,10 +1079,8 @@ registrations(RealmUri, Node, SessionId) ->
     Node :: atom() | '_',
     SessionId :: id() | '_',
     Limit :: non_neg_integer()) ->
-    {
-        [bondy_registry_entry:t()],
-        bondy_registry:continuation() | bondy_registry:eot()
-    }.
+    {[bondy_registry_entry:t()], bondy_registry_entry:continuation_or_eot()}
+    | bondy_registry_entry:eot().
 
 registrations(RealmUri, Node, SessionId, Limit) ->
     bondy_registry:entries(registration, RealmUri, Node, SessionId, Limit).

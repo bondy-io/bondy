@@ -69,6 +69,8 @@
     bondy_registry_entry:entry_type(),
     plum_db:continuation()
 }.
+-type continuation_or_eot() :: continuation_or_eot().
+
 -type task() :: fun((bondy_registry_entry:t(), bondy_context:t()) -> ok).
 
 
@@ -622,7 +624,7 @@ entries(Type, RealmUri, Node, SessionId) ->
     Node :: atom() | '_',
     SessionId :: id() | '_',
     Limit :: pos_integer()) ->
-    {[bondy_registry_entry:t()], continuation() | eot()} | eot().
+    {[bondy_registry_entry:t()], continuation_or_eot()} | eot().
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(
@@ -653,7 +655,7 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec entries(continuation()) ->
-    {[bondy_registry_entry:t()], continuation() | eot()} | eot().
+    {[bondy_registry_entry:t()], continuation_or_eot()} | eot().
 
 entries(?EOT) ->
     ?EOT;
@@ -679,7 +681,7 @@ entries({Type, Cont}) when Type == registration orelse Type == subscription ->
 %% -----------------------------------------------------------------------------
 -spec match(
     bondy_registry_entry:entry_type(), uri(), RealmUri :: uri()) ->
-    {[bondy_registry_entry:t()], continuation()} | eot().
+    {[bondy_registry_entry:t()], continuation_or_eot()} | eot().
 
 match(Type, Uri, RealmUri) ->
     match(Type, Uri, RealmUri, #{}).
@@ -697,15 +699,19 @@ match(Type, Uri, RealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec match(
     bondy_registry_entry:entry_type(), uri(), RealmUri :: uri(), map()) ->
-        {[bondy_registry_entry:t()], continuation() | eot()} | eot().
+        {[bondy_registry_entry:t()], continuation_or_eot()} | eot().
 
 match(Type, Uri, RealmUri, Opts) ->
     try
         Trie = trie(Type),
         Pattern = <<RealmUri/binary, $,, Uri/binary>>,
         MS = trie_ms(Opts),
-        Result = art_server:find_matches(Pattern, MS, Trie),
-        lookup_entries(Type, {Result, ?EOT})
+        case art_server:find_matches(Pattern, MS, Trie) of
+            [] ->
+                ?EOT;
+            Result ->
+                lookup_entries(Type, {Result, ?EOT})
+        end
     catch
         throw:non_eligible_entries ->
             ?EOT;
@@ -733,7 +739,7 @@ match(?EOT) ->
 match({_, ?EOT}) ->
     ?EOT.
 
-%%TODO Implement match continuation
+%%TODO Implement trie match continuation
 
 
 
