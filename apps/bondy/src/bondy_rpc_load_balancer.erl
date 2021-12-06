@@ -338,7 +338,7 @@ next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
     case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
         true ->
             %% The pid of the connection process
-            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
+            Pid = pid(H),
             case erlang:is_process_alive(Pid) of
                 true ->
                     %% We update the invocation state
@@ -373,6 +373,22 @@ next_round_robin(Iter, #last_invocation{value = LastId}) ->
 
 next_round_robin(#iterator{entries = []}, undefined) ->
     '$end_of_table'.
+
+
+pid(Entry) ->
+    Pid = bondy_registry_entry:pid(Entry),
+
+    case bondy_registry_entry:is_proxy(Entry) of
+        true ->
+            Pid;
+        false ->
+            case bondy_registry_entry:session_id(Entry) of
+                undefined ->
+                    Pid;
+                SessionId ->
+                    bondy_session:pid(SessionId)
+            end
+    end.
 
 
 

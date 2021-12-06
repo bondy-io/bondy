@@ -1,3 +1,8 @@
+%% -----------------------------------------------------------------------------
+%% @doc EARLY DRAFT implementation of the server-side connection between and
+%% edge node (client) and a remote/core node (server).
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_edge_uplink_server).
 -behaviour(gen_statem).
 -behaviour(ranch_protocol).
@@ -7,7 +12,6 @@
 -include_lib("bondy.hrl").
 -include_lib("bondy_plum_db.hrl").
 
--define(TIMEOUT, 30000).
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -100,7 +104,7 @@ init({Ref, Transport, Opts}) ->
         ref = Ref,
         transport = Transport,
         opts = Opts,
-        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
+        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(10)),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -138,6 +142,7 @@ when T =/= undefined andalso S =/= undefined ->
     terminate(Reason, StateName, NewState);
 
 terminate(_Reason, _StateName, _StateData) ->
+    %% TODO remove all registrations and subscriptions
 	ok.
 
 
@@ -217,6 +222,14 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
         reason => Reason
     }),
 	{stop, Reason};
+
+connected(info, {?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, State) ->
+    ?LOG_WARNING(#{
+        description => "Received WAMP request we need to FWD to edge",
+        message => M
+    }),
+    %% TODO
+	{keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, State) ->
     ?LOG_INFO(#{
@@ -497,7 +510,7 @@ handle_session_message({subscription_deleted, Entry}, SessionId, State) ->
 
 %% @private
 add_registry_entry(SessionId, Entry) ->
-    ProxyEntry = bondy_registry_entry:to_proxy(Entry, SessionId, self()),
+    ProxyEntry = bondy_registry_entry:proxy(SessionId, self(), Entry),
 
     case bondy_registry:add(ProxyEntry) of
         {ok, _} ->
@@ -508,8 +521,9 @@ add_registry_entry(SessionId, Entry) ->
 
 
 %% @private
-remove_registry_entry(SessionId, Entry) ->
-    ProxyEntry = bondy_registry_entry:to_proxy(Entry, SessionId, self()),
+remove_registry_entry(_SessionId, Entry) ->
+    SessionId = undefined,
+    ProxyEntry = bondy_registry_entry:proxy(Entry, SessionId, self()),
     bondy_registry:remove(ProxyEntry).
 
 
@@ -526,13 +540,15 @@ full_sync(SessionId, RealmUri, Opts, State) ->
             full_sync(SessionId, ProtoUri, Opts, State)
     end,
 
-    %% If the realm or prototype has a SSO Realm we sync the SSO realm first
-    case bondy_realm:sso_realm_uri(Realm) of
-        undefined ->
-            ok;
-        SSOUri ->
-            full_sync(SessionId, SSOUri, Opts, State)
-    end,
+
+    %% We do not automatically sync the SSO Realms, if the edge node wants it,
+    %% that should be requested explicitely
+
+    %% TODO However, we should sync a proyection of the SSO Realm, the realm
+    %% definition itself but with users, groups, sources and grants that affect
+    %% the Realm's users, and avoiding bringing the password
+    %% SO WE NEED REPLICATION FILTERS AT PLUM_DB LEVEL b
+    %%
 
     %% Finally we sync the realm
     ok = do_full_sync(SessionId, RealmUri, Opts, State),

@@ -119,7 +119,9 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Starts the registry server. The server maintains the in-memory tries we
+%% use for matching and it is also a subscriber for plum_db broadcast and AAE
+%% events in order to keep the trie up-to-date with plum_db.
 %% @end
 %% -----------------------------------------------------------------------------
 start_link() ->
@@ -238,10 +240,10 @@ add(Type, Uri, Opts, {RealmUri, Pid}) when is_pid(Pid) ->
 add(registration = Type, Uri, Opts, {RealmUri, Mod}) when is_atom(Mod) ->
     %% Adds a local/internal registration using a callback module (no process)
     %% In the case of callbacks we do not allow shared registrations,
-    %% so we match node and mod (owner)
+    %% so we match node and mod (handler)
     Node = bondy_peer_service:mynode(),
     Pattern = bondy_registry_entry:pattern(
-        registration, RealmUri, Uri, Opts, #{node => Node, owner => Mod}
+        registration, RealmUri, Uri, Opts, #{node => Node, handler => Mod}
     ),
 
     %% We generate a trie key based on pattern
@@ -302,10 +304,18 @@ add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
                     true ->
                         [];
                     false ->
+                        EntryKeys = [
+                            EKey ||
+                                {_, EKey} <- All,
+                                %% Proxy entries can have duplicates, this is
+                                %% becuase the handler (proxy) is registering
+                                %% the entries for multiple remote handlers.
+                                bondy_registry_entry:is_proxy(EKey) == false
+                        ],
                         leap_tuples:join(
-                            [EKey || {_, EKey} <- All],
+                            EntryKeys,
                             [{SessionId}],
-                            {bondy_registry_entry:key_field(owner), 1},
+                            {bondy_registry_entry:key_field(handler), 1},
                             []
                         )
                 end,
@@ -371,13 +381,13 @@ add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
 add(subscription = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
     {RealmUri, Node, SessionId, Term} = PeerId,
 
-    Owner = case SessionId of
+    Handler = case SessionId of
         undefined -> Term;
         _ -> SessionId
     end,
 
     %% We do a full match, we should get none or 1 results
-    Extra = #{node => Node, owner => Owner},
+    Extra = #{node => Node, handler => Handler},
     Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts, Extra),
     TrieKey = trie_key(Pattern),
 

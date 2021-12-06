@@ -1,3 +1,8 @@
+%% -----------------------------------------------------------------------------
+%% @doc EARLY DRAFT implementation of the client-side connection between and
+%% edge node (client) and a remote/core node (server).
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_edge_uplink_client).
 -behaviour(gen_statem).
 
@@ -5,9 +10,6 @@
 -include_lib("wamp/include/wamp.hrl").
 -include_lib("bondy.hrl").
 
--define(CONNECTION_FAILED_MESSAGE,
-    "Failed to establish uplink connection to core router"
-).
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
@@ -413,7 +415,7 @@ connected(EventType, Msg, _) ->
 maybe_reconnect(#state{reconnect_retry = undefined} = State) ->
     %% Reconnect disabled
     ?LOG_ERROR(#{
-        description => ?CONNECTION_FAILED_MESSAGE,
+        description => "Failed to establish uplink connection to core router.",
         reason => State#state.reconnect_retry_reason
     }),
     {stop, normal};
@@ -426,7 +428,7 @@ maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
     case Res of
         Delay when is_integer(Delay) ->
             ?LOG_WARNING(#{
-                description => ?CONNECTION_FAILED_MESSAGE ++ ". Will retry.",
+                description => "Failed to establish uplink connection to core router. Will retry.",
                 delay => Delay
             }),
             {keep_state, State, [{state_timeout, Delay, connect}]};
@@ -434,7 +436,7 @@ maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
         Reason ->
             %% We reached max retries
             ?LOG_ERROR(#{
-                description => ?CONNECTION_FAILED_MESSAGE,
+                description => "Failed to establish uplink connection to core router.",
                 reason => Reason,
                 last_error_reason => State#state.reconnect_retry_reason
             }),
@@ -824,9 +826,9 @@ proxy_existing(Session, State0, Get, {[H|T], Cont}) ->
 %% @private
 proxy_entry(_Session, State, Entry) ->
     Type = bondy_registry_entry:type(Entry),
-    Owner = bondy_registry_entry:owner(Entry),
+    Handler = bondy_registry_entry:handler(Entry),
 
-    case Owner =/= self() of
+    case Handler =/= self() of
         true ->
             %% We do not want to proxy our own subscriptions
             State;

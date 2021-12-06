@@ -174,10 +174,11 @@ format_status(_Opt, #session{} = S) ->
     t() | no_return().
 
 new(Peer, RealmUri, Opts) when is_binary(RealmUri) ->
-    new(bondy_utils:get_id(global), Peer, bondy_realm:fetch(RealmUri), Opts);
+    new(get_id(RealmUri), Peer, bondy_realm:fetch(RealmUri), Opts);
 
 new(Peer, Realm, Opts) when is_map(Opts) ->
-    new(bondy_utils:get_id(global), Peer, Realm, Opts).
+    RealmUri = bondy_realm:uri(Realm),
+    new(get_id(RealmUri), Peer, Realm, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -713,6 +714,25 @@ info(#session{is_anonymous = false} = S) ->
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
+
+
+%% @private
+get_id(RealmUri) ->
+    get_id(RealmUri, 20).
+
+
+%% @private
+get_id(RealmUri, N) when N > 0 ->
+    Id = bondy_utils:get_id(global),
+    case lookup(RealmUri, Id) of
+        {error, not_found} ->
+            Id;
+        _ ->
+            get_id(RealmUri, N - 1)
+    end;
+
+get_id(_, 0) ->
+    error(session_id_allocation).
 
 
 %% @private

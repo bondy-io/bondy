@@ -107,35 +107,35 @@ forward(Msg, State) ->
 
 
 do_handle_event({registration_created = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({registration_added = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({registration_deleted = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({registration_removed = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({subscription_created = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({subscription_added = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({subscription_removed = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event({subscription_deleted = T, Entry, _}, State) ->
-    ok = forward({T, Entry}, State),
+    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
     {ok, State};
 
 do_handle_event(_, State) ->

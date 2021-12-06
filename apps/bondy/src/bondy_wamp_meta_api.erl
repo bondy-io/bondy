@@ -350,7 +350,7 @@ no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
 
 
 list(Type, RealmUri) ->
-    list(Type, RealmUri, fun bondy_registry_entry:to_map/1).
+    list(Type, RealmUri, fun bondy_registry_entry:to_external/1).
 
 
 list(Type, RealmUri, Fun) ->

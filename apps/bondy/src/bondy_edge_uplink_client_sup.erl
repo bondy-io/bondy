@@ -86,10 +86,11 @@ init([]) ->
             Children = [
                 ?WORKER(
                     bondy_edge_uplink_client, Args, permanent, 5000
-                ),
-                ?SUPERVISOR(
-                    bondy_edge_exchanges_sup, Args, permanent, infinity
                 )
+                % ,
+                % ?SUPERVISOR(
+                %     bondy_edge_exchanges_sup, Args, permanent, 5000
+                % )
             ],
             {ok, {{rest_for_one, 5, 60}, Children}};
 
