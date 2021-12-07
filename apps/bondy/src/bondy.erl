@@ -50,6 +50,7 @@
 -export([start/0]).
 -export([subscribe/3]).
 -export([subscribe/4]).
+-export([request/3]).
 
 
 %% =============================================================================
@@ -73,6 +74,17 @@ start() ->
 %% -----------------------------------------------------------------------------
 aae_exchanges() ->
     plumtree_broadcast:exchanges().
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec request(Pid :: pid(), RealmUri :: uri(), M :: wamp_message:t()) ->
+    tuple().
+
+request(Pid, RealmUri, M) ->
+    {?BONDY_PEER_REQUEST, Pid, RealmUri, M}.
 
 
 %% -----------------------------------------------------------------------------
@@ -216,8 +228,7 @@ publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
     list() | undefined,
     map() | undefined,
     bondy_context:t()) ->
-    {ok, map(), bondy_context:t()}
-    | {error, wamp_error_map(), bondy_context:t()}.
+    {ok, map()} | {error, wamp_error_map()}.
 
 call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     Timeout = case maps:find(timeout, Opts) of
@@ -227,23 +238,23 @@ call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     end,
 
     case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
-        {ok, ReqId, Ctxt1} ->
-            check_response(Uri, ReqId, Timeout, Ctxt1);
-        {error, _, _} = Error ->
+        {ok, ReqId} ->
+            check_response(Uri, ReqId, Timeout, Ctxt0);
+        {error, _} = Error ->
             Error
     end.
 
 
 check_response(Uri, ReqId, Timeout, Ctxt) ->
     receive
-        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
-        when Ref == ReqId ->
+        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #result{} = R}
+        when R#result.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {ok, message_to_map(R), Ctxt};
-        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
-        when Ref == ReqId ->
+            {ok, message_to_map(R)};
+        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #error{} = R}
+        when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {error, message_to_map(R), Ctxt}
+            {error, message_to_map(R)}
     after
         Timeout ->
             Mssg = iolist_to_binary(
@@ -268,7 +279,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
                 ErrorKWArgs
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
-            {error, message_to_map(Error), Ctxt}
+            {error, message_to_map(Error)}
     end.
 
 
@@ -283,8 +294,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
     list() | undefined,
     map() | undefined,
     bondy_context:t()) ->
-    {ok, bondy_context:t()}
-    | {error, wamp_error_map(), bondy_context:t()}.
+    ok | {error, wamp_error_map()}.
 
 cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
@@ -359,21 +369,19 @@ validate_send_opts(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
-    Pid ! {?BONDY_PEER_REQUEST, {Pid, erlang:make_ref()}, M},
+do_send({RealmUri, _, _, Pid}, M, _Opts) when Pid =:= self() ->
+    Pid ! request(Pid, RealmUri, M),
     %% This is a sync message so we resolve this sequentially
-    %% so we will not get an ack, the ack is implicit
     ok;
 
-do_send({_, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
+do_send({RealmUri, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
     case maybe_enqueue(SessionId, M, Opts) of
         true ->
             ok;
         false ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    Ref = ref(M),
-                    Pid ! {?BONDY_PEER_REQUEST, {self(), Ref}, M},
+                    Pid ! request(self(), RealmUri, M),
                     ok;
                 false ->
                     ?LOG_DEBUG(#{
@@ -384,16 +392,6 @@ do_send({_, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
                     ok
             end
     end.
-
-
-ref(M) ->
-    try
-        wamp_message:request_id(M)
-    catch
-        error:badarg ->
-            erlang:make_ref()
-    end.
-
 
 
 %% @private

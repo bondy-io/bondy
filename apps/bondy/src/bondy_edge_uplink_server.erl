@@ -223,7 +223,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     }),
 	{stop, Reason};
 
-connected(info, {?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, State) ->
+connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
     ?LOG_WARNING(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
@@ -235,8 +235,7 @@ connected(info, Msg, State) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
         type => info,
-        event => Msg
-    }),
+        event => Msg    }),
 	{keep_state_and_data, [idle_timeout(State)]};
 
 connected({call, From}, Request, State) ->

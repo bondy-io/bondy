@@ -206,13 +206,13 @@ handle_info({tcp_closed, _Socket}, State) ->
 handle_info({tcp_error, _, _} = Reason, State) ->
     {stop, Reason, State};
 
-handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
+handle_info({?BONDY_PEER_REQUEST, Pid, _RealmUri, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_router in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls
     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
+handle_info({?BONDY_PEER_REQUEST, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),

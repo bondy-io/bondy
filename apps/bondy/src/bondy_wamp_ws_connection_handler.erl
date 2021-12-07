@@ -249,10 +249,11 @@ websocket_handle(Data, St) ->
 %% client. See {@link bondy:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
+websocket_info({?BONDY_PEER_REQUEST, Pid, _RealmUri, M}, St)
+when Pid =:= self() ->
     handle_outbound(St#state.frame_type, M, St);
 
-websocket_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
+websocket_info({?BONDY_PEER_REQUEST, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),
