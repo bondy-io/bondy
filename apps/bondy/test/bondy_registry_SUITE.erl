@@ -51,7 +51,8 @@ init_per_suite(Config) ->
     RealmUri = bondy_realm:uri(Realm),
     ok = bondy_realm:disable_security(Realm),
     Peer = {{127, 0, 0, 1}, 10000},
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => <<"foo">>,
         authmethod => ?WAMP_ANON_AUTH,
         is_anonymous => true,

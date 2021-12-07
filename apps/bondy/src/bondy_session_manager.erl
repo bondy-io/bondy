@@ -5,6 +5,8 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(REG_KEY(RealmUri, Id), {n, l, {bondy_session, RealmUri, Id}}).
+
 -record(state, {
     name :: atom()
 }).
@@ -13,7 +15,7 @@
 -export([start_link/2]).
 -export([pool/0]).
 -export([pool_size/0]).
--export([open/4]).
+-export([open/3]).
 -export([close/1]).
 
 
@@ -75,15 +77,20 @@ pool_size() ->
 %% -----------------------------------------------------------------------------
 -spec open(
     bondy_session:id(),
-    bondy_session:peer(),
     uri() | bondy_realm:t(),
-    bondy_session:session_opts()) ->
+    bondy_session:properties()) ->
     bondy_session:t() | no_return().
 
-open(Id, Peer, RealmOrUri, Opts) ->
-    Session = bondy_session:open(Id, Peer, RealmOrUri, Opts),
-    Uri = bondy_session:realm_uri(Session),
-    Name = gproc_pool:pick_worker(pool(), Uri),
+open(Id, RealmOrUri, Opts) ->
+    %% We store the session
+    Session = bondy_session:new(Id, RealmOrUri, Opts),
+    ok = bondy_session:store(Session),
+
+    %% We register the session
+    RealmUri = bondy_session:realm_uri(Session),
+
+    Name = gproc_pool:pick_worker(pool(), RealmUri),
+
     case gen_server:call(Name, {open, Session}, 5000) of
         ok ->
             Session;
@@ -118,13 +125,19 @@ init([Pool, Name]) ->
 
 handle_call({open, Session}, _From, State) ->
     Id = bondy_session:id(Session),
-    Uri = bondy_session:realm_uri(Session),
-    %% We monitor the session owner so that we can cleanup when the process
-    %% terminates
-    ok = gproc_monitor:subscribe({n, l, {session, Uri, Id}}),
+    RealmUri = bondy_session:realm_uri(Session),
+    Pid = bondy_session:pid(Session),
+    Key = ?REG_KEY(RealmUri, Id),
+
+    %% We register the session owner (pid) under the realm and session id.
+    true = gproc:reg_other(Key, Pid),
+
+    %% We monitor the session owner (pid) so that we can cleanup when the
+    %% process terminates
+    ok = gproc_monitor:subscribe(Key),
 
     %% We register WAMP procedures
-    ok = register_procedures(Uri, Id),
+    ok = register_procedures(Session),
 
     {reply, ok, State};
 
@@ -139,13 +152,16 @@ handle_call(Event, From, State) ->
 handle_cast({close, Session}, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
-    ok = gproc_monitor:unsubscribe({n, l, {session, Uri, Id}}),
+    ok = gproc_monitor:unsubscribe(?REG_KEY(Uri, Id)),
+
     ?LOG_DEBUG(#{
         description => "Session closing, demonitoring session connection",
-        realm => Uri,
+        realm => bondy_session:realm_uri(Session),
         session_id => Id
     }),
+
     ok = bondy_session:close(Session),
+
     {noreply, State};
 
 handle_cast(Event, State) ->
@@ -156,27 +172,27 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, undefined}, State) ->
+handle_info({gproc_monitor, {n, l, {bondy_session, Uri, Id}}, undefined}, State) ->
     %% The connection process has died or closed
-    ?LOG_DEBUG(#{
-        description => "Connection process for session terminated, cleaning up",
-        realm => Uri,
-        session_id => Id
-    }),
 
     case bondy_session:lookup(Id) of
         {error, not_found} ->
             ok;
         Session ->
+            ?LOG_DEBUG(#{
+                description => "Connection process for session terminated, cleaning up",
+                realm => Uri,
+                session_id => Id
+            }),
             cleanup(Session)
     end,
     {noreply, State};
 
-handle_info({gproc_monitor, {n, l, {session, Uri, Id}}, Pid}, State) ->
+handle_info({gproc_monitor, {n, l, {bondy_session, Uri, Id}}, Pid}, State) ->
     ?LOG_DEBUG(#{
         description => "Monitoring session connection",
-        realm => Uri,
         session_id => Id,
+        realm => Uri,
         pid => Pid
     }),
     {noreply, State};
@@ -206,15 +222,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-register_procedures(RealmUri, SessionId) ->
+register_procedures(Session) ->
+    RealmUri = bondy_session:realm_uri(Session),
+    Id = bondy_session:id(Session),
     %% We register wamp.session.{id}.get since we need to route the wamp.
     %% session.get call to the node where the session lives and we use the
     %% Registry to do that.
-    Part = bondy_utils:session_id_to_uri_part(SessionId),
-    Uri = <<"wamp.session.", Part/binary, ".get">>,
+    Part = bondy_utils:session_id_to_uri_part(Id),
+    ProcUri = <<"wamp.session.", Part/binary, ".get">>,
     Opts = #{match => ?PREFIX_MATCH},
     Mod = bondy_wamp_meta_api,
-    {ok, _} = bondy_dealer:register(RealmUri, Opts, Uri, Mod),
+    {ok, _} = bondy_dealer:register(RealmUri, Opts, ProcUri, Mod),
     ok.
 
 

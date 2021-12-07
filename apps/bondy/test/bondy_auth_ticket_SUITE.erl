@@ -151,7 +151,8 @@ anon_auth_not_allowed(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => <<"foo">>,
         authmethod => ?WAMP_ANON_AUTH,
         is_anonymous => true,
@@ -182,7 +183,8 @@ ticket_auth_not_allowed(Config) ->
     ]),
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_TICKET_AUTH,
         security_enabled => true,
@@ -209,7 +211,8 @@ local_scope(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -272,7 +275,8 @@ client_scope_with_ticket(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate APP has logged in using cryptosign
-    AppSession = bondy_session:new(Peer, RealmUri, #{
+    AppSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?APP,
         authmethod => ?WAMP_CRYPTOSIGN_AUTH,
         security_enabled => true,
@@ -289,7 +293,8 @@ client_scope_with_ticket(Config) ->
     }),
 
     %% We simulate U1 has logged in using wampcra
-    UserSession = bondy_session:new(Peer, RealmUri, #{
+    UserSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -326,7 +331,8 @@ client_scope_with_id(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    UserSession = bondy_session:new(Peer, RealmUri, #{
+    UserSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,

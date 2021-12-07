@@ -54,8 +54,6 @@
     request_timestamp => integer(),
     request_timeout => non_neg_integer(),
     request_details => map(),
-    is_closing => boolean(),
-    is_shutting_down => boolean(),
     %% Metadata
     user_info => map()
 }.
@@ -77,10 +75,8 @@
 -export([has_session/1]).
 -export([id/1]).
 -export([is_anonymous/1]).
--export([is_closing/1]).
 -export([is_feature_enabled/3]).
 -export([is_security_enabled/1]).
--export([is_shutting_down/1]).
 -export([local_context/1]).
 -export([new/0]).
 -export([new/2]).
@@ -121,14 +117,20 @@
 
 -spec format_status(Opts :: normal | terminate, Ctxt :: t()) -> term().
 
-format_status(Opt, Ctxt) ->
-    Ctxt#{
-        authid => bondy_sensitive:wrap(authid(Ctxt)),
-        session => bondy_sensitive:format_status(
-            Opt, bondy_session, session(Ctxt)
-        )
-    }.
+format_status(Opt, Ctxt0) ->
+    Ctxt = Ctxt0#{
+        authid => bondy_sensitive:wrap(authid(Ctxt0))
+    },
 
+    case session(Ctxt) of
+        undefined ->
+            Ctxt;
+        Session ->
+            Formatted = bondy_sensitive:format_status(
+                Opt, bondy_session, Session
+            ),
+            Ctxt#{session => Formatted}
+    end.
 
 
 %% =============================================================================
@@ -210,11 +212,7 @@ close(Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec close(t(), Reason :: normal | crash | shutdown) -> ok.
 
-close(Ctxt0, Reason) ->
-    Ctxt = Ctxt0#{
-        is_closing => true,
-        is_shutting_down => Reason =:= shutdown
-    },
+close(Ctxt, _Reason) ->
     _ = bondy_router:close_context(Ctxt),
     ok.
 
@@ -434,6 +432,7 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
 -spec session_id(t()) -> id() | undefined.
 session_id(#{session := S}) ->
     bondy_session:id(S);
+
 session_id(#{}) ->
     undefined.
 
@@ -617,27 +616,6 @@ is_feature_enabled(Ctxt, Role, Feature) ->
 is_anonymous(Ctxt) ->
     maps:get(is_anonymous, Ctxt, false).
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if the context and session are closing.
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_closing(t()) -> boolean().
-
-is_closing(Ctxt) ->
-    maps:get(is_closing, Ctxt, false).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if bondy is shutting down
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_shutting_down(t()) -> boolean().
-
-is_shutting_down(Ctxt) ->
-    maps:get(is_shutting_down, Ctxt, false).
 
 
 %% -----------------------------------------------------------------------------

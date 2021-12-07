@@ -577,7 +577,8 @@ open_session(Extra, St0) when is_map(Extra) ->
         Agent = maps:get(agent, ReqDetails, undefined),
         UserMeta = bondy_rbac_user:meta(bondy_auth:user(AuthCtxt)),
 
-        InDetails = #{
+        Properties = #{
+            peer => maps:get(peer, Ctxt0),
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
             agent => Agent,
@@ -590,9 +591,7 @@ open_session(Extra, St0) when is_map(Extra) ->
         },
 
         %% We open a session
-        Session = bondy_session_manager:open(
-            Id, maps:get(peer, Ctxt0), RealmUri, InDetails
-        ),
+        Session = bondy_session_manager:open(Id, RealmUri, Properties),
 
         %% We set the session in the context
         Ctxt1 = bondy_context:set_session(Ctxt0, Session),

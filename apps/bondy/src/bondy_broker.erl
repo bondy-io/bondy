@@ -192,7 +192,7 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
                 %% We publish to a local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
                 ESessionId = bondy_registry_entry:session_id(Entry),
-                case bondy_session:lookup(ESessionId) of
+                case bondy_session:lookup(RealmUri, ESessionId) of
                     {error, not_found} ->
                         Acc;
                     ESession ->
@@ -276,14 +276,25 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% subscriptions, the event will be delivered for each subscription.
 
     Details0 = #{
-        <<"timestamp">> => erlang:system_time(millisecond), %% added by us
         %% This is mandatory only for pattern-based subscriptions but we prefer
         %% to always have it
-        <<"topic">> => TopicUri
+        topic => TopicUri,
+        %% Private internal
+        <<"timestamp">> => erlang:system_time(millisecond)
     },
+
+    %% TODO disclose info only if feature is announced by Publishers, Brokers
+    %% and Subscribers
     Details = case maps:get(disclose_me, Opts, true) of
-        true -> Details0#{<<"publisher">> => bondy_context:session_id(Ctxt)};
-        false -> Details0
+        true ->
+            Details0#{
+                publisher => bondy_context:session_id(Ctxt),
+                publisher_authid => bondy_context:authid(Ctxt),
+                publisher_authrole => bondy_context:authrole(Ctxt),
+                publisher_authroles => bondy_context:authroles(Ctxt)
+            };
+        false ->
+            Details0
     end,
 
     %% We should not send the publication to the publisher, so we exclude it
@@ -364,7 +375,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 
                     ESessionId ->
                         %% A WAMP session
-                        case bondy_session:lookup(ESessionId) of
+                        case bondy_session:lookup(RealmUri, ESessionId) of
                             {error, not_found} ->
                                 NodeAcc;
                             ESession ->
@@ -754,7 +765,10 @@ subscriptions({subscription, _} = Cont) ->
 %% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(RealmUri :: uri(), Node :: atom(), SessionId :: id()) ->
+-spec subscriptions(
+    RealmUri :: uri(),
+    Node :: atom(),
+    SessionId :: id()) ->
     [bondy_registry_entry:t()].
 
 subscriptions(RealmUri, Node, SessionId) ->
@@ -897,16 +911,16 @@ maybe_retain(_, _, _, _, _) ->
 
 %% @private
 send_retained(Entry) ->
-    Realm = bondy_registry_entry:realm_uri(Entry),
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
     SubsId = bondy_registry_entry:id(Entry),
     Topic = bondy_registry_entry:uri(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
 
-    Session = bondy_session:lookup(SessionId),
+    Session = bondy_session:lookup(RealmUri, SessionId),
 
     Matches = to_bondy_utils_cont(
-        bondy_retained_message_manager:match(Realm, Topic, SessionId, Policy)
+        bondy_retained_message_manager:match(RealmUri, Topic, SessionId, Policy)
     ),
 
     bondy_utils:foreach(
