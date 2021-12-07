@@ -780,7 +780,7 @@ perform_action(
     WampCtxt = bondy_context:set_call_timeout(WampCtxt0, CallTimeout),
 
     case bondy:call(P, Opts, A, Akw, WampCtxt) of
-        {ok, Result0, _} ->
+        {ok, Result0} ->
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),
@@ -789,7 +789,7 @@ perform_action(
             ),
             St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
-        {error, WampError0, _} ->
+        {error, WampError0} ->
             StatusCode0 = uri_to_status_code(maps:get(error_uri, WampError0)),
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
@@ -808,10 +808,10 @@ perform_action(
 wamp_context(RealmUri, Peer, St1) ->
     IsAnonymous = maps:get(is_anonymous, St1),
     Authid = authid(St1),
-    SessionOpts = #{
+    SessionProps = #{
+        peer => Peer,
         is_anonymous => IsAnonymous,
         authid => Authid,
-        security_enabled => bondy_realm:is_security_enabled(RealmUri),
         roles => #{
             caller => #{
                 features => #{
@@ -824,7 +824,7 @@ wamp_context(RealmUri, Peer, St1) ->
             }
         }
     },
-    Session = bondy_session:new(Peer, RealmUri, SessionOpts),
+    Session = bondy_session:new(RealmUri, SessionProps),
 
     Subprotocol = {http, text, maps:get(encoding, St1)},
     Ctxt0 = bondy_context:new(Peer, Subprotocol),

@@ -28,12 +28,12 @@
 -define(INVOCATION_QUEUE, bondy_rpc_promise).
 
 -record(bondy_rpc_promise, {
-    invocation_id                           ::  id(),
-    procedure_uri                           ::  uri() | undefined,
-    call_id                                 ::  id() | undefined,
-    caller                                  ::  peer_id(),
-    callee                                  ::  peer_id(),
-    timestamp                               :: integer()
+    invocation_id           ::  id(),
+    procedure_uri           ::  maybe(uri()),
+    call_id                 ::  maybe(id()),
+    caller                  ::  peer_id(),
+    callee                  ::  peer_id(),
+    timestamp               ::  integer()
 }).
 
 
