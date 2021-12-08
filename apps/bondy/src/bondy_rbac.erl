@@ -129,7 +129,7 @@
 
 -else.
 
--define(CTXT_REFRESH_SECS, 3600). % 1h
+-define(CTXT_REFRESH_SECS, timer:minutes(5)).
 
 -endif.
 
