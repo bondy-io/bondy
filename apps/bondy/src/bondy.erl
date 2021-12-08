@@ -44,6 +44,7 @@
 -export([check_response/4]).
 -export([is_remote_peer/1]).
 -export([publish/5]).
+-export([publish/6]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
@@ -212,6 +213,9 @@ publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
     bondy_broker:publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
 
 
+publish(ReqId, Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
+    bondy_broker:publish(ReqId, Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
+
 
 %% =============================================================================
 %% API - CALLER ROLE
@@ -301,7 +305,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% FIXME we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    ReqId = bondy_utils:get_id(global),
+    ReqId = bondy_context:get_id(Ctxt0, session),
 
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 

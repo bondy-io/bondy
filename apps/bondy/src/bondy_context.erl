@@ -69,9 +69,11 @@
 -export([authrole/1]).
 -export([authroles/1]).
 -export([call_timeout/1]).
+-export([caller_details/2]).
 -export([close/1]).
 -export([close/2]).
 -export([encoding/1]).
+-export([get_id/2]).
 -export([has_session/1]).
 -export([id/1]).
 -export([is_anonymous/1]).
@@ -84,6 +86,7 @@
 -export([peer/1]).
 -export([peer_id/1]).
 -export([peername/1]).
+-export([publisher_details/2]).
 -export([rbac_context/1]).
 -export([realm_uri/1]).
 -export([request_details/1]).
@@ -452,6 +455,30 @@ rbac_context(#{}) ->
     undefined.
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns an ID based on scope. If context does not have a session the
+%% global sceop is used.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_id(Ctxt :: t(), Scope :: global | router | session) -> id().
+
+get_id(_, global) ->
+    bondy_utils:get_id(global);
+
+get_id(#{realm_uri := Uri}, router) ->
+    bondy_utils:get_id({router, Uri});
+
+get_id(#{session := Session}, session) ->
+    Id = bondy_session:id(Session),
+    bondy_utils:get_id({session, Id});
+
+get_id(_, session) ->
+    bondy_utils:get_id(global).
+
+
+
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Returns true if the context is associated with a session,
@@ -459,6 +486,7 @@ rbac_context(#{}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec has_session(t()) -> boolean().
+
 has_session(#{session := _}) -> true;
 has_session(#{}) -> false.
 
@@ -561,6 +589,7 @@ request_details(#{request_details := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec call_timeout(t()) -> non_neg_integer().
+
 call_timeout(#{call_timeout := Val}) ->
     Val.
 
@@ -571,9 +600,43 @@ call_timeout(#{call_timeout := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec set_call_timeout(t(), non_neg_integer()) -> t().
+
 set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
     Ctxt#{call_timeout => Timeout}.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a copy of `Details` where the disclose_caller feature
+%% properties have been added from context `Ctxt'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec caller_details(Ctxt :: t(), Details :: map()) -> map().
+
+caller_details(Ctxt, Details) ->
+    Details#{
+        caller => session_id(Ctxt),
+        caller_authid => authid(Ctxt),
+        caller_authrole => authrole(Ctxt),
+        caller_authroles => authroles(Ctxt),
+        x_caller_node => ?MODULE:node(Ctxt)
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a copy of `Details` where the disclose_publisher feature
+%% properties have been added from context `Ctxt'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec publisher_details(Ctxt :: t(), Details :: map()) -> map().
+
+publisher_details(Ctxt, Details) ->
+    Details#{
+        publisher => session_id(Ctxt),
+        publisher_authid => authid(Ctxt),
+        publisher_authrole => authrole(Ctxt),
+        publisher_authroles => authroles(Ctxt),
+        x_publisher_node => ?MODULE:node(Ctxt)
+    }.
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -581,6 +644,7 @@ set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec request_timestamp(t()) -> integer().
+
 request_timestamp(#{request_timestamp := Val}) ->
     Val.
 

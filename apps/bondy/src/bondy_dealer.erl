@@ -178,19 +178,19 @@
 }.
 
 %% API
+-export([callees/1]).
+-export([callees/2]).
+-export([callees/3]).
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
 -export([handle_peer_message/4]).
 -export([is_feature_enabled/1]).
+-export([match_registrations/2]).
+-export([register/4]).
 -export([registrations/1]).
 -export([registrations/3]).
 -export([registrations/4]).
--export([match_registrations/2]).
--export([callees/1]).
--export([callees/2]).
--export([callees/3]).
--export([register/4]).
 -export([unregister/1]).
 -export([unregister/2]).
 
@@ -408,6 +408,7 @@ handle_message(M, Ctxt) ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(bondy_context:peer_id(Ctxt), Reply)
     end.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -876,11 +877,19 @@ format_error(_, #{error_formatter := undefined}) ->
 format_error(Error, #{error_formatter := Fun}) ->
     Fun(Error).
 
+
+% maybe_invocation(#call{} = M, Uri, Entry, Ctxt) ->
+%     case bondy_registry_entry:is_proxy(Entry) of
+%         true ->
+%             %% We forward the call to the origin
+%             M;
+%         false ->
+%             call_to_invocation(M, Uri, Entry, Ctxt)
+%     end.
+
 %% @private
 call_to_invocation(M, Uri, Entry, Ctxt1) ->
-    %% TODO Revert to session-scoped Ids
-    %% ReqId = bondy_utils:get_id({session, SessionId}),
-    ReqId = bondy_utils:get_id(global),
+    ReqId = bondy_context:get_id(Ctxt1, session),
     Args = M#call.args,
     Payload = M#call.kwargs,
     RegId = bondy_registry_entry:id(Entry),
@@ -903,12 +912,7 @@ invocation_details(M, Uri, Entry, Ctxt) ->
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
     Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->
-            Details0#{
-                caller => bondy_context:session_id(Ctxt),
-                caller_authid => bondy_context:authid(Ctxt),
-                caller_authrole => bondy_context:authrole(Ctxt),
-                caller_authroles => bondy_context:authroles(Ctxt)
-            };
+            bondy_context:caller_details(Ctxt, Details0);
         false ->
             Details0
     end,

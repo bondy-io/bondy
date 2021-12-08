@@ -254,7 +254,7 @@ add(registration = Type, Uri, Opts, {RealmUri, Mod}) when is_atom(Mod) ->
     %% TODO we should limit the match to 1 result!!!
     case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
-            RegId = registration_id(Opts),
+            RegId = registration_id(RealmUri, Opts),
             SessionId = undefined,
             PeerId = {RealmUri, Node, SessionId, Mod},
             NewOpts = maps:without([shared_registrations], Opts),
@@ -375,7 +375,7 @@ add(subscription = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
     case art_server:match(TrieKey, ?SUBSCRIPTION_TRIE) of
         [] ->
             %% No matching subscriptions for this SessionId exists
-            RegId = subscription_id(Opts),
+            RegId = subscription_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
             do_add(Entry);
 
@@ -1254,19 +1254,20 @@ do_lookup_entries([{_TrieKey, EntryKey}|T], Type, Acc) ->
 
 
 %% @private
-registration_id(#{registration_id := Val}) ->
+registration_id(_, #{registration_id := Val}) ->
     Val;
 
-registration_id(_) ->
-    bondy_utils:get_id(global).
+registration_id(Uri, _) ->
+    bondy_utils:get_id({router, Uri}).
 
 
 %% @private
-subscription_id(#{subscription_id := Val}) ->
+subscription_id(_, #{subscription_id := Val}) ->
     Val;
 
-subscription_id(_) ->
-    bondy_utils:get_id(global).
+subscription_id(Uri, _) ->
+    bondy_utils:get_id({router, Uri}).
+
 
 filter_duplicate_entry_keys(_, undefined) ->
     [];

@@ -222,7 +222,9 @@ handle_peer_message(#publish{} = M, PeerId, _From,  Opts) ->
     bondy_context:t()) -> {ok, id()} | {error, any()}.
 
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
-    publish(bondy_utils:get_id(global), Opts, TopicUri, Args, ArgsKw, Ctxt).
+    publish(
+        bondy_context:get_id(Ctxt, session), Opts, TopicUri, Args, ArgsKw, Ctxt
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -287,12 +289,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% and Subscribers
     Details = case maps:get(disclose_me, Opts, true) of
         true ->
-            Details0#{
-                publisher => bondy_context:session_id(Ctxt),
-                publisher_authid => bondy_context:authid(Ctxt),
-                publisher_authrole => bondy_context:authrole(Ctxt),
-                publisher_authroles => bondy_context:authroles(Ctxt)
-            };
+            bondy_context:publisher_details(Ctxt, Details0);
         false ->
             Details0
     end,
@@ -346,7 +343,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% We find the matching subscriptions
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
     MyNode = bondy_peer_service:mynode(),
-    PubId = bondy_utils:get_id(global),
+    PubId = bondy_context:get_id(Ctxt, global),
 
     %% TODO Consider creating a Broadcast tree out of the registry trie results
     %% so that instead of us sending possibly millions of Erlang messages to

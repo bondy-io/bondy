@@ -141,7 +141,7 @@
 %% -----------------------------------------------------------------------------
 -spec new(entry_type(), peer_id(), uri(), map()) -> t().
 
-new(Type, {_, _, _, _} = PeerId, Uri, Options) ->
+new(Type, {RealmUri, _, _, _} = PeerId, Uri, Options) ->
     %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
     %% distribution over the complete range [1, 2^53], but in a distributed
     %% setting we might have 2 or more nodes generating the same ID.
@@ -150,7 +150,7 @@ new(Type, {_, _, _, _} = PeerId, Uri, Options) ->
     %% It would be much better is this IDs where 128-bit strings e.g. UUID or
     %% KSUID.
 
-    RegId = bondy_utils:get_id(global),
+    RegId = bondy_utils:get_id({router, RealmUri}),
     new(Type, RegId, PeerId, Uri, Options).
 
 
@@ -646,7 +646,7 @@ proxy(SessionId, Pid, External) ->
         options := Options
     } = External,
 
-    Id = bondy_utils:get_id(global),
+    Id = bondy_utils:get_id({router, RealmUri}),
     {Handler, BinPid, CBMod} = handler_pid_mod(SessionId, Pid),
 
     #entry{
