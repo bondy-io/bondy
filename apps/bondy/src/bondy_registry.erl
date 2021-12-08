@@ -289,7 +289,7 @@ add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
     %% TODO we should limit the match to 1 result!!!
     case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
-            RegId = registration_id(Opts),
+            RegId = registration_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
             do_add(Entry);
 
@@ -299,26 +299,7 @@ add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
             %% 1. Multiple invoke == single registrations
             %% 2. Multiple registrations with differring invoke values
             %% If we do we need to decide which registrations to revoke.
-            DuplicateKeys =
-                case SessionId == undefined of
-                    true ->
-                        [];
-                    false ->
-                        EntryKeys = [
-                            EKey ||
-                                {_, EKey} <- All,
-                                %% Proxy entries can have duplicates, this is
-                                %% becuase the handler (proxy) is registering
-                                %% the entries for multiple remote handlers.
-                                bondy_registry_entry:is_proxy(EKey) == false
-                        ],
-                        leap_tuples:join(
-                            EntryKeys,
-                            [{SessionId}],
-                            {bondy_registry_entry:key_field(handler), 1},
-                            []
-                        )
-                end,
+            DuplicateKeys = filter_duplicate_entry_keys(All, SessionId),
 
             %% We check this callee has not already registered this same
             %% procedure and if it did, we return the same registration Id.
@@ -1286,3 +1267,28 @@ subscription_id(#{subscription_id := Val}) ->
 
 subscription_id(_) ->
     bondy_utils:get_id(global).
+
+filter_duplicate_entry_keys(_, undefined) ->
+    [];
+
+filter_duplicate_entry_keys(Entries, SessionId) ->
+    EntryKeys = [
+        EKey ||
+            {_, EKey} <- Entries,
+            %% Proxy entries can have duplicates, this is
+            %% because the handler (proxy) is registering
+            %% the entries for multiple remote handlers.
+            bondy_registry_entry:is_proxy(EKey) == false
+    ],
+
+    case EntryKeys of
+        [] ->
+            [];
+        _ ->
+            leap_tuples:join(
+                EntryKeys,
+                [{SessionId}],
+                {bondy_registry_entry:key_field(handler), 1},
+                []
+            )
+    end.
