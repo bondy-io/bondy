@@ -517,8 +517,10 @@ lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
 %% -----------------------------------------------------------------------------
 lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, '_', '_', EntryId),
+        Type, RealmUri, '_', '_', EntryId
+    ),
     MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
+
     %% TODO match Details
     case plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts) of
         [] ->
@@ -614,11 +616,7 @@ entries(Type, Ctxt) ->
     SessionId :: id()) -> [bondy_registry_entry:t()].
 
 entries(Type, RealmUri, Node, SessionId) ->
-    Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, '_'),
-    Opts = [{remove_tombstones, true}, {resolver, lww}],
-    Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts),
-    [V || {_, V} <- Matches].
+    entries(Type, RealmUri, Node, SessionId, infinity).
 
 
 %% -----------------------------------------------------------------------------
@@ -633,8 +631,10 @@ entries(Type, RealmUri, Node, SessionId) ->
     Realm :: uri(),
     Node :: atom() | '_',
     SessionId :: id() | '_',
-    Limit :: pos_integer()) ->
-    {[bondy_registry_entry:t()], continuation_or_eot()} | eot().
+    Limit :: pos_integer() | infinity) ->
+    [bondy_registry_entry:t()]
+    | {[bondy_registry_entry:t()], continuation_or_eot()}
+    | eot().
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(
@@ -647,7 +647,9 @@ entries(Type, RealmUri, Node, SessionId, Limit) ->
         {L, ?EOT} ->
             {[V || {_, V} <- L], ?EOT};
         {L, NewCont} ->
-            {[V || {_, V} <- L], {Type, NewCont}}
+            {[V || {_, V} <- L], {Type, NewCont}};
+        L when is_list(L) ->
+            [V || {_, V} <- L]
     end.
 
 
