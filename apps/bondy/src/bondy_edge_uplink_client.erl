@@ -29,8 +29,8 @@
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     hibernate = false       ::  boolean(),
     realms                  ::  map(),
-    sessions = #{}          ::  #{id() => bondy_edge_session:t()},
-    sessions_by_uri = #{}   ::  #{uri() => id()},
+    sessions = #{}          ::  sessions(),
+    sessions_by_uri = #{}   ::  #{uri() => bondy_session:uuid()},
     tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
@@ -38,6 +38,9 @@
 
 
 -type t()                   ::  #state{}.
+-type sessions()            ::  #{
+    bondy_session:uuid() => bondy_edge_session:t()
+}.
 
 %% API.
 -export([start_link/3]).
@@ -77,7 +80,8 @@ start_link(Transport, Endpoint, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Pid :: pid(), Msg :: any(), SessionId :: id()) -> ok.
+-spec forward(Pid :: pid(), Msg :: any(), SessionId :: bondy_session:uuid()) ->
+    ok.
 
 forward(Pid, Msg, SessionId) ->
     gen_statem:cast(Pid, {forward_message, Msg, SessionId}).
@@ -294,6 +298,16 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
 
     {keep_state, State, idle_timeout(State)};
 
+connected(internal, {receive_message, SessionId, M}, State) ->
+    ?LOG_INFO(#{
+        description => "Got session message",
+        session_id => SessionId,
+        message => M
+    }),
+
+    ok = handle_session_message(M, SessionId, State),
+
+    {keep_state, State, idle_timeout(State)};
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
@@ -367,7 +381,7 @@ connected({call, From}, Request, _) ->
 connected(cast, {forward_message, Msg, SessionId}, State) ->
     case has_session(SessionId, State) of
         true ->
-            send_message({receive_message, SessionId, Msg}, State);
+            send_session_message(SessionId, Msg, State);
         _ ->
             ?LOG_WARNING(#{
                 description => "Received message for an uplink session that doesn't exist",
@@ -506,6 +520,11 @@ set_socket_active(State) ->
 send_message(Message, State) ->
     Data = term_to_binary(Message),
     (State#state.transport):send(State#state.socket, Data).
+
+
+%% @private
+send_session_message(SessionId, Msg, State) ->
+    send_message({receive_message, SessionId, Msg}, State).
 
 
 %% @private
@@ -824,23 +843,23 @@ proxy_existing(Session, State0, Get, {[H|T], Cont}) ->
 
 
 %% @private
-proxy_entry(_Session, State, Entry) ->
+proxy_entry(#{id := SessionId}, State, Entry) ->
     Type = bondy_registry_entry:type(Entry),
     Handler = bondy_registry_entry:handler(Entry),
+    Ext =  bondy_registry_entry:to_external(Entry),
 
-    case Handler =/= self() of
+    case Handler =:= self() of
         true ->
-            %% We do not want to proxy our own subscriptions
+            %% We do not want to proxy our own registrations and subscriptions
             State;
         false when Type == registration ->
-            %% TODO
-            Message = {add_registration, Entry},
-            ok = send_message(Message, State),
+            Msg = {registration_added, Ext},
+            ok = send_session_message(SessionId, Msg, State),
             State;
 
         false when Type == subscription ->
-            Message = {add_subscription, Entry},
-            ok = send_message(Message, State),
+            Msg = {subscription_added, Ext},
+            ok = send_session_message(SessionId, Msg, State),
             State
     end.
 
@@ -858,6 +877,9 @@ proxy_entry(_Session, State, Entry) ->
 %     end,
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
+handle_session_message(#invocation{}, _SessionId, _State) ->
+    % bondy:cast()
+    ok.
 
 
 %% =============================================================================

@@ -143,6 +143,9 @@ when T =/= undefined andalso S =/= undefined ->
 
 terminate(_Reason, _StateName, _StateData) ->
     %% TODO remove all registrations and subscriptions
+    % ok = bondy_dealer:unregister(self()),
+    % bondy_remove_all(Type, RealmUri, Node, SessionId)
+    % ok = bondy_broker:unsubscribe(self()),
 	ok.
 
 
@@ -228,14 +231,16 @@ connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
-    %% TODO
+    SessionId = session_id(RealmUri, State),
+    ok = send_message({receive_message, SessionId, M}, State),
 	{keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, State) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
         type => info,
-        event => Msg    }),
+        event => Msg
+    }),
 	{keep_state_and_data, [idle_timeout(State)]};
 
 connected({call, From}, Request, State) ->
@@ -628,3 +633,7 @@ pdb_objects(It, Acc0) ->
 %% @private
 session_realm(SessionId, #state{sessions = Map}) ->
     maps:get(realm, maps:get(SessionId, Map)).
+
+
+session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+    maps:get(RealmUri, Map).

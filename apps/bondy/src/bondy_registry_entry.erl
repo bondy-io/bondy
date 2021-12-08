@@ -38,17 +38,21 @@
 
 -record(entry, {
     key                     ::  key(),
-    %% When the handler is a session, we also have the pid
+    %% If session_id is defined we also have pid
+    session_id              ::  maybe(bondy_session:uuid()),
+    %% If defined, session_id might be undefined, callback_mod must be undefined
     pid                     ::  wildcard(maybe(pid())),
+    %% If callback_mod is defined then session_id and pid are undefined
+    callback_mod            ::  maybe(module()),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
     created                 ::  pos_integer() | atom(),
     options                 ::  map(),
     %% If present this is the binary representation of a bridge|edge node
-    originating_id          ::  wildcard(maybe(integer())),
     originating_node        ::  wildcard(maybe(binary())),
     originating_pid         ::  wildcard(maybe(binpid())),
-    originating_handler     ::  wildcard(maybe(priv_handler()))
+    originating_handler     ::  wildcard(maybe(priv_handler())),
+    originating_id          ::  wildcard(maybe(integer()))
 }).
 
 
@@ -75,6 +79,8 @@
     node             :=  binary(),
     handler          :=  priv_handler(),
     type             :=  entry_type(),
+    session_id       :=  maybe(id()),
+    callback_mod     :=  maybe(module()),
     pid              :=  binpid(),
     uri              :=  uri(),
     match_policy     :=  binary(),
@@ -112,11 +118,12 @@
 -export([pattern/5]).
 -export([peer_id/1]).
 -export([pid/1]).
+-export([proxy/3]).
+-export([proxy_details/1]).
 -export([realm_uri/1]).
 -export([session_id/1]).
 -export([to_details_map/1]).
 -export([to_external/1]).
--export([proxy/3]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -163,7 +170,7 @@ andalso (
     %% Term could be undefined for remote?
     %% For registrations we support Term being a pid, callback module or
     %% undefined
-    {Handler, BinPid} = handler_pid(SessionId, Term),
+    {Handler, BinPid, CBMod} = handler_pid_mod(SessionId, Term),
 
     Key = #entry_key{
         realm_uri = RealmUri,
@@ -175,7 +182,9 @@ andalso (
 
     #entry{
         key = Key,
+        session_id = SessionId,
         pid = BinPid,
+        callback_mod = CBMod,
         uri = Uri,
         match_policy = validate_match_policy(Options),
         created = erlang:system_time(seconds),
@@ -220,15 +229,17 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options, Extra) ->
 
     #entry{
         key = KeyPattern,
+        session_id = '_',
         pid = Pid,
+        callback_mod = '_',
         uri = ProcedureOrTopic,
         match_policy = MatchPolicy,
         created = '_',
         options = '_',
-        originating_id = '_',
         originating_node = '_',
         originating_pid = '_',
-        originating_handler = '_'
+        originating_handler = '_',
+        originating_id = '_'
     }.
 
 
@@ -425,8 +436,8 @@ is_local(#entry_key{node = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec is_callback(t()) -> boolean().
 
-is_callback(#entry{key = Key}) ->
-    is_callback(Key);
+is_callback(#entry{callback_mod = Val}) ->
+    Val =/= undefined;
 
 is_callback(#entry_key{handler = Val}) ->
     Val =/= '_' andalso Val =/= undefined andalso is_atom(Val).
@@ -440,8 +451,8 @@ is_callback(#entry_key{handler = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec callback_mod(t()) -> wildcard(maybe(module())).
 
-callback_mod(#entry{key = Key}) ->
-    callback_mod(Key);
+callback_mod(#entry{callback_mod = Val}) ->
+    Val;
 
 callback_mod(#entry_key{handler = Val}) when is_atom(Val) ->
     %% Either a module or '_'
@@ -474,8 +485,8 @@ pid(#entry_key{handler = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec session_id(t_or_key()) -> wildcard(maybe(id())).
 
-session_id(#entry{key = Key}) ->
-    session_id(Key);
+session_id(#entry{session_id = Val}) ->
+    Val;
 
 session_id(#entry_key{handler = Val}) when is_integer(Val) orelse Val == '_' ->
     Val;
@@ -599,6 +610,8 @@ to_external(#entry{key = Key} = E) ->
         handler => Key#entry_key.handler,
         type => Key#entry_key.type,
         pid => E#entry.pid,
+        session_id => E#entry.session_id,
+        callback_mod => E#entry.callback_mod,
         uri => E#entry.uri,
         match_policy => E#entry.match_policy,
         created => created_format(E#entry.created),
@@ -625,6 +638,8 @@ proxy(SessionId, Pid, External) ->
         handler := OriginatingHandler,
         type := Type,
         pid := OriginatingPid,
+        session_id := _OriginatingSessionId,
+        callback_mod := _OriginatingCBMod,
         uri := Uri,
         match_policy := MatchPolicy,
         created := Created,
@@ -632,7 +647,7 @@ proxy(SessionId, Pid, External) ->
     } = External,
 
     Id = bondy_utils:get_id(global),
-    {Handler, BinPid} = handler_pid(SessionId, Pid),
+    {Handler, BinPid, CBMod} = handler_pid_mod(SessionId, Pid),
 
     #entry{
         key = #entry_key{
@@ -644,6 +659,8 @@ proxy(SessionId, Pid, External) ->
             is_proxy = true
         },
         pid = BinPid,
+        session_id = SessionId,
+        callback_mod = CBMod,
         uri = Uri,
         match_policy = MatchPolicy,
         created = Created,
@@ -668,6 +685,21 @@ is_proxy(#entry_key{is_proxy = Val}) ->
     Val.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec proxy_details(t()) -> map().
+
+proxy_details(#entry{} = E) ->
+    #{
+        originating_id => E#entry.originating_id,
+        originating_handler => E#entry.originating_handler,
+        originating_pid => E#entry.originating_pid,
+        originating_node => E#entry.originating_node
+    }.
+
+
 
 %% =============================================================================
 %% PRIVATE
@@ -676,20 +708,20 @@ is_proxy(#entry_key{is_proxy = Val}) ->
 
 
 %% @private
--spec handler_pid(SessionId :: maybe(id()), Term :: maybe(pid() | module())) ->
-    {handler(), maybe(binpid())} | no_return().
+-spec handler_pid_mod(SessionId :: maybe(id()), Term :: maybe(pid() | module())) ->
+    {handler(), maybe(binpid()), maybe(module())} | no_return().
 
-handler_pid(SessionId, Pid) when is_integer(SessionId), is_pid(Pid) ->
-    {SessionId, bondy_utils:pid_to_bin(Pid)};
+handler_pid_mod(SessionId, Pid) when is_integer(SessionId), is_pid(Pid) ->
+    {SessionId, bondy_utils:pid_to_bin(Pid), undefined};
 
-handler_pid(undefined, Mod) when is_atom(Mod) ->
-    {Mod, undefined};
+handler_pid_mod(undefined, Mod) when is_atom(Mod) ->
+    {Mod, undefined, Mod};
 
-handler_pid(undefined, Pid) when is_pid(Pid) ->
+handler_pid_mod(undefined, Pid) when is_pid(Pid) ->
     Bin = bondy_utils:pid_to_bin(Pid),
-    {Bin, Bin};
+    {Bin, Bin, undefined};
 
-handler_pid(_, _) ->
+handler_pid_mod(_, _) ->
     error(badarg).
 
 
