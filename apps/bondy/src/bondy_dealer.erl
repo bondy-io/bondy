@@ -411,7 +411,7 @@ handle_message(M, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Handles inbound messages received from a peer (node).
+%% @doc Handles inbound messages received from a cluster peer node.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_peer_message(
@@ -630,7 +630,8 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
-                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
+                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw
+                ),
 
                 ok = bondy:send(Callee, Caller, Error, #{}),
 
@@ -883,19 +884,21 @@ call_to_invocation(M, Uri, Entry, Ctxt1) ->
     Args = M#call.args,
     Payload = M#call.kwargs,
     RegId = bondy_registry_entry:id(Entry),
-    RegOpts = bondy_registry_entry:options(Entry),
-    CallOpts = M#call.options,
-    Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
+    Details = invocation_details(M, Uri, Entry, Ctxt1),
     wamp_message:invocation(ReqId, RegId, Details, Args, Payload).
 
 
 %% @private
-prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
+invocation_details(M, Uri, Entry, Ctxt) ->
+    CallOpts = M#call.options,
+    RegOpts = bondy_registry_entry:options(Entry),
     Details0 = #{
         procedure => Uri,
         trust_level => 0
     },
 
+    %% TODO disclose info only if feature is announced by Callee, Dealer
+    %% and Caller
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
     Details1 = case DiscloseCaller orelse DiscloseMe of
@@ -910,13 +913,20 @@ prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
             Details0
     end,
 
-    case maps:get('x_disclose_session_info', RegOpts, false) of
+    Details2 = case maps:get('x_disclose_session_info', RegOpts, false) of
         true ->
             Session = bondy_context:session(Ctxt),
             Info = bondy_session:info(Session),
             Details1#{'x_session_info' => Info};
         false ->
             Details1
+    end,
+
+    case bondy_registry_entry:is_proxy(Entry) of
+        true ->
+            maps:merge(Details2, bondy_registry_entry:proxy_details(Entry));
+        false ->
+            Details2
     end.
 
 
@@ -1276,19 +1286,13 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                             %% for promises
                             {ok, Ctxt2};
 
-                        {ok, #invocation{} = Inv, Ctxt2} ->
+                        {ok, #invocation{} = Msg, Ctxt2} ->
                             RealmUri = bondy_context:realm_uri(Ctxt1),
                             Caller = bondy_context:peer_id(Ctxt1),
-                            InvId = Inv#invocation.request_id,
+                            MsgId = Msg#invocation.request_id,
 
-                            %%  A promise is used to implement a capability and
-                            %% a feature:
-                            %% - the capability to match the callee response
-                            %% (wamp_yield() or wamp_error()) back to the
-                            %% originating wamp_call() and Caller
-                            %% - the call_timeout feature at the dealer level
                             Promise = bondy_rpc_promise:new(
-                                InvId, CallId, ProcUri, Callee, Ctxt2
+                                MsgId, CallId, ProcUri, Callee, Ctxt2
                             ),
 
                             %% We enqueue the promise with a timeout
@@ -1298,7 +1302,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                                 bondy_utils:timeout(call_opts(Opts))
                             ),
 
-                            ok = bondy:send(Caller, Callee, Inv, #{}),
+                            ok = bondy:send(Caller, Callee, Msg, #{}),
 
                             {ok, Ctxt2}
                     end

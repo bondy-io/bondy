@@ -77,7 +77,13 @@
     {event, [
     ]},
     {invocation, [
-        'x_session_info'
+        'x_session_info',
+        %% The following are used internally by Bondy on the edge uplink
+        %% communication
+        originating_id,
+        originating_handler,
+        originating_pid,
+        originating_node
     ]},
     {result, [
     ]}
