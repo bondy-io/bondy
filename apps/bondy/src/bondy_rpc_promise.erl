@@ -17,7 +17,10 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc A promise is used to implement a capability and a feature:
+%% - the capability to match the callee response (wamp_yield() or wamp_error())
+%% back to the originating wamp_call() and Caller
+%% - the call_timeout feature at the dealer level
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
@@ -116,21 +119,22 @@ new(InvocationId, CallId, ProcUri, Callee, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the invocation request identifier
 %% @end
 %% -----------------------------------------------------------------------------
 invocation_id(#bondy_rpc_promise{invocation_id = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the call request identifier
 %% @end
 %% -----------------------------------------------------------------------------
 call_id(#bondy_rpc_promise{call_id = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the callee (`peer_id()') that is the target of this invocation
+%% promise.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec callee(t()) -> peer_id().
@@ -138,7 +142,8 @@ callee(#bondy_rpc_promise{callee = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the caller (`peer_id()') who made the call request associated
+%% with this invocation promise.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec caller(t()) -> peer_id().
@@ -160,14 +165,19 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Adds the invocation promise `P' to the promise queue for realm
+%% `RealmUri' using a timeout of `Timeout'.
+%%
+%% If the promise is not dequeued before `Timeout' milliseconds, the caller
+%% will receive an error with reason "wamp.error.timeout".
 %% @end
 %% -----------------------------------------------------------------------------
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
-    ProcUri = P#bondy_rpc_promise.procedure_uri,
     CallId = P#bondy_rpc_promise.call_id,
-    {_, _, CallerSessionId, _} = Caller = P#bondy_rpc_promise.caller,
+    ProcUri = P#bondy_rpc_promise.procedure_uri,
+    Caller = P#bondy_rpc_promise.caller,
+
     %% We match realm_uri for extra validation
     Key = key(RealmUri, P),
 
@@ -175,9 +185,9 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
         ?LOG_DEBUG(#{
             description => "RPC Promise evicted from queue",
             realm_uri => RealmUri,
-            caller_session_id => CallerSessionId,
-            invocation_id => InvocationId,
+            caller => Caller,
             procedure_uri => ProcUri,
+            invocation_id => InvocationId,
             call_id => CallId,
             timeout => Timeout
         }),
@@ -192,7 +202,6 @@ enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
             ?CALL,
             CallId,
             #{
-
                 procedure_uri => ProcUri,
                 timeout => Timeout
             },
@@ -327,11 +336,6 @@ dequeue_promise(Key) ->
     Opts = #{key => Key},
     case tuplespace_queue:dequeue(?INVOCATION_QUEUE, Opts) of
         empty ->
-            %% The promise might have expired so we GC it.
-            %% case tuplespace_queue:remove(?INVOCATION_QUEUE, Opts) of
-            %%     0 -> empty;
-            %%     _ -> empty
-            %% end;
             empty;
         [#bondy_rpc_promise{} = Promise] ->
             {ok, Promise}
