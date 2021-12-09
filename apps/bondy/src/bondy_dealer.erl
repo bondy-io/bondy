@@ -187,7 +187,7 @@
 -export([handle_peer_message/4]).
 -export([is_feature_enabled/1]).
 -export([match_registrations/2]).
--export([register/4]).
+-export([register/3]).
 -export([registrations/1]).
 -export([registrations/3]).
 -export([registrations/4]).
@@ -213,25 +213,41 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(
-    RealmUri :: uri(),
     Opts :: map(),
     Procedure :: uri(),
-    Term :: pid() | function() | module()) ->
+    Ref :: bondy_ref:t() | bondy_context:t()) ->
     {ok, id()}
     | {ok, id(), pid()}
     | {error, already_exists | any()}
     | no_return().
 
-register(_RealmUri, _Opts, _Procedure, Fun) when is_function(Fun, 2) ->
-    error(not_implemented);
+register(Opts0, Procedure, Ctxt) when is_map(Ctxt) ->
+    register(Opts0, Procedure, bondy_context:ref(Ctxt));
 
-register(RealmUri, Opts0, Procedure, Pid) when is_pid(Pid) ->
-    Opts = Opts0#{shared_registration => true},
-    do_register(Procedure, Opts, {RealmUri, Pid});
+register(Opts0, Procedure, Ref) ->
 
-register(RealmUri, Opts, Procedure, Mod) when is_atom(Mod) ->
-    bondy_wamp_callback:conforms(Mod) orelse error({badarg, Mod}),
-    do_register(Procedure, Opts, {RealmUri, Mod}).
+    Opts =
+        case bondy_ref:target(Ref) of
+            {pid, _} ->
+                Opts0#{shared_registration => true};
+
+            {name, _} ->
+                Opts0#{shared_registration => true};
+
+            {callback, {M, F, A}} ->
+                erlang:function_exported(M, F, 2 + length(A))
+                    orelse error({badarg, Ref}),
+
+                Opts0#{shared_registration => false}
+        end,
+
+    case bondy_registry:add(registration, Procedure, Opts, Ref) of
+        {ok, Entry, _} ->
+            {ok, bondy_registry_entry:id(Entry)};
+
+        {error, {already_exists, _}} ->
+            {error, already_exists}
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -289,17 +305,20 @@ callees(RealmUri) ->
     case bondy_registry:entries(registration, RealmUri, '_', '_') of
         [] ->
             [];
-        Entries ->
-            All = [
-                {
-                    bondy_registry_entry:node(E),
-                    bondy_registry_entry:session_id(E)
-                } || E <- Entries
-            ],
-            [
-                #{node => N, session_id => S}
-                || {N, S} <- sets:to_list(sets:from_list(All))
-            ]
+        List ->
+            Set = lists:foldl(
+                fun(E, Acc) ->
+                    Ref = bondy_registry_entry:ref(E),
+                    M = #{
+                        node => bondy_ref:node(Ref),
+                        session_id => bondy_ref:session_id(E)
+                    },
+                    sets:add_element(M, Acc)
+                end,
+                sets:new(),
+                List
+            ),
+            sets:to_list(Set)
     end.
 
 
@@ -324,19 +343,31 @@ callees(RealmUri, ProcedureUri) ->
 
 callees(RealmUri, ProcedureUri, Opts) ->
     case bondy_registry:match(registration, ProcedureUri, RealmUri, Opts) of
-        {[], '$end_of_table'} ->
+        '$end_of_table' ->
             [];
-        {Entries, '$end_of_table'} ->
-            All = [
-                {
-                    bondy_registry_entry:node(E),
-                    bondy_registry_entry:session_id(E)
-                } || E <- Entries
-            ],
-            [
-                #{node => N, session_id => S}
-                || {N, S} <- sets:to_list(sets:from_list(All))
-            ]
+        {List, Cont} ->
+            Set = lists:foldl(
+                fun(E, Acc) ->
+                    Ref = bondy_registry_entry:ref(E),
+                    M = #{
+                        node => bondy_ref:node(Ref),
+                        session_id => bondy_ref:session_id(E)
+                    },
+                    sets:add_element(M, Acc)
+                end,
+                sets:new(),
+                List
+            ),
+            Res = sets:to_list(Set),
+
+            case Cont of
+                '$end_of_table' ->
+                    Res;
+                _Cont ->
+                    %% TODO
+                    Res
+            end
+
     end.
 
 
@@ -351,7 +382,7 @@ close_context(Ctxt) ->
         %% Cleanup registrations
         ok = unregister_all(Ctxt),
         %% Cleanup invocations queue
-        ok = bondy_rpc_promise:flush(bondy_context:peer_id(Ctxt)),
+        ok = bondy_rpc_promise:flush(bondy_context:ref(Ctxt)),
         Ctxt
     catch
         Class:Reason:Stacktrace ->
@@ -403,10 +434,10 @@ handle_message(M, Ctxt) ->
                 [Reason],
                 #{message => Reason}
             ),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply);
+            bondy:send(bondy_context:ref(Ctxt), Reply);
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
-            bondy:send(bondy_context:peer_id(Ctxt), Reply)
+            bondy:send(bondy_context:ref(Ctxt), Reply)
     end.
 
 
@@ -417,8 +448,8 @@ handle_message(M, Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec handle_peer_message(
     wamp_message(),
-    To :: remote_peer_id(),
-    From :: remote_peer_id(),
+    To :: bondy_ref:t(),
+    From :: bondy_ref:t(),
     Opts :: map()) ->
     ok | no_return().
 
@@ -497,7 +528,10 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
     %% so we fetch it
     {RealmUri, Node, SessionId, _Pid} = Callee,
     Key = bondy_registry_entry:key_pattern(
-        registration, RealmUri, Node, SessionId, M#invocation.registration_id
+        registration,
+        RealmUri,
+        Node,
+        #{session_id => SessionId, entry_id => M#invocation.registration_id}
     ),
 
     %% We use lookup because the key is ground
@@ -510,7 +544,7 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
                 #{}
             );
         Entry ->
-            LocalCallee = bondy_registry_entry:peer_id(Entry),
+            LocalCallee = bondy_registry_entry:ref(Entry),
 
             %% We enqueue the invocation so that we can match it with the
             %% YIELD or ERROR
@@ -548,7 +582,7 @@ do_handle_message(#unregister{} = M, Ctxt) ->
 do_handle_message(#cancel{} = M, Ctxt0) ->
     %% TODO check if authorized and if not throw wamp.error.not_authorized
     CallId = M#cancel.request_id,
-    Caller = bondy_context:peer_id(Ctxt0),
+    Caller = bondy_context:ref(Ctxt0),
     Opts = M#cancel.options,
 
     %% We first use peek to find the Promise based on CallId so we can retreive
@@ -595,7 +629,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             Fun = fun(Promise, Ctxt1) ->
                 InvocationId = bondy_rpc_promise:invocation_id(Promise),
                 Callee = bondy_rpc_promise:callee(Promise),
-                Caller = bondy_context:peer_id(Ctxt1),
+                Caller = bondy_context:ref(Ctxt1),
                 Mssg = <<"call_cancelled">>,
                 Args = [Mssg],
                 ArgsKw = #{
@@ -623,7 +657,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% cancelled
             Fun = fun(Promise, Ctxt1) ->
                 Callee = bondy_rpc_promise:callee(Promise),
-                Caller = bondy_context:peer_id(Ctxt1),
+                Caller = bondy_context:ref(Ctxt1),
                 Mssg = <<"call_cancelled">>,
                 Args = [Mssg],
                 ArgsKw = #{
@@ -645,10 +679,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
 do_handle_message(#yield{} = M, Ctxt0) ->
     %% A Callee is replying to a previous wamp_invocation()
     %% which we generated based on a Caller wamp_call()
-    %% We match the wamp_yield() with the originating wamp_invocation()
+    %% We match the wamp_yield() with the origin wamp_invocation()
     %% using the request_id, and with that match the wamp_call() request_id
     %% to find the caller pid.
-    Callee = bondy_context:peer_id(Ctxt0),
+    Callee = bondy_context:ref(Ctxt0),
     Fun = fun
         (empty) ->
             no_matching_promise(M);
@@ -666,39 +700,40 @@ do_handle_message(#yield{} = M, Ctxt0) ->
             end
     end,
     InvocationId = M#yield.request_id,
-    Callee = bondy_context:peer_id(Ctxt0),
+    Callee = bondy_context:ref(Ctxt0),
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
 do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
-    Callee = bondy_context:peer_id(Ctxt0),
+    Callee = bondy_context:ref(Ctxt0),
+    InvocationId = M#error.request_id,
+
     Fun = fun
         (empty) ->
             no_matching_promise(M);
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
-            CallError = case bondy:is_remote_peer(Caller) of
-                true ->
+            CallError = case bondy_ref:is_local(Caller) of
+                false ->
                     %% We reply the invocation message as the remote node has
                     %% send us an invocation and not a call
                     M;
-                false ->
+                true ->
                     M#error{request_id = CallId, request_type = ?CALL}
             end,
             bondy:send(Callee, Caller, CallError, #{})
     end,
-    InvocationId = M#error.request_id,
-    Callee = bondy_context:peer_id(Ctxt0),
+
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
 do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     %% A callee is responding with an error to an INTERRUPT message
     %% We need to turn this into a CANCEL error
-    Callee = bondy_context:peer_id(Ctxt0),
+    Callee = bondy_context:ref(Ctxt0),
     InvocationId = M#error.request_id,
-    Caller = bondy_context:peer_id(Ctxt0),
+    Caller = bondy_context:ref(Ctxt0),
     case bondy_rpc_promise:peek_invocation(InvocationId, Callee) of
         empty ->
             %% Call was evicted or performed already by Callee
@@ -747,7 +782,7 @@ handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 callback(#call{} = M0, Ctxt, Mod) ->
-    PeerId = bondy_context:peer_id(Ctxt),
+    PeerId = bondy_context:ref(Ctxt),
     DefaultOpts = #{error_formatter => undefined},
 
     try Mod:handle_call(M0, Ctxt) of
@@ -823,12 +858,12 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
 
                 {reply, #yield{} = Yield} ->
                     Reply = yield_to_result(M#call.request_id, Yield),
-                    Caller = bondy_context:peer_id(Ctxt0),
+                    Caller = bondy_context:ref(Ctxt0),
                     ok = bondy:send(Caller, Reply),
                     {ok, Ctxt1};
 
                 {reply, #error{} = Error0} ->
-                    Caller = bondy_context:peer_id(Ctxt0),
+                    Caller = bondy_context:ref(Ctxt0),
                     Error = Error0#error{
                         request_id = M#call.request_id,
                         request_type = ?CALL
@@ -946,18 +981,19 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     ok = bondy_rbac:authorize(<<"wamp.register">>, Uri, Ctxt),
 
     #register{options = Opts0, request_id = ReqId} = M,
-    PeerId = bondy_context:peer_id(Ctxt),
 
     %% We add an option used by bondy_registry
     Val = bondy_context:is_feature_enabled(Ctxt, callee, shared_registration),
     Opts = Opts0#{shared_registration => Val},
 
-    case bondy_registry:add(registration, Uri, Opts, Ctxt) of
+    Ref = bondy_context:ref(Ctxt),
+
+    case bondy_registry:add(registration, Uri, Opts, Ref) of
         {ok, Entry, IsFirst} ->
             ok = on_register(IsFirst, Entry, Ctxt),
             Id = bondy_registry_entry:id(Entry),
             Reply = wamp_message:registered(ReqId, Id),
-            bondy:send(PeerId, Reply);
+            bondy:send(Ref, Reply);
         {error, {already_exists, Entry}} ->
             Policy = bondy_registry_entry:match_policy(Entry),
             Mssg = <<
@@ -971,20 +1007,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
                 ?WAMP_PROCEDURE_ALREADY_EXISTS,
                 [Mssg]
             ),
-            bondy:send(PeerId, Reply)
-    end.
-
-
-%% @private
-do_register(Procedure, Opts, Term) ->
-    case
-        bondy_registry:add(registration, Procedure, Opts, Term)
-    of
-        {ok, Entry, _} ->
-            {ok, bondy_registry_entry:id(Entry)};
-
-        {error, {already_exists, _}} ->
-            {error, already_exists}
+            bondy:send(Ref, Reply)
     end.
 
 
@@ -1023,7 +1046,7 @@ unregister(Uri, M, Ctxt) ->
     ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
     ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
     Reply = wamp_message:unregistered(RegId),
-    bondy:send(bondy_context:peer_id(Ctxt), Reply).
+    bondy:send(bondy_context:ref(Ctxt), Reply).
 
 
 %% -----------------------------------------------------------------------------
@@ -1153,7 +1176,7 @@ match_registrations({registration, _} = Cont) ->
 
 reply_error(Error, Ctxt) ->
     bondy:send(
-        bondy_context:peer_id(Ctxt),
+        bondy_context:ref(Ctxt),
         Error
     ).
 
@@ -1168,7 +1191,7 @@ reply_error(Error, Ctxt) ->
     {ok, bondy_context:t()}.
 
 dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
-    Caller = bondy_context:peer_id(Ctxt),
+    Caller = bondy_context:ref(Ctxt),
     case bondy_rpc_promise:dequeue_call(CallId, Caller) of
         empty ->
             %% Promises for this call were either interrupted by us,
@@ -1196,7 +1219,7 @@ dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
     bondy_context:t()) -> {ok, bondy_context:t()}.
 
 peek_invocations(CallId, Fun, Ctxt) when is_function(Fun, 2) ->
-    Caller = bondy_context:peer_id(Ctxt),
+    Caller = bondy_context:ref(Ctxt),
     case bondy_rpc_promise:peek_call(CallId, Caller) of
         empty ->
             {ok, Ctxt};
@@ -1280,7 +1303,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
                     ok = reply_error(Error, Ctxt1),
                     {ok, Ctxt1};
                 (Entry, Ctxt1) ->
-                    Callee = bondy_registry_entry:peer_id(Entry),
+                    Callee = bondy_registry_entry:ref(Entry),
 
                     %% We invoke the provided fun which actually makes the
                     %% invocation
@@ -1292,11 +1315,11 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 
                         {ok, #invocation{} = Msg, Ctxt2} ->
                             RealmUri = bondy_context:realm_uri(Ctxt1),
-                            Caller = bondy_context:peer_id(Ctxt1),
+                            Caller = bondy_context:ref(Ctxt1),
                             MsgId = Msg#invocation.request_id,
 
                             Promise = bondy_rpc_promise:new(
-                                MsgId, CallId, ProcUri, Callee, Ctxt2
+                                MsgId, Callee, Caller, CallId, ProcUri
                             ),
 
                             %% We enqueue the promise with a timeout

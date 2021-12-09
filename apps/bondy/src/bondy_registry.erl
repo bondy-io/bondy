@@ -133,7 +133,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init_tries() ->
-    gen_server:call(?MODULE, init_tries, 10*60*1000).
+    gen_server:call(?MODULE, init_tries, timer:minutes(10)).
 
 
 %% -----------------------------------------------------------------------------
@@ -186,7 +186,9 @@ info(?SUBSCRIPTION_TRIE) ->
     {ok, IsFirstEntry :: boolean()} | {error, already_exists} | no_return().
 
 add(Entry) ->
-    bondy_registry_entry:is_entry(Entry) orelse error(badarg),
+    bondy_registry_entry:is_entry(Entry)
+        orelse error(badarg),
+
     case do_add(Entry) of
         {ok, _, IsFirstEntry} ->
             {ok, IsFirstEntry};
@@ -223,152 +225,31 @@ add(Entry) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec add(
-    bondy_registry_entry:entry_type(), uri(), map(), bondy_context:t()) ->
-    {ok, bondy_registry_entry:t(), IsFirstEntry :: boolean()}
+    Type :: bondy_registry_entry:entry_type(),
+    RegUri :: uri(),
+    Opts :: map(),
+    CtxtOrRef :: bondy_context:t() | bondy_ref:t()) ->
+    {ok, Entry :: bondy_registry_entry:t(), IsFirstEntry :: boolean()}
     | {error, {already_exists, bondy_registry_entry:t()}}.
 
 add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
-    %% A normal client subscription|registration
-    add(Type, Uri, Opts, bondy_context:peer_id(Ctxt));
+    add(Type, Uri, Opts, bondy_context:ref(Ctxt));
 
-add(Type, Uri, Opts, {RealmUri, Pid}) when is_pid(Pid) ->
-    %% Adds a local/internal subscription|registration using a process
-    Node = bondy_peer_service:mynode(),
-    SessionId = undefined,
-    add(Type, Uri, Opts, {RealmUri, Node, SessionId, Pid});
-
-add(registration = Type, Uri, Opts, {RealmUri, Mod}) when is_atom(Mod) ->
-    %% Adds a local/internal registration using a callback module (no process)
-    %% In the case of callbacks we do not allow shared registrations,
-    %% so we match node and mod (handler)
-    Node = bondy_peer_service:mynode(),
-    Pattern = bondy_registry_entry:pattern(
-        registration, RealmUri, Uri, Opts, #{node => Node, handler => Mod}
-    ),
-
-    %% We generate a trie key based on pattern
-    %% We use the trie as it allows us to match the URI (which is not part of
-    %% the key in plum_db)
-    TrieKey = trie_key(Pattern),
-
-    %% TODO we should limit the match to 1 result!!!
-    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
-        [] ->
-            RegId = registration_id(RealmUri, Opts),
-            SessionId = undefined,
-            PeerId = {RealmUri, Node, SessionId, Mod},
-            NewOpts = maps:without([shared_registrations], Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, NewOpts),
-            do_add(Entry);
-
-        [{_, EntryKey} | _] ->
-            %% A registration exists for this callback Mod and URI
-            FullPrefix = full_prefix(Type, RealmUri),
-            Entry = plum_db:get(FullPrefix, EntryKey),
-            {error, {already_exists, Entry}}
+add(registration, Uri, Opts, Ref) ->
+    case bondy_ref:type(Ref) of
+        callback ->
+            add_callback_registration(Uri, Opts, Ref);
+        _ ->
+            add_process_registration(Uri, Opts, Ref)
     end;
 
-add(registration = Type, Uri, Opts, {_, _, SessionId, _} = PeerId) ->
-    %% A client callee registration
-    {RealmUri, _, _, _} = PeerId,
-
-    %% plum_db prefix to fetch entries
-    FullPrefix = full_prefix(Type, RealmUri),
-
-    %% A session can register a procedure even if it is already
-    %% registered if shared_registration is enabled.
-    %% So we do not match Node nor SessionId to retrieve other session's
-    %% registrations
-    Pattern = bondy_registry_entry:pattern(registration, RealmUri, Uri, Opts),
-
-    %% We generate a trie key based on pattern
-    %% We use the trie as it allows us to match the URI (which is not part of
-    %% the key in plum_db)
-    TrieKey = trie_key(Pattern),
-
-    %% TODO we should limit the match to 1 result!!!
-    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
-        [] ->
-            RegId = registration_id(RealmUri, Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
-            do_add(Entry);
-
-        All ->
-            %% TODO here we need to explore all and resolve any inconsistencies
-            %% that might have ocurred during a net split. There are two cases:
-            %% 1. Multiple invoke == single registrations
-            %% 2. Multiple registrations with differring invoke values
-            %% If we do we need to decide which registrations to revoke.
-            DuplicateKeys = filter_duplicate_entry_keys(All, SessionId),
-
-            %% We check this callee has not already registered this same
-            %% procedure and if it did, we return the same registration Id.
-            case DuplicateKeys of
-                [] ->
-                    %% No duplicates but there are existing registrations done
-                    %% by other calles.
-                    %% We take the first one (we should have checked for
-                    %% incosistencies above).
-                    {_, EntryKey} = hd(All),
-
-                    %% The trie stores plum_db keys, so we fetch the entry from
-                    %% plum_db, this should not fail, if it does we have an
-                    %% inconsistency between plum_db and the trie.
-                    Entry = plum_db:get(FullPrefix, EntryKey),
-
-                    EOpts = bondy_registry_entry:options(Entry),
-                    EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-                    Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
-
-                    %% Shared Registration (RFC 13.3.9)
-                    %% When shared registrations are supported, then the first
-                    %% Callee to register a procedure for a particular URI
-                    %% MAY determine that additional registrations for this URI
-                    %% are allowed, and what Invocation Rules to apply in case
-                    %% such additional registrations are made.
-                    %% When invoke is not 'single', Dealer MUST fail
-                    %% all subsequent attempts to register a procedure for the
-                    %% URI where the value for the invoke option does not match
-                    %% that of the initial registration.
-                    SharedRegAllowed = maps:get(shared_registration, Opts, false),
-
-                    %% Notice we are allowing a session to register the same URI
-                    %% multiple times i.e. we are not checking
-                    Allow =
-                        SharedRegAllowed
-                        andalso EPolicy =/= ?INVOKE_SINGLE
-                        andalso EPolicy =:= Policy,
-
-                    case Allow of
-                        true ->
-                            NewOpts = maps:without([shared_registration], Opts),
-                            NewEntry = bondy_registry_entry:new(
-                                Type, PeerId, Uri, NewOpts
-                            ),
-                            do_add(NewEntry);
-                        false ->
-                            {error, {already_exists, Entry}}
-                    end;
-
-                _ ->
-                    %% The callee has already registered this procedure, we
-                    %% return the existing
-                    EntryKey = hd(DuplicateKeys),
-                    Entry = plum_db:get(FullPrefix, EntryKey),
-                    {ok, Entry, false}
-            end
-    end;
-
-add(subscription = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
-    {RealmUri, Node, SessionId, Term} = PeerId,
-
-    Handler = case SessionId of
-        undefined -> Term;
-        _ -> SessionId
-    end,
+add(subscription = Type, Uri, Opts, Ref) ->
+    RealmUri = bondy_ref:realm_uri(Ref),
+    Node = bondy_ref:node(Ref),
+    Target = bondy_ref:target(Ref),
 
     %% We do a full match, we should get none or 1 results
-    Extra = #{node => Node, handler => Handler},
+    Extra = #{node => Node, target => Target},
     Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts, Extra),
     TrieKey = trie_key(Pattern),
 
@@ -376,7 +257,7 @@ add(subscription = Type, Uri, Opts, {_, _, _, _} = PeerId) ->
         [] ->
             %% No matching subscriptions for this SessionId exists
             RegId = subscription_id(RealmUri, Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, PeerId, Uri, Opts),
+            Entry = bondy_registry_entry:new(Type, RegId, Ref, Uri, Opts),
             do_add(Entry);
 
         [{_, EntryKey}] ->
@@ -424,7 +305,8 @@ when is_function(Task, 2) orelse Task == undefined ->
         SessionId ->
             Node = bondy_context:node(Ctxt),
             Pattern = bondy_registry_entry:key_pattern(
-                Type, RealmUri, Node, SessionId, '_'),
+                Type, RealmUri, Node, #{session_id => SessionId}
+            ),
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [
                 {limit, 100},
@@ -455,7 +337,7 @@ remove_all(_, _, _) ->
 
 remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, '_'
+        Type, RealmUri, Node, #{session_id => SessionId}
     ),
     MatchOpts = [
         {limit, 100},
@@ -498,7 +380,7 @@ lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
 %% -----------------------------------------------------------------------------
 lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, '_', '_', EntryId
+        Type, RealmUri, '_', #{entry_id => EntryId}
     ),
     MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
 
@@ -559,7 +441,7 @@ when is_function(Task, 2) orelse Task == undefined ->
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
     Key = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, EntryId),
+        Type, RealmUri, Node, #{session_id => SessionId, entry_id => EntryId}),
     do_remove(Key, Ctxt, Task).
 
 
@@ -619,7 +501,7 @@ entries(Type, RealmUri, Node, SessionId) ->
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, SessionId, '_'
+        Type, RealmUri, Node, #{session_id => SessionId}
     ),
     Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
     case plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts) of
@@ -993,6 +875,7 @@ do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
 
 do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
     Sid = bondy_registry_entry:session_id(Entry),
+
     case SessionId =:= Sid orelse SessionId == '_' of
         true ->
             EntryKey = bondy_registry_entry:key(Entry),
@@ -1044,6 +927,135 @@ prefix(subscription, RealmUri) ->
 
 prefix(registration, RealmUri) ->
     ?REG_FULL_PREFIX(RealmUri).
+
+
+%% @private
+add_callback_registration(Uri, Opts, Ref) ->
+    %% Adds a local/internal registration using a callback module (no process)
+    %% In the case of callbacks we do not allow shared registrations,
+    %% so we match node and mod (handler)
+    Type = registration,
+    RealmUri = bondy_ref:realm_uri(Ref),
+    Target = bondy_ref:target(Ref),
+    Node = bondy_ref:node(Ref),
+
+    Pattern = bondy_registry_entry:pattern(
+        registration, RealmUri, Uri, Opts, #{node => Node, target => Target}
+    ),
+
+    %% We generate a trie key based on pattern
+    %% We use the trie as it allows us to match the URI (which is not part of
+    %% the key in plum_db)
+    TrieKey = trie_key(Pattern),
+
+    %% TODO we should limit the match to 1 result!!!
+    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
+        [] ->
+            RegId = registration_id(RealmUri, Opts),
+            NewOpts = maps:without([shared_registrations], Opts),
+            Entry = bondy_registry_entry:new(Type, RegId, Ref, Uri, NewOpts),
+            do_add(Entry);
+
+        [{_, EntryKey} | _] ->
+            %% A registration exists for this callback Mod and URI
+            FullPrefix = full_prefix(Type, RealmUri),
+            Entry = plum_db:get(FullPrefix, EntryKey),
+            {error, {already_exists, Entry}}
+    end.
+
+
+%% @private
+add_process_registration(Uri, Opts, Ref) ->
+    Type = registration,
+    RealmUri = bondy_ref:realm_uri(Ref),
+    SessionId = bondy_ref:session_id(Ref),
+
+    %% plum_db prefix to fetch entries
+    FullPrefix = full_prefix(Type, RealmUri),
+
+    %% A session can register a procedure even if it is already
+    %% registered if shared_registration is enabled.
+    %% So we do not match Node nor SessionId to retrieve other session's
+    %% registrations
+    Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts),
+
+    %% We generate a trie key based on pattern
+    %% We use the trie as it allows us to match the URI (which is not part of
+    %% the key in plum_db)
+    TrieKey = trie_key(Pattern),
+
+    %% TODO we should limit the match to 1 result!!!
+    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
+        [] ->
+            RegId = registration_id(RealmUri, Opts),
+            Entry = bondy_registry_entry:new(Type, RegId, Ref, Uri, Opts),
+            do_add(Entry);
+
+        All ->
+            %% TODO here we need to explore all and resolve any inconsistencies
+            %% that might have ocurred during a net split. There are two cases:
+            %% 1. Multiple invoke == single registrations
+            %% 2. Multiple registrations with differring invoke values
+            %% If we do we need to decide which registrations to revoke.
+            DuplicateKeys = filter_duplicate_entry_keys(All, SessionId),
+
+            %% We check this callee has not already registered this same
+            %% procedure and if it did, we return the same registration Id.
+            case DuplicateKeys of
+                [] ->
+                    %% No duplicates but there are existing registrations done
+                    %% by other calles.
+                    %% We take the first one (we should have checked for
+                    %% incosistencies above).
+                    {_, EntryKey} = hd(All),
+
+                    %% The trie stores plum_db keys, so we fetch the entry from
+                    %% plum_db, this should not fail, if it does we have an
+                    %% inconsistency between plum_db and the trie.
+                    Entry = plum_db:get(FullPrefix, EntryKey),
+
+                    EOpts = bondy_registry_entry:options(Entry),
+                    EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
+                    Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
+
+                    %% Shared Registration (RFC 13.3.9)
+                    %% When shared registrations are supported, then the first
+                    %% Callee to register a procedure for a particular URI
+                    %% MAY determine that additional registrations for this URI
+                    %% are allowed, and what Invocation Rules to apply in case
+                    %% such additional registrations are made.
+                    %% When invoke is not 'single', Dealer MUST fail
+                    %% all subsequent attempts to register a procedure for the
+                    %% URI where the value for the invoke option does not match
+                    %% that of the initial registration.
+                    SharedRegAllowed = maps:get(shared_registration, Opts, false),
+
+                    %% Notice we are allowing a session to register the same URI
+                    %% multiple times i.e. we are not checking
+                    Allow =
+                        SharedRegAllowed
+                        andalso EPolicy =/= ?INVOKE_SINGLE
+                        andalso EPolicy =:= Policy,
+
+                    case Allow of
+                        true ->
+                            NewOpts = maps:without([shared_registration], Opts),
+                            NewEntry = bondy_registry_entry:new(
+                                Type, Ref, Uri, NewOpts
+                            ),
+                            do_add(NewEntry);
+                        false ->
+                            {error, {already_exists, Entry}}
+                    end;
+
+                _ ->
+                    %% The callee has already registered this procedure, we
+                    %% return the existing
+                    EntryKey = hd(DuplicateKeys),
+                    Entry = plum_db:get(FullPrefix, EntryKey),
+                    {ok, Entry, false}
+            end
+    end.
 
 
 %% @private

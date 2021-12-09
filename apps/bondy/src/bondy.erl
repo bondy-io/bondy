@@ -42,7 +42,6 @@
 -export([call/5]).
 -export([cast/5]).
 -export([check_response/4]).
--export([is_remote_peer/1]).
 -export([publish/5]).
 -export([publish/6]).
 -export([send/2]).
@@ -94,10 +93,10 @@ request(Pid, RealmUri, M) ->
 %% It calls `send/3' with a an empty map for Options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message()) -> ok.
+-spec send(bondy_ref:t(), wamp_message()) -> ok.
 
-send(PeerId, M) ->
-    send(PeerId, M, #{}).
+send(Ref, M) ->
+    send(Ref, M, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -115,32 +114,42 @@ send(PeerId, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(To :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
+    ok | no_return().
 
-send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
-when is_binary(RealmUri)
-andalso is_integer(SessionId)
-andalso is_pid(Pid) ->
-    %% Send a message to a local peer
-    Node =:= bondy_peer_service:mynode() orelse error(not_my_node),
+send(To, M, Opts0) ->
+    bondy_ref:is_local(To)
+        orelse error(not_my_node),
 
-    %% We validate the message and the opts
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
+    wamp_message:is_message(M)
+        orelse error(invalid_wamp_message),
+
     Opts = validate_send_opts(Opts0),
 
-    do_send(PeerId, M, Opts).
+    do_send(To, M, Opts).
 
 
--spec send(peer_id(), peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(
+    From :: bondy_ref:t(),
+    To :: bondy_ref:t(),
+    Msg :: wamp_message(),
+    Opts :: map()) -> ok | no_return().
 
-send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
-when is_binary(RealmUri) ->
-    %% Send a message to a remote peer
+send(From, To, M, Opts0) ->
+
+    bondy_ref:is_local(From)
+        orelse error(not_my_node),
+
+    bondy_ref:realm_uri(From) =:= bondy_ref:realm_uri(To)
+        orelse error(not_same_realm),
+
     %% We validate the message and the opts
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
+    wamp_message:is_message(M)
+        orelse error(invalid_wamp_message),
+
     Opts = validate_send_opts(Opts0),
 
-    case Node =:= bondy_peer_service:mynode() of
+    case bondy_ref:is_local(To) of
         true ->
             do_send(To, M, Opts);
         false ->
@@ -164,14 +173,6 @@ ack(Pid, _) when Pid =:= self()  ->
 ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-is_remote_peer({_, Node, _, _}) ->
-    Node =/= bondy_peer_service:mynode().
 
 
 %% =============================================================================
@@ -373,32 +374,41 @@ validate_send_opts(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send({RealmUri, _, _, Pid}, M, _Opts) when Pid =:= self() ->
-    Pid ! request(Pid, RealmUri, M),
-    %% This is a sync message so we resolve this sequentially
-    ok;
+do_send(To, M, Opts) ->
+    RealmUri = bondy_ref:realm_uri(To),
+    Pid = bondy_ref:pid(To),
 
-do_send({RealmUri, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
-    case maybe_enqueue(SessionId, M, Opts) of
+    case bondy_ref:is_self(To) of
         true ->
+            Pid ! request(Pid, RealmUri, M),
             ok;
         false ->
-            case erlang:is_process_alive(Pid) of
+            SessionId = bondy_ref:session_id(To),
+
+            case maybe_enqueue(SessionId, M, Opts) of
                 true ->
-                    Pid ! request(self(), RealmUri, M),
                     ok;
                 false ->
-                    ?LOG_DEBUG(#{
-                        description => "Cannot deliver message",
-                        reason => noproc,
-                        message_type => element(1, M)
-                    }),
-                    ok
+                    case erlang:is_process_alive(Pid) of
+                        true ->
+                            Pid ! request(self(), RealmUri, M),
+                            ok;
+                        false ->
+                            ?LOG_DEBUG(#{
+                                description => "Cannot deliver message",
+                                reason => noproc,
+                                message_type => element(1, M)
+                            }),
+                            ok
+                    end
             end
     end.
 
 
 %% @private
+maybe_enqueue(undefined, _, _) ->
+    false;
+
 maybe_enqueue(_SessionId, _M, _Opts) ->
     % case maps:get(enqueue, Opts),
     %     true ->

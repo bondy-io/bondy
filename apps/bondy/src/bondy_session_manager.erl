@@ -230,9 +230,13 @@ register_procedures(Session) ->
     %% Registry to do that.
     Part = bondy_utils:session_id_to_uri_part(Id),
     ProcUri = <<"wamp.session.", Part/binary, ".get">>,
+
     Opts = #{match => ?PREFIX_MATCH},
-    Mod = bondy_wamp_meta_api,
-    {ok, _} = bondy_dealer:register(RealmUri, Opts, ProcUri, Mod),
+    MFA = {bondy_wamp_meta_api, handle_call, []},
+    Ref = bondy_ref:new(internal, RealmUri, MFA),
+
+    {ok, _} = bondy_dealer:register(Opts, ProcUri, Ref),
+
     ok.
 
 
@@ -245,7 +249,7 @@ cleanup(Session) ->
         id => bondy_session:id(Session),
         realm_uri => bondy_session:realm_uri(Session),
         node => bondy_session:node(Session),
-        peer_id => bondy_session:peer_id(Session),
+        ref => bondy_session:ref(Session),
         session => Session
     },
     %% We close the session too

@@ -81,20 +81,20 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_wamp_forwarder).
 -behaviour(gen_server).
+
 -include_lib("kernel/include/logger.hrl").
--include("bondy.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
 
 -define(FORWARD_TIMEOUT, 5000).
 
 -record(peer_ack, {
-    from        ::  peer_id(),
+    from        ::  bondy_ref:t(),
     id          ::  id()
 }).
 
 -record(peer_error, {
-    from        ::  peer_id(),
+    from        ::  bondy_ref:t(),
     id          ::  id(),
     reason      ::  any()
 }).
@@ -157,11 +157,11 @@ start_link() ->
 %% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
+-spec forward(bondy_ref:t(), bondy_ref:t(), wamp_message(), map()) ->
     ok | no_return().
 
-forward(From, To, Mssg, Opts) ->
-    {ok, Id} = async_forward(From, To, Mssg, Opts),
+forward(From, To, Msg, Opts) ->
+    {ok, Id} = async_forward(From, To, Msg, Opts),
     Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
     receive_ack(Id, Timeout).
 
@@ -171,20 +171,23 @@ forward(From, To, Mssg, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec async_forward(
-    remote_peer_id(), remote_peer_id(), wamp_message(), map()) ->
+    bondy_ref:t(), bondy_ref:t(), wamp_message(), map()) ->
     {ok, id()} | no_return().
 
-async_forward(From, To, Mssg, Opts) ->
+async_forward(From, To, Msg, Opts) ->
     %% Remote monitoring is not possible given no connections are maintained
     %% directly between nodes.
     %% If remote monitoring is required, Partisan can additionally connect
     %% nodes over Distributed Erlang to provide this functionality but this will
     %% defeat the purpose of using Partisan in the first place.
-    PeerMssg = bondy_peer_message:new(From, To, Mssg, Opts),
+    PeerMssg = bondy_peer_message:new(From, To, Msg, Opts),
+
     Id = bondy_peer_message:id(PeerMssg),
+
     BinPid = bondy_utils:pid_to_bin(self()),
 
     ok = gen_server:cast(?MODULE, {forward, PeerMssg, BinPid}),
+
     {ok, Id}.
 
 
@@ -192,14 +195,18 @@ async_forward(From, To, Mssg, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec broadcast(peer_id(), [node()], wamp_message(), map()) ->
+-spec broadcast(bondy_ref:t(), [node()], wamp_message(), map()) ->
     {ok, Good :: [node()], Bad :: [node()]}.
 
-broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
+broadcast(From, Nodes, M, Opts) ->
+    RealmUri = bondy_ref:realm_uri(From),
+
     %% We forward the message to the other nodes
     IdNodes = [
         begin
-            To = {RealmUri, Node, undefined, undefined},
+            To = bondy_ref:new(
+                internal, RealmUri, {?MODULE, handle, []}, Node
+            ),
             {ok, Id} = async_forward(From, To, M, Opts),
             {Id, Node}
         end
@@ -214,15 +221,15 @@ broadcast({RealmUri, _, _, _} = From, Nodes, M, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec receive_ack(remote_peer_id(), timeout()) -> ok | no_return().
+-spec receive_ack(bondy_ref:t(), timeout()) -> ok | no_return().
 
 receive_ack(Id, Timeout) ->
     %% We wait for the remote forwarder to send us an ACK
     %% to be sure the wamp peer received the message
     receive
-        #peer_ack{id = Id} ->
+        #peer_ack{id = Val} when Val == Id ->
             ok;
-        #peer_error{id = Id, reason = Reason} ->
+        #peer_error{id = Val, reason = Reason} when Val == Id ->
             error(Reason)
     after
         Timeout ->
@@ -251,9 +258,9 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast({forward, Mssg, BinPid} = Event, State) ->
+handle_cast({forward, Msg, BinPid} = Event, State) ->
     try
-        cast_message(Mssg, BinPid)
+        cast_message(BinPid, Msg)
     catch
         Class:Reason:Stacktrace ->
             %% @TODO publish metaevent
@@ -266,57 +273,52 @@ handle_cast({forward, Mssg, BinPid} = Event, State) ->
     end,
     {noreply, State};
 
-handle_cast({'receive', AckOrError, BinPid}, State)
-when is_record(AckOrError, peer_ack) orelse is_record(AckOrError, peer_error) ->
-    %% We are receving an ACK o Error for a message we have previously forwarded
-    {RealmUri, Node, _, _} = AckOrError#peer_ack.from,
+handle_cast({'receive', #peer_ack{from = FromRef} = Msg, BinPid}, State) when is_record(Msg, peer_ack) orelse is_record(Msg, peer_error) ->
+    %% We are receving an ACK or Error for a message we have previously
+    %% forwarded
+    RealmUri = bondy_ref:realm_uri(FromRef),
 
-    _ = case Node =:= bondy_peer_service:mynode() of
+    _ = case bondy_ref:is_local(FromRef) of
         true ->
-            %% Supporting process identifiers in Partisan, without changing the
-            %% internal implementation of Erlang’s process identifiers, is not
-            %% possible without allowing nodes to directly connect to every
-            %% other node.
-            %% See more details in forward/1.
             %% We use the pid-to-bin trick since we are just waiting for an ack
             %% in case the process died we are not interested in queueing the
             %% ack on behalf of the session (session_resumption)
             Pid = bondy_utils:bin_to_pid(BinPid),
-            Pid ! AckOrError;
+            Pid ! Msg;
         false ->
             ?LOG_WARNING(#{
                 description => "Received a message targetted to another node",
                 realm_uri => RealmUri,
-                wamp_message => AckOrError
+                wamp_message => Msg
             })
     end,
     {noreply, State};
 
-handle_cast({'receive', Mssg, BinPid}, State) ->
+handle_cast({'receive', Msg, BinPid}, State) ->
     %% We are receiving a message from peer
     try
-        bondy_peer_message:is_message(Mssg) orelse throw(badarg),
+        bondy_peer_message:is_message(Msg) orelse throw(badarg),
 
         %% This in theory breaks the CALL order guarantee!!!
         %% We either implement causality or we just use hashing over a pool of
         %% workers by {CallerID, CalleeId}
         Job = fun() ->
-            ok = bondy_router:handle_peer_message(Mssg),
+            ok = bondy_router:handle_peer_message(Msg),
             %% We send the ack to the remote node
-            cast_message(peer_ack(Mssg), BinPid)
+            cast_message(peer_ack(Msg), BinPid)
         end,
         ok = case bondy_router_worker:cast(Job) of
             ok ->
                 ok;
             {error, overload} ->
-                cast_message(peer_error(overload, Mssg), BinPid)
+                cast_message(peer_error(overload, Msg), BinPid)
         end,
 
         {noreply, State}
 
     catch
         throw:badarg ->
-            ok = cast_message(peer_error(badarg, Mssg), BinPid),
+            ok = cast_message(peer_error(badarg, Msg), BinPid),
             {noreply, State};
         Class:Reason:Stacktrace ->
             %% TODO publish metaevent
@@ -325,7 +327,7 @@ handle_cast({'receive', Mssg, BinPid}, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            ok = cast_message(peer_error(Reason, Mssg), BinPid),
+            ok = cast_message(peer_error(Reason, Msg), BinPid),
             {noreply, State}
     end.
 
@@ -376,47 +378,38 @@ receive_broadcast_acks([], _, Good, Bad) ->
 
 
 %% @private
-cast_message(#peer_ack{from = {_, Node, _, _}} = Mssg, BinPid) ->
-    do_cast_message(Node, Mssg, BinPid);
-
-cast_message(#peer_error{from = {_, Node, _, _}} = Mssg, BinPid) ->
-    do_cast_message(Node, Mssg, BinPid);
-
-cast_message(Mssg, BinPid) ->
-    %% When process identifiers are transmitted between nodes, the process
-    %% identifiers are translated based on the receiving nodes membership view.
-    %% Supporting process identifiers in Partisan, without changing the
-    %% internal implementation of Erlang’s process identifiers, is not
-    %% possible without allowing nodes to directly connect to every other node.
-    %% Instead of relying on Erlang’s process identifiers, Partisan recommends
-    %% that processes that wish to receive messages from remote processes
-    %% locally register a name that can be used instead of a process identifier
-    %% when sending the message.
-    Node = bondy_peer_message:peer_node(Mssg),
-    do_cast_message(Node, Mssg, BinPid).
-
-
-%% @private
-do_cast_message(Node, Mssg, BinPid) ->
+cast_message(Msg, BinPid) ->
+    Node = peer_node(Msg),
     Manager = bondy_peer_service:manager(),
     Channel = bondy_config:get(wamp_peer_channel, default),
     ServerRef = ?MODULE,
-    Manager:cast_message(Node, Channel, ServerRef, {'receive', Mssg, BinPid}).
+    Manager:cast_message(Node, Channel, ServerRef, {'receive', Msg, BinPid}).
 
 
 %% @private
-peer_ack(Mssg) ->
+peer_node(#peer_ack{from = Ref}) ->
+    bondy_ref:node(Ref);
+
+peer_node(#peer_error{from = Ref}) ->
+    bondy_ref:node(Ref);
+
+peer_node(Msg) ->
+    bondy_peer_message:node(Msg).
+
+
+%% @private
+peer_ack(Msg) ->
     #peer_ack{
-        from = bondy_peer_message:from(Mssg),
-        id = bondy_peer_message:id(Mssg)
+        from = bondy_peer_message:from(Msg),
+        id = bondy_peer_message:id(Msg)
     }.
 
 
 %% @private
-peer_error(Reason, Mssg) ->
+peer_error(Reason, Msg) ->
     #peer_error{
-        from = bondy_peer_message:from(Mssg),
-        id = bondy_peer_message:id(Mssg),
+        from = bondy_peer_message:from(Msg),
+        id = bondy_peer_message:id(Msg),
         reason = Reason
     }.
 

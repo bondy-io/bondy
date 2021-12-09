@@ -21,7 +21,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_message).
--include("bondy.hrl").
+
 -include_lib("wamp/include/wamp.hrl").
 
 -record(peer_message, {
@@ -33,14 +33,13 @@
     %% other node.
     %% We use the pid-to-bin trick since we will be using the pid to generate
     %% an ACK.
-    from            ::  remote_peer_id(),
-    to              ::  remote_peer_id(),
+    from            ::  bondy_ref:t(),
+    to              ::  bondy_ref:t(),
     payload         ::  wamp_invocation()
                         | wamp_error()
                         | wamp_result()
                         | wamp_interrupt()
                         | wamp_publish(),
-    hop_count = 0   ::  non_neg_integer(),
     options         ::  map()
 }).
 
@@ -54,7 +53,7 @@
 -export([id/1]).
 -export([is_message/1]).
 -export([new/4]).
--export([peer_node/1]).
+-export([node/1]).
 -export([options/1]).
 -export([payload/1]).
 -export([payload_type/1]).
@@ -71,21 +70,27 @@
 %% @doc
 %% @end
 %% ----------------------------------------------------------------------------
-new(From0, To0, Payload0, Opts) ->
-    MyNode = bondy_peer_service:mynode(),
-    element(2, To0) =/= MyNode orelse error(badarg),
+new(From, To, Payload0, Opts) ->
+    bondy_ref:is_type(From)
+        andalso bondy_ref:is_local(From)
+        orelse error({badarg, From}),
 
-    FromPid = maybe_pid_to_bin(element(4, From0)),
-    From1 = setelement(4, From0, FromPid),
+    bondy_ref:is_type(To)
+        andalso not bondy_ref:is_local(To)
+        orelse error({badarg, To}),
 
-    ToPid = maybe_pid_to_bin(element(4, To0)),
-    To1 = setelement(4, To0, ToPid),
+    RealmUri = bondy_ref:realm_uri(From),
+
+    RealmUri =:= bondy_ref:realm_uri(To) orelse
+        error(not_same_realm),
+
 
     #peer_message{
-        payload = validate_payload(Payload0),
         id = ksuid:gen_id(millisecond),
-        to = To1,
-        from = From1,
+        realm_uri = RealmUri,
+        to = To,
+        from = From,
+        payload = validate_payload(Payload0),
         options = Opts
     }.
 
@@ -102,56 +107,64 @@ is_message(_) -> false.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-id(#peer_message{id = Val}) -> Val.
+id(#peer_message{id = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-realm_uri(#peer_message{from = Val}) -> element(1, Val).
+realm_uri(#peer_message{realm_uri = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-peer_node(#peer_message{to = Val}) -> element(2, Val).
+node(#peer_message{to = Ref}) ->
+    bondy_ref:node(Ref).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-from(#peer_message{from = Val}) -> Val.
+from(#peer_message{from = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-to(#peer_message{to = Val}) -> Val.
+to(#peer_message{to = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-payload(#peer_message{payload = Val}) -> Val.
+payload(#peer_message{payload = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-payload_type(#peer_message{payload = Val}) -> element(1, Val).
+payload_type(#peer_message{payload = Val}) ->
+    element(1, Val).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-options(#peer_message{options = Val}) -> Val.
+options(#peer_message{options = Val}) ->
+    Val.
 
 
 
@@ -183,12 +196,3 @@ validate_payload(#publish{} = M) ->
 
 validate_payload(M) ->
     error({badarg, [M]}).
-
-
-
-%% @private
-maybe_pid_to_bin(Pid) when is_pid(Pid) ->
-    bondy_utils:pid_to_bin(Pid);
-
-maybe_pid_to_bin(Term) ->
-    Term.

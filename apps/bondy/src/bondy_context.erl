@@ -84,7 +84,7 @@
 -export([new/2]).
 -export([node/1]).
 -export([peer/1]).
--export([peer_id/1]).
+-export([ref/1]).
 -export([peername/1]).
 -export([publisher_details/2]).
 -export([rbac_context/1]).
@@ -506,11 +506,11 @@ set_session(Ctxt, S) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(t()) -> peer_id().
+-spec ref(t()) -> bondy_ref:t().
 
-peer_id(#{session := S}) ->
+ref(#{session := S}) ->
     %% TODO evaluate caching this as it should be immutable
-    bondy_session:peer_id(S).
+    bondy_session:ref(S).
 
 
 %% -----------------------------------------------------------------------------

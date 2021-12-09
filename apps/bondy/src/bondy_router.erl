@@ -135,7 +135,7 @@ shutdown() ->
     Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
 
     try
-        _ = bondy_utils:foreach(Fun, bondy_session:list_peer_ids(100))
+        _ = bondy_utils:foreach(Fun, bondy_session:list_refs(100))
     catch
        Class:Reason ->
             ?LOG_ERROR(#{
@@ -199,7 +199,7 @@ forward(M, #{session := _} = Ctxt0) ->
 
     %% ?LOG_DEBUG(#{
     %%     description => "Forwarding message",
-    %%     peer_id => bondy_context:peer_id(Ctxt0),
+    %%     ref => bondy_context:ref(Ctxt0),
     %%     message => M
     %% }),
 
@@ -225,7 +225,8 @@ handle_peer_message(PM) ->
     handle_peer_message(Payload, PeerId, From, Opts).
 
 
--spec handle_peer_message(wamp_message(), peer_id(), remote_peer_id(), map()) ->
+-spec handle_peer_message(
+    wamp_message(), bondy_ref:t(), bondy_ref:t(), map()) ->
     ok | no_return().
 
 handle_peer_message(#publish{} = M, PeerId, From, Opts) ->

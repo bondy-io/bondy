@@ -26,11 +26,18 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
-
+%% The WAMP spec defines that the id MUST be drawn randomly from a uniform
+%% distribution over the complete range [1, 2^53], but in a distributed
+%% setting we might have 2 or more nodes generating the same ID.
+%% However, we never use the RegId alone, it is always part of a key that
+%% acts as a context that should help minimise the chances of a collision.
+%% It would be much better is this IDs where 128-bit strings e.g. UUID or
+%% KSUID.
 -record(entry_key, {
     realm_uri               ::  uri(),
     node                    ::  node(),
-    handler                 ::  wildcard(priv_handler()),
+    target                  ::  wildcard(bondy_ref:target()),
+    session_id              ::  wildcard(maybe(id())),
     type                    ::  wildcard(entry_type()),
     entry_id                ::  wildcard(id()),
     is_proxy = false        ::  wildcard(boolean())
@@ -38,21 +45,13 @@
 
 -record(entry, {
     key                     ::  key(),
-    %% If session_id is defined we also have pid
-    session_id              ::  maybe(bondy_session:uuid()),
-    %% If defined, session_id might be undefined, callback_mod must be undefined
-    pid                     ::  wildcard(maybe(pid())),
-    %% If callback_mod is defined then session_id and pid are undefined
-    callback_mod            ::  maybe(module()),
     uri                     ::  uri() | atom(),
     match_policy            ::  binary(),
+    ref                     ::  bondy_ref:t(),
     created                 ::  pos_integer() | atom(),
     options                 ::  map(),
-    %% If present this is the binary representation of a bridge|edge node
-    originating_node        ::  wildcard(maybe(binary())),
-    originating_pid         ::  wildcard(maybe(binpid())),
-    originating_handler     ::  wildcard(maybe(priv_handler())),
-    originating_id          ::  wildcard(maybe(integer()))
+    origin_id               ::  wildcard(id()),
+    origin_ref              ::  wildcard(maybe(bondy_ref:t()))
 }).
 
 
@@ -60,10 +59,6 @@
 -type key()                 ::  #entry_key{}.
 -type t_or_key()            ::  t_or_key().
 -type entry_type()          ::  registration | subscription.
-%% Handler is either a session (id()), an process or a module
--type handler()             ::  id() | pid() | module().
--type priv_handler()        ::  id() | binpid() | module().
--type binpid()              ::  binary().
 -type wildcard(T)           ::  T | '_'.
 
 -type details_map()         ::  #{
@@ -74,32 +69,27 @@
 }.
 
 -type external()    ::  #{
-    entry_id         :=  id(),
-    realm_uri        :=  uri(),
-    node             :=  binary(),
-    handler          :=  priv_handler(),
     type             :=  entry_type(),
-    session_id       :=  maybe(id()),
-    callback_mod     :=  maybe(module()),
-    pid              :=  binpid(),
+    entry_id         :=  id(),
+    ref              :=  bondy_ref:t(),
     uri              :=  uri(),
     match_policy     :=  binary(),
     created          :=  calendar:date(),
-    options          :=  map()
+    options          :=  map(),
+    origin_id        :=  maybe(id()),
+    origin_ref       :=  maybe(bondy_ref:t())
 }.
 
 -export_type([t/0]).
 -export_type([key/0]).
 -export_type([t_or_key/0]).
 -export_type([entry_type/0]).
--export_type([handler/0]).
 -export_type([details_map/0]).
 
 
--export([callback_mod/1]).
+-export([callback/1]).
 -export([created/1]).
 -export([get_option/3]).
--export([handler/1]).
 -export([id/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
@@ -108,7 +98,7 @@
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_field/1]).
--export([key_pattern/5]).
+-export([key_pattern/4]).
 -export([match_policy/1]).
 -export([new/4]).
 -export([new/5]).
@@ -116,12 +106,13 @@
 -export([options/1]).
 -export([pattern/4]).
 -export([pattern/5]).
--export([peer_id/1]).
 -export([pid/1]).
 -export([proxy/3]).
 -export([proxy_details/1]).
 -export([realm_uri/1]).
+-export([ref/1]).
 -export([session_id/1]).
+-export([target/1]).
 -export([to_details_map/1]).
 -export([to_external/1]).
 -export([type/1]).
@@ -139,54 +130,41 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, {RealmUri, _, _, _} = PeerId, Uri, Options) ->
-    %% The WAMP spec defines that the id MUST be drawn randomly from a uniform
-    %% distribution over the complete range [1, 2^53], but in a distributed
-    %% setting we might have 2 or more nodes generating the same ID.
-    %% However, we never use the RegId alone, it is always part of a key that
-    %% acts as a context that should help minimise the chances of a collision.
-    %% It would be much better is this IDs where 128-bit strings e.g. UUID or
-    %% KSUID.
-
+new(Type, Ref, Uri, Options) ->
+    RealmUri = bondy_ref:realm_uri(Ref),
     RegId = bondy_utils:get_id({router, RealmUri}),
-    new(Type, RegId, PeerId, Uri, Options).
+    new(Type, RegId, Ref, Uri, Options).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), id(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RegId, {RealmUri, Node, SessionId, Term}, Uri, Options) when
-(Type == registration orelse Type == subscription)
-andalso (
-    (is_integer(SessionId) andalso is_pid(Term))
-    orelse (SessionId == undefined andalso is_pid(Term))
-    orelse (SessionId == undefined andalso is_atom(Term))
-) ->
-    %% Term could be undefined for remote?
-    %% For registrations we support Term being a pid, callback module or
-    %% undefined
-    {Handler, BinPid, CBMod} = handler_pid_mod(SessionId, Term),
+new(Type, RegId, Ref, Uri, Options)
+when Type == registration orelse Type == subscription ->
+    RealmUri = bondy_ref:realm_uri(Ref),
+    Target = bondy_ref:target(Ref),
+    Node = bondy_ref:node(Ref),
+    SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
         realm_uri = RealmUri,
         node = Node,
-        handler = Handler,
+        target = Target,
+        session_id = SessionId,
         type = Type,
         entry_id = RegId
     },
 
     #entry{
         key = Key,
-        session_id = SessionId,
-        pid = BinPid,
-        callback_mod = CBMod,
         uri = Uri,
         match_policy = validate_match_policy(Options),
+        ref = Ref,
         created = erlang:system_time(seconds),
         options = parse_options(Type, Options)
     }.
@@ -217,29 +195,27 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
     Options :: map(),
     Extra :: map()) -> t().
 
-pattern(Type, RealmUri, ProcedureOrTopic, Options, Extra) ->
+pattern(Type, RealmUri, RegUri, Options, Extra) ->
     Node = maps:get(node, Extra, '_'),
-    EntryId = maps:get(entry_id, Extra, '_'),
-    Handler = maps:get(handler, Extra, '_'),
-    Pid = maybe_pid_to_bin(maps:get(pid, Extra, '_')),
+    SessionId = maps:get(session_id, Extra, '_'),
+    Target0 = maps:get(target, Extra, '_'),
 
-    KeyPattern = key_pattern(Type, RealmUri, Node, Handler, EntryId),
+    PatternRef = bondy_ref:pattern('_', RealmUri, Target0, SessionId, Node),
+    Target = bondy_ref:target(PatternRef),
+
+    KeyPattern = key_pattern(Type, RealmUri, Node, Extra#{target => Target}),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
     #entry{
         key = KeyPattern,
-        session_id = '_',
-        pid = Pid,
-        callback_mod = '_',
-        uri = ProcedureOrTopic,
+        uri = RegUri,
         match_policy = MatchPolicy,
+        ref = '_',
         created = '_',
         options = '_',
-        originating_node = '_',
-        originating_pid = '_',
-        originating_handler = '_',
-        originating_id = '_'
+        origin_id = '_',
+        origin_ref = '_'
     }.
 
 
@@ -247,7 +223,12 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options, Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-key_pattern(Type, RealmUri, Node, Handler0, EntryId) ->
+key_pattern(Type, RealmUri, Node, Extra) ->
+    SessionId = maps:get(session_id, Extra, '_'),
+    Target = maps:get(target, Extra, '_'),
+    EntryId = maps:get(entry_id, Extra, '_'),
+    IsProxy = maps:get(is_proxy, Extra, '_'),
+
     Type =:= subscription
         orelse Type =:= registration
         orelse Type == '_'
@@ -260,17 +241,6 @@ key_pattern(Type, RealmUri, Node, Handler0, EntryId) ->
     is_atom(Node)
         orelse error({badarg, {node, Node}}),
 
-    Handler0 =/= undefined
-        andalso (
-            %% SessionId | Pid | Mod | '_'
-            is_integer(Handler0)
-            orelse is_pid(Handler0)
-            orelse is_atom(Handler0)
-        )
-        orelse error({badarg, {handler, Handler0}}),
-
-    Handler = maybe_pid_to_bin(Handler0),
-
     is_integer(EntryId)
         orelse EntryId == '_'
         orelse error({badarg, {entry_id, EntryId}}),
@@ -278,10 +248,11 @@ key_pattern(Type, RealmUri, Node, Handler0, EntryId) ->
     #entry_key{
         realm_uri = RealmUri,
         node = Node,
-        handler = Handler,
-        entry_id = EntryId,
+        target = Target,
+        session_id = SessionId,
         type = Type,
-        is_proxy = '_'
+        entry_id = EntryId,
+        is_proxy = IsProxy
     }.
 
 
@@ -295,8 +266,11 @@ key_field(realm_uri) ->
 key_field(node) ->
     #entry_key.node;
 
-key_field(handler) ->
-    #entry_key.handler;
+key_field(target) ->
+    #entry_key.target;
+
+key_field(session_id) ->
+    #entry_key.session_id;
 
 key_field(entry_id) ->
     #entry_key.entry_id;
@@ -376,13 +350,13 @@ key(#entry{key = Key}) ->
 %% entry is used as a pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec handler(t()) -> wildcard(handler()).
+-spec target(t()) -> wildcard(bondy_ref:target()).
 
-handler(#entry{key = Key}) ->
-    handler(Key);
+target(#entry{ref = Ref}) ->
+    bondy_ref:target(Ref);
 
-handler(#entry_key{handler = Val}) ->
-    maybe_term_to_pid(Val).
+target(#entry_key{target = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -436,11 +410,14 @@ is_local(#entry_key{node = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec is_callback(t()) -> boolean().
 
-is_callback(#entry{callback_mod = Val}) ->
-    Val =/= undefined;
+is_callback(#entry_key{target = {callback, _}}) ->
+    true;
 
-is_callback(#entry_key{handler = Val}) ->
-    Val =/= '_' andalso Val =/= undefined andalso is_atom(Val).
+is_callback(#entry_key{}) ->
+    false;
+
+is_callback(#entry{key = Key}) ->
+    is_callback(Key).
 
 
 %% -----------------------------------------------------------------------------
@@ -449,16 +426,18 @@ is_callback(#entry_key{handler = Val}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback_mod(t()) -> wildcard(maybe(module())).
+-spec callback(t()) -> wildcard(maybe(module())).
 
-callback_mod(#entry{callback_mod = Val}) ->
+callback(#entry{key = Key}) ->
+    callback(Key);
+
+callback(#entry_key{target = {callback, Val}}) ->
     Val;
 
-callback_mod(#entry_key{handler = Val}) when is_atom(Val) ->
-    %% Either a module or '_'
-    Val;
+callback(#entry_key{target = '_'}) ->
+    '_';
 
-callback_mod(#entry_key{}) ->
+callback(#entry_key{}) ->
     undefined.
 
 
@@ -471,11 +450,17 @@ callback_mod(#entry_key{}) ->
 %% -----------------------------------------------------------------------------
 -spec pid(t_or_key()) -> wildcard(maybe(pid())).
 
-pid(#entry{pid = Val}) ->
-    maybe_term_to_pid(Val);
+pid(#entry{key = Key}) ->
+    pid(Key);
 
-pid(#entry_key{handler = Val}) ->
-    maybe_term_to_pid(Val).
+pid(#entry_key{target = {pid, Bin}}) ->
+    bondy_utils:bin_to_pid(Bin);
+
+pid(#entry_key{target = '_'}) ->
+    '_';
+
+pid(#entry_key{}) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -485,36 +470,24 @@ pid(#entry_key{handler = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec session_id(t_or_key()) -> wildcard(maybe(id())).
 
-session_id(#entry{session_id = Val}) ->
-    Val;
+session_id(#entry{ref = '_'}) ->
+    '_';
 
-session_id(#entry_key{handler = Val}) when is_integer(Val) orelse Val == '_' ->
-    Val;
+session_id(#entry{ref = Ref}) ->
+    bondy_ref:session_id(Ref);
 
-session_id(#entry_key{}) ->
-    undefined.
+session_id(#entry_key{session_id = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the peer_id() of the subscription or registration
+%% @doc Returns the ref() of the subscription or registration
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(t()) -> peer_id().
+-spec ref(t()) -> bondy_ref:t().
 
-peer_id(#entry{key = Key} = Entry) ->
-    PidOrMod = case is_callback(Key) of
-        true ->
-            Key#entry_key.handler;
-        false ->
-            maybe_term_to_pid(Entry#entry.pid)
-    end,
-
-    {
-        Key#entry_key.realm_uri,
-        Key#entry_key.node,
-        session_id(Key),
-        PidOrMod
-    }.
+ref(#entry{ref = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -604,23 +577,20 @@ to_details_map(#entry{key = Key} = E) ->
 
 to_external(#entry{key = Key} = E) ->
     #{
-        entry_id => Key#entry_key.entry_id,
-        realm_uri => Key#entry_key.realm_uri,
-        node => atom_to_binary(Key#entry_key.node, utf8),
-        handler => Key#entry_key.handler,
         type => Key#entry_key.type,
-        pid => E#entry.pid,
-        session_id => E#entry.session_id,
-        callback_mod => E#entry.callback_mod,
+        entry_id => Key#entry_key.entry_id,
+        ref => E#entry.ref,
         uri => E#entry.uri,
         match_policy => E#entry.match_policy,
         created => created_format(E#entry.created),
-        options => E#entry.options
+        options => E#entry.options,
+        origin_ref => E#entry.origin_ref
     }.
 
 
+
 %% -----------------------------------------------------------------------------
-%% @doc Returns a copy of the entry where the node component of the peer_id has
+%% @doc Returns a copy of the entry where the node component of the ref has
 %% been replaced with the node of the calling process, the session identifier
 %% replaced with `SessionId' and the pid with `Pid'.
 %%
@@ -628,47 +598,47 @@ to_external(#entry{key = Key} = E) ->
 %% in an edge router.
 %% @end
 %% -----------------------------------------------------------------------------
--spec proxy(SessionId :: maybe(id()), Pid :: pid(), Entry :: external()) -> t().
+-spec proxy(
+    SessionId :: maybe(id()),
+    Target :: pid() | bondy_ref:mfargs() | bondy_ref:name(),
+    Entry :: external()) -> t().
 
-proxy(SessionId, Pid, External) ->
+proxy(SessionId, Target0, External) ->
     #{
-        entry_id := OriginatingId,
-        realm_uri := RealmUri,
-        node := OriginatingNode,
-        handler := OriginatingHandler,
         type := Type,
-        pid := OriginatingPid,
-        session_id := _OriginatingSessionId,
-        callback_mod := _OriginatingCBMod,
+        entry_id := OriginId,
+        ref := OriginRef,
         uri := Uri,
         match_policy := MatchPolicy,
         created := Created,
         options := Options
     } = External,
 
+    RealmUri = bondy_ref:realm_uri(OriginRef),
+    Node = bondy_peer_service:mynode(),
+
+    Ref = bondy_ref:new(bridge, RealmUri, Target0, SessionId, Node),
+
+    Target = bondy_ref:target(Ref),
+
     Id = bondy_utils:get_id({router, RealmUri}),
-    {Handler, BinPid, CBMod} = handler_pid_mod(SessionId, Pid),
 
     #entry{
         key = #entry_key{
             realm_uri = RealmUri,
-            node = bondy_peer_service:mynode(),
-            handler = Handler,
+            node = Node,
+            target = Target,
             type = Type,
             entry_id = Id,
             is_proxy = true
         },
-        pid = BinPid,
-        session_id = SessionId,
-        callback_mod = CBMod,
+        ref = Ref,
         uri = Uri,
         match_policy = MatchPolicy,
         created = Created,
         options = Options,
-        originating_id = OriginatingId,
-        originating_handler = OriginatingHandler,
-        originating_pid = OriginatingPid,
-        originating_node = OriginatingNode
+        origin_ref = OriginRef,
+        origin_id = OriginId
     }.
 
 
@@ -693,10 +663,8 @@ is_proxy(#entry_key{is_proxy = Val}) ->
 
 proxy_details(#entry{} = E) ->
     #{
-        originating_id => E#entry.originating_id,
-        originating_handler => E#entry.originating_handler,
-        originating_pid => E#entry.originating_pid,
-        originating_node => E#entry.originating_node
+        origin_id => E#entry.origin_id,
+        origin_ref => E#entry.origin_ref
     }.
 
 
@@ -705,24 +673,6 @@ proxy_details(#entry{} = E) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
--spec handler_pid_mod(SessionId :: maybe(id()), Term :: maybe(pid() | module())) ->
-    {handler(), maybe(binpid()), maybe(module())} | no_return().
-
-handler_pid_mod(SessionId, Pid) when is_integer(SessionId), is_pid(Pid) ->
-    {SessionId, bondy_utils:pid_to_bin(Pid), undefined};
-
-handler_pid_mod(undefined, Mod) when is_atom(Mod) ->
-    {Mod, undefined, Mod};
-
-handler_pid_mod(undefined, Pid) when is_pid(Pid) ->
-    Bin = bondy_utils:pid_to_bin(Pid),
-    {Bin, Bin, undefined};
-
-handler_pid_mod(_, _) ->
-    error(badarg).
 
 
 %% @private
@@ -768,19 +718,3 @@ parse_registration_options(Opts) ->
 %% @private
 created_format(Secs) ->
     calendar:system_time_to_universal_time(Secs, second).
-
-
-%% @private
-maybe_pid_to_bin(Pid) when is_pid(Pid) ->
-    bondy_utils:pid_to_bin(Pid);
-
-maybe_pid_to_bin(Term) ->
-    Term.
-
-
-%% @private
-maybe_term_to_pid(Pid) when is_binary(Pid) ->
-    bondy_utils:bin_to_pid(Pid);
-
-maybe_term_to_pid(Term) ->
-    Term.

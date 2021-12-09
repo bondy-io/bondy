@@ -48,12 +48,10 @@
     %% integer, this is something we need to change on the WAMP SPEC and adopt
     %% in all clients
     id                              ::  integer(),
+    type = client                   ::  client | bridge,
     realm_uri                       ::  uri(),
-    node                            ::  atom(),
-    %% If owner of the session.
-    %% This is either pid of the TCP or WS handler process or
-    %% the cowboy handler.
-    pid = self()                    ::  maybe(pid()),
+    ref                             ::  bondy_ref:client_ref()
+                                        | bondy_ref:bridge_ref(),
     %% The {IP, Port} of the client
     peer                            ::  maybe(peer()),
     %% User-Agent HTTP header or WAMP equivalent
@@ -102,6 +100,10 @@
                                     }.
 
 -export_type([t/0]).
+
+%% At the moment we export the id() type defined by the includes. In the future
+%% this should be a UUID or KSUID but not a random integer.
+-export_type([id/0]).
 -export_type([peer/0]).
 -export_type([properties/0]).
 -export_type([details/0]).
@@ -125,23 +127,24 @@
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
--export([list_peer_ids/1]).
--export([list_peer_ids/2]).
+-export([list_refs/1]).
+-export([list_refs/2]).
 -export([lookup/1]).
 -export([lookup/2]).
 -export([new/2]).
 -export([new/3]).
 -export([node/1]).
 -export([peer/1]).
--export([peer_id/1]).
 -export([pid/1]).
 -export([rbac_context/1]).
 -export([realm_uri/1]).
+-export([ref/1]).
 -export([refresh_rbac_context/1]).
 -export([roles/1]).
 -export([size/0]).
 -export([store/1]).
 -export([to_external/1]).
+-export([type/1]).
 -export([update/1]).
 -export([user/1]).
 
@@ -207,14 +210,34 @@ new(Id, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     IsSecurityEnabled = bondy_realm:is_security_enabled(RealmUri),
 
-    S0 = #session{
+    S1 = parse_details(Opts, #session{}),
+
+    Ref = bondy_ref:new(
+        S1#session.type,
+        RealmUri,
+        self(),
+        Id
+    ),
+
+    S1#session{
         id = Id,
+        %% We added for convenience as it is also in ref
         realm_uri = RealmUri,
-        node = bondy_peer_service:mynode(),
+        ref = Ref,
         security_enabled = IsSecurityEnabled,
         created = erlang:system_time(seconds)
-    },
-    parse_details(Opts, S0).
+    }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec type(t()) -> client | bridge.
+
+type(#session{type = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -291,8 +314,8 @@ id(#session{id = Id}) ->
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | t()) -> uri().
 
-realm_uri(#session{realm_uri = Val}) ->
-    Val;
+realm_uri(#session{ref = Ref}) ->
+    bondy_ref:realm_uri(Ref);
 
 realm_uri(Id) when is_integer(Id) ->
     realm_uri(fetch(Id)).
@@ -315,18 +338,13 @@ roles(Id) ->
 %% @doc Returns the identifier for the owner of this session
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(t()) -> local_peer_id().
+-spec ref(t()) -> bondy_ref:client_ref() | bondy_ref:bridge_ref().
 
-peer_id(#session{} = S) ->
-    {
-        S#session.realm_uri,
-        S#session.node,
-        S#session.id,
-        S#session.pid
-    };
+ref(#session{ref = Ref}) ->
+    Ref;
 
-peer_id(Id) when is_integer(Id) ->
-    peer_id(fetch(Id)).
+ref(Id) when is_integer(Id) ->
+    ref(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------
@@ -337,8 +355,8 @@ peer_id(Id) when is_integer(Id) ->
 %% -----------------------------------------------------------------------------
 -spec pid(id() | t()) -> pid().
 
-pid(#session{pid = Pid}) ->
-    Pid;
+pid(#session{ref = Ref}) ->
+    bondy_ref:target(Ref);
 
 pid(Id) when is_integer(Id) ->
     pid(fetch(Id)).
@@ -352,8 +370,8 @@ pid(Id) when is_integer(Id) ->
 %% -----------------------------------------------------------------------------
 -spec node(t()) -> atom().
 
-node(#session{node = Val}) ->
-    Val;
+node(#session{ref = Ref}) ->
+    bondy_ref:node(Ref);
 
 node(Id) when is_integer(Id) ->
     bondy_session:node(fetch(Id)).
@@ -563,9 +581,9 @@ is_security_enabled(Id) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(id()) -> t() | {error, not_found}.
+-spec lookup(id() | bondy_ref:t()) -> t() | {error, not_found}.
 
-lookup(Id) ->
+lookup(Id) when is_integer(Id) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
     case ets:lookup(Tab, Id)  of
@@ -573,7 +591,10 @@ lookup(Id) ->
             Session;
         [] ->
             {error, not_found}
-    end.
+    end;
+
+lookup(Ref) ->
+    lookup(bondy_ref:realm_uri(Ref), bondy_ref:session_id(Ref)).
 
 
 %% -----------------------------------------------------------------------------
@@ -637,17 +658,17 @@ list(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list_peer_ids(N) ->
-    list_peer_ids('_', N).
+list_refs(N) ->
+    list_refs('_', N).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list_peer_ids(RealmUri, N) when is_integer(N), N >= 1 ->
+list_refs(RealmUri, N) when is_integer(N), N >= 1 ->
     Tabs = tuplespace:tables(?SESSION_SPACE),
-    do_list_peer_ids(Tabs, RealmUri, N).
+    do_list_refs(Tabs, RealmUri, N).
 
 
 
@@ -710,7 +731,7 @@ get_id(RealmUri, N) when N > 0 ->
     end;
 
 get_id(_, 0) ->
-    error(session_id_allocation).
+    error(session_id_collision).
 
 
 %% @private
@@ -766,6 +787,9 @@ parse_details(peer, V, Session) ->
         false ->
             error({invalid_options, peer})
     end;
+
+parse_details(type, V, Session) when V == client orelse V == bridge ->
+    Session#session{type = V};
 
 parse_details(_, _, Session) ->
     Session.
@@ -844,50 +868,48 @@ update_context(Id, Context) ->
 
 
 %% @private
-do_list_peer_ids([], _, _) ->
+do_list_refs([], _, _) ->
     ?EOT;
 
-do_list_peer_ids([Tab | Tabs], RealmUri, N)
+do_list_refs([Tab | Tabs], RealmUri, N)
 when is_binary(RealmUri) orelse RealmUri == '_' ->
     Pattern0 = persistent_term:get({?MODULE, pattern}),
     Pattern = Pattern0#session{
-        id = '$3',
         realm_uri = '$1',
-        node = '$2',
-        pid = '$4'
+        ref = '$2'
     },
     Conds = case RealmUri of
         '_' -> [];
         _ ->  [{'=:=', '$1', RealmUri}]
     end,
-    Projection = [{{'$1', '$2', '$3', '$4'}}],
+    Projection = [{'$2'}],
     MS = [{Pattern, Conds, Projection}],
 
     case ets:select(Tab, MS, N) of
         {L, Cont} ->
             FunCont = fun() ->
-                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+                do_list_refs({continuation, Tabs, RealmUri, N, Cont})
             end,
            {L, FunCont};
         ?EOT ->
-            do_list_peer_ids(Tabs, RealmUri, N)
+            do_list_refs(Tabs, RealmUri, N)
     end.
 
 
 %% @private
-do_list_peer_ids({continuation, [], _, _, ?EOT}) ->
+do_list_refs({continuation, [], _, _, ?EOT}) ->
     ?EOT;
 
-do_list_peer_ids({continuation, Tabs, RealmUri, N, ?EOT}) ->
-    do_list_peer_ids(Tabs, RealmUri, N);
+do_list_refs({continuation, Tabs, RealmUri, N, ?EOT}) ->
+    do_list_refs(Tabs, RealmUri, N);
 
-do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont}) ->
-    case ets:select(Cont) of
+do_list_refs({continuation, Tabs, RealmUri, N, Cont0}) ->
+    case ets:select(Cont0) of
         ?EOT ->
             ?EOT;
         {L, Cont} ->
             FunCont = fun() ->
-                do_list_peer_ids({continuation, Tabs, RealmUri, N, Cont})
+                do_list_refs({continuation, Tabs, RealmUri, N, Cont})
             end,
             {L, FunCont}
     end.

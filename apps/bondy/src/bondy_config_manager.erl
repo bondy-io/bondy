@@ -80,10 +80,8 @@
         'x_session_info',
         %% The following are used internally by Bondy on the edge uplink
         %% communication
-        originating_id,
-        originating_handler,
-        originating_pid,
-        originating_node
+        origin_id,
+        origin_ref
     ]},
     {result, [
     ]}

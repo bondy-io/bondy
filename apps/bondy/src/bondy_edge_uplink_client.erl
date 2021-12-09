@@ -845,20 +845,19 @@ proxy_existing(Session, State0, Get, {[H|T], Cont}) ->
 %% @private
 proxy_entry(#{id := SessionId}, State, Entry) ->
     Type = bondy_registry_entry:type(Entry),
-    Handler = bondy_registry_entry:handler(Entry),
-    Ext =  bondy_registry_entry:to_external(Entry),
+    Ref = bondy_registry_entry:ref(Entry),
 
-    case Handler =:= self() of
+    case bondy_ref:is_self(Ref) of
         true ->
             %% We do not want to proxy our own registrations and subscriptions
             State;
         false when Type == registration ->
-            Msg = {registration_added, Ext},
+            Msg = {registration_added, bondy_registry_entry:to_external(Entry)},
             ok = send_session_message(SessionId, Msg, State),
             State;
 
         false when Type == subscription ->
-            Msg = {subscription_added, Ext},
+            Msg = {subscription_added, bondy_registry_entry:to_external(Entry)},
             ok = send_session_message(SessionId, Msg, State),
             State
     end.
