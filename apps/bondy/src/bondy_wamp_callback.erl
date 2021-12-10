@@ -14,7 +14,7 @@
 -callback handle_call(
     M :: wamp_message:call(),
     Ctxt :: bondy_context:t()) ->
-	ok
+    ok
     | continue
     | {continue, uri() | wamp_call()}
     | {continue, uri() | wamp_call(), fun(

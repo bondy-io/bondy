@@ -44,28 +44,28 @@
 -define(VALIDATOR, ?OPTS_VALIDATOR#{
     <<"username">> => #{
         alias => username,
-		key => username,
+        key => username,
         required => true,
         datatype => binary,
         validator => fun bondy_data_validators:strict_username/1
     },
     <<"password">> => #{
         alias => password,
-		key => password,
+        key => password,
         required => false,
         datatype => [binary, {function, 0}, map],
         validator => fun bondy_data_validators:password/1
     },
     <<"authorized_keys">> => #{
         alias => authorized_keys,
-		key => authorized_keys,
+        key => authorized_keys,
         required => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:authorized_key/1}
     },
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         required => true,
         default => [],
         datatype => {list, binary},
@@ -82,14 +82,14 @@
     },
     <<"enabled">> => #{
         alias => enabled,
-		key => enabled,
+        key => enabled,
         required => true,
         datatype => boolean,
         default => true
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         required => true,
         datatype => map,
         default => #{}
@@ -100,34 +100,34 @@
 -define(UPDATE_VALIDATOR, ?OPTS_VALIDATOR#{
     <<"password">> => #{
         alias => password,
-		key => password,
+        key => password,
         required => false,
         datatype => [binary, {function, 0}, map],
         validator => fun bondy_data_validators:password/1
     },
     <<"authorized_keys">> => #{
         alias => authorized_keys,
-		key => authorized_keys,
+        key => authorized_keys,
         required => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:authorized_key/1}
     },
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         required => false,
         datatype => {list, binary},
         validator => {list, fun bondy_data_validators:groupname/1}
     },
     <<"enabled">> => #{
         alias => enabled,
-		key => enabled,
+        key => enabled,
         required => false,
         datatype => boolean
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         required => false,
         datatype => map
     }

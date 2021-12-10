@@ -68,7 +68,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Ref, Transport, Opts) ->
-	gen_statem:start_link(?MODULE, {Ref, Transport, Opts}, []).
+    gen_statem:start_link(?MODULE, {Ref, Transport, Opts}, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -92,7 +92,7 @@ start_link(Ref, _, Transport, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 callback_mode() ->
-	[state_functions, state_enter].
+    [state_functions, state_enter].
 
 
 %% -----------------------------------------------------------------------------
@@ -123,7 +123,7 @@ init({Ref, Transport, Opts}) ->
     %% How much time till we get
     Timeout = key_value:get(auth_timeout, Opts, 5000),
 
-	{ok, connected, State, Timeout}.
+    {ok, connected, State, Timeout}.
 
 
 %% -----------------------------------------------------------------------------
@@ -146,7 +146,7 @@ terminate(_Reason, _StateName, _StateData) ->
     % ok = bondy_dealer:unregister(self()),
     % bondy_remove_all(Type, RealmUri, Node, SessionId)
     % ok = bondy_broker:unsubscribe(self()),
-	ok.
+    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -154,7 +154,7 @@ terminate(_Reason, _StateName, _StateData) ->
 %% @end
 %% -----------------------------------------------------------------------------
 code_change(_OldVsn, StateName, StateData, _Extra) ->
-	{ok, StateName, StateData}.
+    {ok, StateName, StateData}.
 
 
 
@@ -181,7 +181,7 @@ connected(enter, connected, State) ->
 
     %% Setup and configure socket
     {ok, Socket} = ranch:handshake(Ref),
-	ok = Transport:setopts(Socket, Opts),
+    ok = Transport:setopts(Socket, Opts),
 
     {ok, Peername} = inet:peername(Socket),
     PeernameBin = inet_utils:peername_to_binary(Peername),
@@ -217,14 +217,14 @@ when ?SOCKET_DATA(Tag) ->
     end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
-	{stop, normal};
+    {stop, normal};
 
 connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     ?LOG_INFO(#{
         description => "Edge connection closed due to error",
         reason => Reason
     }),
-	{stop, Reason};
+    {stop, Reason};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
     ?LOG_WARNING(#{
@@ -233,7 +233,7 @@ connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
     }),
     SessionId = session_id(RealmUri, State),
     ok = send_message({receive_message, SessionId, M}, State),
-	{keep_state_and_data, [idle_timeout(State)]};
+    {keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, State) ->
     ?LOG_INFO(#{
@@ -241,7 +241,7 @@ connected(info, Msg, State) ->
         type => info,
         event => Msg
     }),
-	{keep_state_and_data, [idle_timeout(State)]};
+    {keep_state_and_data, [idle_timeout(State)]};
 
 connected({call, From}, Request, State) ->
     ?LOG_INFO(#{
@@ -249,8 +249,8 @@ connected({call, From}, Request, State) ->
         type => call,
         event => Request
     }),
-	gen_statem:reply(From, {error, badcall}),
-	{keep_state_and_data, [idle_timeout(State)]};
+    gen_statem:reply(From, {error, badcall}),
+    {keep_state_and_data, [idle_timeout(State)]};
 
 connected(cast, {forward, Msg}, State) ->
     ok = send_message(Msg, State),
@@ -262,17 +262,17 @@ connected(cast, Msg, State) ->
         type => cast,
         event => Msg
     }),
-	{keep_state_and_data, [idle_timeout(State)]};
+    {keep_state_and_data, [idle_timeout(State)]};
 
 connected(timeout, _Msg, _) ->
     ?LOG_INFO(#{
         description => "Closing connection",
         reason => timeout
     }),
-	{stop, normal};
+    {stop, normal};
 
 connected(_EventType, _Msg, _) ->
-	{stop, normal}.
+    {stop, normal}.
 
 
 

@@ -72,7 +72,7 @@ start_link(Transport, Endpoint, Opts) ->
     % dbg:tracer(), dbg:p(all,c),
     % dbg:tpl(?MODULE, '_', x),
     % dbg:tpl(gen_tcp, 'connect', x),
-	gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
+    gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
 
 
 
@@ -99,7 +99,7 @@ forward(Pid, Msg, SessionId) ->
 %% @end
 %% -----------------------------------------------------------------------------
 callback_mode() ->
-	[state_functions, state_enter].
+    [state_functions, state_enter].
 
 
 %% -----------------------------------------------------------------------------
@@ -190,7 +190,7 @@ terminate(Reason, _StateName, State0) ->
         reason => Reason
     }),
 
-	ok.
+    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -198,7 +198,7 @@ terminate(Reason, _StateName, State0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 code_change(_OldVsn, StateName, StateData, _Extra) ->
-	{ok, StateName, StateData}.
+    {ok, StateName, StateData}.
 
 
 
@@ -239,7 +239,7 @@ connecting(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-	{stop, normal}.
+    {stop, normal}.
 
 
 %% -----------------------------------------------------------------------------
@@ -327,12 +327,12 @@ when ?SOCKET_DATA(Tag) ->
 connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{description => "Socket closed", reason => normal}),
     ok = on_disconnect(State),
-	{stop, normal};
+    {stop, normal};
 
 connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
     ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
     ok = on_disconnect(State),
-	{stop, Reason};
+    {stop, Reason};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
     ?LOG_WARNING(#{description => "Connection timeout, sending first ping"}),
@@ -363,7 +363,7 @@ connected(info, Msg, _) ->
         type => info,
         event => Msg
     }),
-	keep_state_and_data;
+    keep_state_and_data;
 
 connected({call, _From}, {join, _Realms, _AuthId, _PubKey}, _State) ->
     %% TODO
@@ -375,8 +375,8 @@ connected({call, From}, Request, _) ->
         type => call,
         event => Request
     }),
-	gen_statem:reply(From, {error, badcall}),
-	keep_state_and_data;
+    gen_statem:reply(From, {error, badcall}),
+    keep_state_and_data;
 
 connected(cast, {forward_message, Msg, SessionId}, State) ->
     case has_session(SessionId, State) of
@@ -399,7 +399,7 @@ connected(cast, Msg, _) ->
         type => cast,
         event => Msg
     }),
-	keep_state_and_data;
+    keep_state_and_data;
 
 connected(timeout, Msg, _) ->
     ?LOG_INFO(#{
@@ -407,7 +407,7 @@ connected(timeout, Msg, _) ->
         type => timeout,
         event => Msg
     }),
-	{stop, normal};
+    {stop, normal};
 
 connected(EventType, Msg, _) ->
     ?LOG_INFO(#{
@@ -415,7 +415,7 @@ connected(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-	{stop, normal}.
+    {stop, normal}.
 
 
 

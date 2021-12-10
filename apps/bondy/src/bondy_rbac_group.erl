@@ -36,7 +36,7 @@
 -define(VALIDATOR, ?UPDATE_VALIDATOR#{
     <<"name">> => #{
         alias => name,
-		key => name,
+        key => name,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -45,7 +45,7 @@
     },
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -55,7 +55,7 @@
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -67,7 +67,7 @@
 -define(UPDATE_VALIDATOR, #{
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         allow_null => false,
         allow_undefined => false,
         required => false,
@@ -76,7 +76,7 @@
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         allow_null => false,
         allow_undefined => false,
         required => false,
