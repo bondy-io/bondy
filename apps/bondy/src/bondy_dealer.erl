@@ -579,8 +579,30 @@ do_handle_message(#register{} = M, Ctxt) ->
 do_handle_message(#unregister{} = M, Ctxt) ->
     handle_unregister(M, Ctxt);
 
+do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
+    ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
+
+    case Uri of
+        <<"bondy.", _/binary>> ->
+            callback(M, Ctxt, bondy_wamp_api);
+
+        <<"com.bondy.", _/binary>> ->
+            %% Alias for "bondy"
+            callback(M, Ctxt, bondy_wamp_api);
+
+        <<"com.leapsight.bondy.", _/binary>> ->
+            %% Deprecated API prefix. Now "bondy"
+            callback(M, Ctxt, bondy_wamp_api);
+
+        <<"wamp.", _/binary>> ->
+            callback(M, Ctxt, bondy_wamp_meta_api);
+
+        _ ->
+            Opts = #{error_formatter => undefined},
+            handle_call(M, Ctxt, Uri, Opts)
+    end;
+
 do_handle_message(#cancel{} = M, Ctxt0) ->
-    %% TODO check if authorized and if not throw wamp.error.not_authorized
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
     Opts = M#cancel.options,
@@ -677,8 +699,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     end;
 
 do_handle_message(#yield{} = M, Ctxt0) ->
-    %% A Callee is replying to a previous wamp_invocation()
-    %% which we generated based on a Caller wamp_call()
+    %% A Callee is replying to a previous invocation.
     %% We match the wamp_yield() with the origin wamp_invocation()
     %% using the request_id, and with that match the wamp_call() request_id
     %% to find the caller pid.
@@ -711,8 +732,6 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     InvocationId = M#error.request_id,
 
     Fun = fun
-        (empty) ->
-            no_matching_promise(M);
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
@@ -724,7 +743,10 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
                 true ->
                     M#error{request_id = CallId, request_type = ?CALL}
             end,
-            bondy:send(Callee, Caller, CallError, #{})
+            bondy:send(Callee, Caller, CallError, #{});
+
+        (empty) ->
+            no_matching_promise(M)
     end,
 
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
@@ -736,45 +758,19 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     Callee = bondy_context:ref(Ctxt0),
     InvocationId = M#error.request_id,
     Caller = bondy_context:ref(Ctxt0),
+
     case bondy_rpc_promise:peek_invocation(InvocationId, Callee) of
-        empty ->
-            %% Call was evicted or performed already by Callee
-            no_matching_promise(M);
         {ok, Promise} ->
             Caller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
             CancelError = M#error{request_id = CallId, request_type = ?CALL},
-            bondy:send(Callee, Caller, CancelError, #{})
-    end,
-    ok;
+            bondy:send(Callee, Caller, CancelError, #{});
 
-do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
-    %% TODO Maybe
-    %% ReqId = bondy_utils:get_id(global),
-    %% spawn with pool -> bondy_wamp_meta_api:handle_call(M, Ctxt);
-    %% {ok, ReqId, Ctxt}.
-    ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
-    handle_call(M, Ctxt).
-
-
-%% @private
-handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    callback(M, Ctxt, bondy_wamp_meta_api);
-
-handle_call(#call{procedure_uri = <<"com.bondy.", _/binary>>} = M, Ctxt) ->
-    %% Alias for "bondy"
-    callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(
-    #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    %% Deprecated API prefix. Now "bondy"
-    callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
-    do_handle_call(M, Ctxt, Uri).
+        empty ->
+            %% Call was evicted or performed already by Callee
+            no_matching_promise(M),
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -791,21 +787,21 @@ callback(#call{} = M0, Ctxt, Mod) ->
         ok ->
             ok;
         continue ->
-            do_handle_call(M0, Ctxt, M0#call.procedure_uri, DefaultOpts);
+            handle_call(M0, Ctxt, M0#call.procedure_uri, DefaultOpts);
 
         {continue, #call{} = M1}  ->
-            do_handle_call(M1, Ctxt, M1#call.procedure_uri, DefaultOpts);
+            handle_call(M1, Ctxt, M1#call.procedure_uri, DefaultOpts);
 
         {continue, #call{} = M1, Fun}  ->
             Opts = DefaultOpts#{error_formatter => Fun},
-            do_handle_call(M1, Ctxt, M1#call.procedure_uri, Opts);
+            handle_call(M1, Ctxt, M1#call.procedure_uri, Opts);
 
         {continue, Uri} when is_binary(Uri) ->
-            do_handle_call(M0, Ctxt, Uri, DefaultOpts);
+            handle_call(M0, Ctxt, Uri, DefaultOpts);
 
         {continue, Uri, Fun} when is_binary(Uri) ->
             Opts = DefaultOpts#{error_formatter => Fun},
-            do_handle_call(M0, Ctxt, Uri, Opts);
+            handle_call(M0, Ctxt, Uri, Opts);
 
         {reply, Reply} ->
             bondy:send(PeerId, Reply)
@@ -831,12 +827,7 @@ callback(#call{} = M0, Ctxt, Mod) ->
 
 
 %% @private
-do_handle_call(M, Ctxt, Uri) ->
-    do_handle_call(M, Ctxt, Uri, #{error_formatter => undefined}).
-
-
-%% @private
-do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
+handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
     CallId = M#call.request_id,
     CallUri = M#call.procedure_uri,
 
