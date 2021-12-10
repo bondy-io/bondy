@@ -1301,7 +1301,7 @@ filter_duplicate_entry_keys(Entries, SessionId) ->
             leap_tuples:join(
                 EntryKeys,
                 [{SessionId}],
-                {bondy_registry_entry:key_field(handler), 1},
+                {bondy_registry_entry:key_field(target), 1},
                 []
             )
     end.
