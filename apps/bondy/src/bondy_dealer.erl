@@ -849,25 +849,21 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
         (Entry, Ctxt) ->
             Callee = bondy_registry_entry:ref(Entry),
             IsLocal = bondy_ref:is_local(Callee),
+
+            %% We use an invocation even for callbacks
+            %% as we will reuse the apply_callback/4 when we are forwarded and
+            %% invocation from another cluster peer.
             Invocation = call_to_invocation(M, Uri, Entry, Ctxt),
 
             case bondy_ref:target(Callee) of
                 {callback, MFA} when IsLocal == true, CallUri == Uri ->
                     %% A callback implemented procedure e.g. WAMP Session APIs
-                    %% on this node. We send here as we do not need invoke/5 to
+                    %% on this node. We apply here as we do not need invoke/5 to
                     %% enqueue a promise, we will call the module sequentially.
-                    invoke_callback(MFA, CallId, Invocation, Ctxt);
-
-                {callback, _} when IsLocal == false, CallUri == Uri->
-                    %% A callback implemented procedure e.g. WAMP Session APIs
-                    %% on another node
-                    R = call_to_invocation(M, Uri, Entry, Ctxt),
-                    {ok, R, Ctxt};
-
-                {TargetType, _} when TargetType == pid; TargetType == name ->
-                    %% An internal callee process
-                    R = call_to_invocation(M, Uri, Entry, Ctxt),
-                    {ok, R, Ctxt}
+                    apply_callback(MFA, CallId, Invocation, Ctxt);
+                _ ->
+                    %% All other calls we need to invoke asynchronously
+                    {ok, Invocation, Ctxt}
             end
     end,
 
@@ -876,7 +872,7 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
     invoke(M#call.request_id, Uri, Fun, Opts, Ctxt0).
 
 
-invoke_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
+apply_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
     Caller = bondy_context:ref(Ctxt),
     A = to_callback_args(Invocation, A0),
 
