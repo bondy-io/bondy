@@ -49,9 +49,9 @@
     %% in all clients
     id                              ::  integer(),
     type = client                   ::  client | bridge,
+    tab                             ::  maybe(ets:tid()),
     realm_uri                       ::  uri(),
-    ref                             ::  bondy_ref:client_ref()
-                                        | bondy_ref:bridge_ref(),
+    ref                             ::  bondy_ref:t(),
     %% The {IP, Port} of the client
     peer                            ::  maybe(peer()),
     %% User-Agent HTTP header or WAMP equivalent
@@ -249,10 +249,10 @@ type(#session{type = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec store(t()) -> ok | no_return().
 
-store(#session{} = S) ->
-    Id = S#session.id,
-
+store(#session{} = S0) ->
+    Id = S0#session.id,
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    S = S0#session{tab = Tab},
 
     true == ets:insert_new(Tab, S)
         orelse error({integrity_constraint_violation, Id}),
@@ -540,12 +540,21 @@ refresh_rbac_context(Id) when is_integer(Id) ->
 %% -----------------------------------------------------------------------------
 -spec incr_seq(id() | t()) -> map().
 
+incr_seq(#session{tab = undefined}) ->
+    bondy_utils:get_id(global);
+
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
 incr_seq(Id) when is_integer(Id), Id >= 0 ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-    ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0}).
+    try
+        ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0})
+    catch
+        error:badarg ->
+            bondy_utils:get_id(global)
+    end.
+
 
 
 %% -----------------------------------------------------------------------------

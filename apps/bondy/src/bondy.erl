@@ -311,11 +311,13 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 
     case bondy_router:forward(M, Ctxt0) of
-        {ok, Ctxt1} ->
-            {ok, ReqId, Ctxt1};
-        {reply, #error{} = Error, Ctxt1} ->
+        {ok, _} ->
+            {ok, ReqId};
+
+        {reply, #error{} = Error, _} ->
             %% A sync reply (should not ever happen with calls)
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = wamp_message:error(
@@ -323,11 +325,13 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 [<<"Inconsistency error">>]
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = wamp_message:error(
@@ -335,7 +339,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 [<<"Inconsistency error">>]
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1}
+            {error, message_to_map(Error)}
     end.
 
 
