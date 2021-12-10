@@ -630,10 +630,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                 InvocationId = bondy_rpc_promise:invocation_id(Promise),
                 Callee = bondy_rpc_promise:callee(Promise),
                 Caller = bondy_context:ref(Ctxt1),
-                Mssg = <<"call_cancelled">>,
-                Args = [Mssg],
+                Msg = <<"call_cancelled">>,
+                Args = [Msg],
                 ArgsKw = #{
-                    message => Mssg,
+                    message => Msg,
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
@@ -658,10 +658,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             Fun = fun(Promise, Ctxt1) ->
                 Callee = bondy_rpc_promise:callee(Promise),
                 Caller = bondy_context:ref(Ctxt1),
-                Mssg = <<"call_cancelled">>,
-                Args = [Mssg],
+                Msg = <<"call_cancelled">>,
+                Args = [Msg],
                 ArgsKw = #{
-                    message => Mssg,
+                    message => Msg,
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
@@ -683,9 +683,9 @@ do_handle_message(#yield{} = M, Ctxt0) ->
     %% using the request_id, and with that match the wamp_call() request_id
     %% to find the caller pid.
     Callee = bondy_context:ref(Ctxt0),
+    InvocationId = M#yield.request_id,
+
     Fun = fun
-        (empty) ->
-            no_matching_promise(M);
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
             case bondy_rpc_promise:call_id(Promise) of
@@ -697,10 +697,12 @@ do_handle_message(#yield{} = M, Ctxt0) ->
                 CallId ->
                     Result = yield_to_result(CallId, M),
                     bondy:send(Callee, Caller, Result, #{})
-            end
+            end;
+
+        (empty) ->
+            no_matching_promise(M)
     end,
-    InvocationId = M#yield.request_id,
-    Callee = bondy_context:ref(Ctxt0),
+
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
     ok;
 
@@ -835,7 +837,8 @@ do_handle_call(M, Ctxt, Uri) ->
 
 %% @private
 do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
-    MyNode = bondy_peer_service:mynode(),
+    CallId = M#call.request_id,
+    CallUri = M#call.procedure_uri,
 
     %% invoke/5 takes a fun which takes the registration_id of the
     %% procedure and the callee
@@ -843,61 +846,100 @@ do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
     %% determine how many invocations and to whom we should do.
     %% fun(Entry, Callee, Ctxt)
     Fun = fun
-        (Entry, {_, Node, undefined, Mod}, Ctxt1)
-        when is_atom(Mod), Node =:= MyNode, M#call.procedure_uri == Uri ->
-            %% A callback implemented procedure e.g. WAMP Session APIs
-            %% on this node
-            %% We send here as we do not need invoke/5 to enqueue a promise,
-            %% we will call the module sequentially.
-            Invocation = call_to_invocation(M, Uri, Entry, Ctxt1),
+        (Entry, Ctxt) ->
+            Callee = bondy_registry_entry:ref(Entry),
+            IsLocal = bondy_ref:is_local(Callee),
+            Invocation = call_to_invocation(M, Uri, Entry, Ctxt),
 
-            case Mod:handle_invocation(Invocation, Ctxt1) of
-                ok ->
-                    %% No reply needed
-                    {ok, Ctxt1};
+            case bondy_ref:target(Callee) of
+                {callback, MFA} when IsLocal == true, CallUri == Uri ->
+                    %% A callback implemented procedure e.g. WAMP Session APIs
+                    %% on this node. We send here as we do not need invoke/5 to
+                    %% enqueue a promise, we will call the module sequentially.
+                    invoke_callback(MFA, CallId, Invocation, Ctxt);
 
-                {reply, #yield{} = Yield} ->
-                    Reply = yield_to_result(M#call.request_id, Yield),
-                    Caller = bondy_context:ref(Ctxt0),
-                    ok = bondy:send(Caller, Reply),
-                    {ok, Ctxt1};
+                {callback, _} when IsLocal == false, CallUri == Uri->
+                    %% A callback implemented procedure e.g. WAMP Session APIs
+                    %% on another node
+                    R = call_to_invocation(M, Uri, Entry, Ctxt),
+                    {ok, R, Ctxt};
 
-                {reply, #error{} = Error0} ->
-                    Caller = bondy_context:ref(Ctxt0),
-                    Error = Error0#error{
-                        request_id = M#call.request_id,
-                        request_type = ?CALL
-                    },
-                    ok = bondy:send(Caller, Error),
-                    {ok, Ctxt1};
-
-                Other ->
-                    %% we do not allow continue nor {continue, term()}
-                    %% at this point
-                    error({invalid_return, Other})
-
-            end;
-
-        (Entry, {_, _, undefined, Mod}, Ctxt1) when is_atom(Mod) ->
-            %% A callback implemented procedure e.g. WAMP Session APIs
-            %% on another node
-            R = call_to_invocation(M, Uri, Entry, Ctxt1),
-            {ok, R, Ctxt1};
-
-        (Entry, {_, _, undefined, Pid}, Ctxt1) when is_pid(Pid) ->
-            %% An internal callee process
-            R = call_to_invocation(M, Uri, Entry, Ctxt1),
-            {ok, R, Ctxt1};
-
-        (Entry, {_, _, SessionId, Pid}, Ctxt1)
-        when is_integer(SessionId), is_pid(Pid) ->
-            R = call_to_invocation(M, Uri, Entry, Ctxt1),
-            {ok, R, Ctxt1}
+                {TargetType, _} when TargetType == pid; TargetType == name ->
+                    %% An internal callee process
+                    R = call_to_invocation(M, Uri, Entry, Ctxt),
+                    {ok, R, Ctxt}
+            end
     end,
 
     %% A response will be send asynchronously
     Opts = Opts0#{call_opts => M#call.options},
     invoke(M#call.request_id, Uri, Fun, Opts, Ctxt0).
+
+
+invoke_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
+    Caller = bondy_context:ref(Ctxt),
+    A = to_callback_args(Invocation, A0),
+
+    try erlang:apply(M, F, A) of
+        {ok, Details, Args, KWArgs} ->
+            Reply = wamp_message:result(
+                CallId,
+                Details,
+                Args,
+                KWArgs
+            ),
+            ok = bondy:send(Caller, Reply),
+            {ok, Ctxt};
+
+        {error, Uri, Details, Args, KWArgs} ->
+            Reply = wamp_message:error(
+                ?CALL,
+                CallId,
+                Details,
+                Uri,
+                Args,
+                KWArgs
+            ),
+            ok = bondy:send(Caller, Reply),
+            {ok, Ctxt};
+
+        Other ->
+            %% we do not allow continue nor {continue, term()}
+            %% at this point
+            error({invalid_return, Other})
+    catch
+        error:undef ->
+            Reply = badarity_error(CallId),
+            ok = bondy:send(Caller, Reply),
+            {ok, Ctxt};
+
+        error:{badarg, _} ->
+            Reply = badarg_error(CallId),
+            ok = bondy:send(Caller, Reply),
+            {ok, Ctxt}
+    end.
+
+
+
+%% @private
+to_callback_args(#invocation{} = Msg, ExtraArgs) ->
+    lists:append([
+        ExtraArgs,
+        args_to_list(Msg#invocation.args),
+        args_to_list(Msg#invocation.kwargs),
+        args_to_list(Msg#invocation.details)
+    ]).
+
+
+%% @private
+args_to_list(undefined) ->
+    [];
+
+args_to_list(L) when is_list(L) ->
+    L;
+
+args_to_list(M) when is_map(M) ->
+    [M].
 
 
 %% @private
@@ -996,7 +1038,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
             bondy:send(Ref, Reply);
         {error, {already_exists, Entry}} ->
             Policy = bondy_registry_entry:match_policy(Entry),
-            Mssg = <<
+            Msg = <<
                 "The procedure is already registered by another peer ",
                 "with policy ", $', Policy/binary, $', $.
             >>,
@@ -1005,7 +1047,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
                 ReqId,
                 #{},
                 ?WAMP_PROCEDURE_ALREADY_EXISTS,
-                [Mssg]
+                [Msg]
             ),
             bondy:send(Ref, Reply)
     end.
@@ -1190,7 +1232,7 @@ reply_error(Error, Ctxt) ->
     id(), wamp_message(), function(), bondy_context:t()) ->
     {ok, bondy_context:t()}.
 
-dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
+dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 2) ->
     Caller = bondy_context:ref(Ctxt),
     case bondy_rpc_promise:dequeue_call(CallId, Caller) of
         empty ->
@@ -1198,10 +1240,8 @@ dequeue_invocations(CallId, M, Fun, Ctxt) when is_function(Fun, 3) ->
             %% fulfilled or timed out and/or garbage collected.
             ok = no_matching_promise(M),
             {ok, Ctxt};
-        {ok, P} ->
-            ReqId = bondy_rpc_promise:invocation_id(P),
-            Callee = bondy_rpc_promise:callee(P),
-            {ok, Ctxt1} = Fun(ReqId, Callee, Ctxt),
+        {ok, Promise} ->
+            {ok, Ctxt1} = Fun(Promise, Ctxt),
             %% We iterate until there are no more pending invocation for the
             %% call_request_id == CallId
             dequeue_invocations(CallId, M, Fun, Ctxt1)
@@ -1259,7 +1299,7 @@ no_matching_promise(M) ->
 %% -----------------------------------------------------------------------------
 -spec invoke(id(), uri(), function(), invoke_opts(), bondy_context:t()) -> ok.
 
-invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
+invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
     %% Contrary to pubusub, the _Caller_ can receive the
     %% invocation even if the _Caller_ is also a _Callee_ registered
     %% for that procedure.
@@ -1307,7 +1347,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
 
                     %% We invoke the provided fun which actually makes the
                     %% invocation
-                    case UserFun(Entry, Callee, Ctxt1) of
+                    case UserFun(Entry, Ctxt1) of
                         {ok, Ctxt2} ->
                             %% UserFun sent a response sequentially, no need
                             %% for promises
@@ -1533,15 +1573,15 @@ on_delete(Map, Ctxt) ->
 
 
 error_from_map(Error, CallId) ->
-     Mssg = <<"The request failed due to invalid option parameters.">>,
+    Msg = <<"The request failed due to invalid option parameters.">>,
     wamp_message:error(
         ?CALL,
         CallId,
         #{},
         ?WAMP_INVALID_ARGUMENT,
-        [Mssg],
+        [Msg],
         #{
-            message => Mssg,
+            message => Msg,
             details => Error,
             description => <<"A required options parameter was missing in the request or while present they were malformed.">>
         }
@@ -1560,7 +1600,7 @@ no_eligible_callee(invocation, CallId) ->
 
 %% @private
 no_eligible_callee(Type, Id, Desc) ->
-    Mssg = <<
+    Msg = <<
         "There are no elibible callees for the procedure."
     >>,
     wamp_message:error(
@@ -1568,11 +1608,37 @@ no_eligible_callee(Type, Id, Desc) ->
         Id,
         #{},
         ?WAMP_NO_ELIGIBLE_CALLE,
-        [Mssg],
-        #{message => Mssg, description => Desc}
+        [Msg],
+        #{message => Msg, description => Desc}
     ).
 
 
+%% @private
+badarity_error(CallId) ->
+    Msg = <<
+        "The call was made passing the wrong number of positional arguments."
+    >>,
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_INVALID_ARGUMENT,
+        [Msg]
+    ).
+
+
+%% @private
+badarg_error(CallId) ->
+    Msg = <<
+        "The call was made passing invalid arguments."
+    >>,
+    wamp_message:error(
+        ?CALL,
+        CallId,
+        #{},
+        ?WAMP_INVALID_ARGUMENT,
+        [Msg]
+    ).
 
 %% @private
 yield_to_result(CallId, M) ->
@@ -1587,7 +1653,7 @@ yield_to_result(CallId, M) ->
 
 %% @private
 not_found_error(M, _Ctxt) ->
-    Mssg = iolist_to_binary(
+    Msg = iolist_to_binary(
         <<"There are no registered procedures matching the id ",
         $', (M#unregister.registration_id)/integer, $'>>
     ),
@@ -1596,9 +1662,9 @@ not_found_error(M, _Ctxt) ->
         M#unregister.request_id,
         #{},
         ?WAMP_NO_SUCH_REGISTRATION,
-        [Mssg],
+        [Msg],
         #{
-            message => Mssg,
+            message => Msg,
             description => <<"The unregister request failed.">>
         }
     ).

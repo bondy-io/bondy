@@ -394,9 +394,6 @@ validate_target(Target, AllowPattern) ->
         undefined ->
             error({badarg, {target, Target}});
 
-        '_' when AllowPattern == false ->
-            error({badarg, {target, Target}});
-
         {M, F, undefined} when is_atom(M), is_atom(F) ->
             {callback, Target};
 
@@ -405,6 +402,11 @@ validate_target(Target, AllowPattern) ->
 
         Pid when is_pid(Pid) ->
             {pid, bondy_utils:pid_to_bin(Pid)};
+
+        '_'  ->
+            AllowPattern == true
+                orelse error({badarg, {target, Target}}),
+            '_';
 
         Term ->
             {name, Term}

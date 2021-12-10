@@ -236,8 +236,8 @@ add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
     add(Type, Uri, Opts, bondy_context:ref(Ctxt));
 
 add(registration, Uri, Opts, Ref) ->
-    case bondy_ref:type(Ref) of
-        callback ->
+    case bondy_ref:target(Ref) of
+        {callback, _} ->
             add_callback_registration(Uri, Opts, Ref);
         _ ->
             add_process_registration(Uri, Opts, Ref)

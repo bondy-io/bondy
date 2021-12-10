@@ -232,7 +232,9 @@ register_procedures(Session) ->
     ProcUri = <<"wamp.session.", Part/binary, ".get">>,
 
     Opts = #{match => ?PREFIX_MATCH},
-    MFA = {bondy_wamp_meta_api, handle_call, []},
+
+    MFA = {bondy_session_api, get, [RealmUri]},
+    _ = bondy_wamp_callback:validate_target(MFA),
     Ref = bondy_ref:new(internal, RealmUri, MFA),
 
     {ok, _} = bondy_dealer:register(Opts, ProcUri, Ref),
