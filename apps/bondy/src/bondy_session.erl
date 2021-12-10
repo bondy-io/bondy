@@ -356,7 +356,7 @@ ref(Id) when is_integer(Id) ->
 -spec pid(id() | t()) -> pid().
 
 pid(#session{ref = Ref}) ->
-    bondy_ref:target(Ref);
+    bondy_ref:pid(Ref);
 
 pid(Id) when is_integer(Id) ->
     pid(fetch(Id)).
