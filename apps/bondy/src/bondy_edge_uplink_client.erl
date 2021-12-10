@@ -523,11 +523,6 @@ send_message(Message, State) ->
 
 
 %% @private
-send_session_message(SessionId, Msg, State) ->
-    send_message({receive_message, SessionId, Msg}, State).
-
-
-%% @private
 on_connect(_State) ->
     ?LOG_NOTICE(#{description => "Uplink connection established"}),
     ok.
@@ -864,6 +859,20 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
 
 
 
+
+
+%% =============================================================================
+%% PRIVATE: HANDLING WAMP EVENTS
+%% =============================================================================
+
+
+
+%% @private
+send_session_message(SessionId, Msg, State) ->
+    send_message({receive_message, SessionId, Msg}, State).
+
+
+
 % new_request_id(Type, RealmUri, State) ->
 %     Tab = State#state.tab,
 %     Pos = case Type of
@@ -879,11 +888,6 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
 handle_session_message(#invocation{}, _SessionId, _State) ->
     % bondy:cast()
     ok.
-
-
-%% =============================================================================
-%% PRIVATE: HANDLING WAMP EVENTS
-%% =============================================================================
 
 
 
