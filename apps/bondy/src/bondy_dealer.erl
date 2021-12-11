@@ -234,9 +234,8 @@ register(Opts0, Procedure, Ref) ->
             {name, _} ->
                 Opts0#{shared_registration => true};
 
-            {callback, {M, F, A}} ->
-                erlang:function_exported(M, F, 2 + length(A))
-                    orelse error({badarg, Ref}),
+            {callback, MFA} ->
+                _ = bondy_wamp_callback:validate_target(MFA),
 
                 Opts0#{shared_registration => false}
         end,
