@@ -220,18 +220,50 @@ register_shared(Config) ->
 register_callback(Config) ->
     Realm = ?config(realm_uri, Config),
 
-    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Uri1 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+
+
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
-    Ref = bondy_ref:new(internal, Realm, {bondy_wamp_api, handle_call, []}),
-
+    Ref1 = bondy_ref:new(internal, Realm, {bondy_wamp_api, handle_call, []}),
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Opts, Uri, Ref)
+        bondy_dealer:register(Opts, Uri1, Ref1)
     ),
-
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Opts, Uri, Ref),
+        bondy_dealer:register(Opts, Uri1, Ref1),
+        "Callbacks cannot use shared registration"
+    ),
+
+    %% Not allowed currently
+    %% Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    % ?assertMatch(
+    %     {ok, _},
+    %     bondy_dealer:register(Opts, Uri2, Ref1),
+    %     "We can have multiple URIs associates with the same Ref"
+    % ),
+
+    Ref2 = bondy_ref:new(internal, Realm, {bondy_wamp_api, resolve, []}),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Opts, Uri1, Ref2)
+    ),
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Opts, Uri1, Ref2),
+        "Callbacks cannot use shared registration"
+    ),
+
+    Ref3 = bondy_ref:new(
+        internal, Realm, {bondy_wamp_api, handle_call, []}, undefined, 'bondy2@127.0.0.1'
+    ),
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Opts, Uri1, Ref3)
+    ),
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Opts, Uri1, Ref3),
         "Callbacks cannot use shared registration"
     ).

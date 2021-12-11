@@ -932,34 +932,35 @@ prefix(registration, RealmUri) ->
 %% @private
 add_callback_registration(Uri, Opts, Ref) ->
     %% Adds a local/internal registration using a callback module (no process)
-    %% In the case of callbacks we do not allow shared registrations,
-    %% so we match node and mod (handler)
     Type = registration,
     RealmUri = bondy_ref:realm_uri(Ref),
     Target = bondy_ref:target(Ref),
     Node = bondy_ref:node(Ref),
+    Prefix = full_prefix(Type, RealmUri),
 
-    Pattern = bondy_registry_entry:pattern(
-        registration, RealmUri, Uri, Opts, #{node => Node, target => Target}
-    ),
+    %% In the case of callbacks we do not allow shared registrations,
+    %% we even ignore the invoke options in Opts.
+    %% This means we cannot have multiple registrations for the same URI
+    %% associated to the same Target but we could have multiple URIs associated
+    %% with the same Target but we do not allow that at the moment
+    Extra = #{target => Target},
+    Pattern = bondy_registry_entry:key_pattern(Type, RealmUri, Node, Extra),
+    MatchOpts = [
+        {limit, 100},
+        {resolver, lww},
+        {allow_put, true},
+        {remove_tombstones, true}
+    ],
 
-    %% We generate a trie key based on pattern
-    %% We use the trie as it allows us to match the URI (which is not part of
-    %% the key in plum_db)
-    TrieKey = trie_key(Pattern),
-
-    %% TODO we should limit the match to 1 result!!!
-    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
-        [] ->
+    case plum_db:match(Prefix, Pattern, MatchOpts) of
+        ?EOT ->
             RegId = registration_id(RealmUri, Opts),
             NewOpts = maps:without([shared_registrations], Opts),
             Entry = bondy_registry_entry:new(Type, RegId, Ref, Uri, NewOpts),
             do_add(Entry);
 
-        [{_, EntryKey} | _] ->
+        {[{_, Entry}], _Cont} ->
             %% A registration exists for this callback Mod and URI
-            FullPrefix = full_prefix(Type, RealmUri),
-            Entry = plum_db:get(FullPrefix, EntryKey),
             {error, {already_exists, Entry}}
     end.
 
@@ -982,6 +983,8 @@ add_process_registration(Uri, Opts, Ref) ->
     %% We generate a trie key based on pattern
     %% We use the trie as it allows us to match the URI (which is not part of
     %% the key in plum_db)
+    %% TODO To be replaced with the upcoming plum_db match specs which when
+    %% used  with ram tables should be idem to using ets directly.
     TrieKey = trie_key(Pattern),
 
     %% TODO we should limit the match to 1 result!!!

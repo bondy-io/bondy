@@ -98,6 +98,7 @@
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_field/1]).
+-export([key_pattern/2]).
 -export([key_pattern/4]).
 -export([match_policy/1]).
 -export([new/4]).
@@ -217,6 +218,29 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         origin_id = '_',
         origin_ref = '_'
     }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec key_pattern(entry_type(), Ref :: bondy_ref:t()) -> key().
+
+key_pattern(Type, Ref) ->
+    bondy_ref:is_type(Ref)
+        orelse error({badarg, {ref, Ref}}),
+
+    RealmUri = bondy_ref:realm_uri(Ref),
+    Node = bondy_ref:node(Ref),
+    SessionId = bondy_ref:session_id(Ref),
+    Target = bondy_ref:target(Ref),
+
+    Extra = #{
+        target => Target,
+        session_id => SessionId
+    },
+
+    key_pattern(Type, RealmUri, Node, Extra).
 
 
 %% -----------------------------------------------------------------------------
