@@ -105,11 +105,12 @@
 
 
 %% API
+-export([agent/0]).
 -export([close_context/1]).
 -export([forward/2]).
--export([handle_peer_message/1]).
+-export([forward/3]).
+-export([forward/4]).
 -export([roles/0]).
--export([agent/0]).
 -export([shutdown/0]).
 
 
@@ -212,42 +213,40 @@ forward(M, #{session := _} = Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_peer_message(bondy_peer_message:t()) -> ok | no_return().
+-spec forward(wamp_message(), bondy_ref:t(), bondy_ref:t()) ->
+    ok | no_return().
 
-handle_peer_message(PM) ->
-    bondy_peer_message:is_message(PM) orelse exit(badarg),
-
-    Payload = bondy_peer_message:payload(PM),
-    PeerId = bondy_peer_message:to(PM),
-    From = bondy_peer_message:from(PM),
-    Opts = bondy_peer_message:options(PM),
-
-    handle_peer_message(Payload, PeerId, From, Opts).
+forward(Msg, From, To) ->
+    forward(Msg, From, To, #{}).
 
 
--spec handle_peer_message(
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec forward(
     wamp_message(), bondy_ref:t(), bondy_ref:t(), map()) ->
     ok | no_return().
 
-handle_peer_message(#publish{} = M, PeerId, From, Opts) ->
-    bondy_broker:handle_peer_message(M, PeerId, From, Opts);
+forward(#publish{} = M, To, From, Opts) ->
+    bondy_broker:handle_message(M, To, From, Opts);
 
-handle_peer_message(#error{} = M, PeerId, From, Opts) ->
+forward(#error{} = M, To, From, Opts) ->
     %% This is a CALL, INVOCATION or INTERRUPT error
     %% see bondy_peer_message for more details
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+    bondy_dealer:handle_message(M, To, From, Opts);
 
-handle_peer_message(#interrupt{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+forward(#interrupt{} = M, To, From, Opts) ->
+    bondy_dealer:handle_message(M, To, From, Opts);
 
-handle_peer_message(#call{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+forward(#call{} = M, To, From, Opts) ->
+    bondy_dealer:handle_message(M, To, From, Opts);
 
-handle_peer_message(#invocation{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts);
+forward(#invocation{} = M, To, From, Opts) ->
+    bondy_dealer:handle_message(M, To, From, Opts);
 
-handle_peer_message(#yield{} = M, PeerId, From, Opts) ->
-    bondy_dealer:handle_peer_message(M, PeerId, From, Opts).
+forward(#yield{} = M, To, From, Opts) ->
+    bondy_dealer:handle_message(M, To, From, Opts).
 
 
 

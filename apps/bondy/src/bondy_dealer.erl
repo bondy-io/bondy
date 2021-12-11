@@ -183,7 +183,7 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
--export([handle_peer_message/4]).
+-export([handle_message/4]).
 -export([is_feature_enabled/1]).
 -export([match_registrations/2]).
 -export([register/3]).
@@ -444,31 +444,41 @@ handle_message(M, Ctxt) ->
 %% @doc Handles inbound messages received from a cluster peer node.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_peer_message(
+-spec handle_message(
     wamp_message(),
     To :: bondy_ref:t(),
     From :: bondy_ref:t(),
     Opts :: map()) ->
     ok | no_return().
 
-handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
-    %% A remote callee is returning a yield to a local caller.
+handle_message(#yield{} = M, Caller, Callee, _Opts) ->
+    %% A remote Callee is returning a YIELD to an INVOCATION done
+    %% on behalf of a local Caller.
+
+    InvocationId = M#yield.request_id,
+
     Fun = fun
-        (empty) ->
-            no_matching_promise(M);
         ({ok, Promise}) ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
+            %% LocalCaller == Caller
+            %% LocalCaller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
             Result = yield_to_result(CallId, M),
-            bondy:send(Callee, LocalCaller, Result, #{})
+            bondy:send(Callee, Caller, Result, #{});
+
+        (empty) ->
+            no_matching_promise(M)
     end,
-    InvocationId = M#yield.request_id,
+
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
+
     ok;
 
-handle_peer_message(
-    #error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
-    %% A remote callee is returning an error to a local caller.
+handle_message(#error{request_type = ?INVOCATION} = M, _Caller, Callee, _Opts) ->
+    %% A remote callee is returning an ERROR to an INVOCATION done
+    %% on behalf of a local Caller.
+
+    InvocationId = M#error.request_id,
+
     Fun = fun
         (empty) ->
             no_matching_promise(M);
@@ -478,83 +488,82 @@ handle_peer_message(
             CallError = M#error{request_id = CallId, request_type = ?CALL},
             bondy:send(Callee, LocalCaller, CallError, #{})
     end,
-    InvocationId = M#error.request_id,
+
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Callee, Fun),
+
     ok;
 
-handle_peer_message(
-    #error{request_type = ?CANCEL} = M, Caller, Callee, _Opts) ->
-    %% A CANCEL we made to a remote callee has failed.
-    %% We forward the error back to the local caller, keeping the promise to be
-    %% able to match the future yield message,
+handle_message(#error{request_type = ?CANCEL} = M, Caller, Callee, _Opts) ->
+    %% A CANCEL a local Caller made to a remote Callee has failed.
+    %% We send the error back to the local Caller, keeping the promise to be
+    %% able to match the still pending YIELD message,
     CallId = M#error.request_id,
+
     case bondy_rpc_promise:peek_call(CallId, Caller) of
         empty ->
+            %% The promise already expired the Caller would have already
+            %% received a TIMEOUT error as a response for the original CALL.
             no_matching_promise(M);
-        {ok, Promise} ->
-            LocalCaller = bondy_rpc_promise:caller(Promise),
-            bondy:send(Callee, LocalCaller, M, #{})
-    end,
-    ok;
 
-handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
-    %% A remote caller is cancelling a previous call-invocation
-    %% made to our local callee.
+        {ok, Promise} ->
+            %% Caller and PCaller should be the same
+            PCaller = bondy_rpc_promise:caller(Promise),
+            bondy:send(Callee, PCaller, M, #{})
+    end;
+
+handle_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
+    %% A remote Caller is cancelling a previous CALL/INVOCATION
+    %% made to a local Callee.
+    InvocationId = M#interrupt.request_id,
+
     Fun = fun
         (empty) ->
-            %% TODO We should reply with an error
+            %% The promise already expired the Caller would have already
+            %% received a TIMEOUT error as a response for the original CALL.
             no_matching_promise(M);
         ({ok, Promise}) ->
             LocalCallee = bondy_rpc_promise:callee(Promise),
             bondy:send(Caller, LocalCallee, M, #{})
     end,
-    InvocationId = M#interrupt.request_id,
+
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Caller, Fun),
+
     ok;
 
-handle_peer_message(
-    #invocation{} = M, {RealmUri, _, undefined, Mod} = Callee, Caller, _Opts)
-    when is_atom(Mod) ->
-    Ctxt = bondy_context:local_context(RealmUri),
-    {reply, Reply} = Mod:handle_invocation(M, Ctxt),
-    bondy:send(Callee, Caller, Reply, #{});
+handle_message(#invocation{} = Msg, Callee, Caller, Opts) ->
+    %% A remote Caller is making a CALL to a local Callee.
 
-handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
-    %% A remote caller is making a call to a local callee.
-    %% We first need to find the registry entry to get the local callee
-    %% At the moment we might not get the Pid in the Callee tuple,
-    %% so we fetch it
-    {RealmUri, Node, SessionId, _Pid} = Callee,
-    Key = bondy_registry_entry:key_pattern(
-        registration,
-        RealmUri,
-        Node,
-        #{session_id => SessionId, entry_id => M#invocation.registration_id}
-    ),
+    case bondy_ref:target(Callee) of
+        {callback, _} ->
+            %% A callback implemented procedure e.g. WAMP Session APIs
+            %% on this node. We apply here as we do not need invoke/5 to
+            %% enqueue a promise, we will call the module sequentially.
+            apply_dynamic_callback(Msg, Callee, Caller);
 
-    %% We use lookup because the key is ground
-    case bondy_registry:lookup(Key) of
-        {error, not_found} ->
-            bondy:send(
-                Callee,
-                Caller,
-                no_eligible_callee(invocation, M#invocation.registration_id),
-                #{}
-            );
-        Entry ->
-            LocalCallee = bondy_registry_entry:ref(Entry),
+        _ ->
+            try
 
-            %% We enqueue the invocation so that we can match it with the
-            %% YIELD or ERROR
-            Promise = bondy_rpc_promise:new(
-                M#invocation.request_id, LocalCallee, Caller
-            ),
 
-            Timeout = bondy_utils:timeout(Opts),
+                RealmUri = bondy_ref:realm_uri(Callee),
+                Timeout = bondy_utils:timeout(Opts),
 
-            ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
-            bondy:send(Caller, LocalCallee, M, Opts)
+                %% We enqueue an invocation promise so that we can match it
+                %% with the future YIELD or ERROR response from the Callee.
+                Promise = bondy_rpc_promise:new(
+                    Msg#invocation.request_id, Callee, Caller
+                ),
+
+                ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
+
+                %% We send the invocation to the local callee
+                bondy:send(Callee, Msg, Opts)
+
+            catch
+                error:_Reason ->
+                    maybe_reroute_invocation(Msg, Callee, Caller, Opts)
+            end
     end.
+
 
 
 
@@ -565,7 +574,29 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
 
 
 
+
+%% @private
+maybe_reroute_invocation(#invocation{} = Msg, Callee, Caller, _Opts) ->
+    %% TODO https://www.notion.so/leapsight/Call-Re-Routing-c18901c7aaea4ef7896b993d4e5d307f
+
+    %% We need to find another local callee to satisfy the original call,
+    %% if it exists, then it is easy. But the reply might need to include the %% original Callee ref.
+    %% If there are no local callees then we need to return either
+    %% wamp.error.unavailable or wamp.error.no_eligible_callee and let the
+    %% origin router re-route.
+
+    bondy:send(
+        Callee,
+        Caller,
+        no_eligible_callee(
+            invocation, Msg#invocation.registration_id
+        ),
+        #{}
+    ).
+
+
 %% -----------------------------------------------------------------------------
+%% @private
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -582,18 +613,18 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 
     case Uri of
         <<"bondy.", _/binary>> ->
-            callback(M, Ctxt, bondy_wamp_api);
+            apply_static_callback(M, Ctxt, bondy_wamp_api);
 
         <<"com.bondy.", _/binary>> ->
             %% Alias for "bondy"
-            callback(M, Ctxt, bondy_wamp_api);
+            apply_static_callback(M, Ctxt, bondy_wamp_api);
 
         <<"com.leapsight.bondy.", _/binary>> ->
             %% Deprecated API prefix. Now "bondy"
-            callback(M, Ctxt, bondy_wamp_api);
+            apply_static_callback(M, Ctxt, bondy_wamp_api);
 
         <<"wamp.", _/binary>> ->
-            callback(M, Ctxt, bondy_wamp_meta_api);
+            apply_static_callback(M, Ctxt, bondy_wamp_meta_api);
 
         _ ->
             Opts = #{error_formatter => undefined},
@@ -697,25 +728,26 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     end;
 
 do_handle_message(#yield{} = M, Ctxt0) ->
-    %% A Callee is replying to a previous invocation.
-    %% We match the wamp_yield() with the origin wamp_invocation()
-    %% using the request_id, and with that match the wamp_call() request_id
-    %% to find the caller pid.
+    %% A local Callee is replying to a previous INVOCATION.
+    %% We match the YIELD with the origin INVOCATION
+    %% using the request_id, and with that match the CALL request_id
+    %% to find the Caller.
     Callee = bondy_context:ref(Ctxt0),
     InvocationId = M#yield.request_id,
 
     Fun = fun
         ({ok, Promise}) ->
             Caller = bondy_rpc_promise:caller(Promise),
-            case bondy_rpc_promise:call_id(Promise) of
-                undefined ->
-                    %% The caller is remote, we fwd the yield to the peer node
-                    %% TODO make this explicit, at the moment a promise with
-                    %% undefined callId is a promise for a remote callee
-                    bondy:send(Callee, Caller, M, #{});
-                CallId ->
+
+            case bondy_ref:is_local(Caller) of
+                true ->
+                    CallId = bondy_rpc_promise:call_id(Promise),
                     Result = yield_to_result(CallId, M),
-                    bondy:send(Callee, Caller, Result, #{})
+                    bondy:send(Callee, Caller, Result, #{});
+
+                false ->
+                    %% The caller is remote, we fwd the yield to the peer node
+                    bondy:send(Callee, Caller, M, #{})
             end;
 
         (empty) ->
@@ -755,7 +787,6 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     %% We need to turn this into a CANCEL error
     Callee = bondy_context:ref(Ctxt0),
     InvocationId = M#error.request_id,
-    Caller = bondy_context:ref(Ctxt0),
 
     case bondy_rpc_promise:peek_invocation(InvocationId, Callee) of
         {ok, Promise} ->
@@ -771,13 +802,42 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     end.
 
 
+%% @private
+handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
+    CallUri = Msg#call.procedure_uri,
+    %% Based on procedure registration and passed options, we will
+    %% determine how many invocations and to whom we should do.
+    Fun = fun
+        (Entry, Ctxt) ->
+            Callee = bondy_registry_entry:ref(Entry),
+            IsLocal = bondy_ref:is_local(Callee),
+
+            case bondy_ref:target(Callee) of
+                {callback, _} when IsLocal == true, CallUri == Uri ->
+                    %% A callback implemented procedure e.g. WAMP Session APIs
+                    %% on this node. We apply here as we do not need invoke/5 to
+                    %% enqueue a promise, we will call the module sequentially.
+                    apply_dynamic_callback(Msg, Callee, Ctxt);
+                _ ->
+                    %% All other calls we need to invoke normally
+                    Invocation = call_to_invocation(Msg, Uri, Entry, Ctxt),
+                    {ok, Invocation, Ctxt}
+            end
+    end,
+
+    %% A response will be send asynchronously
+    Opts = Opts0#{call_opts => Msg#call.options},
+
+    invoke(Msg#call.request_id, Uri, Fun, Opts, Ctxt0).
+
+
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc If the callback module returns ignore we need to find the callee in the
 %% registry
 %% @end
 %% -----------------------------------------------------------------------------
-callback(#call{} = M0, Ctxt, Mod) ->
+apply_static_callback(#call{} = M0, Ctxt, Mod) ->
     PeerId = bondy_context:ref(Ctxt),
     DefaultOpts = #{error_formatter => undefined},
 
@@ -803,6 +863,7 @@ callback(#call{} = M0, Ctxt, Mod) ->
 
         {reply, Reply} ->
             bondy:send(PeerId, Reply)
+
     catch
         throw:no_such_procedure ->
             Error = bondy_wamp_utils:no_such_procedure_error(M0),
@@ -825,50 +886,59 @@ callback(#call{} = M0, Ctxt, Mod) ->
 
 
 %% @private
-handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
-    CallId = M#call.request_id,
-    CallUri = M#call.procedure_uri,
+apply_dynamic_callback(#invocation{} = Msg, Callee, Caller) ->
+    bondy_ref:is_type(Caller)
+        orelse error({badarg, {caller, Caller}}),
 
-    %% invoke/5 takes a fun which takes the registration_id of the
-    %% procedure and the callee
-    %% Based on procedure registration and passed options, we will
-    %% determine how many invocations and to whom we should do.
-    %% fun(Entry, Callee, Ctxt)
-    Fun = fun
-        (Entry, Ctxt) ->
-            Callee = bondy_registry_entry:ref(Entry),
-            IsLocal = bondy_ref:is_local(Callee),
+    ReqId = Msg#invocation.request_id,
+    {M, F, A0} = bondy_ref:callback(Callee),
 
-            %% We use an invocation even for callbacks
-            %% as we will reuse the apply_callback/4 when we are forwarded and
-            %% invocation from another cluster peer.
-            Invocation = call_to_invocation(M, Uri, Entry, Ctxt),
-
-            case bondy_ref:target(Callee) of
-                {callback, MFA} when IsLocal == true, CallUri == Uri ->
-                    %% A callback implemented procedure e.g. WAMP Session APIs
-                    %% on this node. We apply here as we do not need invoke/5 to
-                    %% enqueue a promise, we will call the module sequentially.
-                    apply_callback(MFA, CallId, Invocation, Ctxt);
-                _ ->
-                    %% All other calls we need to invoke asynchronously
-                    {ok, Invocation, Ctxt}
-            end
-    end,
-
-    %% A response will be send asynchronously
-    Opts = Opts0#{call_opts => M#call.options},
-    invoke(M#call.request_id, Uri, Fun, Opts, Ctxt0).
-
-
-apply_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
-    Caller = bondy_context:ref(Ctxt),
-    A = to_callback_args(Invocation, A0),
+    A = to_callback_args(Msg, A0),
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
             Reply = wamp_message:result(
-                CallId,
+                ReqId,
+                Details,
+                Args,
+                KWArgs
+            ),
+            bondy:send(Callee, Caller, Reply, #{});
+
+        {error, Uri, Details, Args, KWArgs} ->
+            Reply = wamp_message:error(
+                ?INVOCATION,
+                ReqId,
+                Details,
+                Uri,
+                Args,
+                KWArgs
+            ),
+            bondy:send(Callee, Caller, Reply), #{};
+
+        Other ->
+            error({invalid_return, Other})
+    catch
+        error:undef ->
+            Reply = badarity_error(ReqId, ?INVOCATION),
+            bondy:send(Callee, Caller, Reply, #{});
+
+        error:{badarg, _} ->
+            Reply = badarg_error(ReqId, ?INVOCATION),
+            bondy:send(Callee, Caller, Reply, #{})
+    end;
+
+apply_dynamic_callback(#call{} = Msg, Callee, Ctxt) when is_map(Ctxt) ->
+    Caller = bondy_context:ref(Ctxt),
+    ReqId = Msg#call.request_id,
+    {M, F, A0} = bondy_ref:callback(Callee),
+
+    A = to_callback_args(Msg, A0),
+
+    try erlang:apply(M, F, A) of
+        {ok, Details, Args, KWArgs} ->
+            Reply = wamp_message:result(
+                ReqId,
                 Details,
                 Args,
                 KWArgs
@@ -879,7 +949,7 @@ apply_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
         {error, Uri, Details, Args, KWArgs} ->
             Reply = wamp_message:error(
                 ?CALL,
-                CallId,
+                ReqId,
                 Details,
                 Uri,
                 Args,
@@ -889,17 +959,15 @@ apply_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
             {ok, Ctxt};
 
         Other ->
-            %% we do not allow continue nor {continue, term()}
-            %% at this point
             error({invalid_return, Other})
     catch
         error:undef ->
-            Reply = badarity_error(CallId),
+            Reply = badarity_error(ReqId, ?CALL),
             ok = bondy:send(Caller, Reply),
             {ok, Ctxt};
 
         error:{badarg, _} ->
-            Reply = badarg_error(CallId),
+            Reply = badarg_error(ReqId, ?CALL),
             ok = bondy:send(Caller, Reply),
             {ok, Ctxt}
     end.
@@ -907,6 +975,14 @@ apply_callback({M, F, A0}, CallId, Invocation, Ctxt) ->
 
 
 %% @private
+to_callback_args(#call{} = Msg, ExtraArgs) ->
+    lists:append([
+        ExtraArgs,
+        args_to_list(Msg#call.args),
+        args_to_list(Msg#call.kwargs),
+        args_to_list(Msg#call.options)
+    ]);
+
 to_callback_args(#invocation{} = Msg, ExtraArgs) ->
     lists:append([
         ExtraArgs,
@@ -939,15 +1015,6 @@ format_error(_, #{error_formatter := undefined}) ->
 format_error(Error, #{error_formatter := Fun}) ->
     Fun(Error).
 
-
-% maybe_invocation(#call{} = M, Uri, Entry, Ctxt) ->
-%     case bondy_registry_entry:is_proxy(Entry) of
-%         true ->
-%             %% We forward the call to the origin
-%             M;
-%         false ->
-%             call_to_invocation(M, Uri, Entry, Ctxt)
-%     end.
 
 %% @private
 call_to_invocation(M, Uri, Entry, Ctxt1) ->
@@ -1599,12 +1666,12 @@ no_eligible_callee(Type, Id, Desc) ->
 
 
 %% @private
-badarity_error(CallId) ->
+badarity_error(CallId, Type) ->
     Msg = <<
         "The call was made passing the wrong number of positional arguments."
     >>,
     wamp_message:error(
-        ?CALL,
+        Type,
         CallId,
         #{},
         ?WAMP_INVALID_ARGUMENT,
@@ -1613,12 +1680,12 @@ badarity_error(CallId) ->
 
 
 %% @private
-badarg_error(CallId) ->
+badarg_error(CallId, Type) ->
     Msg = <<
         "The call was made passing invalid arguments."
     >>,
     wamp_message:error(
-        ?CALL,
+        Type,
         CallId,
         #{},
         ?WAMP_INVALID_ARGUMENT,

@@ -303,7 +303,11 @@ handle_cast({'receive', Msg, BinPid}, State) ->
         %% We either implement causality or we just use hashing over a pool of
         %% workers by {CallerID, CalleeId}
         Job = fun() ->
-            ok = bondy_router:handle_peer_message(Msg),
+            Payload = bondy_peer_message:payload(Msg),
+            PeerId = bondy_peer_message:to(Msg),
+            From = bondy_peer_message:from(Msg),
+            Opts = bondy_peer_message:options(Msg),
+            ok = bondy_router:forward(Payload, PeerId, From, Opts),
             %% We send the ack to the remote node
             cast_message(peer_ack(Msg), BinPid)
         end,

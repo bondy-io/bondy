@@ -56,13 +56,13 @@
 
 -export([callback/1]).
 -export([is_bridge/1]).
--export([is_callback/1]).
 -export([is_client/1]).
 -export([is_internal/1]).
 -export([is_local/1]).
 -export([is_self/1]).
 -export([is_type/1]).
 -export([name/1]).
+-export([new/2]).
 -export([new/3]).
 -export([new/4]).
 -export([new/5]).
@@ -76,9 +76,21 @@
 
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(Type :: ref_type(), RealmUri :: uri()) ->
+    t().
+
+new(Type, RealmUri) ->
+    new(Type, RealmUri, self()).
 
 
 
@@ -189,19 +201,6 @@ type(#bondy_ref{type = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns `true' if term `Term' is a reference. Otherwise returns `false'.
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_type(t()) -> boolean().
-
-is_type(#bondy_ref{}) ->
-    true;
-
-is_type(_) ->
-    false.
-
-
-%% -----------------------------------------------------------------------------
 %% @doc Returns the realm URI of the reference.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -260,31 +259,6 @@ session_id(#bondy_ref{session_id = Val}) ->
 target(#bondy_ref{target = Val}) ->
     Val.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns whether this is a reference to a local target i.e. located on
-%% the caller's node.
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_local(Ref :: t()) -> boolean().
-
-is_local(#bondy_ref{node = Node}) ->
-    Node =:= bondy_peer_service:mynode().
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_callback(t()) -> boolean().
-
-is_callback(#bondy_ref{target = {callback, _}}) ->
-    true;
-
-is_callback(#bondy_ref{}) ->
-    false.
-
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -299,6 +273,16 @@ is_bridge(Ref) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec is_client(t()) -> boolean().
+
+is_client(Ref) ->
+    client =:= type(Ref).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec is_internal(t()) -> boolean().
 
 is_internal(Ref) ->
@@ -306,13 +290,14 @@ is_internal(Ref) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns whether this is a reference to a local target i.e. located on
+%% the caller's node.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_client(t()) -> boolean().
+-spec is_local(Ref :: t()) -> boolean().
 
-is_client(Ref) ->
-    client =:= type(Ref).
+is_local(#bondy_ref{node = Node}) ->
+    Node =:= bondy_peer_service:mynode().
 
 
 %% -----------------------------------------------------------------------------
@@ -334,6 +319,19 @@ is_self(#bondy_ref{target = {name, Name}} = Ref) ->
     is_local(Ref) andalso gproc:lookup_pid({n, l, Name}) =:= self();
 
 is_self(#bondy_ref{}) ->
+    false.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if term `Term' is a reference. Otherwise returns `false'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_type(t()) -> boolean().
+
+is_type(#bondy_ref{}) ->
+    true;
+
+is_type(_) ->
     false.
 
 
