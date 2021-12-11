@@ -136,10 +136,6 @@ send(To, M, Opts0) ->
     Opts :: map()) -> ok | no_return().
 
 send(From, To, M, Opts0) ->
-
-    bondy_ref:is_local(From)
-        orelse error(not_my_node),
-
     bondy_ref:realm_uri(From) =:= bondy_ref:realm_uri(To)
         orelse error(not_same_realm),
 
@@ -151,10 +147,17 @@ send(From, To, M, Opts0) ->
 
     case bondy_ref:is_local(To) of
         true ->
-            do_send(To, M, Opts);
+            case bondy_ref:is_bridge(To) of
+                true ->
+                    %% TODO Validate this
+                    do_send(To, {forward, M, From}, Opts);
+                false ->
+                    do_send(To, M, Opts)
+            end;
         false ->
             bondy_peer_wamp_forwarder:forward(From, To, M, Opts)
     end.
+
 
 
 %% -----------------------------------------------------------------------------
