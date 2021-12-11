@@ -166,7 +166,6 @@
 -include("bondy.hrl").
 
 
--define(DEFAULT_LIMIT, 1000).
 -define(RESERVED_NS(NS),
     <<"Use of reserved namespace '", NS/binary, "'.">>
 ).
