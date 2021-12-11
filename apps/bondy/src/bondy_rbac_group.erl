@@ -238,6 +238,8 @@ add_or_update(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
     {ok, NewUser :: t()} | {error, any()}.
 
 update(RealmUri, Name, Data0) when is_binary(Name) ->
+     %% TODO validate that we are not updating a prototype group, if so raise a
+     %% {operation_not_allowed}
     try
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
 
@@ -438,6 +440,8 @@ list(RealmUri) ->
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
+    %% TODO We SHOULD list the realm's prototype roups as well (amd potentially
+    %% marking them with a flag)
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     FoldOpts = case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of
