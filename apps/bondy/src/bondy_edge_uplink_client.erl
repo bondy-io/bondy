@@ -30,7 +30,7 @@
     hibernate = false       ::  boolean(),
     realms                  ::  map(),
     sessions = #{}          ::  sessions(),
-    sessions_by_uri = #{}   ::  #{uri() => bondy_session:uuid()},
+    sessions_by_uri = #{}   ::  #{uri() => bondy_session:id()},
     tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
@@ -39,7 +39,7 @@
 
 -type t()                   ::  #state{}.
 -type sessions()            ::  #{
-    bondy_session:uuid() => bondy_edge_session:t()
+    bondy_session:id() => bondy_edge_session:t()
 }.
 
 %% API.
@@ -80,7 +80,7 @@ start_link(Transport, Endpoint, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Pid :: pid(), Msg :: any(), SessionId :: bondy_session:uuid()) ->
+-spec forward(Pid :: pid(), Msg :: any(), SessionId :: bondy_session:id()) ->
     ok.
 
 forward(Pid, Msg, SessionId) ->
@@ -729,6 +729,10 @@ add_session(#{id := Id, realm := Uri} = Session, #state{} = State) ->
     }.
 
 
+session(Id, #state{sessions = Map}) ->
+    maps:get(Id, Map).
+
+
 % update_session(Key, Value, Id, #state{} = State) ->
 %     Sessions = State#state.sessions,
 %     Session0 =  maps:get(Id, Sessions),
@@ -885,9 +889,12 @@ send_session_message(SessionId, Msg, State) ->
 %     end,
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
-handle_session_message(#invocation{}, _SessionId, _State) ->
-    % bondy:cast()
-    ok.
+handle_session_message(#invocation{} = Msg, SessionId, State) ->
+    #{realm := RealmUri} = session(SessionId, State),
+    From = bondy_ref:new(bridge, RealmUri, self(), undefined),
+    %% To Needs to come
+    To = error,
+    bondy_router:forward(Msg, To, From, #{}).
 
 
 
