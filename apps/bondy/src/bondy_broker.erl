@@ -166,7 +166,7 @@ handle_message(#publish{} = M, Ctxt) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Handles a message sent by a peer node through the
-%% bondy_peer_wamp_forwarder.
+%% bondy_peer_wamp_relay.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec handle_message(
@@ -718,7 +718,7 @@ forward_publication(Nodes, #publish{} = M, Opts, Ctxt) ->
     Publisher = bondy_context:ref(Ctxt),
 
     {ok, Good, Bad} =
-        bondy_peer_wamp_forwarder:broadcast(Publisher, Nodes, M, Opts),
+        bondy_peer_wamp_relay:broadcast(Publisher, Nodes, M, Opts),
 
     case Nodes =:= Good of
         true ->

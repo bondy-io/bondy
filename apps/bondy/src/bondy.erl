@@ -155,7 +155,7 @@ send(From, To, M, Opts0) ->
                     do_send(To, M, Opts)
             end;
         false ->
-            bondy_peer_wamp_forwarder:forward(From, To, M, Opts)
+            bondy_peer_wamp_relay:forward(From, To, M, Opts)
     end.
 
 

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_peer_wamp_forwarder.erl - forwards INVOCATION (their RESULT or
+%%  bondy_peer_wamp_relay.erl - forwards INVOCATION (their RESULT or
 %%  ERROR), INTERRUPT and PUBLISH messages between WAMP clients connected to
 %%  different Bondy peers (nodes).
 %%
@@ -37,7 +37,7 @@
 %% |    |          v         |                    |         v          |    |
 %% |    |  +---------------+ |                    | +---------------+  |    |
 %% |    |  |bondy_peer_wamp| |                    | |bondy_peer_wamp|  |    |
-%% |    |  |  _forwarder   | |                    | |  _forwarder   |  |    |
+%% |    |  |    _relay     | |                    | |    _relay     |  |    |
 %% |    |  |               | |                    | |               |  |    |
 %% |    |  +---------------+ |                    | +---------------+  |    |
 %% |    |          |         |                    |         |          |    |
@@ -79,7 +79,7 @@
 %% '''
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_peer_wamp_forwarder).
+-module(bondy_peer_wamp_relay).
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -135,7 +135,7 @@
 -spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
 
 start_link() ->
-    %% bondy_peer_wamp_forwarder may receive a huge amount of
+    %% bondy_peer_wamp_relay may receive a huge amount of
     %% messages. Make sure that they are stored off heap to
     %% avoid exessive GCs. This makes messaging slower though.
     SpawnOpts = [
@@ -146,7 +146,7 @@ start_link() ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Forwards a wamp message to a peer (cluster node).
-%% It returns `ok' when the remote bondy_peer_wamp_forwarder acknoledges the
+%% It returns `ok' when the remote bondy_peer_wamp_relay acknoledges the
 %% reception of the message, but it does not imply the message handler has
 %% actually received the message.
 %%
@@ -224,7 +224,7 @@ broadcast(From, Nodes, M, Opts) ->
 -spec receive_ack(bondy_ref:t(), timeout()) -> ok | no_return().
 
 receive_ack(Id, Timeout) ->
-    %% We wait for the remote forwarder to send us an ACK
+    %% We wait for the remote relay to send us an ACK
     %% to be sure the wamp peer received the message
     receive
         #peer_ack{id = Val} when Val == Id ->

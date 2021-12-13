@@ -1084,6 +1084,7 @@ full_prefix(Entry) ->
     Type = bondy_registry_entry:type(Entry),
     full_prefix(Type, RealmUri).
 
+
 %% @private
 full_prefix(registration, RealmUri) ->
     ?REG_FULL_PREFIX(RealmUri);
