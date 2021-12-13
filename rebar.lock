@@ -87,7 +87,7 @@
   0},
  {<<"plum_db">>,
   {git,"https://gitlab.com/leapsight/plum_db.git",
-       {ref,"5b3513cd6d477e5a2d1808443bbf867507e68995"}},
+       {ref,"48372c69ee6b120c6daf043a16fd4c7150cdb81c"}},
   0},
  {<<"plumtree">>,
   {git,"https://github.com/aramallo/plumtree.git",
