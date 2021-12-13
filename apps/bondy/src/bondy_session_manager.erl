@@ -231,13 +231,12 @@ register_procedures(Session) ->
     Part = bondy_utils:session_id_to_uri_part(Id),
     ProcUri = <<"wamp.session.", Part/binary, ".get">>,
 
-    Opts = #{match => ?PREFIX_MATCH},
+    MF = {bondy_session_api, get},
+    Args = [RealmUri],
+    Opts = #{match => ?PREFIX_MATCH, callback_args => Args},
+    Ref = bondy_ref:new(internal, RealmUri, MF),
 
-    MFA = {bondy_session_api, get, [RealmUri]},
-    _ = bondy_wamp_callback:validate_target(MFA),
-    Ref = bondy_ref:new(internal, RealmUri, MFA),
-
-    {ok, _} = bondy_dealer:register(Opts, ProcUri, Ref),
+    {ok, _} = bondy_dealer:register(ProcUri, Opts, Ref),
 
     ok.
 

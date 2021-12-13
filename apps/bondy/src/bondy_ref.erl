@@ -8,7 +8,7 @@
 %% ## Types
 %% ### Internal
 %%
-%% ### Bridge
+%% ### Relay
 %%
 %% ### Client
 %%
@@ -37,25 +37,27 @@
 }).
 
 -type t()               ::  #bondy_ref{}.
--type bridge_ref()      ::  #bondy_ref{type :: bridge}.
+-type relay_ref()       ::  #bondy_ref{type :: relay}.
 -type client_ref()      ::  #bondy_ref{type :: client}.
 -type internal_ref()    ::  #bondy_ref{type :: internal}.
--type ref_type()        ::  internal | bridge | client.
+-type ref_type()        ::  internal | relay | client.
 -type target()          ::  {pid, binary()}
-                            | {callback, mfargs()}
-                            | {name, term()}.
+                            | {name, term()}
+                            | {callback, mf()}.
+-type target_type()     ::  pid | name | callback.
 -type name()            ::  term().
--type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
+-type mf()              ::  {M :: module(), F :: atom()}.
 -type wildcard(T)       ::  T | '_'.
 
 -export_type([t/0]).
--export_type([bridge_ref/0]).
+-export_type([relay_ref/0]).
 -export_type([client_ref/0]).
 -export_type([internal_ref/0]).
+-export_type([mf/0]).
 -export_type([target/0]).
 
 -export([callback/1]).
--export([is_bridge/1]).
+-export([is_relay/1]).
 -export([is_client/1]).
 -export([is_internal/1]).
 -export([is_local/1]).
@@ -72,14 +74,15 @@
 -export([realm_uri/1]).
 -export([session_id/1]).
 -export([target/1]).
+-export([target_type/1]).
 -export([type/1]).
-
 
 
 
 %% =============================================================================
 %% API
 %% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -93,7 +96,6 @@ new(Type, RealmUri) ->
     new(Type, RealmUri, self()).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -101,7 +103,7 @@ new(Type, RealmUri) ->
 -spec new(
     Type :: ref_type(),
     RealmUri :: uri(),
-    Target :: pid() | mfargs() | name()) ->
+    Target :: pid() | mf() | name()) ->
     t().
 
 new(Type, RealmUri, Target) ->
@@ -117,7 +119,7 @@ new(Type, RealmUri, Target) ->
 -spec new(
     Type :: ref_type(),
     RealmUri :: uri(),
-    Target :: pid() | mfargs() | name(),
+    Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session:id())) -> t().
 
 new(Type, RealmUri, Target, SessionId) ->
@@ -132,7 +134,7 @@ new(Type, RealmUri, Target, SessionId) ->
 -spec new(
     Type :: ref_type(),
     RealmUri :: uri(),
-    Target :: pid() | mfargs() | name(),
+    Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session:id()),
     Node :: node()) -> t().
 
@@ -143,7 +145,7 @@ when is_binary(RealmUri), is_atom(Node) ->
         orelse SessionId == undefined
         orelse error({badarg, {session_id, SessionId}}),
 
-    lists:member(Type, [client, internal, bridge])
+    lists:member(Type, [client, internal, relay])
         orelse error({badarg, {type, Type}}),
 
     Target = validate_target(Target0),
@@ -165,14 +167,14 @@ when is_binary(RealmUri), is_atom(Node) ->
 -spec pattern(
     Type :: wildcard(ref_type()),
     RealmUri :: uri(),
-    Target :: wildcard(pid() | mfargs() | name()),
+    Target :: wildcard(pid() | mf() | name()),
     SessionId :: wildcard(maybe(bondy_session:id())),
     Node :: wildcard(node())) -> t().
 
 pattern(Type, RealmUri, Target0, SessionId, Node)
 when is_binary(RealmUri), is_atom(Node) ->
 
-    lists:member(Type, ['_', client, internal, bridge])
+    lists:member(Type, ['_', client, internal, relay])
         orelse error({badarg, {type, Type}}),
 
     Target = validate_target(Target0, _AllowPattern = true),
@@ -235,38 +237,13 @@ session_id(#bondy_ref{session_id = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the target of the reference. A target is a process (`pid()') a
-%% gproc registered name (`{name, GprocName}') or a callback (`mfargs()').
-%%
-%% If the reference type is `client' the target refers to the
-%% session and/or process owning the network connection to the client.
-%%
-%% If the reference type is `internal' the target refers to an internal
-%% process acting as one of the Bondy client roles e.g. an internal subscriber.
-%% Messages destined to a target located on a different node are relayed by the
-%% router through the cluster distribution layer (Partisan).
-%%
-%% If the reference type is `bridge' the target refers to the session
-%% and/or process owning the network connection to the edge or
-%% remote cluster (See {@link bondy_edge_uplink_client} and
-%% {@link bondy_edge_uplink_server} respectively). The bridge acts as a proxy
-%% for the actual edge or remote clients, internal and callback targets.
-%%
-%% @end
-%% -----------------------------------------------------------------------------
--spec target(t()) -> target().
-
-target(#bondy_ref{target = Val}) ->
-    Val.
-
-%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_bridge(t()) -> boolean().
+-spec is_relay(t()) -> boolean().
 
-is_bridge(Ref) ->
-    bridge =:= type(Ref).
+is_relay(Ref) ->
+    relay =:= type(Ref).
 
 
 %% -----------------------------------------------------------------------------
@@ -306,20 +283,8 @@ is_local(#bondy_ref{node = Node}) ->
 %% -----------------------------------------------------------------------------
 -spec is_self(Ref :: t()) -> boolean().
 
-is_self(#bondy_ref{target = {pid, Val}} = Ref) ->
-    %% Pids can only be used on the node where they were created (this is
-    %% because we are using Partisan and not Distributed Erlang)
-    is_local(Ref) andalso Val =:= bondy_utils:pid_to_bin(self());
-
-is_self(#bondy_ref{target = {name, Name}} = Ref) ->
-    %% Pids can only be used on the node where they were created (this is
-    %% because we are using Partisan and not Distributed Erlang).
-    %% Also we only use gproc locally, if this ref is for another node then we
-    %% do not have the session here.
-    is_local(Ref) andalso gproc:lookup_pid({n, l, Name}) =:= self();
-
-is_self(#bondy_ref{}) ->
-    false.
+is_self(#bondy_ref{} = Ref) ->
+    (catch pid(Ref)) =:= self().
 
 
 %% -----------------------------------------------------------------------------
@@ -333,6 +298,63 @@ is_type(#bondy_ref{}) ->
 
 is_type(_) ->
     false.
+
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the target of the reference. A target is a process (`pid()') a
+%% gproc registered name (`{name, GprocName}') or a callback (`mf()').
+%%
+%% If the reference type is `client' the target refers to the
+%% session and/or process owning the network connection to the client.
+%%
+%% If the reference type is `internal' the target refers to an internal
+%% process acting as one of the Bondy client roles e.g. an internal subscriber.
+%% Messages destined to a target located on a different node are relayed by the
+%% router through the cluster distribution layer (Partisan).
+%%
+%% If the reference type is `relay' the target refers to the session
+%% and/or process owning the network connection to the edge or
+%% remote cluster (See {@link bondy_edge_uplink_client} and
+%% {@link bondy_edge_uplink_server} respectively). The relay acts as a proxy
+%% for the actual edge or remote clients, internal and callback targets.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec target(t()) -> target().
+
+target(#bondy_ref{target = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the target of the reference. A target is a process (`pid()') a
+%% gproc registered name (`{name, GprocName}') or a callback (`mf()').
+%%
+%% If the reference type is `client' the target refers to the
+%% session and/or process owning the network connection to the client.
+%%
+%% If the reference type is `internal' the target refers to an internal
+%% process acting as one of the Bondy client roles e.g. an internal subscriber.
+%% Messages destined to a target located on a different node are relayed by the
+%% router through the cluster distribution layer (Partisan).
+%%
+%% If the reference type is `relay' the target refers to the session
+%% and/or process owning the network connection to the edge or
+%% remote cluster (See {@link bondy_edge_uplink_client} and
+%% {@link bondy_edge_uplink_server} respectively). The relay acts as a proxy
+%% for the actual edge or remote clients, internal and callback targets.
+%%
+%% @end
+%% -----------------------------------------------------------------------------
+-spec target_type(t()) -> wildcard(target_type()).
+
+target_type(#bondy_ref{target = {Type, _}}) ->
+    Type;
+
+target_type(#bondy_ref{target = '_'}) ->
+    '_'.
 
 
 %% -----------------------------------------------------------------------------
@@ -349,13 +371,28 @@ name(#bondy_ref{}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns a pid when target is of type `{pid, binary()}', otherwise
+%% returns the atom `undefined'.
+%% If the reference is not local it fails with exception `not_my_node`. This is
+%% becuase process identifies can only be used on the node where they were
+%% created (this is because we are using Partisan and not Distributed Erlang).
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(t()) -> maybe(pid()).
+-spec pid(t()) -> maybe(pid()) | no_return().
 
-pid(#bondy_ref{target = {pid, Bin}}) ->
+pid(#bondy_ref{target = {pid, Bin}} = Ref) ->
+    %% Pids can only be used on the node where they were created (this is
+    %% because we are using Partisan and not Distributed Erlang).
+    is_local(Ref) orelse error(not_my_node),
     bondy_utils:bin_to_pid(Bin);
+
+pid(#bondy_ref{target = {name, Name}} = Ref) ->
+    %% Pids can only be used on the node where they were created (this is
+    %% because we are using Partisan and not Distributed Erlang).
+    %% Also we only use gproc locally, if this ref is for another node then we
+    %% do not have the session here.
+    is_local(Ref) orelse error(not_my_node),
+    gproc:lookup_pid({n, l, Name});
 
 pid(#bondy_ref{}) ->
     undefined.
@@ -365,7 +402,7 @@ pid(#bondy_ref{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback(t()) -> maybe(mfargs()).
+-spec callback(t()) -> maybe(mf()).
 
 callback(#bondy_ref{target = {callback, Val}}) ->
     Val;
@@ -392,10 +429,7 @@ validate_target(Target, AllowPattern) ->
         undefined ->
             error({badarg, {target, Target}});
 
-        {M, F, undefined} when is_atom(M), is_atom(F) ->
-            {callback, Target};
-
-        {M, F, A} when is_atom(M), is_atom(F), is_list(A) ->
+        {M, F} when is_atom(M), is_atom(F) ->
             {callback, Target};
 
         Pid when is_pid(Pid) ->

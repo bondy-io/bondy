@@ -212,30 +212,28 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec register(
-    Opts :: map(),
     Procedure :: uri(),
+    Opts :: map(),
     Ref :: bondy_ref:t() | bondy_context:t()) ->
     {ok, id()}
     | {ok, id(), pid()}
     | {error, already_exists | any()}
     | no_return().
 
-register(Opts0, Procedure, Ctxt) when is_map(Ctxt) ->
-    register(Opts0, Procedure, bondy_context:ref(Ctxt));
+register(Procedure, Opts, Ctxt) when is_map(Ctxt) ->
+    register(Procedure, Opts, bondy_context:ref(Ctxt));
 
-register(Opts0, Procedure, Ref) ->
+register(Procedure, Opts0, Ref) ->
 
     Opts =
-        case bondy_ref:target(Ref) of
-            {pid, _} ->
+        case bondy_ref:target_type(Ref) of
+            pid ->
                 Opts0#{shared_registration => true};
 
-            {name, _} ->
+            name ->
                 Opts0#{shared_registration => true};
 
-            {callback, MFA} ->
-                _ = bondy_wamp_callback:validate_target(MFA),
-
+            callback ->
                 Opts0#{shared_registration => false}
         end,
 
@@ -533,17 +531,18 @@ handle_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
 handle_message(#invocation{} = Msg, Callee, Caller, Opts) ->
     %% A remote Caller is making a CALL to a local Callee.
 
-    case bondy_ref:target(Callee) of
-        {callback, _} ->
+    case bondy_ref:target_type(Callee) of
+        callback ->
             %% A callback implemented procedure e.g. WAMP Session APIs
             %% on this node. We apply here as we do not need invoke/5 to
             %% enqueue a promise, we will call the module sequentially.
-            apply_dynamic_callback(Msg, Callee, Caller);
+            %% Also, the INVOCATION already has the static arguments appended
+            %% to its positional args.
+            CBArgs = [],
+            apply_dynamic_callback(CBArgs, Msg, Callee, Caller);
 
         _ ->
             try
-
-
                 RealmUri = bondy_ref:realm_uri(Callee),
                 Timeout = bondy_utils:timeout(Opts),
 
@@ -812,12 +811,14 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
             Callee = bondy_registry_entry:ref(Entry),
             IsLocal = bondy_ref:is_local(Callee),
 
-            case bondy_ref:target(Callee) of
-                {callback, _} when IsLocal == true, CallUri == Uri ->
+            case bondy_ref:target_type(Callee) of
+                callback when IsLocal == true, CallUri == Uri ->
                     %% A callback implemented procedure e.g. WAMP Session APIs
                     %% on this node. We apply here as we do not need invoke/5 to
-                    %% enqueue a promise, we will call the module sequentially.
-                    apply_dynamic_callback(Msg, Callee, Ctxt);
+                    %% enqueue a promise, we will apply the callback
+                    %% and respond sequentially.
+                    CBArgs = bondy_registry_entry:callback_args(Entry),
+                    apply_dynamic_callback(CBArgs, Msg, Callee, Ctxt);
                 _ ->
                     %% All other calls we need to invoke normally
                     Invocation = call_to_invocation(Msg, Uri, Entry, Ctxt),
@@ -886,54 +887,13 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
 
 
 %% @private
-apply_dynamic_callback(#invocation{} = Msg, Callee, Caller) ->
-    bondy_ref:is_type(Caller)
-        orelse error({badarg, {caller, Caller}}),
-
-    ReqId = Msg#invocation.request_id,
-    {M, F, A0} = bondy_ref:callback(Callee),
-
-    A = to_callback_args(Msg, A0),
-
-    try erlang:apply(M, F, A) of
-        {ok, Details, Args, KWArgs} ->
-            Reply = wamp_message:result(
-                ReqId,
-                Details,
-                Args,
-                KWArgs
-            ),
-            bondy:send(Callee, Caller, Reply, #{});
-
-        {error, Uri, Details, Args, KWArgs} ->
-            Reply = wamp_message:error(
-                ?INVOCATION,
-                ReqId,
-                Details,
-                Uri,
-                Args,
-                KWArgs
-            ),
-            bondy:send(Callee, Caller, Reply), #{};
-
-        Other ->
-            error({invalid_return, Other})
-    catch
-        error:undef ->
-            Reply = badarity_error(ReqId, ?INVOCATION),
-            bondy:send(Callee, Caller, Reply, #{});
-
-        error:{badarg, _} ->
-            Reply = badarg_error(ReqId, ?INVOCATION),
-            bondy:send(Callee, Caller, Reply, #{})
-    end;
-
-apply_dynamic_callback(#call{} = Msg, Callee, Ctxt) when is_map(Ctxt) ->
+apply_dynamic_callback(CBArgs, #call{} = Msg, Callee, Ctxt)
+when is_map(Ctxt) ->
     Caller = bondy_context:ref(Ctxt),
     ReqId = Msg#call.request_id,
-    {M, F, A0} = bondy_ref:callback(Callee),
 
-    A = to_callback_args(Msg, A0),
+    {M, F} = bondy_ref:callback(Callee),
+    A = to_callback_args(Msg, CBArgs),
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
@@ -970,8 +930,50 @@ apply_dynamic_callback(#call{} = Msg, Callee, Ctxt) when is_map(Ctxt) ->
             Reply = badarg_error(ReqId, ?CALL),
             ok = bondy:send(Caller, Reply),
             {ok, Ctxt}
-    end.
+    end;
 
+apply_dynamic_callback(CBArgs, #invocation{} = Msg, Callee, Caller) ->
+    bondy_ref:is_type(Caller)
+        orelse error({badarg, {caller, Caller}}),
+
+    ReqId = Msg#invocation.request_id,
+
+    {M, F} = bondy_ref:callback(Callee),
+
+    A = to_callback_args(Msg, CBArgs),
+
+    try erlang:apply(M, F, A) of
+        {ok, Details, Args, KWArgs} ->
+            Reply = wamp_message:result(
+                ReqId,
+                Details,
+                Args,
+                KWArgs
+            ),
+            bondy:send(Callee, Caller, Reply, #{});
+
+        {error, Uri, Details, Args, KWArgs} ->
+            Reply = wamp_message:error(
+                ?INVOCATION,
+                ReqId,
+                Details,
+                Uri,
+                Args,
+                KWArgs
+            ),
+            bondy:send(Callee, Caller, Reply), #{};
+
+        Other ->
+            error({invalid_return, Other})
+    catch
+        error:undef ->
+            Reply = badarity_error(ReqId, ?INVOCATION),
+            bondy:send(Callee, Caller, Reply, #{});
+
+        error:{badarg, _} ->
+            Reply = badarg_error(ReqId, ?INVOCATION),
+            bondy:send(Callee, Caller, Reply, #{})
+    end.
 
 
 %% @private
@@ -1019,11 +1021,22 @@ format_error(Error, #{error_formatter := Fun}) ->
 %% @private
 call_to_invocation(M, Uri, Entry, Ctxt1) ->
     ReqId = bondy_context:get_id(Ctxt1, session),
-    Args = M#call.args,
-    Payload = M#call.kwargs,
     RegId = bondy_registry_entry:id(Entry),
     Details = invocation_details(M, Uri, Entry, Ctxt1),
-    wamp_message:invocation(ReqId, RegId, Details, Args, Payload).
+    KWArgs = M#call.kwargs,
+
+    %% If this is a callback we add the statically defined arguments to the
+    %% INVOCATION. So that when we relay this invocation, we avoid having to
+    %% look the local copay of the entry to retrieve the arguments.
+    Args =
+        case bondy_registry_entry:is_callback(Entry) of
+            true ->
+                bondy_registry_entry:callback_args(Entry) ++ M#call.args;
+            false ->
+                M#call.args
+        end,
+
+    wamp_message:invocation(ReqId, RegId, Details, Args, KWArgs).
 
 
 %% @private
@@ -1088,6 +1101,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
             Id = bondy_registry_entry:id(Entry),
             Reply = wamp_message:registered(ReqId, Id),
             bondy:send(Ref, Reply);
+
         {error, {already_exists, Entry}} ->
             Policy = bondy_registry_entry:match_policy(Entry),
             Msg = <<
@@ -1127,8 +1141,7 @@ handle_unregister(#unregister{} = M, Ctxt) ->
         Entry ->
             Uri = bondy_registry_entry:uri(Entry),
             %% We authorize first
-            ok = bondy_rbac:authorize(
-                <<"wamp.unregister">>, Uri, Ctxt),
+            ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
             unregister(Uri, M, Ctxt)
     end.
 
@@ -1406,6 +1419,8 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
                             {ok, Ctxt2};
 
                         {ok, #invocation{} = Msg, Ctxt2} ->
+                            %% We sent an INVOCATION and we will be waiting for
+                            %% an asynchronous response (YIELD | ERROR).
                             RealmUri = bondy_context:realm_uri(Ctxt1),
                             Caller = bondy_context:ref(Ctxt1),
                             MsgId = Msg#invocation.request_id,

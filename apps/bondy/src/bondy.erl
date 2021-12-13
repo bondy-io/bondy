@@ -147,7 +147,7 @@ send(From, To, M, Opts0) ->
 
     case bondy_ref:is_local(To) of
         true ->
-            case bondy_ref:is_bridge(To) of
+            case bondy_ref:is_relay(To) of
                 true ->
                     %% TODO Validate this
                     do_send(To, {forward, M, From}, Opts);

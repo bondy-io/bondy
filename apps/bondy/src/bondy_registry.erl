@@ -230,17 +230,33 @@ add(Entry) ->
     Opts :: map(),
     CtxtOrRef :: bondy_context:t() | bondy_ref:t()) ->
     {ok, Entry :: bondy_registry_entry:t(), IsFirstEntry :: boolean()}
-    | {error, {already_exists, bondy_registry_entry:t()}}.
+    | {error, {already_exists, bondy_registry_entry:t()} | any()}.
 
 add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
     add(Type, Uri, Opts, bondy_context:ref(Ctxt));
 
-add(registration, Uri, Opts, Ref) ->
+add(registration, Uri, Opts0, Ref) ->
     case bondy_ref:target(Ref) of
-        {callback, _} ->
-            add_callback_registration(Uri, Opts, Ref);
+        {callback, MF} ->
+            Args = maps:get(callback_args, Opts0, []),
+
+            case bondy_wamp_callback:validate_target(MF, Args) of
+                true ->
+                    Opts1 = maps:without([callback_args], Opts0),
+                    %% In the case of callbacks we do not allow shared
+                    %% registrations.
+                    %% This means we cannot have multiple registrations for the
+                    %% same URI associated to the same Target.
+                    Opts = Opts1#{
+                        invoke => ?INVOKE_SINGLE,
+                        callback_args => Args
+                    },
+                    add_registration(Uri, Opts, Ref);
+                false ->
+                    {error, {invalid_callback, erlang:append_element(MF, Args)}}
+            end;
         _ ->
-            add_process_registration(Uri, Opts, Ref)
+            add_registration(Uri, Opts0, Ref)
     end;
 
 add(subscription = Type, Uri, Opts, Ref) ->
@@ -353,12 +369,15 @@ remove_all(Type, RealmUri, Node, SessionId) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(Key :: bondy_registry_entry:key()) -> any().
+-spec lookup(Key :: bondy_registry_entry:key()) ->
+    bondy_registry_entry:t() | {error, not_found}.
 
 lookup(Key) ->
     Type = bondy_registry_entry:type(Key),
     RealmUri = bondy_registry_entry:realm_uri(Key),
-    case plum_db:get(full_prefix(Type, RealmUri), Key) of
+    FP = full_prefix(Type, RealmUri),
+
+    case plum_db:get(FP, Key) of
         undefined ->
             {error, not_found};
         Entry ->
@@ -930,43 +949,7 @@ prefix(registration, RealmUri) ->
 
 
 %% @private
-add_callback_registration(Uri, Opts, Ref) ->
-    %% Adds a local/internal registration using a callback module (no process)
-    Type = registration,
-    RealmUri = bondy_ref:realm_uri(Ref),
-    Target = bondy_ref:target(Ref),
-    Node = bondy_ref:node(Ref),
-    Prefix = full_prefix(Type, RealmUri),
-
-    %% In the case of callbacks we do not allow shared registrations,
-    %% we even ignore the invoke options in Opts.
-    %% This means we cannot have multiple registrations for the same URI
-    %% associated to the same Target but we could have multiple URIs associated
-    %% with the same Target but we do not allow that at the moment
-    Extra = #{target => Target},
-    Pattern = bondy_registry_entry:key_pattern(Type, RealmUri, Node, Extra),
-    MatchOpts = [
-        {limit, 100},
-        {resolver, lww},
-        {allow_put, true},
-        {remove_tombstones, true}
-    ],
-
-    case plum_db:match(Prefix, Pattern, MatchOpts) of
-        ?EOT ->
-            RegId = registration_id(RealmUri, Opts),
-            NewOpts = maps:without([shared_registrations], Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, Ref, Uri, NewOpts),
-            do_add(Entry);
-
-        {[{_, Entry}], _Cont} ->
-            %% A registration exists for this callback Mod and URI
-            {error, {already_exists, Entry}}
-    end.
-
-
-%% @private
-add_process_registration(Uri, Opts, Ref) ->
+add_registration(Uri, Opts, Ref) ->
     Type = registration,
     RealmUri = bondy_ref:realm_uri(Ref),
     SessionId = bondy_ref:session_id(Ref),
@@ -1010,7 +993,7 @@ add_process_registration(Uri, Opts, Ref) ->
                     %% by other calles.
                     %% We take the first one (we should have checked for
                     %% incosistencies above).
-                    {_, EntryKey} = hd(All),
+                    {_K, EntryKey} = hd(All),
 
                     %% The trie stores plum_db keys, so we fetch the entry from
                     %% plum_db, this should not fail, if it does we have an
@@ -1031,7 +1014,8 @@ add_process_registration(Uri, Opts, Ref) ->
                     %% all subsequent attempts to register a procedure for the
                     %% URI where the value for the invoke option does not match
                     %% that of the initial registration.
-                    SharedRegAllowed = maps:get(shared_registration, Opts, false),
+                    SharedRegAllowed =
+                        maps:get(shared_registration, Opts, false),
 
                     %% Notice we are allowing a session to register the same URI
                     %% multiple times i.e. we are not checking

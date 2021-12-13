@@ -34,46 +34,49 @@
 %% It would be much better is this IDs where 128-bit strings e.g. UUID or
 %% KSUID.
 -record(entry_key, {
-    realm_uri               ::  uri(),
-    node                    ::  node(),
-    target                  ::  wildcard(bondy_ref:target()),
-    session_id              ::  wildcard(maybe(id())),
-    type                    ::  wildcard(entry_type()),
-    entry_id                ::  wildcard(id()),
-    is_proxy = false        ::  wildcard(boolean())
+    realm_uri           ::  uri(),
+    node                ::  node(),
+    target              ::  wildcard(bondy_ref:target()),
+    session_id          ::  wildcard(maybe(id())),
+    type                ::  wildcard(entry_type()),
+    entry_id            ::  wildcard(id()),
+    is_proxy = false    ::  wildcard(boolean())
 }).
 
 -record(entry, {
-    key                     ::  key(),
-    uri                     ::  uri() | atom(),
-    match_policy            ::  binary(),
-    ref                     ::  bondy_ref:t(),
-    created                 ::  pos_integer() | atom(),
-    options                 ::  map(),
-    origin_id               ::  wildcard(id()),
-    origin_ref              ::  wildcard(maybe(bondy_ref:t()))
+    key                 ::  key(),
+    uri                 ::  uri() | atom(),
+    match_policy        ::  binary(),
+    ref                 ::  bondy_ref:t(),
+    callback_args       ::  list(term()),
+    created             ::  pos_integer() | atom(),
+    options             ::  map(),
+    origin_id           ::  wildcard(id()),
+    origin_ref          ::  wildcard(maybe(bondy_ref:t()))
 }).
 
 
--opaque t()                 ::  #entry{}.
--type key()                 ::  #entry_key{}.
--type t_or_key()            ::  t_or_key().
--type entry_type()          ::  registration | subscription.
--type wildcard(T)           ::  T | '_'.
+-opaque t()             ::  #entry{}.
+-type key()             ::  #entry_key{}.
+-type t_or_key()        ::  t_or_key().
+-type entry_type()      ::  registration | subscription.
+-type wildcard(T)       ::  T | '_'.
+-type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
 
--type details_map()         ::  #{
+-type details_map()     ::  #{
     id => id(),
     created => calendar:date(),
     uri => uri(),
     match => binary()
 }.
 
--type external()    ::  #{
+-type external()         ::  #{
     type             :=  entry_type(),
     entry_id         :=  id(),
-    ref              :=  bondy_ref:t(),
     uri              :=  uri(),
     match_policy     :=  binary(),
+    ref              :=  bondy_ref:t(),
+    callback_args    :=  list(term()),
     created          :=  calendar:date(),
     options          :=  map(),
     origin_id        :=  maybe(id()),
@@ -88,6 +91,7 @@
 
 
 -export([callback/1]).
+-export([callback_args/1]).
 -export([created/1]).
 -export([get_option/3]).
 -export([id/1]).
@@ -145,7 +149,7 @@ new(Type, Ref, Uri, Options) ->
 %% -----------------------------------------------------------------------------
 -spec new(entry_type(), id(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RegId, Ref, Uri, Options)
+new(Type, RegId, Ref, Uri, Opts0)
 when Type == registration orelse Type == subscription ->
     RealmUri = bondy_ref:realm_uri(Ref),
     Target = bondy_ref:target(Ref),
@@ -161,13 +165,18 @@ when Type == registration orelse Type == subscription ->
         entry_id = RegId
     },
 
+    MatchPolicy = validate_match_policy(Opts0),
+    CBArgs = maps:get(callback_args, Opts0, []),
+    Opts = maps:without([match, callback_args], Opts0),
+
     #entry{
         key = Key,
         uri = Uri,
-        match_policy = validate_match_policy(Options),
+        match_policy = MatchPolicy,
         ref = Ref,
+        callback_args = CBArgs,
         created = erlang:system_time(seconds),
-        options = parse_options(Type, Options)
+        options = Opts
     }.
 
 
@@ -213,6 +222,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
         uri = RegUri,
         match_policy = MatchPolicy,
         ref = '_',
+        callback_args = '_',
         created = '_',
         options = '_',
         origin_id = '_',
@@ -414,7 +424,7 @@ node(#entry_key{node = Val}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns true if the entry represents a handler local to the caller's
-%% node and false when the handler is located in a cluster peer.
+%% node and false when the target is located in a cluster peer.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_local(t_or_key()) -> boolean().
@@ -427,7 +437,7 @@ is_local(#entry_key{node = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry handler is a callback registration.
+%% @doc Returns true if the entry target is a callback registration.
 %% Callback registrations are only used by Bondy itself to provide some of the
 %% admin and meta APIs.
 %% @end
@@ -445,37 +455,46 @@ is_callback(#entry{key = Key}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the callback module when handler is a callback, otherwise
+%% @doc Returns the callback arguments when target is a callback, otherwise
 %% returns `undefined' or the wilcard value '_' when the entry was used as a
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback(t()) -> wildcard(maybe(module())).
+-spec callback_args(t()) -> list(term()).
 
-callback(#entry{key = Key}) ->
-    callback(Key);
+callback_args(#entry{callback_args = Val}) ->
+    Val.
 
-callback(#entry_key{target = {callback, Val}}) ->
-    Val;
 
-callback(#entry_key{target = '_'}) ->
+%% -----------------------------------------------------------------------------
+%% @doc Returns the callback module when target is a callback, otherwise
+%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% pattern (See {@link pattern/5}).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callback(t()) -> wildcard(maybe(mfargs())).
+
+callback(#entry{key = #entry_key{target = {callback, MF}}} = E) ->
+    erlang:append_element(MF, E#entry.callback_args);
+
+callback(#entry{key = #entry_key{target = '_'}}) ->
     '_';
 
-callback(#entry_key{}) ->
+callback(#entry{}) ->
     undefined.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the value of the subscription's or registration's pid
-%% property when handler is a pid() or a session identifier. Otherwise
+%% property when target is a pid() or a session identifier. Otherwise
 %% returns `undefined' or the wilcard value '_' when the entry was used as a
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
 -spec pid(t_or_key()) -> wildcard(maybe(pid())).
 
-pid(#entry{key = Key}) ->
-    pid(Key);
+pid(#entry{ref = Ref}) ->
+    bondy_ref:pid(Ref);
 
 pid(#entry_key{target = {pid, Bin}}) ->
     bondy_utils:bin_to_pid(Bin);
@@ -603,9 +622,10 @@ to_external(#entry{key = Key} = E) ->
     #{
         type => Key#entry_key.type,
         entry_id => Key#entry_key.entry_id,
-        ref => E#entry.ref,
         uri => E#entry.uri,
         match_policy => E#entry.match_policy,
+        ref => E#entry.ref,
+        callback_args => E#entry.callback_args,
         created => created_format(E#entry.created),
         options => E#entry.options,
         origin_ref => E#entry.origin_ref
@@ -641,7 +661,7 @@ proxy(SessionId, Target0, External) ->
     RealmUri = bondy_ref:realm_uri(OriginRef),
     Node = bondy_peer_service:mynode(),
 
-    Ref = bondy_ref:new(bridge, RealmUri, Target0, SessionId, Node),
+    Ref = bondy_ref:new(relay, RealmUri, Target0, SessionId, Node),
 
     Target = bondy_ref:target(Ref),
 
@@ -719,24 +739,6 @@ validate_match_policy(_, Options) when is_map(Options) ->
         P ->
             error({invalid_match_policy, P})
     end.
-
-
-%% @private
-parse_options(subscription, Opts) ->
-    parse_subscription_options(Opts);
-
-parse_options(registration, Opts) ->
-    parse_registration_options(Opts).
-
-
-%% @private
-parse_subscription_options(Opts) ->
-    maps:without([match], Opts).
-
-
-%% @private
-parse_registration_options(Opts) ->
-    maps:without([match], Opts).
 
 
 %% @private

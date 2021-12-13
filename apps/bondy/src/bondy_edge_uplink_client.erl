@@ -891,7 +891,7 @@ send_session_message(SessionId, Msg, State) ->
 
 handle_session_message(#invocation{} = Msg, SessionId, State) ->
     #{realm := RealmUri} = session(SessionId, State),
-    From = bondy_ref:new(bridge, RealmUri, self(), undefined),
+    From = bondy_ref:new(relay, RealmUri, self(), undefined),
     %% To Needs to come
     To = error,
     bondy_router:forward(Msg, To, From, #{}).
