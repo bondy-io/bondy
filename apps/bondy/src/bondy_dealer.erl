@@ -826,7 +826,8 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                     bondy:send(Caller, Reply, #{origin => Origin}),
                     {ok, Ctxt};
                 _ ->
-                    %% All other cases we need to invoke normally
+                    %% All other cases, including remote callbacks,
+                    %% we need to invoke normally
                     Invocation = call_to_invocation(Msg, Uri, Entry, Ctxt),
                     {ok, Invocation, Ctxt}
             end
@@ -1015,7 +1016,6 @@ format_error(Error, #{error_formatter := Fun}) ->
 %% @private
 call_to_invocation(M, Uri, Entry, Ctxt1) ->
     ReqId = bondy_context:get_id(Ctxt1, session),
-    RegId = bondy_registry_entry:id(Entry),
     Details = invocation_details(M, Uri, Entry, Ctxt1),
     KWArgs = M#call.kwargs,
 
@@ -1028,6 +1028,14 @@ call_to_invocation(M, Uri, Entry, Ctxt1) ->
                 bondy_registry_entry:callback_args(Entry) ++ M#call.args;
             false ->
                 M#call.args
+        end,
+
+    RegId =
+        case bondy_registry_entry:is_proxy(Entry) of
+            true ->
+                bondy_registry_entry:origin_id(Entry);
+            false ->
+                bondy_registry_entry:id(Entry)
         end,
 
     wamp_message:invocation(ReqId, RegId, Details, Args, KWArgs).
@@ -1360,10 +1368,6 @@ no_matching_promise(M) ->
 -spec invoke(id(), uri(), function(), invoke_opts(), bondy_context:t()) -> ok.
 
 invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
-    %% Contrary to pubsub, the _Caller_ can receive the
-    %% invocation even if the _Caller_ is also a _Callee_ registered
-    %% for that procedure.
-
     case match_registrations(ProcUri, Ctxt0, #{}) of
         ?EOT ->
             Error = case format_error(no_such_procedure, Opts) of
