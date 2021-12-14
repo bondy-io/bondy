@@ -176,9 +176,9 @@ handle_message(#publish{} = M, Ctxt) ->
     Opts :: map()) ->
     ok | no_return().
 
-handle_message(#publish{} = M, PeerId, _From,  Opts) ->
+handle_message(#publish{} = M, PeerRef, _From, Opts) ->
     PubId = maps:get(publication_id, Opts),
-    RealmUri = RealmUri = element(1, PeerId),
+    RealmUri = bondy_ref:realm_uri(PeerRef),
     TopicUri = M#publish.topic_uri,
     Args = M#publish.args,
     ArgsKW = M#publish.kwargs,
