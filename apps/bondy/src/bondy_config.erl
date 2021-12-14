@@ -22,15 +22,21 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_config).
 -behaviour(app_config).
+
 -include_lib("kernel/include/logger.hrl").
+-include_lib("partisan/include/partisan.hrl").
+-include("bondy.hrl").
 
--define(APP, bondy).
-
+-define(BONDY, bondy).
 
 -export([get/1]).
 -export([get/2]).
 -export([init/0]).
 -export([set/2]).
+
+-export([node/0]).
+-export([nodestring/0]).
+-export([node_spec/0]).
 
 -compile({no_auto_import, [get/1]}).
 
@@ -47,7 +53,8 @@
 %% @end
 %% -----------------------------------------------------------------------------
 init() ->
-    ok = app_config:init(?APP, #{callback_mod => ?MODULE}),
+    ok = app_config:init(?BONDY, #{callback_mod => ?MODULE}),
+
     ?LOG_NOTICE(#{description => "Bondy configuration initialised"}),
     ok.
 
@@ -60,12 +67,12 @@ init() ->
 -spec get(Key :: list() | atom() | tuple()) -> term().
 
 get(wamp_call_timeout = Key) ->
-    Value = app_config:get(?APP, Key),
-    Max = app_config:get(?APP, wamp_max_call_timeout),
+    Value = app_config:get(?BONDY, Key),
+    Max = app_config:get(?BONDY, wamp_max_call_timeout),
     min(Value, Max);
 
 get(Key) ->
-    app_config:get(?APP, Key).
+    app_config:get(?BONDY, Key).
 
 
 %% -----------------------------------------------------------------------------
@@ -75,7 +82,7 @@ get(Key) ->
 -spec get(Key :: list() | atom() | tuple(), Default :: term()) -> term().
 
 get(Key, Default) ->
-    app_config:get(?APP, Key, Default).
+    app_config:get(?BONDY, Key, Default).
 
 
 %% -----------------------------------------------------------------------------
@@ -88,7 +95,46 @@ set(status, Value) ->
     %% Typically we would change status during application_controller
     %% lifecycle so to avoid a loop (resulting in timeout) we avoid
     %% calling application:set_env/3.
-    persistent_term:put({?APP, status}, Value);
+    persistent_term:put({?BONDY, status}, Value);
 
 set(Key, Value) ->
-    app_config:set(?APP, Key, Value).
+    app_config:set(?BONDY, Key, Value).
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec node() -> atom().
+
+node() ->
+    partisan_config:get(name).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec nodestring() -> nodestring().
+
+nodestring() ->
+    case get(nodestring, undefined) of
+        undefined ->
+            Node = partisan_config:get(name),
+            set(nodestring, atom_to_binary(Node, utf8));
+        Nodestring ->
+            Nodestring
+    end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec node_spec() -> node_spec().
+
+node_spec() ->
+    bondy_peer_service:myself().
+

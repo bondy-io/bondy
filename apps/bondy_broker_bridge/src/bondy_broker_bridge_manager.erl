@@ -364,7 +364,7 @@ init([]) ->
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
-        nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
+        nodename = list_to_binary(atom_to_list(bondy_config:node())),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
     },

@@ -134,6 +134,7 @@
 -export([new/2]).
 -export([new/3]).
 -export([node/1]).
+-export([nodestring/1]).
 -export([peer/1]).
 -export([pid/1]).
 -export([rbac_context/1]).
@@ -375,6 +376,21 @@ node(#session{ref = Ref}) ->
 
 node(Id) when is_integer(Id) ->
     bondy_session:node(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the node of the process managing the transport that the session
+%% identified by Id runs on.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec nodestring(t()) -> nodestring().
+
+nodestring(#session{ref = Ref}) ->
+    bondy_ref:nodestring(Ref);
+
+nodestring(Id) when is_integer(Id) ->
+    bondy_session:nodestring(fetch(Id)).
 
 
 %% -----------------------------------------------------------------------------

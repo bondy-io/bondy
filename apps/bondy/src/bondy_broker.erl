@@ -183,12 +183,11 @@ handle_message(#publish{} = M, PeerId, _From,  Opts) ->
     Args = M#publish.args,
     ArgsKW = M#publish.kwargs,
     Subs = match_subscriptions(TopicUri, RealmUri, #{}),
-
-    Node = bondy_peer_service:mynode(),
+    Nodestring = bondy_config:nodestring(),
 
     Fun = fun(Entry, Acc) ->
-        case bondy_registry_entry:node(Entry) of
-            Node ->
+        case bondy_registry_entry:nodestring(Entry) of
+            Nodestring ->
                 %% We publish to a local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
                 SubsRef = bondy_registry_entry:ref(Entry),
@@ -200,14 +199,18 @@ handle_message(#publish{} = M, PeerId, _From,  Opts) ->
                             SubsId, PubId, Opts, Args, ArgsKW
                         ),
                         bondy:send(SubsRef, Event),
-                        maps:update_with(Node, fun(V) -> V + 1 end, 1, Acc)
+                        maps:update_with(
+                            Nodestring, fun(V) -> V + 1 end, 1, Acc
+                        )
                 end;
             _ ->
                 %% This is a forwarded PUBLISH so we do not forward it
                 Acc
         end
     end,
+
     _Acc1 = publish_fold(Subs, Fun, #{}),
+
     ok.
 
 
@@ -343,7 +346,6 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
 
     %% We find the matching subscriptions
     Subs = match_subscriptions(TopicUri, RealmUri, MatchOpts),
-    MyNode = bondy_peer_service:mynode(),
     PubId = bondy_context:get_id(Ctxt, global),
 
     %% TODO Consider creating a Broadcast tree out of the registry trie results
@@ -390,32 +392,44 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                 %% A remote subscriber.
                 %% We just acummulate the subscribers per peer, later we will
                 %% forward a single message to each peer.
-                Node = bondy_ref:node(SubscriberRef),
-                maps:update_with(Node, fun(V) -> V + 1 end, 1, NodeAcc)
+                Nodestring = bondy_ref:nodestring(SubscriberRef),
+                maps:update_with(Nodestring, fun(V) -> V + 1 end, 1, NodeAcc)
         end
     end,
 
     %% We send the event to the subscribers
-    Nodes0 = publish_fold(Subs, Fun, #{}),
+    Nodestrings0 = publish_fold(Subs, Fun, #{}),
+    MyNodestring = bondy_config:nodestring(),
 
     %% If we have remote subscribers we forward the publication
     case bondy_peer_service:peers() of
         {ok, []} ->
             {ok, PubId};
         {ok, Peers} ->
-            Nodes1 = maps:keys(Nodes0) -- [MyNode],
+            %% Peers is a list of nodes (atoms)
+            Nodestrings1 = maps:keys(Nodestrings0) -- [MyNodestring],
             Set = sets:intersection(
-                sets:from_list(Peers), sets:from_list(Nodes1)),
-            ok = case sets:size(Set) > 0 of
+                sets:from_list(Peers), sets:from_list(Nodestrings1)
+            ),
+            case sets:size(Set) > 0 of
                 true ->
                     M = wamp_message:publish(
-                        ReqId, Opts, TopicUri, Args, ArgsKw),
+                        ReqId, Opts, TopicUri, Args, ArgsKw
+                    ),
                     %% We also forward the PubId
                     FOpts = #{publication_id => PubId},
-                    forward_publication(sets:to_list(Set), M, FOpts, Ctxt);
+
+                    %% We turn nodestrings into atoms here now that we have
+                    %% reduced them via sets
+                    Nodes = [
+                        binary_to_atom(Bin, utf8) || Bin <- sets:to_list(Set)
+                    ],
+                    forward_publication(Nodes, M, FOpts, Ctxt);
+
                 false ->
                     ok
             end,
+
             {ok, PubId}
     end;
 

@@ -261,11 +261,11 @@ add(registration, Uri, Opts0, Ref) ->
 
 add(subscription = Type, Uri, Opts, Ref) ->
     RealmUri = bondy_ref:realm_uri(Ref),
-    Node = bondy_ref:node(Ref),
+    Nodestring = bondy_ref:nodestring(Ref),
     Target = bondy_ref:target(Ref),
 
     %% We do a full match, we should get none or 1 results
-    Extra = #{node => Node, target => Target},
+    Extra = #{node => Nodestring, target => Target},
     Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts, Extra),
     TrieKey = trie_key(Pattern),
 
@@ -809,7 +809,7 @@ init_tries(Iterator, #state{start_time = Now} = State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 maybe_add_to_trie(Entry, Now) ->
-    MyNode = bondy_peer_service:mynode(),
+    MyNode = bondy_config:node(),
     Node = bondy_registry_entry:node(Entry),
     Created = bondy_registry_entry:created(Entry),
     %% Here we asume nodes keep their names

@@ -8,7 +8,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include_lib("bondy.hrl").
+-include("bondy.hrl").
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -815,7 +815,7 @@ proxy_existing(Session, State0) ->
     RealmUri = maps:get(realm, Session),
 
     %% We want only the entries done in this node
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:node(),
 
     %% We want all sessions, callback modules or processes
     SessionId = '_',

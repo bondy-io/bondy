@@ -528,7 +528,7 @@ do_issue(Session, Opts) ->
         authid => Authid,
         authmethod => bondy_session:authmethod(Session),
         issued_by => issuer(Authid, Scope),
-        issued_on => atom_to_binary(bondy_peer_service:mynode(), utf8),
+        issued_on => atom_to_binary(bondy_config:node(), utf8),
         issued_at => IssuedAt,
         expires_at => ExpiresAt,
         scope => Scope,

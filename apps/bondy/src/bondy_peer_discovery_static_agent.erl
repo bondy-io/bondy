@@ -72,7 +72,7 @@
 init(Opts) ->
     try
         #{nodes := All} = maps_utils:validate(Opts, ?OPTS_SPEC),
-        Myself = bondy_peer_service:mynode(),
+        Myself = bondy_config:node(),
 
         State = #state{
             peers = [Node || Node <- All, Node =/= Myself]

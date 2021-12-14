@@ -306,7 +306,7 @@ callees(RealmUri) ->
                 fun(E, Acc) ->
                     Ref = bondy_registry_entry:ref(E),
                     M = #{
-                        node => bondy_ref:node(Ref),
+                        node => bondy_ref:nodestring(Ref),
                         session_id => bondy_ref:session_id(E)
                     },
                     sets:add_element(M, Acc)
@@ -346,7 +346,7 @@ callees(RealmUri, ProcedureUri, Opts) ->
                 fun(E, Acc) ->
                     Ref = bondy_registry_entry:ref(E),
                     M = #{
-                        node => bondy_ref:node(Ref),
+                        node => bondy_ref:nodestring(Ref),
                         session_id => bondy_ref:session_id(E)
                     },
                     sets:add_element(M, Acc)

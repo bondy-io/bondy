@@ -1,6 +1,6 @@
 -module(bondy_retry).
 
--include_lib("bondy.hrl").
+-include("bondy.hrl").
 
 -record(bondy_retry, {
     id                  ::  any(),

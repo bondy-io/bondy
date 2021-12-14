@@ -122,7 +122,7 @@ to_peer_list(DNSMessage) ->
     {ok, Port} = application:get_env(partisan, peer_port),
     %% We are assuming all nodes have the same nodename prefix
     Prefix = "bondy",
-    MyNode = bondy_peer_service:mynode(),
+    MyNode = bondy_config:node(),
 
     L = [
         maps:from_list([

@@ -151,7 +151,7 @@ format_status(Opt, Ctxt0) ->
 new() ->
     #{
         id => bondy_utils:get_id(global),
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         request_id => undefined,
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
         request_timeout => bondy_config:get(request_timeout, undefined)

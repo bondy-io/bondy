@@ -150,7 +150,7 @@
 -spec get(entries(), opts()) -> bondy_registry_entry:t() | {error, noproc}.
 
 get(Entries, Opts) when is_list(Entries) ->
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:node(),
     do_get(iterate(Entries, Opts), Node).
 
 
@@ -252,7 +252,7 @@ prepare_entries(Entries, _) ->
 
 %% @private
 maybe_sort_by_locality(true, L) ->
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:node(),
     Fun = fun(A, B) ->
         case {bondy_registry_entry:node(A), bondy_registry_entry:node(B)} of
             {Node, _} -> true;
@@ -335,7 +335,7 @@ next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
     %% We never invoked this procedure before or we reordered the round
     NewIter = Iter#iterator{entries = T},
 
-    case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
+    case bondy_config:node() =:= bondy_registry_entry:node(H) of
         true ->
             %% The pid of the connection process
             Pid = pid(H),

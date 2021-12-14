@@ -18,7 +18,7 @@
 -module(bondy_ref).
 
 -include_lib("wamp/include/wamp.hrl").
--include_lib("bondy.hrl").
+-include("bondy.hrl").
 
 %% The order of the record fields is defined so that the ref can be used as a
 %% key in an ordered_set store supporting prefix mapping, so do not change it
@@ -30,9 +30,9 @@
 %% - bondy_session
 -record(bondy_ref, {
     realm_uri           ::  uri(),
-    node                ::  wildcard(node()),
-    target              ::  wildcard(target()),
+    nodestring          ::  wildcard(nodestring()),
     session_id          ::  wildcard(maybe(id())),
+    target              ::  wildcard(target()),
     type                ::  wildcard(ref_type())
 }).
 
@@ -69,6 +69,7 @@
 -export([new/4]).
 -export([new/5]).
 -export([node/1]).
+-export([nodestring/1]).
 -export([pattern/5]).
 -export([pid/1]).
 -export([realm_uri/1]).
@@ -107,9 +108,7 @@ new(Type, RealmUri) ->
     t().
 
 new(Type, RealmUri, Target) ->
-    SessionId = undefined,
-    Node = bondy_peer_service:mynode(),
-    new(Type, RealmUri, Target, SessionId, Node).
+    new(Type, RealmUri, Target, undefined).
 
 
 %% -----------------------------------------------------------------------------
@@ -123,7 +122,7 @@ new(Type, RealmUri, Target) ->
     SessionId :: maybe(bondy_session:id())) -> t().
 
 new(Type, RealmUri, Target, SessionId) ->
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:nodestring(),
     new(Type, RealmUri, Target, SessionId, Node).
 
 
@@ -136,10 +135,13 @@ new(Type, RealmUri, Target, SessionId) ->
     RealmUri :: uri(),
     Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session:id()),
-    Node :: node()) -> t().
+    Node :: node() | nodestring()) -> t().
 
-new(Type, RealmUri, Target0, SessionId, Node)
-when is_binary(RealmUri), is_atom(Node) ->
+new(Type, RealmUri, Target, SessionId, Node) when is_atom(Node) ->
+    new(Type, RealmUri, Target, SessionId, atom_to_binary(Node, utf8));
+
+new(Type, RealmUri, Target0, SessionId, Nodestring)
+when is_binary(RealmUri), is_binary(Nodestring) ->
 
     is_integer(SessionId)
         orelse SessionId == undefined
@@ -153,7 +155,7 @@ when is_binary(RealmUri), is_atom(Node) ->
     #bondy_ref{
         type = Type,
         realm_uri = RealmUri,
-        node = Node,
+        nodestring = Nodestring,
         session_id = SessionId,
         target = Target
     }.
@@ -169,10 +171,22 @@ when is_binary(RealmUri), is_atom(Node) ->
     RealmUri :: uri(),
     Target :: wildcard(pid() | mf() | name()),
     SessionId :: wildcard(maybe(bondy_session:id())),
-    Node :: wildcard(node())) -> t().
+    Node :: wildcard(node() | nodestring())) -> t().
+
 
 pattern(Type, RealmUri, Target0, SessionId, Node)
-when is_binary(RealmUri), is_atom(Node) ->
+when is_binary(RealmUri) ->
+
+    Nodestring = case Node of
+        '_' ->
+            Node;
+        Node when is_atom(Node) ->
+            atom_to_binary(Node, utf8);
+        Node when is_binary(Node) ->
+            Node;
+        _ ->
+            error({badarg, {node, Node}})
+    end,
 
     lists:member(Type, ['_', client, internal, relay])
         orelse error({badarg, {type, Type}}),
@@ -186,7 +200,7 @@ when is_binary(RealmUri), is_atom(Node) ->
     #bondy_ref{
         type = Type,
         realm_uri = RealmUri,
-        node = Node,
+        nodestring = Nodestring,
         session_id = SessionId,
         target = Target
     }.
@@ -213,6 +227,20 @@ realm_uri(#bondy_ref{realm_uri = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the Bondy peer binary string name of the node in which the
+%% target of this reference is located and/or connected to.
+%%
+%% See {@link target/1} for a description of the different targets and the
+%% relationship with the node.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec nodestring(t()) -> nodestring().
+
+nodestring(#bondy_ref{nodestring = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
 %% @doc Returns the Bondy peer node in which the target of this reference is
 %% located and/or connected to.
 %%
@@ -222,8 +250,8 @@ realm_uri(#bondy_ref{realm_uri = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec node(t()) -> node().
 
-node(#bondy_ref{node = Val}) ->
-    Val.
+node(#bondy_ref{nodestring = Val}) ->
+    binary_to_atom(Val, utf8).
 
 
 %% -----------------------------------------------------------------------------
@@ -273,8 +301,8 @@ is_internal(Ref) ->
 %% -----------------------------------------------------------------------------
 -spec is_local(Ref :: t()) -> boolean().
 
-is_local(#bondy_ref{node = Node}) ->
-    Node =:= bondy_peer_service:mynode().
+is_local(#bondy_ref{nodestring = Val}) ->
+    Val =:= bondy_config:nodestring().
 
 
 %% -----------------------------------------------------------------------------

@@ -227,11 +227,9 @@ do_init() ->
     %% We initialised the Bondy app config
     ok = bondy_config:init(),
 
-    %% Since advanced.config can be provided by the user at the
-    %% platform_etd_dir location we need to override all those parameters
-    %% which the user should not be able to set and also set
-    %% other parameters which are required for Bondy to operate i.e. all
-    %% dependencies, and are private.
+    %% We override all those parameters which the user should not be able to
+    %% set and also set other parameters which are required for Bondy to
+    %% operate i.e. all dependencies, and are private.
     State = undefined,
     ok = wamp_config:set(extended_details, ?WAMP_EXT_DETAILS),
     ok = wamp_config:set(extended_options, ?WAMP_EXT_OPTIONS),

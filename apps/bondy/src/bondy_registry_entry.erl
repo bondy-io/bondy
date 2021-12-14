@@ -23,6 +23,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
+
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
@@ -35,7 +36,7 @@
 %% KSUID.
 -record(entry_key, {
     realm_uri           ::  uri(),
-    node                ::  node(),
+    nodestring          ::  nodestring(),
     target              ::  wildcard(bondy_ref:target()),
     session_id          ::  wildcard(maybe(id())),
     type                ::  wildcard(entry_type()),
@@ -108,6 +109,7 @@
 -export([new/4]).
 -export([new/5]).
 -export([node/1]).
+-export([nodestring/1]).
 -export([options/1]).
 -export([origin_id/1]).
 -export([origin_ref/1]).
@@ -155,12 +157,12 @@ new(Type, RegId, Ref, Uri, Opts0)
 when Type == registration orelse Type == subscription ->
     RealmUri = bondy_ref:realm_uri(Ref),
     Target = bondy_ref:target(Ref),
-    Node = bondy_ref:node(Ref),
+    Nodestring = bondy_ref:nodestring(Ref),
     SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
         realm_uri = RealmUri,
-        node = Node,
+        nodestring = Nodestring,
         target = Target,
         session_id = SessionId,
         type = Type,
@@ -212,10 +214,14 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
     Target0 = maps:get(target, Extra, '_'),
 
-    PatternRef = bondy_ref:pattern('_', RealmUri, Target0, SessionId, Node),
+    PatternRef = bondy_ref:pattern(
+        '_', RealmUri, Target0, SessionId, Node
+    ),
     Target = bondy_ref:target(PatternRef),
 
-    KeyPattern = key_pattern(Type, RealmUri, Node, Extra#{target => Target}),
+    KeyPattern = key_pattern(
+        Type, RealmUri, Node, Extra#{target => Target}
+    ),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
@@ -243,7 +249,7 @@ key_pattern(Type, Ref) ->
         orelse error({badarg, {ref, Ref}}),
 
     RealmUri = bondy_ref:realm_uri(Ref),
-    Node = bondy_ref:node(Ref),
+    Nodestring = bondy_ref:nodestring(Ref),
     SessionId = bondy_ref:session_id(Ref),
     Target = bondy_ref:target(Ref),
 
@@ -252,7 +258,7 @@ key_pattern(Type, Ref) ->
         session_id => SessionId
     },
 
-    key_pattern(Type, RealmUri, Node, Extra).
+    key_pattern(Type, RealmUri, Nodestring, Extra).
 
 
 %% -----------------------------------------------------------------------------
@@ -260,6 +266,18 @@ key_pattern(Type, Ref) ->
 %% @end
 %% -----------------------------------------------------------------------------
 key_pattern(Type, RealmUri, Node, Extra) ->
+    Nodestring =
+        case Node of
+            '_' ->
+                Node;
+
+            Node when is_atom(Node) ->
+                atom_to_binary(Node, utf8);
+
+            Node when is_binary(Node) ->
+                Node
+        end,
+
     SessionId = maps:get(session_id, Extra, '_'),
     Target = maps:get(target, Extra, '_'),
     EntryId = maps:get(entry_id, Extra, '_'),
@@ -274,16 +292,13 @@ key_pattern(Type, RealmUri, Node, Extra) ->
         orelse RealmUri == '_'
         orelse error({badarg, {realm_uri, RealmUri}}),
 
-    is_atom(Node)
-        orelse error({badarg, {node, Node}}),
-
     is_integer(EntryId)
         orelse EntryId == '_'
         orelse error({badarg, {entry_id, EntryId}}),
 
     #entry_key{
         realm_uri = RealmUri,
-        node = Node,
+        nodestring = Nodestring,
         target = Target,
         session_id = SessionId,
         type = Type,
@@ -299,8 +314,8 @@ key_pattern(Type, RealmUri, Node, Extra) ->
 key_field(realm_uri) ->
     #entry_key.realm_uri;
 
-key_field(node) ->
-    #entry_key.node;
+key_field(nodestring) ->
+    #entry_key.nodestring;
 
 key_field(target) ->
     #entry_key.target;
@@ -417,11 +432,30 @@ realm_uri(#entry_key{realm_uri = Val}) ->
 %% -----------------------------------------------------------------------------
 -spec node(t_or_key()) -> atom().
 
-node(#entry{key = Key}) ->
-    Key#entry_key.node;
+node(#entry{key = #entry_key{nodestring = '_'}}) ->
+    '_';
 
-node(#entry_key{node = Val}) ->
+node(#entry{key = #entry_key{nodestring = Val}}) ->
+    binary_to_atom(Val, utf8);
+
+node(#entry_key{nodestring = Val}) ->
+    binary_to_atom(Val, utf8).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns the value of the subscription's or registration's node property.
+%% This is always the Bondy cluster peer node where the handler exists.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec nodestring(t_or_key()) -> nodestring().
+
+nodestring(#entry{key = Key}) ->
+    Key#entry_key.nodestring;
+
+nodestring(#entry_key{nodestring = Val}) ->
     Val.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -434,8 +468,8 @@ node(#entry_key{node = Val}) ->
 is_local(#entry{key = Key}) ->
     is_local(Key);
 
-is_local(#entry_key{node = Val}) ->
-    bondy_peer_service:mynode() =:= Val.
+is_local(#entry_key{nodestring = Val}) ->
+    Val =:= bondy_config:node().
 
 
 %% -----------------------------------------------------------------------------
@@ -684,9 +718,9 @@ proxy(SessionId, Target0, External) ->
     } = External,
 
     RealmUri = bondy_ref:realm_uri(OriginRef),
-    Node = bondy_peer_service:mynode(),
+    Nodestring = bondy_config:nodestring(),
 
-    Ref = bondy_ref:new(relay, RealmUri, Target0, SessionId, Node),
+    Ref = bondy_ref:new(relay, RealmUri, Target0, SessionId, Nodestring),
 
     Target = bondy_ref:target(Ref),
 
@@ -695,7 +729,7 @@ proxy(SessionId, Target0, External) ->
     #entry{
         key = #entry_key{
             realm_uri = RealmUri,
-            node = Node,
+            nodestring = Nodestring,
             target = Target,
             type = Type,
             session_id = SessionId,

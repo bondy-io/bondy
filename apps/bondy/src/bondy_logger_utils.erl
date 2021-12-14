@@ -21,7 +21,7 @@
 
 set_primary_metadata(Map0) ->
     Map = Map0#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     },
     logger:update_primary_config(#{metadata => Map}).
@@ -34,7 +34,7 @@ set_primary_metadata(Map0) ->
 
 update_primary_metadata(Map) ->
     NewMeta = Map#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     },
     Config = logger:get_primary_config(),
@@ -54,7 +54,7 @@ update_primary_metadata(Map) ->
 
 set_process_metadata(Map) ->
     logger:set_process_metadata(Map#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     }).
 

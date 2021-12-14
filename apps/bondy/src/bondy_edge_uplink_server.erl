@@ -9,7 +9,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include_lib("bondy.hrl").
+-include("bondy.hrl").
 -include_lib("bondy_plum_db.hrl").
 
 
@@ -558,7 +558,7 @@ handle_session_message({forward, From, To, Msg}, SessionId, State) ->
     %% workers by {CallerID, CalleeId}
     Job = fun() ->
         RealmUri = bondy_ref:realm_uri(To),
-        Node = bondy_peer_service:mynode(),
+        Node = bondy_config:node(),
         Myself = bondy_ref:new(
             relay, RealmUri, self(), Node, SessionId
         ),
@@ -601,7 +601,7 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
         ProxyId ->
             %% TODO get ctxt from session once we have real sessions
             RealmUri = session_realm(SessionId, State),
-            Node = bondy_peer_service:mynode(),
+            Node = bondy_config:node(),
             Ctxt = #{
                 realm_uri => RealmUri,
                 node => Node,
@@ -619,10 +619,10 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 
 remove_all_registry_entries(State) ->
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:node(),
 
-    lists:foreach(
-        fun(#{id := SessionId, realm := RealmUri}) ->
+    maps:foreach(
+        fun(RealmUri, SessionId) ->
             Ctxt = #{
                 realm_uri => RealmUri,
                 session_id => SessionId,
@@ -631,9 +631,8 @@ remove_all_registry_entries(State) ->
             _ = bondy_registry:remove_all(registration, Ctxt),
             _ = bondy_registry:remove_all(subscription, Ctxt)
         end,
-        State#state.sessions
-    ),
-    ok.
+        State#state.sessions_by_uri
+    ).
 
 
 %% @private

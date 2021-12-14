@@ -124,6 +124,8 @@ start_phase(init_db_partitions, normal, []) ->
     %% The application master will call this same phase in plum_db
     %% we do nothing here.
     %% plum_db will initialise its partitions from disk.
+
+    %% Partisan must have started and init its config
     ok;
 
 start_phase(configure_features, normal, []) ->
@@ -131,6 +133,9 @@ start_phase(configure_features, normal, []) ->
     %% ok = bondy_oauth2:apply_config(),
     ok = bondy_http_gateway:apply_config(),
     ok;
+
+start_phase(init_registry, normal, []) ->
+    bondy_registry:init_tries();
 
 start_phase(init_admin_listeners, normal, []) ->
     %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
@@ -140,9 +145,6 @@ start_phase(init_admin_listeners, normal, []) ->
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
     bondy_http_gateway:start_admin_listeners();
-
-start_phase(init_registry, normal, []) ->
-    bondy_registry:init_tries();
 
 start_phase(init_db_hashtrees, normal, []) ->
     ok = restore_aae(),
@@ -235,7 +237,8 @@ setup_partisan() ->
     Channels0 = partisan_config:get(channels, []),
     Channels1 = [wamp_peer_messages | Channels0],
     ok = partisan_config:set(channels, Channels1),
-    bondy_config:set(wamp_peer_channel, wamp_peer_messages).
+    ok = bondy_config:set(wamp_peer_channel, wamp_peer_messages),
+    ok.
 
 
 %% @private
