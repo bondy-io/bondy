@@ -20,7 +20,7 @@
 
 
 -record(state, {
-    ref                     ::  atom(),
+    ranch_ref               ::  atom(),
     transport               ::  module(),
     opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
@@ -30,12 +30,15 @@
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     sessions = #{}          ::  #{id() => bondy_edge_session:t()},
     sessions_by_uri = #{}   ::  #{uri() => id()},
+    registrations = #{}     ::  reg_indx(),
     session                 ::  maybe(map()),
     auth_realm              ::  binary(),
     start_ts                ::  pos_integer()
 }).
 
 % -type t()                   ::  #state{}.
+-type reg_indx()            ::  #{SessionId :: id() => proxy_map()}.
+-type proxy_map()           ::  #{OrigEntryId :: id() => ProxyEntryId :: id()}.
 
 %% API.
 -export([start_link/3]).
@@ -67,8 +70,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Ref, Transport, Opts) ->
-    gen_statem:start_link(?MODULE, {Ref, Transport, Opts}, []).
+start_link(RanchRef, Transport, Opts) ->
+    gen_statem:start_link(?MODULE, {RanchRef, Transport, Opts}, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -76,8 +79,8 @@ start_link(Ref, Transport, Opts) ->
 %% This will be deprecated with Ranch 2.0
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Ref, _, Transport, Opts) ->
-    start_link(Ref, Transport, Opts).
+start_link(RanchRef, _, Transport, Opts) ->
+    start_link(RanchRef, Transport, Opts).
 
 
 
@@ -99,9 +102,9 @@ callback_mode() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-init({Ref, Transport, Opts}) ->
+init({RanchRef, Transport, Opts}) ->
     State0 = #state{
-        ref = Ref,
+        ranch_ref = RanchRef,
         transport = Transport,
         opts = Opts,
         idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(10)),
@@ -169,7 +172,7 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connected(enter, connected, State) ->
-    Ref = State#state.ref,
+    Ref = State#state.ranch_ref,
     Transport = State#state.transport,
 
     Opts = [
@@ -207,7 +210,7 @@ when ?SOCKET_DATA(Tag) ->
                 reason => Msg,
                 session_id => SessionId
             }),
-            handle_session_message(Msg, SessionId, State);
+            safe_handle_session_message(Msg, SessionId, State);
         Msg ->
             ?LOG_INFO(#{
                 description => "Got message",
@@ -479,57 +482,139 @@ handle_message({aae_sync, SessionId, Opts}, State) ->
 
 
 %% @private
-handle_session_message({registration_created, Entry}, SessionId, State) ->
-    ok = add_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+safe_handle_session_message(Msg, SessionId, State) ->
+    try
+        handle_session_message(Msg, SessionId, State)
+    catch
+        throw:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Unhandled error",
+                session => SessionId,
+                message => Msg,
+                class => throw,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {keep_state_and_data, [idle_timeout(State)]};
 
-handle_session_message({registration_added, Entry}, SessionId, State) ->
-    ok = add_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while handling session message",
+                session => SessionId,
+                message => Msg,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok = send_message({abort, #{}, server_error}, State),
+            {stop, State}
+    end.
 
-handle_session_message({registration_removed, Entry}, SessionId, State) ->
-    ok = remove_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
 
-handle_session_message({registration_deleted, Entry}, SessionId, State) ->
-    ok = remove_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+%% @private
+handle_session_message({registration_created, Entry}, SessionId, State0) ->
+    State = add_registry_entry(SessionId, Entry, State0),
 
-handle_session_message({subscription_created, Entry}, SessionId, State) ->
-    ok = add_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+    {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_added, Entry}, SessionId, State) ->
-    ok = add_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+handle_session_message({registration_added, Entry}, SessionId, State0) ->
+    State = add_registry_entry(SessionId, Entry, State0),
 
-handle_session_message({subscription_removed, Entry}, SessionId, State) ->
-    ok = remove_registry_entry(SessionId, Entry),
-    {keep_state_and_data, [idle_timeout(State)]};
+    {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_deleted, Entry}, SessionId, State) ->
-    ok = remove_registry_entry(SessionId, Entry),
+handle_session_message({registration_removed, Entry}, SessionId, State0) ->
+    State = remove_registry_entry(SessionId, Entry, State0),
+
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({registration_deleted, Entry}, SessionId, State0) ->
+    State = remove_registry_entry(SessionId, Entry, State0),
+
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({subscription_created, Entry}, SessionId, State0) ->
+    State = add_registry_entry(SessionId, Entry, State0),
+
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({subscription_added, Entry}, SessionId, State0) ->
+    State = add_registry_entry(SessionId, Entry, State0),
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({subscription_removed, Entry}, SessionId, State0) ->
+    State = remove_registry_entry(SessionId, Entry, State0),
+
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
+    State = remove_registry_entry(SessionId, Entry, State0),
+
+    {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({forward, From, To, Msg}, SessionId, State) ->
+    %% This in theory breaks the CALL order guarantee!!!
+    %% We either implement causality or we just use hashing over a pool of
+    %% workers by {CallerID, CalleeId}
+    Job = fun() ->
+        RealmUri = bondy_ref:realm_uri(To),
+        Node = bondy_peer_service:mynode(),
+        Myself = bondy_ref:new(
+            relay, RealmUri, self(), Node, SessionId
+        ),
+        bondy_router:forward(Msg, To, Myself, #{origin => From})
+    end,
+
+    case bondy_router_worker:cast(Job) of
+        ok ->
+            ok;
+        {error, overload} ->
+            %% TODO return proper return ...but we should move this to router
+            error(overload)
+    end,
+
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
 %% @private
-add_registry_entry(SessionId, Entry) ->
+add_registry_entry(SessionId, Entry, State) ->
     ProxyEntry = bondy_registry_entry:proxy(SessionId, self(), Entry),
+    Id = bondy_registry_entry:id(ProxyEntry),
+    OriginId = bondy_registry_entry:origin_id(ProxyEntry),
 
     case bondy_registry:add(ProxyEntry) of
         {ok, _} ->
-            ok;
+            Index0 = State#state.registrations,
+            Index = key_value:put([SessionId, OriginId], Id, Index0),
+            State#state{registrations = Index};
         {error, already_exists} ->
             ok
     end.
 
 
 %% @private
-remove_registry_entry(_SessionId, Entry) ->
-    SessionId = undefined,
-    ProxyEntry = bondy_registry_entry:proxy(Entry, SessionId, self()),
-    bondy_registry:remove(ProxyEntry).
+remove_registry_entry(SessionId, ExtEntry, State) ->
+    Index0 = State#state.registrations,
+    OriginId = maps:get(entry_id, ExtEntry),
 
+    try key_value:get([SessionId, OriginId], Index0) of
+        ProxyId ->
+            %% TODO get ctxt from session once we have real sessions
+            RealmUri = session_realm(SessionId, State),
+            Node = bondy_peer_service:mynode(),
+            Ctxt = #{
+                realm_uri => RealmUri,
+                node => Node,
+                session_id => SessionId
+            },
+
+            ok = bondy_registry:remove(registration, ProxyId, Ctxt),
+
+            Index = key_value:remove([SessionId, OriginId], Index0),
+            State#state{registrations = Index}
+    catch
+        error:badkey ->
+            State
+    end.
 
 
 %% @private

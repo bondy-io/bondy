@@ -224,18 +224,28 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 register_procedures(Session) ->
     RealmUri = bondy_session:realm_uri(Session),
-    Id = bondy_session:id(Session),
-    %% We register wamp.session.{id}.get since we need to route the wamp.
-    %% session.get call to the node where the session lives and we use the
-    %% Registry to do that.
-    Part = bondy_utils:session_id_to_uri_part(Id),
+    SessionId = bondy_session:id(Session),
+    Part = bondy_utils:session_id_to_uri_part(SessionId),
+
+    %% wamp.session.{ID}.get
+    %% -------------------------------------------------------------------------
+    %% The wamp.session.get implementation forwards the call to this dynamic
+    %% URI. This is required becuase sessions are not replicated, so we need a
+    %% way to located the node where the session lives to route the call to it.
+    %% If we have more session methods then we should implement prefix
+    %% registration i.e. wamp.session.{ID}.*
     ProcUri = <<"wamp.session.", Part/binary, ".get">>,
 
+    %% Notice we are implementing this as callback reference,
+    %% this means a different reference per callback. In case we needed to
+    %% support many more callbacks we would be better of using the session
+    %% manager process as target, having a single reference for all procedures,
+    %% reducing memory consumption.
     MF = {bondy_session_api, get},
+    Ref = bondy_ref:new(internal, RealmUri, MF, SessionId),
+
     Args = [RealmUri],
     Opts = #{match => ?PREFIX_MATCH, callback_args => Args},
-    Ref = bondy_ref:new(internal, RealmUri, MF),
-
     {ok, _} = bondy_dealer:register(ProcUri, Opts, Ref),
 
     ok.

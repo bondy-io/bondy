@@ -289,6 +289,126 @@ add(subscription = Type, Uri, Opts, Ref) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup(Key :: bondy_registry_entry:key()) ->
+    bondy_registry_entry:t() | {error, not_found}.
+
+lookup(Key) ->
+    Type = bondy_registry_entry:type(Key),
+    RealmUri = bondy_registry_entry:realm_uri(Key),
+    FP = full_prefix(Type, RealmUri),
+
+    case plum_db:get(FP, Key) of
+        undefined ->
+            {error, not_found};
+        Entry ->
+            Entry
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
+    lookup(Type, EntryId, RealmUri, #{}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, '_', #{entry_id => EntryId}
+    ),
+    MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
+
+    %% TODO match Details
+    case plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts) of
+        [] ->
+            {error, not_found};
+        [{_, Entry}] ->
+            Entry
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(bondy_registry_entry:t()) -> ok.
+
+remove(Entry) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Key = bondy_registry_entry:key(Entry),
+
+    case plum_db:take(full_prefix(Entry), Key) of
+        undefined ->
+            ok;
+        StoredEntry ->
+            Uri = bondy_registry_entry:uri(StoredEntry),
+            ok = delete_from_trie(StoredEntry),
+            _ = decr_counter(RealmUri, Uri, 1),
+            ok
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(
+    bondy_registry_entry:entry_type(), id(), bondy_context:t()) ->
+    ok | {error, not_found}.
+
+remove(Type, EntryId, Ctxt) ->
+    remove(Type, EntryId, Ctxt, undefined).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec remove(
+    bondy_registry_entry:entry_type(),
+    id(),
+    bondy_context:t(),
+    task() | undefined) -> ok.
+
+remove(Type, EntryId, Ctxt, Task)
+when is_function(Task, 2) orelse Task == undefined ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    Node = bondy_context:node(Ctxt),
+    SessionId = bondy_context:session_id(Ctxt),
+    Prefix = full_prefix(Type, RealmUri),
+
+    Pattern = bondy_registry_entry:key_pattern(
+        Type, RealmUri, Node, #{session_id => SessionId, entry_id => EntryId}
+    ),
+
+    MatchOpts = [
+        {limit, 1},
+        {resolver, lww},
+        {remove_tombstones, true}
+    ],
+
+    case plum_db:match(Prefix, Pattern, MatchOpts) of
+        ?EOT ->
+            ok;
+        {[{Key, Entry}], _} ->
+            %% We delete the entry from plum_db. This will broadcast the delete
+            %% amongst the nodes in the cluster
+            ok = plum_db:delete(Prefix, Key),
+            ok = delete_from_trie(Entry),
+            maybe_execute(maybe_fun(Task, Ctxt), Entry)
+    end.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
 %% Removes all entries matching the context's realm and session_id (if any).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -363,105 +483,6 @@ remove_all(Type, RealmUri, Node, SessionId) ->
     ],
     Matches = plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts),
     do_remove_all(Matches, SessionId, undefined).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec lookup(Key :: bondy_registry_entry:key()) ->
-    bondy_registry_entry:t() | {error, not_found}.
-
-lookup(Key) ->
-    Type = bondy_registry_entry:type(Key),
-    RealmUri = bondy_registry_entry:realm_uri(Key),
-    FP = full_prefix(Type, RealmUri),
-
-    case plum_db:get(FP, Key) of
-        undefined ->
-            {error, not_found};
-        Entry ->
-            Entry
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
-    lookup(Type, EntryId, RealmUri, #{}).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
-    Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, '_', #{entry_id => EntryId}
-    ),
-    MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
-
-    %% TODO match Details
-    case plum_db:match(full_prefix(Type, RealmUri), Pattern, MatchOpts) of
-        [] ->
-            {error, not_found};
-        [{_, Entry}] ->
-            Entry
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove(bondy_registry_entry:t()) -> ok.
-
-remove(Entry) ->
-    RealmUri = bondy_registry_entry:realm_uri(Entry),
-    Key = bondy_registry_entry:key(Entry),
-    case plum_db:take(full_prefix(Entry), Key) of
-        undefined ->
-            ok;
-        Entry ->
-            Uri = bondy_registry_entry:uri(Entry),
-            ok = delete_from_trie(Entry),
-            _ = decr_counter(RealmUri, Uri, 1),
-            ok
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove(
-    bondy_registry_entry:entry_type(), id(), bondy_context:t()) ->
-    ok | {error, not_found}.
-
-remove(Type, EntryId, Ctxt) ->
-    remove(Type, EntryId, Ctxt, undefined).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec remove(
-    bondy_registry_entry:entry_type(),
-    id(),
-    bondy_context:t(),
-    task() | undefined) -> ok.
-
-remove(Type, EntryId, Ctxt, Task)
-when is_function(Task, 2) orelse Task == undefined ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Node = bondy_context:node(Ctxt),
-    SessionId = bondy_context:session_id(Ctxt),
-    Key = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, #{session_id => SessionId, entry_id => EntryId}),
-    do_remove(Key, Ctxt, Task).
 
 
 %% -----------------------------------------------------------------------------
@@ -711,6 +732,9 @@ handle_info(
             %% We got a delete for an entry we do not know anymore.
             %% This happens when the registry has just been reset
             %% as we do not persist registrations any more
+            %%
+            %% TODO use the future plum_db:erase instead of delete and avoid
+            %% tombstones being reseurfaced
             ok;
         Entry ->
             %% We only add to trie
@@ -858,19 +882,6 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
     ok.
 
 
-%% @private
-do_remove(Key, Ctxt, Task) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
-    Type = bondy_registry_entry:type(Key),
-    %% We delete the entry from plum_db. This will broadcast the delete
-    %% amongst the nodes in the cluster
-    case plum_db:take(full_prefix(Type, RealmUri), Key) of
-        undefined ->
-            ok;
-        Entry ->
-            ok = delete_from_trie(Entry),
-            maybe_execute(maybe_fun(Task, Ctxt), Entry)
-    end.
 
 
 %% @private

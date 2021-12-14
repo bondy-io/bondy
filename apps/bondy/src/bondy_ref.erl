@@ -300,8 +300,6 @@ is_type(_) ->
     false.
 
 
-
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns the target of the reference. A target is a process (`pid()') a
 %% gproc registered name (`{name, GprocName}') or a callback (`mf()').

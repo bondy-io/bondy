@@ -117,14 +117,12 @@ send(Ref, M) ->
 -spec send(To :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
     ok | no_return().
 
-send(To, M, Opts0) ->
+send(To, M, Opts) ->
     bondy_ref:is_local(To)
         orelse error(not_my_node),
 
     wamp_message:is_message(M)
         orelse error(invalid_wamp_message),
-
-    Opts = validate_send_opts(Opts0),
 
     do_send(To, M, Opts).
 
@@ -135,7 +133,8 @@ send(To, M, Opts0) ->
     Msg :: wamp_message(),
     Opts :: map()) -> ok | no_return().
 
-send(From, To, M, Opts0) ->
+
+send(From, To, M, Opts) ->
     bondy_ref:realm_uri(From) =:= bondy_ref:realm_uri(To)
         orelse error(not_same_realm),
 
@@ -143,21 +142,39 @@ send(From, To, M, Opts0) ->
     wamp_message:is_message(M)
         orelse error(invalid_wamp_message),
 
-    Opts = validate_send_opts(Opts0),
+    Origin = maps:get(origin, Opts, undefined),
+    Relay = maps:get(via, Opts, undefined),
+    IsDestLocal = bondy_ref:is_local(To),
 
-    case bondy_ref:is_local(To) of
-        true ->
-            case bondy_ref:is_relay(To) of
-                true ->
-                    %% TODO Validate this
-                    do_send(To, {forward, M, From}, Opts);
-                false ->
-                    do_send(To, M, Opts)
-            end;
-        false ->
-            bondy_peer_wamp_relay:forward(From, To, M, Opts)
+    Origin == undefined
+        orelse not bondy_ref:is_local(Origin)
+        orelse error({badarg, Origin}),
+
+    case {Relay, Origin, IsDestLocal} of
+        {undefined, undefined, true} ->
+            do_send(To, M, Opts);
+
+        {undefined, undefined, false} ->
+            %% TODO this will be replaced with a dynamic call to the
+            %% Relay process i.e. #{origin => RelayRef} with target pid
+            %% or {bondy_peer_wamp_relay, forward}
+            bondy_peer_wamp_relay:forward(From, To, M, Opts);
+
+        {Relay, undefined, true} ->
+            send_via(From, To, M, Opts, Relay);
+
+        {undefined, Origin, true} ->
+            send_via(From, Origin, M, Opts, To)
     end.
 
+
+
+send_via(From, To, Msg, Opts, Relay) ->
+    bondy_ref:is_local(Relay)
+        andalso bondy_ref:is_relay(Relay)
+        orelse error({badrelay, Relay}),
+
+    do_send(Relay, {forward, From, To, Msg}, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -361,21 +378,6 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 
 
 
-validate_send_opts(Opts) ->
-    maps_utils:validate(Opts, #{
-        timeout => #{
-            required => true,
-            datatype => timeout,
-            default => ?SEND_TIMEOUT
-        },
-        enqueue => #{
-            required => true,
-            datatype => boolean,
-            default => false
-        }
-    }).
-
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -417,7 +419,7 @@ maybe_enqueue(undefined, _, _) ->
     false;
 
 maybe_enqueue(_SessionId, _M, _Opts) ->
-    % case maps:get(enqueue, Opts),
+    % case maps:get(enqueue, Opts, false),
     %     true ->
     %         %% TODO Enqueue events only for session resumption
     %         true;

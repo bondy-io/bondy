@@ -109,6 +109,8 @@
 -export([new/5]).
 -export([node/1]).
 -export([options/1]).
+-export([origin_id/1]).
+-export([origin_ref/1]).
 -export([pattern/4]).
 -export([pattern/5]).
 -export([pid/1]).
@@ -534,6 +536,29 @@ ref(#entry{ref = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the origin ref() of the subscription or registration
+%% This value is only present when the entry is a proxy.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec origin_ref(t()) -> maybe(bondy_ref:t()).
+
+origin_ref(#entry{origin_ref = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the origin ref() of the subscription or registration.
+%% This value is only present when the entry is a proxy.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec origin_id(t()) -> maybe(id()).
+
+origin_id(#entry{origin_id = Val}) ->
+    Val.
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the uri this entry is about i.e. either a subscription topic_uri or
 %% a registration procedure_uri.
@@ -673,6 +698,7 @@ proxy(SessionId, Target0, External) ->
             node = Node,
             target = Target,
             type = Type,
+            session_id = SessionId,
             entry_id = Id,
             is_proxy = true
         },

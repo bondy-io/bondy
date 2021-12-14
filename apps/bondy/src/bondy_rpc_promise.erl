@@ -186,6 +186,17 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 %% will receive an error with reason "wamp.error.timeout".
 %% @end
 %% -----------------------------------------------------------------------------
+enqueue(RealmUri, #bondy_rpc_promise{call_id = undefined} = P, Timeout) ->
+    InvocationId = P#bondy_rpc_promise.invocation_id,
+    Caller = P#bondy_rpc_promise.caller,
+    Callee = P#bondy_rpc_promise.callee,
+
+    Key = {RealmUri, InvocationId, Callee, undefined, Caller},
+
+    Secs = erlang:round(Timeout / 1000),
+    Opts = #{key => Key, ttl => Secs},
+    tuplespace_queue:enqueue(?INVOCATION_QUEUE, P, Opts);
+
 enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,

@@ -298,14 +298,15 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
 
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {receive_message, SessionId, M}, State) ->
+connected(
+    internal, {receive_message, SessionId, {forward, From, To, Msg}}, State) ->
     ?LOG_INFO(#{
         description => "Got session message",
         session_id => SessionId,
-        message => M
+        message => Msg
     }),
 
-    ok = handle_session_message(M, SessionId, State),
+    ok = handle_session_message(Msg, From, To, SessionId, State),
 
     {keep_state, State, idle_timeout(State)};
 
@@ -325,14 +326,17 @@ when ?SOCKET_DATA(Tag) ->
     {keep_state_and_data, Actions};
 
 connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
-    ?LOG_INFO(#{description => "Socket closed", reason => normal}),
+    ?LOG_INFO(#{
+        description => "Socket closed",
+        reason => closed_by_remote
+    }),
     ok = on_disconnect(State),
-    {stop, normal};
+    {next_state, connecting, State};
 
 connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
     ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
     ok = on_disconnect(State),
-    {stop, Reason};
+    {next_state, connecting, State};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
     ?LOG_WARNING(#{description => "Connection timeout, sending first ping"}),
@@ -889,12 +893,10 @@ send_session_message(SessionId, Msg, State) ->
 %     end,
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
-handle_session_message(#invocation{} = Msg, SessionId, State) ->
+handle_session_message(Msg, From, To, SessionId, State) ->
     #{realm := RealmUri} = session(SessionId, State),
-    From = bondy_ref:new(relay, RealmUri, self(), undefined),
-    %% To Needs to come
-    To = error,
-    bondy_router:forward(Msg, To, From, #{}).
+    Myself = bondy_ref:new(relay, RealmUri, self(), SessionId),
+    bondy_router:forward(Msg, To, From, #{via => Myself}).
 
 
 
