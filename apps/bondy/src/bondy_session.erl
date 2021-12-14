@@ -434,13 +434,16 @@ authid(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authrole(t()) -> bondy_rbac_group:name().
+-spec authrole(t()) -> maybe(bondy_rbac_group:name()).
 
 authrole(#session{authrole = undefined, authroles = []}) ->
-    undefined;
+    <<"undefined">>;
+
+authrole(#session{authrole = undefined, authroles = [Role]}) ->
+    Role;
 
 authrole(#session{authrole = undefined}) ->
-    <<"">>;
+    <<"multiple">>;
 
 authrole(#session{authrole = Val}) ->
     Val;
@@ -691,7 +694,7 @@ to_external(#session{} = S) ->
     #{
         session => S#session.id,
         authid => S#session.authid,
-        authrole => S#session.authrole,
+        authrole => authrole(S),
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
         'x_authroles' => S#session.authroles,
