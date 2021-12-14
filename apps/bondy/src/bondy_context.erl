@@ -255,6 +255,10 @@ peername(#{peer := Val}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec node(t()) -> atom().
+
+node(#{session := Session}) ->
+    bondy_session:node(Session);
+
 node(#{node := Val}) -> Val.
 
 
@@ -436,6 +440,10 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
 session_id(#{session := S}) ->
     bondy_session:id(S);
 
+session_id(#{session_id := Val}) ->
+    %% TODO remove this once we force everyone to have sessions
+    Val;
+
 session_id(#{}) ->
     undefined.
 
@@ -509,7 +517,6 @@ set_session(Ctxt, S) ->
 -spec ref(t()) -> bondy_ref:t().
 
 ref(#{session := S}) ->
-    %% TODO evaluate caching this as it should be immutable
     bondy_session:ref(S).
 
 
