@@ -144,7 +144,8 @@ when T =/= undefined andalso S =/= undefined ->
     NewState = State#state{transport = undefined, socket = undefined},
     terminate(Reason, StateName, NewState);
 
-terminate(_Reason, _StateName, _StateData) ->
+terminate(_Reason, _StateName, State) ->
+    ok = remove_all_registry_entries(State),
     %% TODO remove all registrations and subscriptions
     % ok = bondy_dealer:unregister(self()),
     % bondy_remove_all(Type, RealmUri, Node, SessionId)
@@ -615,6 +616,24 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
         error:badkey ->
             State
     end.
+
+
+remove_all_registry_entries(State) ->
+    Node = bondy_peer_service:mynode(),
+
+    lists:foreach(
+        fun(#{id := SessionId, realm := RealmUri}) ->
+            Ctxt = #{
+                realm_uri => RealmUri,
+                session_id => SessionId,
+                node => Node
+            },
+            _ = bondy_registry:remove_all(registration, Ctxt),
+            _ = bondy_registry:remove_all(subscription, Ctxt)
+        end,
+        State#state.sessions
+    ),
+    ok.
 
 
 %% @private
