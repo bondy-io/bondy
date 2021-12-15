@@ -20,6 +20,8 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(TYPES, [relay, bridge_relay, internal, client]).
+
 %% The order of the record fields is defined so that the ref can be used as a
 %% key in an ordered_set store supporting prefix mapping, so do not change it
 %% unless you know exactly what you are doing.
@@ -28,19 +30,31 @@
 %% - bondy_registry
 %% - bondy_rpc_promise
 %% - bondy_session
+%% TODO consider reeimplementing this as
+% -record(bondy_ref, {
+%     %% <<"bondy:ref:{type}:{realm}:{node}:{random}">>
+%     id                  ::  binary(),
+%     %% WAMP session id integer
+%     session_id          ::  wildcard(maybe(id())),
+%     target_type         ::  wildcard(target_type()),
+%     target_handle       ::  binary() | term | mf()
+% }).
+
 -record(bondy_ref, {
     realm_uri           ::  uri(),
     nodestring          ::  wildcard(nodestring()),
     session_id          ::  wildcard(maybe(id())),
+    %% TODO split target into target_type and target_handle
     target              ::  wildcard(target()),
     type                ::  wildcard(ref_type())
 }).
 
 -type t()               ::  #bondy_ref{}.
--type relay_ref()       ::  #bondy_ref{type :: relay}.
--type client_ref()      ::  #bondy_ref{type :: client}.
--type internal_ref()    ::  #bondy_ref{type :: internal}.
--type ref_type()        ::  internal | relay | client.
+-type relay()           ::  #bondy_ref{type :: relay}.
+-type bridge_relay()    ::  #bondy_ref{type :: bridge_relay}.
+-type client()          ::  #bondy_ref{type :: client}.
+-type internal()        ::  #bondy_ref{type :: internal}.
+-type ref_type()        ::  relay | bridge_relay | internal | client.
 -type target()          ::  {pid, binary()}
                             | {name, term()}
                             | {callback, mf()}.
@@ -50,19 +64,22 @@
 -type wildcard(T)       ::  T | '_'.
 
 -export_type([t/0]).
--export_type([relay_ref/0]).
--export_type([client_ref/0]).
--export_type([internal_ref/0]).
+-export_type([relay/0]).
+-export_type([bridge_relay/0]).
+-export_type([client/0]).
+-export_type([internal/0]).
 -export_type([mf/0]).
 -export_type([target/0]).
 
 -export([callback/1]).
 -export([is_relay/1]).
+-export([is_bridge_relay/1]).
 -export([is_client/1]).
 -export([is_internal/1]).
 -export([is_local/1]).
 -export([is_self/1]).
 -export([is_type/1]).
+-export([types/0]).
 -export([name/1]).
 -export([new/2]).
 -export([new/3]).
@@ -147,7 +164,7 @@ when is_binary(RealmUri), is_binary(Nodestring) ->
         orelse SessionId == undefined
         orelse error({badarg, {session_id, SessionId}}),
 
-    lists:member(Type, [client, internal, relay])
+    lists:member(Type, ?TYPES)
         orelse error({badarg, {type, Type}}),
 
     Target = validate_target(Target0),
@@ -188,7 +205,7 @@ when is_binary(RealmUri) ->
             error({badarg, {node, Node}})
     end,
 
-    lists:member(Type, ['_', client, internal, relay])
+    lists:member(Type, ?TYPES ++ ['_'])
         orelse error({badarg, {type, Type}}),
 
     Target = validate_target(Target0, _AllowPattern = true),
@@ -214,6 +231,16 @@ when is_binary(RealmUri) ->
 
 type(#bondy_ref{type = Val}) ->
     Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns all the supported reference types.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec types() -> [ref_type()].
+
+types() ->
+    ?TYPES.
 
 
 %% -----------------------------------------------------------------------------
@@ -272,6 +299,16 @@ session_id(#bondy_ref{session_id = Val}) ->
 
 is_relay(Ref) ->
     relay =:= type(Ref).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_bridge_relay(t()) -> boolean().
+
+is_bridge_relay(Ref) ->
+    bridge_relay =:= type(Ref).
 
 
 %% -----------------------------------------------------------------------------

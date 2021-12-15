@@ -105,11 +105,12 @@
 
 
 %% API
--export([start_link/0]).
--export([forward/4]).
+-export([async_forward/3]).
 -export([broadcast/4]).
--export([async_forward/4]).
+-export([forward/3]).
 -export([receive_ack/2]).
+-export([ref/1]).
+-export([start_link/0]).
 
 %% GEN_SERVER CALLBACKS
 -export([init/1]).
@@ -157,13 +158,10 @@ start_link() ->
 %% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(bondy_ref:t(), bondy_ref:t(), wamp_message(), map()) ->
-    ok | no_return().
+-spec forward(Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) -> ok.
 
-forward(From, To, Msg, Opts) ->
-    {ok, Id} = async_forward(From, To, Msg, Opts),
-    Timeout = maps:get(timeout, Opts, ?FORWARD_TIMEOUT),
-    receive_ack(Id, Timeout).
+forward(To, Msg, Opts) ->
+    gen_server:cast(?MODULE, {forward, Msg, To, Opts}).
 
 
 %% -----------------------------------------------------------------------------
@@ -171,10 +169,10 @@ forward(From, To, Msg, Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec async_forward(
-    bondy_ref:t(), bondy_ref:t(), wamp_message(), map()) ->
+    Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
     {ok, id()} | no_return().
 
-async_forward(From, To, Msg, Opts) ->
+async_forward(To, Msg, #{from := From} = Opts) ->
     %% Remote monitoring is not possible given no connections are maintained
     %% directly between nodes.
     %% If remote monitoring is required, Partisan can additionally connect
@@ -207,7 +205,7 @@ broadcast(From, Nodes, M, Opts) ->
             To = bondy_ref:new(
                 internal, RealmUri, {?MODULE, handle, []}, Node
             ),
-            {ok, Id} = async_forward(From, To, M, Opts),
+            {ok, Id} = async_forward(To, M, Opts),
             {Id, Node}
         end
         || Node <- Nodes
@@ -239,6 +237,20 @@ receive_ack(Id, Timeout) ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec ref(RealmUri :: uri()) -> bondy_ref:t().
+
+ref(RealmUri) ->
+    %% We use our name which we registered using gproc on init/1
+    %% By using a registered name we might be able to continue routing messages
+    %% after a relay crash (provided it comes back on time).
+    bondy_ref:new(relay, RealmUri, ?MODULE).
+
+
+
 %% =============================================================================
 %% API : GEN_SERVER CALLBACKS
 %% =============================================================================
@@ -246,6 +258,7 @@ receive_ack(Id, Timeout) ->
 
 
 init([]) ->
+    true = gproc:reg({n, l, ?MODULE}),
     {ok, #state{}}.
 
 
@@ -258,15 +271,30 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast({forward, Msg, BinPid} = Event, State) ->
+handle_cast({forward, PeerMsg, BinPid} = Event, State) ->
     try
-        cast_message(BinPid, Msg)
+        cast_message(PeerMsg, BinPid)
     catch
         Class:Reason:Stacktrace ->
             %% @TODO publish metaevent
             ?LOG_ERROR(#{
                 class => Class,
                 event => Event,
+                reason => Reason,
+                stacktrace => Stacktrace
+            })
+    end,
+    {noreply, State};
+
+handle_cast({forward, _, _, _} = Msg, State) ->
+    try
+        cast_message(Msg)
+    catch
+        Class:Reason:Stacktrace ->
+            %% @TODO publish metaevent
+            ?LOG_ERROR(#{
+                event => Msg,
+                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
             })
@@ -294,36 +322,99 @@ handle_cast({'receive', #peer_ack{from = FromRef} = Msg, BinPid}, State) when is
     end,
     {noreply, State};
 
-handle_cast({'receive', Msg, BinPid}, State) ->
+handle_cast({'receive', {forward, Msg, To, Opts0} = M}, State) ->
     %% We are receiving a message from peer
     try
-        bondy_peer_message:is_message(Msg) orelse throw(badarg),
 
         %% This in theory breaks the CALL order guarantee!!!
         %% We either implement causality or we just use hashing over a pool of
         %% workers by {CallerID, CalleeId}
         Job = fun() ->
-            Payload = bondy_peer_message:payload(Msg),
-            PeerId = bondy_peer_message:to(Msg),
-            From = bondy_peer_message:from(Msg),
-            Opts = bondy_peer_message:options(Msg),
-            ok = bondy_router:forward(Payload, PeerId, From, Opts),
+            RealmUri = bondy_ref:realm_uri(To),
+            Myself = bondy_ref:new(relay, RealmUri),
+            Opts = Opts0#{via => Myself},
+
+            try
+                bondy_router:forward(Msg, To, Opts)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while forwarding peer message",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace,
+                        message => M
+                    }),
+                    ok
+            end
+        end,
+
+        case bondy_router_worker:cast(Job) of
+            ok ->
+                ok;
+            {error, overload} ->
+                %% TODO send back WAMP message
+                %% We should synchronoulsy call bondy_router:forward to get back a WAMP ERROR we can send back to the Opts.from
+                ?LOG_DEBUG(#{
+                    description => "Error while forwarding peer message",
+                    reason => overload
+                }),
+                ok
+        end,
+
+        {noreply, State}
+
+    catch
+        Class:Reason:Stacktrace ->
+            %% TODO send back WAMP message
+            %% TODO publish metaevent
+            ?LOG_ERROR(#{
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            {noreply, State}
+    end;
+
+handle_cast({'receive', PeerMsg, BinPid}, State) ->
+    %% TODO DEPRECATED
+    %% We are receiving a message from peer
+    try
+        bondy_peer_message:is_message(PeerMsg) orelse throw(badarg),
+
+        %% This in theory breaks the CALL order guarantee!!!
+        %% We either implement causality or we just use hashing over a pool of
+        %% workers by {CallerID, CalleeId}
+        Job = fun() ->
+            To = bondy_peer_message:to(PeerMsg),
+            From = bondy_peer_message:from(PeerMsg),
+            Msg = bondy_peer_message:payload(PeerMsg),
+            Opts0 = bondy_peer_message:options(PeerMsg),
+
+            RealmUri = bondy_ref:realm_uri(To),
+            Opts = Opts0#{
+                from => From,
+                via => bondy_ref:new(relay, RealmUri)
+            },
+            ok = bondy_router:forward(Msg, To, Opts),
+
             %% We send the ack to the remote node
-            cast_message(peer_ack(Msg), BinPid)
+            cast_message(peer_ack(PeerMsg), BinPid)
         end,
         ok = case bondy_router_worker:cast(Job) of
             ok ->
                 ok;
             {error, overload} ->
-                cast_message(peer_error(overload, Msg), BinPid)
+                cast_message(peer_error(overload, PeerMsg), BinPid)
         end,
 
         {noreply, State}
 
     catch
         throw:badarg ->
-            ok = cast_message(peer_error(badarg, Msg), BinPid),
+            ok = cast_message(peer_error(badarg, PeerMsg), BinPid),
             {noreply, State};
+
         Class:Reason:Stacktrace ->
             %% TODO publish metaevent
             ?LOG_ERROR(#{
@@ -331,7 +422,7 @@ handle_cast({'receive', Msg, BinPid}, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            ok = cast_message(peer_error(Reason, Msg), BinPid),
+            ok = cast_message(peer_error(Reason, PeerMsg), BinPid),
             {noreply, State}
     end.
 
@@ -379,6 +470,14 @@ receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
 receive_broadcast_acks([], _, Good, Bad) ->
     {ok, Good, Bad}.
 
+
+cast_message({forward, _, To, _} = M) ->
+    Node = bondy_ref:node(To),
+    Manager = bondy_peer_service:manager(),
+    Channel = bondy_config:get(wamp_peer_channel, default),
+    ServerRef = ?MODULE,
+
+    Manager:cast_message(Node, Channel, ServerRef, {'receive', M}).
 
 
 %% @private

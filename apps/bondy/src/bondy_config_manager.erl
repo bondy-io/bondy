@@ -78,10 +78,8 @@
     ]},
     {invocation, [
         'x_session_info',
-        %% The following are used internally by Bondy on the edge uplink
-        %% communication
-        origin_id,
-        origin_ref
+        %% Use by bondy relays
+        'x_call_id'
     ]},
     {result, [
     ]}

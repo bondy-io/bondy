@@ -48,7 +48,7 @@
     %% integer, this is something we need to change on the WAMP SPEC and adopt
     %% in all clients
     id                              ::  integer(),
-    type = client                   ::  client | relay,
+    type = client                   ::  bondy_ref:type(),
     tab                             ::  maybe(ets:tid()),
     realm_uri                       ::  uri(),
     ref                             ::  bondy_ref:t(),
@@ -235,7 +235,7 @@ new(Id, Realm, Opts) when is_map(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec type(t()) -> client | relay.
+-spec type(t()) -> bondy_ref:type().
 
 type(#session{type = Val}) ->
     Val.
@@ -339,7 +339,7 @@ roles(Id) ->
 %% @doc Returns the identifier for the owner of this session
 %% @end
 %% -----------------------------------------------------------------------------
--spec ref(t()) -> bondy_ref:client_ref() | bondy_ref:relay_ref().
+-spec ref(t()) -> bondy_ref:client() | bondy_ref:relay().
 
 ref(#session{ref = Ref}) ->
     Ref;
@@ -816,7 +816,10 @@ parse_details(peer, V, Session) ->
             error({invalid_options, peer})
     end;
 
-parse_details(type, V, Session) when V == client orelse V == relay ->
+parse_details(type, V, Session) ->
+    lists:member(V, bondy_ref:types())
+        orelse error({invalid_options, type}),
+
     Session#session{type = V};
 
 parse_details(_, _, Session) ->

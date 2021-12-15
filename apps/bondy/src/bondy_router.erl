@@ -109,7 +109,6 @@
 -export([close_context/1]).
 -export([forward/2]).
 -export([forward/3]).
--export([forward/4]).
 -export([roles/0]).
 -export([shutdown/0]).
 
@@ -209,44 +208,32 @@ forward(M, #{session := _} = Ctxt0) ->
     do_forward(M, Ctxt1).
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec forward(wamp_message(), bondy_ref:t(), bondy_ref:t()) ->
-    ok | no_return().
-
-forward(Msg, From, To) ->
-    forward(Msg, From, To, #{}).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(
-    wamp_message(), bondy_ref:t(), bondy_ref:t(), map()) ->
-    ok | no_return().
+-spec forward(wamp_message(), bondy_ref:t(), map()) -> ok | no_return().
 
-forward(#publish{} = M, To, From, Opts) ->
-    bondy_broker:handle_message(M, To, From, Opts);
+forward(#publish{} = M, To, Opts) ->
+    bondy_broker:handle_message(M, To, Opts);
 
-forward(#error{} = M, To, From, Opts) ->
+forward(#error{} = M, To, Opts) ->
     %% This is a CALL, INVOCATION or INTERRUPT error
     %% see bondy_peer_message for more details
-    bondy_dealer:handle_message(M, To, From, Opts);
+    bondy_dealer:handle_message(M, To, Opts);
 
-forward(#interrupt{} = M, To, From, Opts) ->
-    bondy_dealer:handle_message(M, To, From, Opts);
+forward(#interrupt{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
 
-forward(#call{} = M, To, From, Opts) ->
-    bondy_dealer:handle_message(M, To, From, Opts);
+forward(#call{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
 
-forward(#invocation{} = M, To, From, Opts) ->
-    bondy_dealer:handle_message(M, To, From, Opts);
+forward(#invocation{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
 
-forward(#yield{} = M, To, From, Opts) ->
-    bondy_dealer:handle_message(M, To, From, Opts).
+forward(#yield{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts).
 
 
 

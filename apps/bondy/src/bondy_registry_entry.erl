@@ -49,7 +49,7 @@
     uri                 ::  uri() | atom(),
     match_policy        ::  binary(),
     ref                 ::  bondy_ref:t(),
-    callback_args       ::  list(term()),
+    callback_args       ::  maybe(list(term())),
     created             ::  pos_integer() | atom(),
     options             ::  map(),
     origin_id           ::  wildcard(id()),
@@ -170,7 +170,7 @@ when Type == registration orelse Type == subscription ->
     },
 
     MatchPolicy = validate_match_policy(Opts0),
-    CBArgs = maps:get(callback_args, Opts0, []),
+    CBArgs = maps:get(callback_args, Opts0, undefined),
     Opts = maps:without([match, callback_args], Opts0),
 
     #entry{
@@ -496,7 +496,7 @@ is_callback(#entry{key = Key}) ->
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback_args(t()) -> list(term()).
+-spec callback_args(t()) -> maybe(list(term())).
 
 callback_args(#entry{callback_args = Val}) ->
     Val.
@@ -720,7 +720,7 @@ proxy(SessionId, Target0, External) ->
     RealmUri = bondy_ref:realm_uri(OriginRef),
     Nodestring = bondy_config:nodestring(),
 
-    Ref = bondy_ref:new(relay, RealmUri, Target0, SessionId, Nodestring),
+    Ref = bondy_ref:new(bridge_relay, RealmUri, Target0, SessionId, Nodestring),
 
     Target = bondy_ref:target(Ref),
 

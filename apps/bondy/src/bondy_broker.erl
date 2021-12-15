@@ -76,7 +76,7 @@
 -export([close_context/1]).
 -export([features/0]).
 -export([handle_message/2]).
--export([handle_message/4]).
+-export([handle_message/3]).
 -export([is_feature_enabled/1]).
 -export([match_subscriptions/2]).
 -export([publish/5]).
@@ -169,14 +169,10 @@ handle_message(#publish{} = M, Ctxt) ->
 %% bondy_peer_wamp_relay.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(
-    wamp_publish(),
-    To :: bondy_ref:t(),
-    From :: bondy_ref:t(),
-    Opts :: map()) ->
+-spec handle_message(M :: wamp_publish(), To :: bondy_ref:t(), Opts :: map()) ->
     ok | no_return().
 
-handle_message(#publish{} = M, PeerRef, _From, Opts) ->
+handle_message(#publish{} = M, PeerRef, Opts) ->
     PubId = maps:get(publication_id, Opts),
     RealmUri = bondy_ref:realm_uri(PeerRef),
     TopicUri = M#publish.topic_uri,

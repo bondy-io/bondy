@@ -299,16 +299,17 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
     {keep_state, State, idle_timeout(State)};
 
 connected(
-    internal, {receive_message, SessionId, {forward, From, To, Msg}}, State) ->
+    internal, {receive_message, SessionId, {forward, Msg, To, Opts}}, State) ->
     ?LOG_INFO(#{
         description => "Got session message",
         session_id => SessionId,
         message => Msg
     }),
 
-    ok = handle_session_message(Msg, From, To, SessionId, State),
+    ok = handle_session_message(Msg, To, Opts, SessionId, State),
 
     {keep_state, State, idle_timeout(State)};
+
 
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
@@ -360,6 +361,15 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     {ok, State1} = send_ping(Bin, State),
 %     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
 %     {keep_state, State1};
+
+connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
+    ?LOG_WARNING(#{
+        description => "Received WAMP request we need to FWD to core",
+        message => Msg
+    }),
+    SessionId = session_id(RealmUri, State),
+    ok = send_session_message(SessionId, Msg, State),
+    {keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, _) ->
     ?LOG_WARNING(#{
@@ -737,6 +747,11 @@ session(Id, #state{sessions = Map}) ->
     maps:get(Id, Map).
 
 
+
+session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+    maps:get(RealmUri, Map).
+
+
 % update_session(Key, Value, Id, #state{} = State) ->
 %     Sessions = State#state.sessions,
 %     Session0 =  maps:get(Id, Sessions),
@@ -893,10 +908,10 @@ send_session_message(SessionId, Msg, State) ->
 %     end,
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
-handle_session_message(Msg, From, To, SessionId, State) ->
+handle_session_message(Msg, To, Opts, SessionId, State) ->
     #{realm := RealmUri} = session(SessionId, State),
-    Myself = bondy_ref:new(relay, RealmUri, self(), SessionId),
-    bondy_router:forward(Msg, To, From, #{via => Myself}).
+    Myself = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
+    bondy_router:forward(Msg, To, Opts#{via => Myself}).
 
 
 

@@ -46,7 +46,6 @@
 -export([publish/6]).
 -export([send/2]).
 -export([send/3]).
--export([send/4]).
 -export([subscribe/3]).
 -export([subscribe/4]).
 -export([request/3]).
@@ -105,67 +104,44 @@ send(Ref, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(To :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
+-spec send(Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
     ok | no_return().
 
-send(To, M, Opts) ->
-    bondy_ref:is_local(To)
-        orelse error(not_my_node),
-
-    wamp_message:is_message(M)
+send(Ref, Msg, Opts0) ->
+    %% We validate the message
+    wamp_message:is_message(Msg)
         orelse error(invalid_wamp_message),
 
-    do_send(To, M, Opts).
+    {Relay, Opts} =
+        case maps:take(via, Opts0) of
+            error ->
+                {undefined, Opts0};
+            ValueOpts ->
+                ValueOpts
+        end,
 
+    IsLocalRef = bondy_ref:is_local(Ref),
 
--spec send(
-    From :: bondy_ref:t(),
-    To :: bondy_ref:t(),
-    Msg :: wamp_message(),
-    Opts :: map()) -> ok | no_return().
+    case {Relay, IsLocalRef} of
+        {undefined, true} ->
+            do_send(Ref, Msg, Opts);
 
+        {undefined, false} ->
+            error({badarg, [{ref, Ref}, {via, Relay}]});
 
-send(From, To, M, Opts) ->
-    bondy_ref:realm_uri(From) =:= bondy_ref:realm_uri(To)
-        orelse error(not_same_realm),
+        {_, true} ->
+            error({badarg, [{ref, Ref}, {via, Relay}]});
 
-    %% We validate the message and the opts
-    wamp_message:is_message(M)
-        orelse error(invalid_wamp_message),
+        {Relay, false} ->
+            bondy_ref:is_local(Relay)
+                andalso (
+                    bondy_ref:is_relay(Relay)
+                    orelse bondy_ref:is_bridge_relay(Relay)
+                )
+                orelse error({badarg, [{via, Relay}]}),
 
-    Origin = maps:get(origin, Opts, undefined),
-    Relay = maps:get(via, Opts, undefined),
-    IsDestLocal = bondy_ref:is_local(To),
-
-    Origin == undefined
-        orelse not bondy_ref:is_local(Origin)
-        orelse error({badarg, Origin}),
-
-    case {Relay, Origin, IsDestLocal} of
-        {undefined, undefined, true} ->
-            do_send(To, M, Opts);
-
-        {undefined, undefined, false} ->
-            %% TODO this will be replaced with a dynamic call to the
-            %% Relay process i.e. #{origin => RelayRef} with target pid
-            %% or {bondy_peer_wamp_relay, forward}
-            bondy_peer_wamp_relay:forward(From, To, M, Opts);
-
-        {Relay, undefined, true} ->
-            send_via(From, To, M, Opts, Relay);
-
-        {undefined, Origin, true} ->
-            send_via(From, Origin, M, Opts, To)
+            do_send(Relay, {forward, Msg, Ref, Opts}, Opts)
     end.
-
-
-
-send_via(From, To, Msg, Opts, Relay) ->
-    bondy_ref:is_local(Relay)
-        andalso bondy_ref:is_relay(Relay)
-        orelse error({badrelay, Relay}),
-
-    do_send(Relay, {forward, From, To, Msg}, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -464,3 +440,4 @@ args(L) -> L.
 %% @private
 kwargs(undefined) -> #{};
 kwargs(M) -> M.
+
