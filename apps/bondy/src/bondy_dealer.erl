@@ -700,18 +700,6 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
     Caller = bondy_context:ref(Ctxt0),
     Opts = M#cancel.options,
 
-    %% We first use peek to find the Promise based on CallId so we can retrieve
-    %% the Procedure URI required for authrization
-    Authorize = fun(Promise, Ctxt) ->
-        Uri = bondy_rpc_promise:procedure_uri(Promise),
-
-        %% If not authoried this will fail with an exception
-        ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt),
-        {ok, Ctxt}
-    end,
-
-    _ = peek_invocations(CallId, Authorize, Ctxt0),
-
     %% A response will be send asynchronously by another router process instance
 
     %% If the callee does not support call canceling, then behavior is 'skip'.
@@ -729,6 +717,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% INVOCATION first.
             %% We thus peek (read) instead of dequeueing.
             Fun = fun(Promise, Ctxt1) ->
+                %% If not authoried this will fail with an exception
+                Uri = bondy_rpc_promise:procedure_uri(Promise),
+                ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
+
                 InvocationId = bondy_rpc_promise:invocation_id(Promise),
                 Callee = bondy_rpc_promise:callee(Promise),
 
@@ -754,6 +746,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% We dequeue the invocation, that way the response will be
             %% discarded.
             Fun = fun(Promise, Ctxt1) ->
+                %% If not authoried this will fail with an exception
+                Uri = bondy_rpc_promise:procedure_uri(Promise),
+                ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
+
                 InvocationId = bondy_rpc_promise:invocation_id(Promise),
                 Callee = bondy_rpc_promise:callee(Promise),
 
@@ -792,7 +788,11 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             %% discarded.
             %% TODO instead of dequeing, update the entry to reflect it was
             %% cancelled
-            Fun = fun(_Promise, Ctxt1) ->
+            Fun = fun(Promise, Ctxt1) ->
+                %% If not authoried this will fail with an exception
+                Uri = bondy_rpc_promise:procedure_uri(Promise),
+                ok = bondy_rbac:authorize(<<"wamp.cancel">>, Uri, Ctxt1),
+
                 Error = wamp_message:error(
                     ?CANCEL,
                     CallId,
