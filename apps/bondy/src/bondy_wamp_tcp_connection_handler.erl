@@ -688,44 +688,59 @@ close_socket(Reason, St) ->
         )
     end,
 
-    LogMsg = case Reason of
+    {Level, LogMsg} = case Reason of
         normal ->
-            #{
-                description => <<"Connection closed by peer">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by peer">>,
+                    reason => Reason
+                }
             };
 
         closed ->
-            #{
-                description => <<"Connection closed by peer">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by peer">>,
+                    reason => Reason
+                }
             };
 
         shutdown ->
-            #{
-                description => <<"Connection closed by router">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by router">>,
+                    reason => Reason
+                }
             };
 
         {tcp_error, Socket, Reason} ->
             %% We increase the socker error counter
             ok = IncrSockerErrorCnt(),
-            #{
-                description => <<"Connection closing due to tcp_error">>,
-                reason => Reason
+            {
+                error,
+                #{
+                    description => <<"Connection closing due to tcp_error">>,
+                    reason => Reason
+                }
             };
 
 
         _ ->
             %% We increase the socket error counter
             ok = IncrSockerErrorCnt(),
-            #{
-                description => <<"Connection closing due to system error">>,
-                reason => Reason
+            {
+                error,
+                #{
+                    description => <<"Connection closing due to system error">>,
+                    reason => Reason
+                }
             }
     end,
 
-    _ = log(error, LogMsg, St),
+    _ = log(Level, LogMsg, St),
     ok.
 
 
