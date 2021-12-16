@@ -202,6 +202,7 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Creates a local registration.
 %% If the registration is done using a callback module, only the invoke single
@@ -329,7 +330,6 @@ callees(RealmUri, ProcedureUri) ->
     callees(RealmUri, ProcedureUri, #{}).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -437,7 +437,6 @@ handle_message(M, Ctxt) ->
     end.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Handles inbound messages received from a relay i.e. a cluster peer node
 %% or bridge_relay i.e. edge client or server.
@@ -512,8 +511,6 @@ handle_message(#yield{} = M, Caller, #{from := Callee}) ->
 
     Fun = fun
         ({ok, Promise}) ->
-            %% LocalCaller == Caller
-            %% LocalCaller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
             Result = yield_to_result(CallId, M),
             bondy:send(Caller, Result);
@@ -540,7 +537,6 @@ handle_message(
 
     Fun = fun
         ({ok, Promise}) ->
-            % LocalCaller = bondy_rpc_promise:caller(Promise),
             CallId = bondy_rpc_promise:call_id(Promise),
             CallError = M#error{request_id = CallId, request_type = ?CALL},
             bondy:send(Caller, CallError, #{from => Callee});
@@ -604,9 +600,10 @@ handle_message(#interrupt{} = M, Callee, #{from := Caller}) ->
 %% =============================================================================
 
 
+
 %% @private
 -spec prepare_send(To :: bondy_ref:t(), Opts :: map()) ->
-{bondy_ref:t(), map()}.
+    {bondy_ref:t(), map()}.
 
 prepare_send(Ref, #{via := undefined} = Opts) ->
     prepare_send(Ref, maps:without([via], Opts));
@@ -1367,7 +1364,6 @@ registrations(RealmUri, Node, SessionId, Limit) ->
     bondy_registry:entries(registration, RealmUri, Node, SessionId, Limit).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc
@@ -1500,7 +1496,6 @@ no_matching_promise(M) ->
 %% =============================================================================
 %% PRIVATE - INVOCATION STRATEGIES (LOAD BALANCING, FAIL OVER, ETC)
 %% =============================================================================
-
 
 
 
