@@ -125,11 +125,13 @@ to_peer_list(DNSMessage) ->
     MyNode = bondy_config:node(),
 
     L = [
-        maps:from_list([
-            to_peer_entry(R, Prefix, Port)
-            || {K, _} = R <- inet_dns:rr(ARecord),
-                K == data orelse K == domain
-        ])
+        to_peer(
+            maps:from_list([
+                to_peer_entry(R, Prefix, Port)
+                || {K, _} = R <- inet_dns:rr(ARecord),
+                    K == data orelse K == domain
+            ])
+        )
         || ARecord <- inet_dns:msg(DNSMessage, arlist)
     ],
 
@@ -142,6 +144,10 @@ to_peer_list(DNSMessage) ->
 
 
 
+to_peer(Map) ->
+    Parallelism = partisan_config:get(parallelism, 1),
+    Channels = partisan_config:get(channels, [undefined]),
+    Map#{channels => Channels, parallelism => Parallelism}.
 
 %% @private
 to_peer_entry({domain, Domain}, Prefix, _) ->

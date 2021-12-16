@@ -43,7 +43,20 @@
         datatype => {list, binary},
         validator => fun
             (L) when is_list(L) ->
-                {ok, [binary_to_atom(Node, utf8) || Node <- L]}
+                try
+                    Node = bondy_config:node(),
+                    Peers = [
+                        P ||
+                            #{name := Name} = P <- [to_peer(Bin) || Bin <- L],
+                            Name =/= Node
+                    ],
+                    {ok, Peers}
+                catch
+                    throw:Reason ->
+                        {error, Reason}
+                end;
+            (_) ->
+                false
         end
     }
 }).
@@ -71,14 +84,8 @@
 
 init(Opts) ->
     try
-        #{nodes := All} = maps_utils:validate(Opts, ?OPTS_SPEC),
-        Myself = bondy_config:node(),
-
-        State = #state{
-            peers = [Node || Node <- All, Node =/= Myself]
-        },
-        {ok, State}
-
+        #{nodes := Peers} = maps_utils:validate(Opts, ?OPTS_SPEC),
+        {ok, #state{peers = Peers}}
     catch
         _:Reason ->
             {error, Reason}
@@ -102,3 +109,51 @@ lookup(State, _Timeout) ->
 %% PRIVATE
 %% =============================================================================
 
+
+to_peer(Bin) when is_binary(Bin) ->
+    {Hostname, Port} =
+        case binary:split(Bin, <<$:>>) of
+            [_] ->
+                {Bin, partisan_config:get(peer_port)};
+            [Hostname0, Port0] ->
+                try
+                    {Hostname0, binary_to_integer(Port0)}
+                catch
+                    error:_ ->
+                        throw("invalid port")
+                end;
+            _ ->
+                throw("invalid hostname")
+        end,
+
+    {Name, Host, IPAddress} =
+        case binary:split(Hostname, <<$@>>) of
+            [Name0, Value] ->
+                Str = binary_to_list(Value),
+
+                case inet_parse:address(Str) of
+                    {ok, IPAddress0} ->
+                        {Name0, Value, IPAddress0};
+                    {error, _} ->
+                        case inet:getaddr(Str, inet) of
+                            {ok, IPAddress0} ->
+                                {Name0, Value, IPAddress0};
+                            {error, _} ->
+                                throw("invalid hostname")
+                        end
+                end;
+            _ ->
+                throw("invalid hostname")
+        end,
+
+    Node = binary_to_atom(<<Name/binary, $@, Host/binary>>, utf8),
+
+    Channels = partisan_config:get(channels, [undefined]),
+    Parallelism = partisan_config:get(parallelism, 1),
+
+    #{
+        name => Node,
+        listen_addrs => [#{ip => IPAddress, port => Port}],
+        channels => Channels,
+        parallelism => Parallelism
+    }.
