@@ -660,7 +660,7 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
     end;
 
 do_handle_message(#cancel{} = M, Ctxt0) ->
-    %% A local callee is cancelling a previous call
+    %% A local Caller is cancelling a previous call
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
     Opts = M#cancel.options,
@@ -691,8 +691,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
 
                 %% Via might be undefined
                 Via = bondy_rpc_promise:via(Promise),
-
-                SendOpts0 = bondy:add_via(Via, Opts#{from => Caller}),
+                SendOpts0 = #{from => Caller, via => Via},
                 {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
 
                 R = wamp_message:interrupt(InvocationId, Opts),
@@ -735,7 +734,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                 %% But Callee might be remote
                 Interrupt = wamp_message:interrupt(InvocationId, Opts),
                 Via = bondy_rpc_promise:via(Promise),
-
+                SendOpts0 = #{from => Callee, via => Via},
                 SendOpts0 = bondy:add_via(Via, Opts#{from => Caller}),
                 {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
 
@@ -799,7 +798,6 @@ do_handle_message(#yield{} = M, Ctxt0) ->
             %% INVOCATION in handle_message/3 and provides the route back to
             %% the Caller i.e. a pipe of relays.
             Via = bondy_rpc_promise:via(Promise),
-
             SendOpts0 = #{from => Callee, via => Via},
             {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
 
@@ -842,19 +840,19 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
             %% Via might be undefined. If might have been set when handling the
             %% INVOCATION in handle_message/3
             Via = bondy_rpc_promise:via(Promise),
+            SendOpts0 = #{from => Callee, via => Via},
 
-            SendOpts0 = bondy:add_via(Via, #{from => Callee}),
+            {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
 
-            case bondy:prepare_send(Caller, SendOpts0) of
-                {To, #{via := _} = SendOpts} ->
-                    %% Caller is remote so the INVOCATION was forwarded to us,
-                    %% we need to modify the ERROR to make it a CALL error
-                    %% as we are sending back the error message directly to
-                    %% the Caller.
+            case bondy_ref:is_local(To) of
+                true ->
+                    %% We turn Error type from INVCATION to CALL and send to
+                    %% Caller
                     Error = M#error{request_id = CallId, request_type = ?CALL},
                     bondy:send(To, Error, SendOpts);
-
-                {To, SendOpts} ->
+                false ->
+                    %% This ERROR is related to a relayed INVOCATION so we
+                    %% relay the ERROR back to origin.
                     bondy:send(To, M, SendOpts)
             end;
 
@@ -882,9 +880,7 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
             %% Via might be undefined. If might have been set when handling the
             %% INVOCATION in handle_message/3
             Via = bondy_rpc_promise:via(Promise),
-
-            SendOpts0 = bondy:add_via(Via, #{from => Callee}),
-
+            SendOpts0 = #{from => Callee, via => Via},
             {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
             CancelError = M#error{request_id = CallId, request_type = ?CALL},
 
