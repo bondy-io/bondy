@@ -32,7 +32,7 @@
 %% - bondy_session
 %% TODO consider reeimplementing this as
 % -record(bondy_ref, {
-%     %% <<"bondy:ref:{type}:{realm}:{node}:{random}">>
+%     %% <<"bondy:ref:{type}:{realm}:{node}:{random}:{target_type}:{target_handle}">>
 %     id                  ::  binary(),
 %     %% WAMP session id integer
 %     session_id          ::  wildcard(maybe(id())),

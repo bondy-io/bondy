@@ -207,14 +207,14 @@ when ?SOCKET_DATA(Tag) ->
     case binary_to_term(Data) of
         {receive_message, SessionId, Msg} ->
             ?LOG_INFO(#{
-                description => "Got session message",
+                description => "Got session message from edge",
                 reason => Msg,
                 session_id => SessionId
             }),
             safe_handle_session_message(Msg, SessionId, State);
         Msg ->
             ?LOG_INFO(#{
-                description => "Got message",
+                description => "Got message from edge",
                 reason => Msg
             }),
             handle_message(Msg, State)
@@ -552,15 +552,14 @@ handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({forward, Msg, To, Opts}, _SessionId, State) ->
+handle_session_message({forward, To, Msg, Opts}, _SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
     %% We either need to implement Partisan 4 plus:
     %% a) causality or
     %% b) a pool of relays (selecting one by hashing {CallerID, CalleeId}) and
     %% do it sync
     Job = fun() ->
-        SendOpts = maps:without([via], Opts),
-        bondy_router:forward(Msg, To, SendOpts)
+        bondy_router:forward(Msg, To, Opts)
     end,
 
     case bondy_router_worker:cast(Job) of

@@ -446,10 +446,9 @@ handle_message(M, Ctxt) ->
     ok | no_return().
 
 
-handle_message(
-    #invocation{} = Msg, Callee, #{from := Caller, via := Via} = Opts) ->
+handle_message(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
     %% A remote Caller is making a CALL to a local Callee via a Relay.
-    {To, SendOpts} = prepare_send(Callee, maps:without([via], Opts)),
+    {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
     case bondy_ref:target_type(Callee) of
         callback ->
@@ -475,12 +474,17 @@ handle_message(
                     procedure, Msg#invocation.details, undefined
                 ),
 
+                %% If we are handling this here is because any remaining relays
+                %% in the 'via' stack are part of the route back to the Caller.
+                %% If this was an INVOCATION destined to another peer node then
+                %% bondy_peer_wamp_relay would have forwarded itself.
+                Via = maps:get(via, SendOpts, undefined),
                 %% We enqueue an invocation promise so that we can match it
                 %% with the future YIELD or ERROR response from the Callee.
                 %% We add the relay so that we can route back the YIELD or
                 %% ERROR response to Caller.
                 Promise = bondy_rpc_promise:new(
-                    InvocationId, Callee, Caller, SendOpts#{
+                    InvocationId, Callee, Caller, #{
                         call_id => CallId,
                         procedure => Procedure,
                         via => Via
@@ -595,50 +599,11 @@ handle_message(#interrupt{} = M, Callee, #{from := Caller}) ->
     ok.
 
 
+
 %% =============================================================================
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
--spec prepare_send(To :: bondy_ref:t(), Opts :: map()) ->
-    {bondy_ref:t(), map()}.
-
-prepare_send(Ref, #{via := undefined} = Opts) ->
-    prepare_send(Ref, maps:without([via], Opts));
-
-prepare_send(Ref, Opts) ->
-    prepare_send(Ref, undefined, Opts).
-
-
-%% @private
--spec prepare_send(
-    To :: bondy_ref:t(),
-    Origin :: maybe(bondy_ref:client() | bondy_ref:internal()),
-    Opts :: map()) -> {bondy_ref:t(), map()}.
-
-prepare_send(undefined, Ref, Opts) ->
-    prepare_send(Ref, undefined, Opts);
-
-prepare_send(Ref, undefined, Opts) ->
-    case bondy_ref:is_local(Ref) of
-        true ->
-            {Ref, Opts};
-        false when is_map_key(via, Opts) ->
-            {Ref, Opts};
-        false ->
-            %% Ref is Callee but it is located in another peer node,
-            %% we need to use a relay
-            RealmUri = bondy_ref:realm_uri(Ref),
-            Relay = bondy_peer_wamp_relay:ref(RealmUri),
-            {Ref, Opts#{via => Relay}}
-        end;
-
-prepare_send(Ref, Origin, Opts) ->
-    %% We do not check if ref is relay or bridge_relay here, that will happen
-    %% in bondy:send/3
-    {Origin, Opts#{via => Ref}}.
 
 
 %% @private
@@ -726,9 +691,9 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
 
                 %% Via might be undefined
                 Via = bondy_rpc_promise:via(Promise),
-                {To, SendOpts} = prepare_send(
-                    Callee, Opts#{from => Caller, via => Via}
-                ),
+
+                SendOpts0 = bondy:add_via(Via, Opts#{from => Caller}),
+                {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
 
                 R = wamp_message:interrupt(InvocationId, Opts),
                 ok = bondy:send(To, R, SendOpts),
@@ -770,9 +735,10 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                 %% But Callee might be remote
                 Interrupt = wamp_message:interrupt(InvocationId, Opts),
                 Via = bondy_rpc_promise:via(Promise),
-                {To, SendOpts} = prepare_send(
-                    Callee, Opts#{from => Caller, via => Via}
-                ),
+
+                SendOpts0 = bondy:add_via(Via, Opts#{from => Caller}),
+                {To, SendOpts} = bondy:prepare_send(Callee, SendOpts0),
+
                 ok = bondy:send(To, Interrupt, SendOpts),
 
                 {ok, Ctxt1}
@@ -828,15 +794,17 @@ do_handle_message(#yield{} = M, Ctxt0) ->
         ({ok, Promise}) ->
             CallId = bondy_rpc_promise:call_id(Promise),
             Caller = bondy_rpc_promise:caller(Promise),
+
             %% Via might be undefined. If might have been set when handling the
-            %% INVOCATION in handle_message/3
+            %% INVOCATION in handle_message/3 and provides the route back to
+            %% the Caller i.e. a pipe of relays.
             Via = bondy_rpc_promise:via(Promise),
+
+            SendOpts0 = #{from => Callee, via => Via},
+            {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
+
             IsRemoteCaller =
                 Via =/= undefined orelse not bondy_ref:is_local(Caller),
-
-            {To, SendOpts} = prepare_send(
-                Caller, #{from => Callee, via => Via}
-            ),
 
             case IsRemoteCaller of
                 true ->
@@ -875,7 +843,9 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
             %% INVOCATION in handle_message/3
             Via = bondy_rpc_promise:via(Promise),
 
-            case prepare_send(Caller, #{from => Callee, via => Via}) of
+            SendOpts0 = bondy:add_via(Via, #{from => Callee}),
+
+            case bondy:prepare_send(Caller, SendOpts0) of
                 {To, #{via := _} = SendOpts} ->
                     %% Caller is remote so the INVOCATION was forwarded to us,
                     %% we need to modify the ERROR to make it a CALL error
@@ -913,9 +883,9 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
             %% INVOCATION in handle_message/3
             Via = bondy_rpc_promise:via(Promise),
 
-            {To, SendOpts} = prepare_send(
-                Caller, #{from => Callee, via => Via}
-            ),
+            SendOpts0 = bondy:add_via(Via, #{from => Callee}),
+
+            {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
             CancelError = M#error{request_id = CallId, request_type = ?CALL},
 
             bondy:send(To, CancelError, SendOpts);
@@ -1568,7 +1538,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
 
                             %% SendOpts might include 'via' field which we use
                             %% to build the promise
-                            {Callee, SendOpts} = prepare_send(
+                            {Callee, SendOpts} = bondy:prepare_send(
                                 Ref, Origin, Opts#{from => Caller}
                             ),
 
@@ -1576,7 +1546,11 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
                                 ReqId,
                                 Callee,
                                 Caller,
-                                SendOpts#{
+                                % SendOpts#{
+                                %     call_id => CallId,
+                                %     procedure_uri => ProcUri
+                                % }
+                                #{
                                     call_id => CallId,
                                     procedure_uri => ProcUri
                                 }
@@ -1585,7 +1559,7 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
                             ok = bondy_rpc_promise:enqueue(
                                 RealmUri,
                                 Promise,
-                                bondy_utils:timeout(call_opts(Opts))
+                                bondy_utils:timeout(call_opts(SendOpts))
                             ),
 
                             ok = bondy:send(Callee, Msg, SendOpts),

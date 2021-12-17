@@ -84,6 +84,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 
 -define(FORWARD_TIMEOUT, 5000).
@@ -107,6 +108,7 @@
 %% API
 -export([async_forward/3]).
 -export([broadcast/4]).
+-export([forward/2]).
 -export([forward/3]).
 -export([receive_ack/2]).
 -export([ref/1]).
@@ -158,10 +160,18 @@ start_link() ->
 %% This is equivalent to calling async_forward/3 and then yield/2.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) -> ok.
+-spec forward(Node :: node, Msg :: wamp_message(), Opts :: map()) -> ok.
 
-forward(To, Msg, Opts) ->
-    gen_server:cast(?MODULE, {forward, Msg, To, Opts}).
+forward(Node, Msg, Opts) ->
+    gen_server:cast(?MODULE, {forward, Node, Msg, Opts}).
+
+
+
+forward(Node, Msg) ->
+    Manager = bondy_peer_service:manager(),
+    Channel = bondy_config:get(wamp_peer_channel, default),
+    Manager:cast_message(Node, Channel, ?MODULE, Msg).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -272,6 +282,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast({forward, PeerMsg, BinPid} = Event, State) ->
+    %% TO BE DEPRECATED
     try
         cast_message(PeerMsg, BinPid)
     catch
@@ -280,21 +291,6 @@ handle_cast({forward, PeerMsg, BinPid} = Event, State) ->
             ?LOG_ERROR(#{
                 class => Class,
                 event => Event,
-                reason => Reason,
-                stacktrace => Stacktrace
-            })
-    end,
-    {noreply, State};
-
-handle_cast({forward, _, _, _} = Msg, State) ->
-    try
-        cast_message(Msg)
-    catch
-        Class:Reason:Stacktrace ->
-            %% @TODO publish metaevent
-            ?LOG_ERROR(#{
-                event => Msg,
-                class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
             })
@@ -322,7 +318,7 @@ handle_cast({'receive', #peer_ack{from = FromRef} = Msg, BinPid}, State) when is
     end,
     {noreply, State};
 
-handle_cast({'receive', {forward, Msg, To, Opts0} = M}, State) ->
+handle_cast({forward, To, Msg, Opts} = M, State) ->
     %% We are receiving a message from peer
     try
 
@@ -330,10 +326,6 @@ handle_cast({'receive', {forward, Msg, To, Opts0} = M}, State) ->
         %% We either implement causality or we just use hashing over a pool of
         %% workers by {CallerID, CalleeId}
         Job = fun() ->
-            RealmUri = bondy_ref:realm_uri(To),
-            Myself = bondy_ref:new(relay, RealmUri),
-            Opts = Opts0#{via => Myself},
-
             try
                 bondy_router:forward(Msg, To, Opts)
             catch
@@ -392,10 +384,8 @@ handle_cast({'receive', PeerMsg, BinPid}, State) ->
             Opts0 = bondy_peer_message:options(PeerMsg),
 
             RealmUri = bondy_ref:realm_uri(To),
-            Opts = Opts0#{
-                from => From,
-                via => bondy_ref:new(relay, RealmUri)
-            },
+            Myself = ref(RealmUri),
+            Opts = bondy:add_via(Myself, Opts0#{from => From}),
             ok = bondy_router:forward(Msg, To, Opts),
 
             %% We send the ack to the remote node
@@ -425,7 +415,6 @@ handle_cast({'receive', PeerMsg, BinPid}, State) ->
             ok = cast_message(peer_error(Reason, PeerMsg), BinPid),
             {noreply, State}
     end.
-
 
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
@@ -469,15 +458,6 @@ receive_broadcast_acks([{Id, Node}|T], Timeout, Good, Bad) ->
 
 receive_broadcast_acks([], _, Good, Bad) ->
     {ok, Good, Bad}.
-
-
-cast_message({forward, _, To, _} = M) ->
-    Node = bondy_ref:node(To),
-    Manager = bondy_peer_service:manager(),
-    Channel = bondy_config:get(wamp_peer_channel, default),
-    ServerRef = ?MODULE,
-
-    Manager:cast_message(Node, Channel, ServerRef, {'receive', M}).
 
 
 %% @private

@@ -39,16 +39,21 @@
 
 -export([aae_exchanges/0]).
 -export([ack/2]).
+-export([add_via/2]).
 -export([call/5]).
 -export([cast/5]).
 -export([check_response/4]).
+-export([peek_via/1]).
+-export([prepare_send/2]).
+-export([prepare_send/3]).
 -export([publish/5]).
 -export([publish/6]).
+-export([request/3]).
 -export([send/2]).
 -export([send/3]).
 -export([subscribe/3]).
 -export([subscribe/4]).
--export([request/3]).
+-export([take_via/1]).
 
 
 
@@ -107,41 +112,189 @@ send(Ref, M) ->
 -spec send(Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
     ok | no_return().
 
-send(Ref, Msg, Opts0) ->
+send(To, Msg, Opts) ->
     %% We validate the message
     wamp_message:is_message(Msg)
         orelse error(invalid_wamp_message),
 
-    {Relay, Opts} =
-        case maps:take(via, Opts0) of
-            error ->
-                {undefined, Opts0};
-            ValueOpts ->
-                ValueOpts
-        end,
+    case bondy_ref:is_local(To) of
+        true ->
+            do_send(To, Msg, Opts);
 
-    IsLocalRef = bondy_ref:is_local(Ref),
+        false ->
+            case peek_via(Opts) of
+                Relay when Relay == undefined ->
+                    error({badarg, [{ref, To}, {via, Relay}]});
 
-    case {Relay, IsLocalRef} of
-        {undefined, true} ->
-            do_send(Ref, Msg, Opts);
+                Relay ->
+                    Type = bondy_ref:type(Relay),
+                    IsLocalRelay = bondy_ref:is_local(Relay),
 
-        {undefined, false} ->
-            error({badarg, [{ref, Ref}, {via, Relay}]});
+                    case {Type, IsLocalRelay} of
+                        {bridge_relay, true} ->
+                            %% We consume the relay from stack
+                            {Relay, Opts1} = take_via(Opts),
+                            do_send(Relay, {forward, To, Msg, Opts1}, Opts1);
 
-        {_, true} ->
-            error({badarg, [{ref, Ref}, {via, Relay}]});
+                        {bridge_relay, false} ->
+                            %% We cannot send directly, we need to go through
+                            %% the cluster so we use a relay, this means we do
+                            %% not consume from stack.
+                            Node = bondy_ref:node(Relay),
+                            PeerMsg = {forward, To, Msg, Opts},
+                            bondy_peer_wamp_relay:forward(Node, PeerMsg);
 
-        {Relay, false} ->
-            bondy_ref:is_local(Relay)
-                andalso (
-                    bondy_ref:is_relay(Relay)
-                    orelse bondy_ref:is_bridge_relay(Relay)
-                )
-                orelse error({badarg, [{via, Relay}]}),
-
-            do_send(Relay, {forward, Msg, Ref, Opts}, Opts)
+                        {_, _} ->
+                            error({badarg, [{via, Relay}]})
+                    end
+            end
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prepare_send(To :: bondy_ref:t(), Opts :: map()) ->
+    {bondy_ref:t(), map()}.
+
+prepare_send(Ref, #{via := undefined} = Opts) ->
+    prepare_send(Ref, maps:without([via], Opts));
+
+prepare_send(Ref, Opts) ->
+    prepare_send(Ref, undefined, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prepare_send(
+    To :: bondy_ref:t(),
+    Origin :: maybe(bondy_ref:client() | bondy_ref:internal()),
+    Opts :: map()) -> {bondy_ref:t(), map()}.
+
+prepare_send(undefined, Ref, Opts) ->
+    prepare_send(Ref, undefined, Opts);
+
+prepare_send(Ref, undefined, Opts) ->
+    %% We keep 'via' as it has the route back to the origin
+    {Ref, Opts};
+    % case bondy_ref:is_local(Ref) of
+    %     true ->
+    %         %% We keep 'via' as it has the route back to the origin
+    %         {Ref, Opts};
+    %     false when is_map_key(via, Opts), map_get(via, Opts) =/= undefined ->
+    %         {Ref, Opts};
+    %     false ->
+    %         %% Ref is located in another peer node,
+    %         %% we need to use a relay
+    %         RealmUri = bondy_ref:realm_uri(Ref),
+    %         Relay = bondy_peer_wamp_relay:ref(RealmUri),
+    %         {Ref, add_via(Relay, Opts)}
+    %     end;
+
+prepare_send(Ref, Origin, Opts) ->
+    %% We do not check if ref is relay or bridge_relay here, that will happen
+    %% in send/3
+    {Origin, add_via(Ref, Opts)}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+add_via(Relay, #{via := undefined} = Opts) ->
+    add_via(Relay, Opts#{via => queue:new()});
+
+add_via(Relay, #{via := Term} = Opts) when is_map(Opts) ->
+    Q0 = case queue:is_queue(Term) of
+        true ->
+            Term;
+        false ->
+            queue:from_list([Term])
+    end,
+
+    Q1 = queue:in(Relay, Q0),
+    Opts#{via => Q1};
+    % case bondy_ref:is_local(Relay) of
+    %     true ->
+    %         bondy_ref:is_relay(Relay)
+    %             orelse bondy_ref:is_bridge_relay(Relay)
+    %             orelse error({badarg, Relay}),
+
+    %         Q1 = queue:in(Relay, Q0),
+    %         Opts#{via => Q1};
+
+    %     false ->
+    %         bondy_ref:is_bridge_relay(Relay)
+    %             orelse error({badarg, Relay}),
+
+    %         Q1 = queue:in(Relay, Q0),
+
+    %         %% We need to route this through a peer relay
+    %         RealmUri = bondy_ref:realm_uri(Relay),
+    %         PeerRelay = bondy_peer_wamp_relay:ref(RealmUri),
+    %         Q2 = queue:in(PeerRelay, Q1),
+
+    %         Opts#{via => Q2}
+    % end;
+
+add_via(Relay, Opts) ->
+    add_via(Relay, Opts#{via => queue:new()}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes and returns the first relay reference of the 'via' option stack.
+%% @end
+%% -----------------------------------------------------------------------------
+take_via(#{via := Term} = Opts) ->
+    case queue:is_queue(Term) of
+        true ->
+            case queue:out_r(Term) of
+                {empty, Q} ->
+                    {undefined, Opts#{via => Q}};
+                {{value, Relay}, Q} ->
+                    {Relay, Opts#{via => Q}}
+            end;
+        false ->
+            {Term, maps:without([via], Opts)}
+    end;
+
+take_via(Opts) ->
+    {undefined, Opts}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the last relay reference of the 'via' option stack. This
+%% reference represents the final relay the message will need to go through to
+%% be send using {@link send/3}.
+%% @end
+%% -----------------------------------------------------------------------------
+peek_via(#{via := undefined}) ->
+    undefined;
+
+peek_via(#{via := Term}) ->
+    case queue:is_queue(Term) of
+        true ->
+            case queue:peek_r(Term) of
+                empty ->
+                    undefined;
+                {value, Relay} ->
+                    Relay
+            end;
+        false ->
+            Term
+    end;
+
+peek_via(_) ->
+    undefined.
+
+
+%% =============================================================================
+%% API - DEPRECATED
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -160,6 +313,7 @@ ack(Pid, _) when Pid =:= self()  ->
 ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     Pid ! {?BONDY_PEER_ACK, Ref},
     ok.
+
 
 
 %% =============================================================================

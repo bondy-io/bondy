@@ -121,44 +121,6 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Sends a GOODBYE message to all existing client connections.
-%% The client should reply with another GOODBYE within the configured time and
-%% when it does or on timeout, Bondy will close the connection triggering the
-%% cleanup of all the client sessions.
-%% @end
-%% -----------------------------------------------------------------------------
-shutdown() ->
-    M = wamp_message:goodbye(
-        #{message => <<"Router is shutting down">>},
-        ?WAMP_SYSTEM_SHUTDOWN
-    ),
-    Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
-
-    try
-        _ = bondy_utils:foreach(Fun, bondy_session:list_refs(100))
-    catch
-       Class:Reason ->
-            ?LOG_ERROR(#{
-                description => "Error while shutting down router",
-                class => Class,
-                reason => Reason
-            })
-    end,
-
-    ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec close_context(bondy_context:t()) -> bondy_context:t().
-
-close_context(Ctxt) ->
-    bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
-
-
-%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
@@ -196,17 +158,9 @@ agent() ->
 
 forward(M, #{session := _} = Ctxt0) ->
     Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
-
-    %% ?LOG_DEBUG(#{
-    %%     description => "Forwarding message",
-    %%     ref => bondy_context:ref(Ctxt0),
-    %%     message => M
-    %% }),
-
     %% Client has a session so this should be either a message
     %% for broker or dealer roles
     do_forward(M, Ctxt1).
-
 
 
 %% -----------------------------------------------------------------------------
@@ -215,26 +169,65 @@ forward(M, #{session := _} = Ctxt0) ->
 %% -----------------------------------------------------------------------------
 -spec forward(wamp_message(), bondy_ref:t(), map()) -> ok | no_return().
 
-forward(#publish{} = M, To, Opts) ->
-    bondy_broker:handle_message(M, To, Opts);
+forward(Msg, To, Opts) ->
+    case bondy_ref:is_local(To) of
+        true ->
+            do_forward(Msg, To, Opts);
+        false ->
+            case bondy:peek_via(Opts) of
+                undefined ->
+                    Node = bondy_ref:node(To),
+                    PeerMsg = {forward, To, Msg, Opts},
+                    bondy_peer_wamp_relay:forward(Node, PeerMsg);
+                Relay ->
+                    case bondy_ref:is_local(Relay) of
+                        true ->
+                            bondy:send(To, Msg, Opts);
+                        false ->
+                            Node = bondy_ref:node(Relay),
+                            PeerMsg = {forward, To, Msg, Opts},
+                            bondy_peer_wamp_relay:forward(Node, PeerMsg)
+                    end
+            end
+    end.
 
-forward(#error{} = M, To, Opts) ->
-    %% This is a CALL, INVOCATION or INTERRUPT error
-    %% see bondy_peer_message for more details
-    bondy_dealer:handle_message(M, To, Opts);
 
-forward(#interrupt{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+%% -----------------------------------------------------------------------------
+%% @doc Sends a GOODBYE message to all existing client connections.
+%% The client should reply with another GOODBYE within the configured time and
+%% when it does or on timeout, Bondy will close the connection triggering the
+%% cleanup of all the client sessions.
+%% @end
+%% -----------------------------------------------------------------------------
+shutdown() ->
+    M = wamp_message:goodbye(
+        #{message => <<"Router is shutting down">>},
+        ?WAMP_SYSTEM_SHUTDOWN
+    ),
+    Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
 
-forward(#call{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+    try
+        _ = bondy_utils:foreach(Fun, bondy_session:list_refs(100))
+    catch
+       Class:Reason ->
+            ?LOG_ERROR(#{
+                description => "Error while shutting down router",
+                class => Class,
+                reason => Reason
+            })
+    end,
 
-forward(#invocation{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+    ok.
 
-forward(#yield{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts).
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close_context(bondy_context:t()) -> bondy_context:t().
+
+close_context(Ctxt) ->
+    bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
 
 
 
@@ -417,3 +410,25 @@ when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
 sync_forward({M, _Ctxt}) ->
     error({unexpected_message, M}).
 
+
+
+
+do_forward(#publish{} = M, To, Opts) ->
+    bondy_broker:handle_message(M, To, Opts);
+
+do_forward(#error{} = M, To, Opts) ->
+    %% This is a CALL, INVOCATION or INTERRUPT error
+    %% see bondy_peer_message for more details
+    bondy_dealer:handle_message(M, To, Opts);
+
+do_forward(#interrupt{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
+
+do_forward(#call{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
+
+do_forward(#invocation{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts);
+
+do_forward(#yield{} = M, To, Opts) ->
+    bondy_dealer:handle_message(M, To, Opts).

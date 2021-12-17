@@ -299,9 +299,9 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
     {keep_state, State, idle_timeout(State)};
 
 connected(
-    internal, {receive_message, SessionId, {forward, Msg, To, Opts}}, State) ->
+    internal, {receive_message, SessionId, {forward, To, Msg, Opts}}, State) ->
     ?LOG_INFO(#{
-        description => "Got session message",
+        description => "Got session message from core",
         session_id => SessionId,
         message => Msg
     }),
@@ -911,7 +911,9 @@ send_session_message(SessionId, Msg, State) ->
 handle_session_message(Msg, To, Opts, SessionId, State) ->
     #{realm := RealmUri} = session(SessionId, State),
     Myself = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
-    bondy_router:forward(Msg, To, Opts#{via => Myself}).
+
+    SendOpts = bondy:add_via(Myself, Opts),
+    bondy_router:forward(Msg, To, SendOpts).
 
 
 

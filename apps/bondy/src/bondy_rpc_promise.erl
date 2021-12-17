@@ -36,7 +36,7 @@
     call_id                 ::  maybe(id()),
     callee                  ::  bondy_ref:t(),
     caller                  ::  bondy_ref:t(),
-    via                     ::  maybe(bondy_ref:t()),
+    via                     ::  maybe(queue:queue(bondy_ref:t())),
     timestamp               ::  integer()
 }).
 
@@ -132,10 +132,21 @@ new(InvocationId, Callee, Caller, Opts) when is_integer(InvocationId) ->
     bondy_ref:is_type(Caller)
         orelse error({badarg, {caller, Caller}}),
 
-    Via = maps:get(via, Opts, undefined),
-    bondy_ref:is_type(Via)
-        orelse Via == undefined
-        orelse error({badarg, {via, Via}}),
+    Via =
+        case maps:get(via, Opts, undefined) of
+            undefined ->
+                queue:new();
+            Term ->
+                case queue:is_queue(Term) of
+                    true ->
+                        Term;
+                    false ->
+                        bondy_ref:is_type(Term)
+                            orelse error({badarg, {via, Term}}),
+                        queue:from_list([Term])
+                end
+        end,
+
 
     CallId = maps:get(call_id, Opts, undefined),
     is_integer(CallId)
@@ -194,12 +205,14 @@ caller(#bondy_rpc_promise{caller = Val}) -> Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the relay that can forward an invocation result to the caller.
+%% @doc Returns the queue of relays that are needed to forward an invocation
+%% result to the caller.
 %% @end
 %% -----------------------------------------------------------------------------
--spec via(t()) -> maybe(bondy_ref:relay() | bondy_ref:bridge_relay()).
+-spec via(t()) -> queue:queue(bondy_ref:relay() | bondy_ref:bridge_relay()).
 
-via(#bondy_rpc_promise{via = Val}) -> Val.
+via(#bondy_rpc_promise{via = Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
