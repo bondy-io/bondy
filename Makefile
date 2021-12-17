@@ -49,7 +49,6 @@ prodtarrun: tar
 
 
 node1:
-	${REBAR} as node1 release
 	_build/node1/rel/bondy/bin/bondy console
 
 node2:
@@ -65,3 +64,15 @@ edge1:
 	${REBAR} as edge1 release
 	_build/edge1/rel/bondy/bin/bondy console
 
+
+run-node1:
+	_build/node1/rel/bondy/bin/bondy console
+
+run-node2:
+	_build/node2/rel/bondy/bin/bondy console
+
+run-node3:
+	_build/node3/rel/bondy/bin/bondy console
+
+run-edge1:
+	_build/edge1/rel/bondy/bin/bondy console
