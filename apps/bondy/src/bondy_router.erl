@@ -240,7 +240,12 @@ stop() ->
 -spec close_context(bondy_context:t()) -> bondy_context:t().
 
 close_context(Ctxt) ->
-    bondy_dealer:close_context(bondy_broker:close_context(Ctxt)).
+    case bondy_context:ref(Ctxt) of
+        undefined ->
+            ok;
+        _Ref ->
+            bondy_dealer:close_context(bondy_broker:close_context(Ctxt))
+    end.
 
 
 
