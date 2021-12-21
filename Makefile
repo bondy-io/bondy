@@ -49,6 +49,7 @@ prodtarrun: tar
 
 
 node1:
+	${REBAR} as node1 release
 	_build/node1/rel/bondy/bin/bondy console
 
 node2:
