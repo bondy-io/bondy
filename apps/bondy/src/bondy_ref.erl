@@ -447,7 +447,7 @@ pid(#bondy_ref{target = {pid, Bin}} = Ref) ->
     %% Pids can only be used on the node where they were created (this is
     %% because we are using Partisan and not Distributed Erlang).
     is_local(Ref) orelse error(not_my_node),
-    bondy_utils:bin_to_pid(Bin);
+    list_to_pid(binary_to_list(Bin));
 
 pid(#bondy_ref{target = {name, Name}} = Ref) ->
     %% Pids can only be used on the node where they were created (this is
@@ -496,7 +496,7 @@ validate_target(Target, AllowPattern) ->
             {callback, Target};
 
         Pid when is_pid(Pid) ->
-            {pid, bondy_utils:pid_to_bin(Pid)};
+            {pid, list_to_binary(pid_to_list(Pid))};
 
         '_'  ->
             AllowPattern == true
