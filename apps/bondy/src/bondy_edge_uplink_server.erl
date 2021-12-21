@@ -645,15 +645,15 @@ full_sync(SessionId, RealmUri, Opts, State) ->
             full_sync(SessionId, ProtoUri, Opts, State)
     end,
 
-
     %% We do not automatically sync the SSO Realms, if the edge node wants it,
     %% that should be requested explicitely
 
     %% TODO However, we should sync a proyection of the SSO Realm, the realm
     %% definition itself but with users, groups, sources and grants that affect
     %% the Realm's users, and avoiding bringing the password
-    %% SO WE NEED REPLICATION FILTERS AT PLUM_DB LEVEL b
-    %%
+    %% SO WE NEED REPLICATION FILTERS AT PLUM_DB LEVEL
+    %% This means that only non SSO Users can login.
+    %% ALSO we are currently copying the CRA passwords which we shouldn't
 
     %% Finally we sync the realm
     ok = do_full_sync(SessionId, RealmUri, Opts, State),
