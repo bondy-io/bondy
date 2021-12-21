@@ -47,6 +47,7 @@
 -export([to_binary_keys/1]).
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
+-export([uuid/1]).
 
 
 
@@ -62,17 +63,18 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -spec foreach(
-    fun((Elem :: term()) -> term()), ?EOT | {[term()], any()} | any()) -> ok.
+    Do :: fun((Elem :: term() | {continue, Cont :: any()}) -> term()),
+    ?EOT | {[term()], Cont :: any()} | list()) -> ok.
 
 foreach(_, ?EOT) ->
     ok;
 
 foreach(Fun, {L, Cont}) ->
     ok = lists:foreach(Fun, L),
-    foreach(Fun, Cont);
+    foreach(Fun, Fun({continue, Cont}));
 
-foreach(Fun, Cont) when is_function(Cont, 0) ->
-    foreach(Fun, Cont()).
+foreach(Fun, L) when is_list(L) ->
+    lists:foreach(Fun, L).
 
 
 %% -----------------------------------------------------------------------------
@@ -143,10 +145,20 @@ to_existing_atom_keys(Map) when is_map(Map) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec uuid() -> bitstring().
+-spec uuid() -> binary().
 
 uuid() ->
     list_to_binary(uuid:uuid_to_string(uuid:get_v4())).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec uuid(Prefix :: binary()) -> binary().
+
+uuid(Prefix) ->
+    <<Prefix/binary, (uuid())/binary>>.
 
 
 %% -----------------------------------------------------------------------------
