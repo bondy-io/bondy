@@ -626,8 +626,7 @@ caller_details(Ctxt, Details) ->
     Details#{
         caller => session_id(Ctxt),
         caller_authid => authid(Ctxt),
-        caller_authrole => name_to_binary(authrole(Ctxt)),
-        caller_authroles => name_to_binary(authroles(Ctxt))
+        caller_authrole => name_to_binary(authrole(Ctxt))
     }.
 
 
@@ -642,8 +641,7 @@ publisher_details(Ctxt, Details) ->
     Details#{
         publisher => session_id(Ctxt),
         publisher_authid => name_to_binary(authid(Ctxt)),
-        publisher_authrole => name_to_binary(authrole(Ctxt)),
-        publisher_authroles => name_to_binary(authroles(Ctxt))
+        publisher_authrole => name_to_binary(authrole(Ctxt))
     }.
 
 %% -----------------------------------------------------------------------------
