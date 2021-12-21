@@ -438,13 +438,14 @@ handle_cast(Event, State) ->
     }),
     {noreply, State}.
 
-
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     ?LOG_DEBUG(#{
         description => "Subscriber down",
         pid => Pid
     }),
-    %% TODO
+
+    %% bondy_subscriber is responsible for the cleanup
+
     {noreply, State};
 
 
@@ -555,6 +556,7 @@ load_config(Map, State) when is_map(Map) ->
             %% %% We rebuild the dispatch table
             %% rebuild_dispatch_tables();
             {ok, NewState};
+
         {error, _} = Error ->
             {Error, State}
     end;
@@ -627,6 +629,7 @@ do_subscribe(Subscription, State) ->
     case get_bridge(Bridge, State) of
         undefined ->
             error({unknown_bridge, Bridge});
+
         #{id := Bridge} ->
             Opts1 = maps:put(meta, Meta, Opts0),
             do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
@@ -657,12 +660,16 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
         %% We use bondy_broker subscribers, this is an intance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup
         {ok, Id, Pid} = Res = bondy_broker:subscribe(
-            RealmUri, Opts, Topic, Fun),
-        %% Add to registry and set properties
+            RealmUri, Opts, Topic, Fun
+        ),
+
+        %% Add to registry and set properties so that we can perform queries
         true = gproc:reg_other({n, l, {subscriber, Id}}, Pid),
         true = gproc:reg_other({r, l, subscription_id}, Pid, Id),
         true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
+
         Res
+
     catch
         Class:Reason:Stacktrace->
             ?LOG_ERROR(#{
