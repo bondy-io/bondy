@@ -933,22 +933,17 @@ send_retained(Entry) ->
     Topic = bondy_registry_entry:uri(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),
 
-    Matches = to_bondy_utils_cont(
-        bondy_retained_message_manager:match(RealmUri, Topic, SessionId, Policy)
+    Matches = bondy_retained_message_manager:match(
+        RealmUri, Topic, SessionId, Policy
     ),
 
     bondy_utils:foreach(
-        fun(M) ->
-            Event = bondy_retained_message:to_event(M, SubsId),
-            catch bondy:send(Ref, Event)
+        fun
+            ({continuation, Cont}) ->
+                bondy_retained_message_manager:match(Cont);
+            (M) ->
+                Event = bondy_retained_message:to_event(M, SubsId),
+                catch bondy:send(Ref, Event)
         end,
         Matches
     ).
-
-
-%% @private
-to_bondy_utils_cont({L, Cont}) when is_list(L) ->
-    {L, fun() -> bondy_retained_message_manager:match(Cont) end};
-
-to_bondy_utils_cont(Term) ->
-    Term.

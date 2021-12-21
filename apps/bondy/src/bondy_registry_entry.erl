@@ -116,7 +116,7 @@
 -export([pattern/4]).
 -export([pattern/5]).
 -export([pid/1]).
--export([proxy/3]).
+-export([proxy/2]).
 -export([proxy_details/1]).
 -export([realm_uri/1]).
 -export([ref/1]).
@@ -701,12 +701,9 @@ to_external(#entry{key = Key} = E) ->
 %% in an edge router.
 %% @end
 %% -----------------------------------------------------------------------------
--spec proxy(
-    SessionId :: maybe(id()),
-    Target :: pid() | bondy_ref:mfargs() | bondy_ref:name(),
-    Entry :: external()) -> t().
+-spec proxy(Ref :: bondy_ref:bridge_relay(), Entry :: external()) -> t().
 
-proxy(SessionId, Target0, External) ->
+proxy(Ref, External) ->
     #{
         type := Type,
         entry_id := OriginId,
@@ -720,9 +717,8 @@ proxy(SessionId, Target0, External) ->
     RealmUri = bondy_ref:realm_uri(OriginRef),
     Nodestring = bondy_config:nodestring(),
 
-    Ref = bondy_ref:new(bridge_relay, RealmUri, Target0, SessionId, Nodestring),
-
     Target = bondy_ref:target(Ref),
+    SessionId = bondy_ref:session_id(Ref),
 
     Id = bondy_utils:get_id({router, RealmUri}),
 

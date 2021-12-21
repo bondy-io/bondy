@@ -517,7 +517,10 @@ set_session(Ctxt, S) ->
 -spec ref(t()) -> bondy_ref:t().
 
 ref(#{session := S}) ->
-    bondy_session:ref(S).
+    bondy_session:ref(S);
+
+ref(#{ref := Ref}) ->
+    Ref.
 
 
 %% -----------------------------------------------------------------------------

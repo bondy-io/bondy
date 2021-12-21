@@ -110,7 +110,8 @@
 -export([forward/2]).
 -export([forward/3]).
 -export([roles/0]).
--export([shutdown/0]).
+-export([stop/0]).
+-export([pre_stop/0]).
 
 
 
@@ -199,24 +200,36 @@ forward(Msg, To, Opts) ->
 %% cleanup of all the client sessions.
 %% @end
 %% -----------------------------------------------------------------------------
-shutdown() ->
+pre_stop() ->
     M = wamp_message:goodbye(
         #{message => <<"Router is shutting down">>},
         ?WAMP_SYSTEM_SHUTDOWN
     ),
-    Fun = fun(PeerId) -> catch bondy:send(PeerId, M) end,
 
-    try
-        _ = bondy_utils:foreach(Fun, bondy_session:list_refs(100))
-    catch
-       Class:Reason ->
-            ?LOG_ERROR(#{
-                description => "Error while shutting down router",
-                class => Class,
-                reason => Reason
-            })
+    Fun = fun
+        ({continue, Cont}) ->
+            try
+                bondy_session:list_refs(Cont)
+            catch
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(#{
+                        description => "Error while shutting down router",
+                        class => Class,
+                        reason => Reason,
+                        stacktrace => Stacktrace
+                    }),
+                    []
+            end;
+        (Ref) ->
+            catch bondy:send(Ref, M),
+            ok
     end,
 
+    %% We loop with batches of 100
+    bondy_utils:foreach(Fun, bondy_session:list_refs(100)).
+
+
+stop() ->
     ok.
 
 

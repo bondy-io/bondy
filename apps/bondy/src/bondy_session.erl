@@ -44,10 +44,12 @@
 -define(SESSION_SPACE, ?MODULE).
 
 -record(session, {
+    %% ets key
+    id                              ::  id(),
     %% TODO The session ID should definitively be a UUID and not a random
     %% integer, this is something we need to change on the WAMP SPEC and adopt
     %% in all clients
-    id                              ::  integer(),
+    % uuid                            ::  ksuid:t(),
     type = client                   ::  bondy_ref:type(),
     tab                             ::  maybe(ets:tid()),
     realm_uri                       ::  uri(),
@@ -686,8 +688,14 @@ list(_) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-list_refs(N) ->
-    list_refs('_', N).
+list_refs(?EOT) ->
+    ?EOT;
+
+list_refs(N) when is_integer(N) ->
+    list_refs('_', N);
+
+list_refs(Cont) when is_tuple(Cont) ->
+    do_list_refs(Cont).
 
 
 %% -----------------------------------------------------------------------------
@@ -912,15 +920,12 @@ when is_binary(RealmUri) orelse RealmUri == '_' ->
         '_' -> [];
         _ ->  [{'=:=', '$1', RealmUri}]
     end,
-    Projection = [{'$2'}],
+    Projection = ['$2'],
     MS = [{Pattern, Conds, Projection}],
 
     case ets:select(Tab, MS, N) of
         {L, Cont} ->
-            FunCont = fun() ->
-                do_list_refs({continuation, Tabs, RealmUri, N, Cont})
-            end,
-           {L, FunCont};
+           {L, {continuation, Tabs, RealmUri, N, Cont}};
         ?EOT ->
             do_list_refs(Tabs, RealmUri, N)
     end.
@@ -938,10 +943,7 @@ do_list_refs({continuation, Tabs, RealmUri, N, Cont0}) ->
         ?EOT ->
             ?EOT;
         {L, Cont} ->
-            FunCont = fun() ->
-                do_list_refs({continuation, Tabs, RealmUri, N, Cont})
-            end,
-            {L, FunCont}
+            {L, {continuation, Tabs, RealmUri, N, Cont}}
     end.
 
 

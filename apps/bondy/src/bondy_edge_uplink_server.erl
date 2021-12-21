@@ -145,12 +145,7 @@ when T =/= undefined andalso S =/= undefined ->
     terminate(Reason, StateName, NewState);
 
 terminate(_Reason, _StateName, State) ->
-    ok = remove_all_registry_entries(State),
-    %% TODO remove all registrations and subscriptions
-    % ok = bondy_dealer:unregister(self()),
-    % bondy_remove_all(Type, RealmUri, Node, SessionId)
-    % ok = bondy_broker:unsubscribe(self()),
-    ok.
+    ok = remove_all_registry_entries(State).
 
 
 %% -----------------------------------------------------------------------------
@@ -574,8 +569,13 @@ handle_session_message({forward, To, Msg, Opts}, _SessionId, State) ->
 
 
 %% @private
-add_registry_entry(SessionId, Entry, State) ->
-    ProxyEntry = bondy_registry_entry:proxy(SessionId, self(), Entry),
+add_registry_entry(SessionId, ExtEntry, State) ->
+    RealmUri = bondy_ref:realm_uri(maps:get(ref, ExtEntry)),
+    Nodestring = bondy_config:nodestring(),
+
+    Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId, Nodestring),
+    ProxyEntry = bondy_registry_entry:proxy(Ref, ExtEntry),
+
     Id = bondy_registry_entry:id(ProxyEntry),
     OriginId = bondy_registry_entry:origin_id(ProxyEntry),
 
@@ -620,13 +620,14 @@ remove_all_registry_entries(State) ->
 
     maps:foreach(
         fun(RealmUri, SessionId) ->
+            Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
             Ctxt = #{
                 realm_uri => RealmUri,
                 session_id => SessionId,
-                node => Node
+                node => Node,
+                ref => Ref
             },
-            _ = bondy_registry:remove_all(registration, Ctxt),
-            _ = bondy_registry:remove_all(subscription, Ctxt)
+            bondy_router:close_context(Ctxt)
         end,
         State#state.sessions_by_uri
     ).

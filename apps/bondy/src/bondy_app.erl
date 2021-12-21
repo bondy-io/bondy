@@ -189,7 +189,32 @@ start_phase(init_listeners, normal, []) ->
 %% -----------------------------------------------------------------------------
 prep_stop(_State) ->
     ok = bondy_config:set(status, shutting_down),
-    stop_router_services().
+
+    ?LOG_NOTICE(#{description => "Initiating shutdown"}),
+
+    ok = suspend_listeners(),
+
+    %% We ask the router to shutdown.
+    %% This will send a goodbye to all sessions
+    ?LOG_NOTICE(#{
+        description => "Shutting down all existing client sessions."
+    }),
+    ok = bondy_router:pre_stop(),
+
+    %% We sleep for a while to allow all sessions to terminate gracefully
+    Secs = bondy_config:get(shutdown_grace_period, 5),
+
+    ?LOG_NOTICE(#{
+        description => "Awaiting for client sessions to gracefully terminate",
+        timer_secs => Secs
+    }),
+    ok = timer:sleep(Secs * 1000),
+
+    %% We remove all session and their registrations and subscriptions, also
+    %% broadcasting those to the other nodes.
+    ok = bondy_router:stop(),
+
+    ok = stop_listeners().
 
 
 %% -----------------------------------------------------------------------------
@@ -197,6 +222,7 @@ prep_stop(_State) ->
 %% @end
 %% -----------------------------------------------------------------------------
 stop(_State) ->
+    ?LOG_NOTICE(#{description => "Shutdown finished"}),
     ok.
 
 
@@ -302,45 +328,39 @@ restore_aae() ->
     end.
 
 
-%% @private
-stop_router_services() ->
-    ?LOG_NOTICE(#{description => "Initiating shutdown"}),
-
+suspend_listeners() ->
     %% We stop accepting new connections on HTTP/S and WS/S
     ?LOG_NOTICE(#{description =>
-        "Suspending HTTP/S and WS/S listeners. "
+        "Suspending HTTP/S and WS/S client listeners. "
         "No new connections will be accepted."
     }),
     ok = bondy_http_gateway:suspend_listeners(),
 
     %% We stop accepting new connections on TCP/TLS
     ?LOG_NOTICE(#{description =>
-        "Suspending TCP/TLS listeners. "
+        "Suspending TCP/TLS client listeners. "
         "No new connections will be accepted."
     }),
     ok = bondy_wamp_tcp:suspend_listeners(),
 
-    %% We ask the router to shutdown. This will send a goodbye to all sessions
-    ?LOG_NOTICE(#{description => "Shutting down all existing client sessions."}),
-    ok = bondy_router:shutdown(),
-
-    %% We sleep for a while to allow all sessions to terminate gracefully
-    Secs = bondy_config:get(shutdown_grace_period, 5),
-    ?LOG_NOTICE(#{
-        description => "Awaiting for client sessions to gracefully terminate",
-        timer_secs => Secs
+    %% We stop accepting new connections on TCP/TLS
+    ?LOG_NOTICE(#{description =>
+        "Suspending TCP/TLS Edge listeners. "
+        "No new connections will be accepted."
     }),
-    ok = timer:sleep(Secs * 1000),
+    ok = bondy_edge:suspend_listeners().
+
+
+stop_listeners() ->
 
     %% We force the HTTP/S and WS/S connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all HTTP/S and WS/S connections"}),
+    ?LOG_NOTICE(#{description => "Terminating all client HTTP/S and WS/S client connections"}),
     ok = bondy_http_gateway:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS connections"}),
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS client connections"}),
     ok = bondy_wamp_tcp:stop_listeners(),
 
-    ?LOG_NOTICE(#{description => "Shutdown finished"}),
-    ok.
-
-
+    %% We force the TCP/TLS connections to stop
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Edge connections"}),
+    ok = bondy_edge:stop_listeners().
