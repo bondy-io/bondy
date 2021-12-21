@@ -626,9 +626,8 @@ caller_details(Ctxt, Details) ->
     Details#{
         caller => session_id(Ctxt),
         caller_authid => authid(Ctxt),
-        caller_authrole => authrole(Ctxt),
-        caller_authroles => authroles(Ctxt),
-        x_caller_node => ?MODULE:node(Ctxt)
+        caller_authrole => name_to_binary(authrole(Ctxt)),
+        caller_authroles => name_to_binary(authroles(Ctxt))
     }.
 
 
@@ -642,10 +641,9 @@ caller_details(Ctxt, Details) ->
 publisher_details(Ctxt, Details) ->
     Details#{
         publisher => session_id(Ctxt),
-        publisher_authid => authid(Ctxt),
-        publisher_authrole => authrole(Ctxt),
-        publisher_authroles => authroles(Ctxt),
-        x_publisher_node => ?MODULE:node(Ctxt)
+        publisher_authid => name_to_binary(authid(Ctxt)),
+        publisher_authrole => name_to_binary(authrole(Ctxt)),
+        publisher_authroles => name_to_binary(authroles(Ctxt))
     }.
 
 %% -----------------------------------------------------------------------------
@@ -701,3 +699,19 @@ is_anonymous(Ctxt) ->
 set_is_anonymous(Ctxt, Value) when is_boolean(Value) ->
     Ctxt#{is_anonymous => Value}.
 
+
+
+%% =============================================================================
+%%  PRIVATE
+%% =============================================================================
+
+
+
+name_to_binary(undefined) ->
+    <<"undefined">>;
+
+name_to_binary(anonymous) ->
+    <<"anonymous">>;
+
+name_to_binary(Term) when is_binary(Term) ->
+    Term.
