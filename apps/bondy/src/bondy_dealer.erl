@@ -51,11 +51,13 @@
 %% unregistering endpoints to be called over RPC involves the following
 %% messages:
 %%
-%%    1.  "REGISTER"
-%%    2.  "REGISTERED"
-%%    3.  "UNREGISTER"
-%%    4.  "UNREGISTERED"
-%%    5.  "ERROR"
+%% <ol>
+%% <li>`REGISTER'</li>
+%% <li>`REGISTERED'</li>
+%% <li>`UNREGISTER'</li>
+%% <li>`UNREGISTERED'</li>
+%% <li>`ERROR'</li>
+%% </ol>
 %%
 %% ```
 %%        ,------.          ,------.               ,------.
@@ -64,20 +66,20 @@
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |       REGISTER       |
-%%           |                 | &lt;---------------------
+%%           |                 | <---------------------
 %%           |                 |                      |
 %%           |                 |  REGISTERED or ERROR |
-%%           |                 | ---------------------&gt;
+%%           |                 | --------------------->
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |                      |
 %%           |                 |      UNREGISTER      |
-%%           |                 | &lt;---------------------
+%%           |                 | <---------------------
 %%           |                 |                      |
 %%           |                 | UNREGISTERED or ERROR|
-%%           |                 | ---------------------&gt;
+%%           |                 | --------------------->
 %%        ,--+---.          ,--+---.               ,--+---.
 %%        |Caller|          |Dealer|               |Callee|
 %%        `------'          `------'               `------'
@@ -100,26 +102,14 @@
 %%
 %%    5. "ERROR"
 %%
-%% ```
-%%        ,------.          ,------.          ,------.
-%%        |Caller|          |Dealer|          |Callee|
-%%        `--+---'          `--+---'          `--+---'
-%%           |       CALL      |                 |
-%%           | ----------------&gt;                 |
-%%           |                 |                 |
-%%           |                 |    INVOCATION   |
-%%           |                 | ----------------&gt;
-%%           |                 |                 |
-%%           |                 |  YIELD or ERROR |
-%%           |                 | %lt;----------------
-%%           |                 |                 |
-%%           | RESULT or ERROR |                 |
-%%           | %lt;----------------                 |
-%%        ,--+---.          ,--+---.          ,--+---.
-%%        |Caller|          |Dealer|          |Callee|
-%%        `------'          `------'          `------'
-%%
-%% '''
+%% <pre><code class="mermaid">
+%%    sequenceDiagram
+%%     %%{init: {'theme': 'neutral'} }%%
+%%     Caller->>+Dealer: CALL
+%%     Dealer->>Callee: INVOCATION
+%%     Callee->>Dealer: YIELD | ERROR
+%%     Dealer->>Caller: RESULT | ERROR
+%% </code></pre>
 %%
 %%    The execution of remote procedure calls is asynchronous, and there
 %%    may be more than one call outstanding.  A call is called outstanding

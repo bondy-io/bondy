@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>API Reference — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="extras">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1 id="content">
+API Reference <small class="app-vsn">bondy v1.0.0-beta.16</small>
+
+</h1>
+
+
+  <section class="details-list">
+    <h2 id="modules" class="section-heading">
+  <a href="#modules" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Modules
+</h2>
+
+    <div class="summary">
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy.html" translate="no">bondy</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_admin_ping_http_handler.html" translate="no">bondy_admin_ping_http_handler</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_admin_ready_http_handler.html" translate="no">bondy_admin_ready_http_handler</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_alarm_handler.html" translate="no">bondy_alarm_handler</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module implements a replacement for OTP's default alarm_handler.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_app.html" translate="no">bondy_app</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth.html" translate="no">bondy_auth</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module provides the behaviour to be implemented by the authentication methods used by Bondy. The module provides the functions required to setup an authentication context, compute a challenge (in the case of challenge-response methods and authenticate a user based on the selected method out of the available methods offered by the Realm and restricted by the access control system and the user's password capabilities.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_anonymous.html" translate="no">bondy_auth_anonymous</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module implements the <a href="bondy_auth.html"><code>bondy_auth</code></a> behaviour to allow access to clients which connect without credentials assigning them the 'anonymous' group.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_oauth2.html" translate="no">bondy_auth_oauth2</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_password.html" translate="no">bondy_auth_password</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_ticket.html" translate="no">bondy_auth_ticket</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_trust.html" translate="no">bondy_auth_trust</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_wamp_cra.html" translate="no">bondy_auth_wamp_cra</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_wamp_cryptosign.html" translate="no">bondy_auth_wamp_cryptosign</a>
+
+  </div>
+
+    <div class="summary-synopsis">## References * [BrowserAuth](http://www.browserauth.net) * [Binding Security Tokens to TLS Channels](https://www.ietf.org/proceedings/90/slides/slides-90-uta-0.pdf)</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_auth_wamp_scram.html" translate="no">bondy_auth_wamp_scram</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_backup.html" translate="no">bondy_backup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_backup_wamp_api.html" translate="no">bondy_backup_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_broker.html" translate="no">bondy_broker</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module implements the capabilities of a Broker. It is used by <a href="bondy_router.html"><code>bondy_router</code></a>.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_cache.html" translate="no">bondy_cache</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_cidr.html" translate="no">bondy_cidr</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_cli_table.html" translate="no">bondy_cli_table</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_cluster_wamp_api.html" translate="no">bondy_cluster_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_config.html" translate="no">bondy_config</a>
+
+  </div>
+
+    <div class="summary-synopsis">An implementation of app_config behaviour.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_consistent_hashing.html" translate="no">bondy_consistent_hashing</a>
+
+  </div>
+
+    <div class="summary-synopsis">It uses Jump Consistent Hash algorithm described in [A Fast, Minimal Memory, Consistent Hash Algorithm](https://arxiv.org/ftp/ arxiv/papers/1406/1406.2294.pdf).</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_context.html" translate="no">bondy_context</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A Bondy Context lets you access information that defines the state of an interaction. In a typical interacion, several actors or objects have a hand in what is going on e.g. bondy_session, wamp_realm, etc.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_data_validators.html" translate="no">bondy_data_validators</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_dealer.html" translate="no">bondy_dealer</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements the capabilities of a Dealer. It is used by <a href="bondy_router.html"><code>bondy_router</code></a>.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge.html" translate="no">bondy_edge</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_event_handler.html" translate="no">bondy_edge_event_handler</a>
+
+  </div>
+
+    <div class="summary-synopsis">An event handler to generates WAMP Meta Events based on internal Bondy events</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_exchanges_sup.html" translate="no">bondy_edge_exchanges_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_session.html" translate="no">bondy_edge_session</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_uplink_client.html" translate="no">bondy_edge_uplink_client</a>
+
+  </div>
+
+    <div class="summary-synopsis">EARLY DRAFT implementation of the client-side connection between and edge node (client) and a remote/core node (server).</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_uplink_client_sup.html" translate="no">bondy_edge_uplink_client_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_edge_uplink_server.html" translate="no">bondy_edge_uplink_server</a>
+
+  </div>
+
+    <div class="summary-synopsis">EARLY DRAFT implementation of the server-side connection between and edge node (client) and a remote/core node (server).</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_error.html" translate="no">bondy_error</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_event_handler_watcher.html" translate="no">bondy_event_handler_watcher</a>
+
+  </div>
+
+    <div class="summary-synopsis">Implements the event watcher capability as designed by Lager.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_event_handler_watcher_sup.html" translate="no">bondy_event_handler_watcher_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_event_logger.html" translate="no">bondy_event_logger</a>
+
+  </div>
+
+    <div class="summary-synopsis">An event handler to generates WAMP Meta Events based on internal Bondy events</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_event_manager.html" translate="no">bondy_event_manager</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module is used by Bondy to manage event handlers and notify them of events. It implements the &quot;watched&quot; handler capability i.e. <code>add_watched_handler/2,3</code>, <code>swap_watched_handler/2,3</code>. In addition, this module mirrors most of the gen_event API and adds variants with two arguments were the first argument is the defaul event manager (<code>bondy_event_manager</code>).</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_event_wamp_publisher.html" translate="no">bondy_event_wamp_publisher</a>
+
+  </div>
+
+    <div class="summary-synopsis">An event handler to generates WAMP Meta Events based on internal Bondy events</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_http_gateway.html" translate="no">bondy_http_gateway</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_http_gateway_api_spec_parser.html" translate="no">bondy_http_gateway_api_spec_parser</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements a parser for the Bondy API Specification Format which is used to dynamically define one or more RESTful APIs.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_http_gateway_rest_handler.html" translate="no">bondy_http_gateway_rest_handler</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements a generic Cowboy rest handler that handles a resource specified using the Bondy API Gateway Specification Format (BAGS), a JSON-based format for describing, producing and consuming RESTful Web Services using Bondy.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_http_gateway_utils.html" translate="no">bondy_http_gateway_utils</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_http_gateway_wamp_api.html" translate="no">bondy_http_gateway_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_json.html" translate="no">bondy_json</a>
+
+  </div>
+
+    <div class="summary-synopsis">A utiliy module use to customised the JSON encoding for 3rd-party libs e.g. erlang_jose</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_lager_logger_backend.html" translate="no">bondy_lager_logger_backend</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_logger_formatter.html" translate="no">bondy_logger_formatter</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This is the main module that exposes custom formatting to the OTP logger library (part of the <code>kernel</code> application since OTP-21).</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_logger_utils.html" translate="no">bondy_logger_utils</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_oauth2.html" translate="no">bondy_oauth2</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>The following table documents the storage layout in plum_db of the token data and its indices</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_oauth2_client.html" translate="no">bondy_oauth2_client</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_oauth2_resource_owner.html" translate="no">bondy_oauth2_resource_owner</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_oauth2_rest_handler.html" translate="no">bondy_oauth2_rest_handler</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_oauth2_wamp_api.html" translate="no">bondy_oauth2_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_partisan_peer_service.html" translate="no">bondy_partisan_peer_service</a>
+
+  </div>
+
+    <div class="summary-synopsis">Based on: github.com/lasp-lang/lasp/...lasp_partisan_peer_service.erl</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_password.html" translate="no">bondy_password</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A Password object stores a fixed size salted hash of a user's password and all the metadata required to re-compute the salted hash for comparing a user input and for implementing several password-based authentication protocols.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_password_cra.html" translate="no">bondy_password_cra</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_password_scram.html" translate="no">bondy_password_scram</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module provides the functions and algorithms to operate with the Salted Challenge-Reponse Mechanism data structures.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_discovery_agent.html" translate="no">bondy_peer_discovery_agent</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This state machine is reponsible for discovering Bondy cluster peers using the defined implementation backend (callback module).</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_discovery_dns_agent.html" translate="no">bondy_peer_discovery_dns_agent</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>An implementation of the <a href="bondy_peer_discovery_agent.html"><code>bondy_peer_discovery_agent</code></a> behaviour that uses DNS for service discovery.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_discovery_static_agent.html" translate="no">bondy_peer_discovery_static_agent</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>An implementation of the <a href="bondy_peer_discovery_agent.html"><code>bondy_peer_discovery_agent</code></a> behaviour that uses a static list of node names for service discovery.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_message.html" translate="no">bondy_peer_message</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_service.html" translate="no">bondy_peer_service</a>
+
+  </div>
+
+    <div class="summary-synopsis">Based on: github.com/lasp-lang/lasp/...lasp_peer_service.erl</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_peer_wamp_relay.html" translate="no">bondy_peer_wamp_relay</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A gen_server that forwards INVOCATION (their RESULT or ERROR), INTERRUPT and EVENT messages between WAMP clients connected to different Bondy peers (nodes).</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_prometheus.html" translate="no">bondy_prometheus</a>
+
+  </div>
+
+    <div class="summary-synopsis">We follow https://prometheus.io/docs/practices/naming/</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_prometheus_collector.html" translate="no">bondy_prometheus_collector</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_prometheus_cowboy_collector.html" translate="no">bondy_prometheus_cowboy_collector</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>Collects Cowboy metrics using <a href="https://github.com/ninenines/cowboy/blob/master/src/cowboy_metrics_h.erl">metrics stream handler </a>.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_ranch_listener.html" translate="no">bondy_ranch_listener</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module encapsulates several operations on the ranch library and it is used by all other modules to setup and manage TCP and TLS listeners.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac.html" translate="no">bondy_rbac</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>### WAMP Permissions</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_group.html" translate="no">bondy_rbac_group</a>
+
+  </div>
+
+    <div class="summary-synopsis">**Note:** Usernames and group names are stored in lower case. All functions in this module are case sensitice so when using the functions in this module make sure the inputs you provide are in lowercase to. If you need to convert your input to lowercase use <a href="https://www.erlang.org/doc/man/string.html#casefold-1"><code>string:casefold/1</code></a>.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_group_wamp_api.html" translate="no">bondy_rbac_group_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_source.html" translate="no">bondy_rbac_source</a>
+
+  </div>
+
+    <div class="summary-synopsis">**Note:** Usernames and group names are stored in lower case. All functions in this module are case sensitice so when using the functions in this module make sure the inputs you provide are in lowercase to. If you need to convert your input to lowercase use <a href="https://www.erlang.org/doc/man/string.html#casefold-1"><code>string:casefold/1</code></a>.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_source_wamp_api.html" translate="no">bondy_rbac_source_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_user.html" translate="no">bondy_rbac_user</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A user is a role that is able to log into a Bondy Realm. Users have attributes associated with themelves like username, credentials (password or authorized keys) and metadata determined by the client applications. Users can be assigned group memberships.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_user_wamp_api.html" translate="no">bondy_rbac_user_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rbac_wamp_api.html" translate="no">bondy_rbac_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_realm.html" translate="no">bondy_realm</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>Realms are routing and administrative domains and act as namespaces for all resources in Bondy i.e. all users, groups, permissions, registrations and subscriptions belong to a Realm. Messages and events are routed separately for each individual realm so sessions attached to a realm won’t see message and events occurring on another realm.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_realm_wamp_api.html" translate="no">bondy_realm_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_ref.html" translate="no">bondy_ref</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A <code>bondy_ref</code> (reference) acts as a fully qualified name for a process or callback function in a Bondy network. The reference is used by Bondy in the <code>bondy_registry</code> when registering procedures and subscriptions so that the <code>bondy_router</code> can forward and/or relay a message to a process, or callback function.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_registry.html" translate="no">bondy_registry</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>An in-memory registry for PubSub subscriptions and Routed RPC registrations, providing pattern matching capabilities including support for WAMP's version 2.0 match policies (exact, prefix and wildcard).</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_registry_entry.html" translate="no">bondy_registry_entry</a>
+
+  </div>
+
+    <div class="summary-synopsis">An entry is a record of a RPC registration or PubSub subscription. It is stored in-memory in the Registry <a href="bondy_registry.html"><code>bondy_registry</code></a> and replicated globally and is immutable.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_remote_user_events_handler.html" translate="no">bondy_remote_user_events_handler</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_retained_message.html" translate="no">bondy_retained_message</a>
+
+  </div>
+
+    <div class="summary-synopsis">This is experimental and does not scale with high traffic at the moment.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_retained_message_manager.html" translate="no">bondy_retained_message_manager</a>
+
+  </div>
+
+    <div class="summary-synopsis">Implements Eviction amogst other things</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_retry.html" translate="no">bondy_retry</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_router.html" translate="no">bondy_router</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>bondy_router provides the routing logic for all interactions.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_router_worker.html" translate="no">bondy_router_worker</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rpc_load_balancer.html" translate="no">bondy_rpc_load_balancer</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements a distributed load balancer, providing the different load balancing strategies used by bondy_dealer to choose the Callee and Procedure to invoke when handling a WAMP Call.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_rpc_promise.html" translate="no">bondy_rpc_promise</a>
+
+  </div>
+
+    <div class="summary-synopsis">A promise is used to implement a capability and a feature: - the capability to match the callee response (wamp_yield() or wamp_error()) back to the origin wamp_call() and Caller - the call_timeout feature at the dealer level</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_security.html" translate="no">bondy_security</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_sensitive.html" translate="no">bondy_sensitive</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_session.html" translate="no">bondy_session</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A Session (wamp session) is a transient conversation between two WAMP Peers attached to a Realm and running over a Transport.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_session_api.html" translate="no">bondy_session_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_session_manager.html" translate="no">bondy_session_manager</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_session_manager_sup.html" translate="no">bondy_session_manager_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_subscriber.html" translate="no">bondy_subscriber</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements a supervised process (gen_server) that acts as a local (internal) WAMP subscriber that when received an EVENT applies the user provided function.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_subscribers_sup.html" translate="no">bondy_subscribers_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_sup.html" translate="no">bondy_sup</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_telemetry.html" translate="no">bondy_telemetry</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_telemetry_wamp_api.html" translate="no">bondy_telemetry_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_ticket.html" translate="no">bondy_ticket</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>This module implements the functions to issue and manage authentication tickets.</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_ticket_wamp_api.html" translate="no">bondy_ticket_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_utils.html" translate="no">bondy_utils</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_api.html" translate="no">bondy_wamp_api</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_callback.html" translate="no">bondy_wamp_callback</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_event_manager.html" translate="no">bondy_wamp_event_manager</a>
+
+  </div>
+
+    <div class="summary-synopsis">This module provides a bridge between WAMP events and OTP events.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_meta_api.html" translate="no">bondy_wamp_meta_api</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>Handles the following META API wamp calls</p></div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_protocol.html" translate="no">bondy_wamp_protocol</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_tcp.html" translate="no">bondy_wamp_tcp</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_tcp_connection_handler.html" translate="no">bondy_wamp_tcp_connection_handler</a>
+
+  </div>
+
+    <div class="summary-synopsis">A ranch handler for the wamp protocol over either tcp or tls transports.</div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_utils.html" translate="no">bondy_wamp_utils</a>
+
+  </div>
+
+</div>
+<div class="summary-row">
+  <div class="summary-signature">
+    <a href="bondy_wamp_ws_connection_handler.html" translate="no">bondy_wamp_ws_connection_handler</a>
+
+  </div>
+
+    <div class="summary-synopsis"><p>A Cowboy WS handler.</p></div>
+
+</div>
+
+    </div>
+  </section>
+
+
+<div class="bottom-actions">
+  <div class="bottom-actions-item">
+
+  </div>
+  <div class="bottom-actions-item">
+
+      <a href="license.html" class="bottom-actions-button" rel="next">
+        <span class="subheader">
+          Next Page →
+        </span>
+        <span class="title">
+LICENSE
+        </span>
+      </a>
+
+  </div>
+</div>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

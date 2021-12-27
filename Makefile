@@ -12,7 +12,7 @@ compile:
 	${REBAR} compile
 
 docs:
-	${REBAR} as docs edoc
+	${REBAR} ex_doc
 
 test: xref
 	${REBAR} as test ct

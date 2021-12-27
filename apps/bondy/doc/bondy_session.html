@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_session — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_session</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L38" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>A Session (wamp session) is a transient conversation between two WAMP Peers attached to a Realm and running over a Transport.</p><p>Bondy implementation ties the lifetime of the underlying transport connection for a WAMP connection to that of a WAMP Session i.e. establish a new transport-layer connection as part of each new session establishment.</p><p>A Bondy Session is a not an application Session and is not a store for application specific content (an application session store should be implemented as a service i.e. a Callee).</p>Currently sessions are not persistent i.e. if the connection closes the session data will be lost.
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:details/0" translate="no">details/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:id/0" translate="no">id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:maybe/1" translate="no">maybe/1</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:nodestring/0" translate="no">nodestring/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:peer/0" translate="no">peer/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:properties/0" translate="no">properties/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:t/0" translate="no">t/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#agent/1" translate="no">agent(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authid/1" translate="no">authid(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authmethod/1" translate="no">authmethod(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authrole/1" translate="no">authrole(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authroles/1" translate="no">authroles(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#close/1" translate="no">close(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#created/1" translate="no">created(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the time at which the session was created, Its value is a timestamp in seconds.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#fetch/1" translate="no">fetch(Id)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the session identified by Id from the tuplespace. If the session does not exist it fails with reason '{badarg, Id}'.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#format_status/2" translate="no">format_status(Opt, Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#id/1" translate="no">id(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#incr_seq/1" translate="no">incr_seq(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#info/1" translate="no">info(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_security_enabled/1" translate="no">is_security_enabled(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list/0" translate="no">list()</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list/1" translate="no">list(_)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list_refs/1" translate="no">list_refs(N)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list_refs/2" translate="no">list_refs(RealmUri, N)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup/1" translate="no">lookup(Id)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the session identified by Id from the tuplespace or 'not_found' if it doesn't exist.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup/2" translate="no">lookup(RealmUri, Id)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the session identified by Id from the tuplespace or 'not_found' if it doesn't exist.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/2" translate="no">new(RealmUri, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Creates a new transient session (not persisted)</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/3" translate="no">new(Id, RealmUri, Opts)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#node/1" translate="no">node(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the node of the process managing the transport that the session identified by Id runs on.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#nodestring/1" translate="no">nodestring(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the node of the process managing the transport that the session identified by Id runs on.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#peer/1" translate="no">peer(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#pid/1" translate="no">pid(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the pid of the process managing the transport that the session identified by Id runs on.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#rbac_context/1" translate="no">rbac_context(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#realm_uri/1" translate="no">realm_uri(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#ref/1" translate="no">ref(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the identifier for the owner of this session</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#refresh_rbac_context/1" translate="no">refresh_rbac_context(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#roles/1" translate="no">roles(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#size/0" translate="no">size()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the number of sessions in the tuplespace.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#store/1" translate="no">store(Session)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Creates a new session provided the RealmUri exists or can be dynamically created. It calls <code>bondy_utils:get_realm/1</code> which will fail with an exception if the realm does not exist or cannot be created -----------------------------------------------------------------------------</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#to_external/1" translate="no">to_external(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#type/1" translate="no">type(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#update/1" translate="no">update(Session)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#user/1" translate="no">user(Session)</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:details/0">
+
+  <div class="detail-header">
+    <a href="#t:details/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">details/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L81" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">details() ::
+    #{session => <a href="#t:id/0">id</a>(),
+      authid => <a href="#t:id/0">id</a>(),
+      authrole => binary(),
+      authmethod => binary(),
+      authprovider => binary(),
+      transport => #{agent => binary(), peername => binary()}}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:id/0">
+
+  <div class="detail-header">
+    <a href="#t:id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L52" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id() :: 0..9007199254740992.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:maybe/1">
+
+  <div class="detail-header">
+    <a href="#t:maybe/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">maybe/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L116" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">maybe(T) :: T | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:nodestring/0">
+
+  <div class="detail-header">
+    <a href="#t:nodestring/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">nodestring/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L117" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">nodestring() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:peer/0">
+
+  <div class="detail-header">
+    <a href="#t:peer/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">peer/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L78" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">peer() :: {<a href="https://www.erlang.org/doc/man/inet.html#type-ip_address">inet:ip_address</a>(), <a href="https://www.erlang.org/doc/man/inet.html#type-port_number">inet:port_number</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:properties/0">
+
+  <div class="detail-header">
+    <a href="#t:properties/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">properties/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L93" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">properties() ::
+    #{roles := map(),
+      agent => binary(),
+      authid => binary(),
+      authrole => binary(),
+      authroles => [binary()],
+      authmethod => binary(),
+      is_anonymous => boolean(),
+      roles => <a href="#t:peer/0">peer</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:t/0">
+
+  <div class="detail-header">
+    <a href="#t:t/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">t/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L79" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">t() :: #session{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="agent/1">
+
+  <div class="detail-header">
+    <a href="#agent/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">agent(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L418" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">agent(<a href="#t:t/0">t</a>()) -> binary() | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="authid/1">
+
+  <div class="detail-header">
+    <a href="#authid/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authid(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L444" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authid(<a href="#t:t/0">t</a>()) -> <a href="bondy_rbac_user.html#t:username/0">bondy_rbac_user:username</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="authmethod/1">
+
+  <div class="detail-header">
+    <a href="#authmethod/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authmethod(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L492" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authmethod(<a href="#t:t/0">t</a>()) -> binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="authrole/1">
+
+  <div class="detail-header">
+    <a href="#authrole/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authrole(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L457" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authrole(<a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()).</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="authroles/1">
+
+  <div class="detail-header">
+    <a href="#authroles/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authroles(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L479" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authroles(<a href="#t:t/0">t</a>()) -> [<a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="close/1">
+
+  <div class="detail-header">
+    <a href="#close/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">close(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L286" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">close(<a href="#t:t/0">t</a>()) -> ok.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="created/1">
+
+  <div class="detail-header">
+    <a href="#created/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">created(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L405" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">created(<a href="#t:t/0">t</a>()) -> pos_integer().</pre>
+
+      </div>
+
+Returns the time at which the session was created, Its value is a timestamp in seconds.
+  </section>
+</section>
+<section class="detail" id="fetch/1">
+
+  <div class="detail-header">
+    <a href="#fetch/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">fetch(Id)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L655" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">fetch(<a href="#t:id/0">id</a>()) -> <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+Retrieves the session identified by Id from the tuplespace. If the session does not exist it fails with reason '{badarg, Id}'.
+  </section>
+</section>
+<section class="detail" id="format_status/2">
+
+  <div class="detail-header">
+    <a href="#format_status/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">format_status(Opt, Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L172" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">format_status(Opt :: normal | terminate, Session :: <a href="#t:t/0">t</a>()) -> term().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="id/1">
+
+  <div class="detail-header">
+    <a href="#id/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">id(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L310" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id(<a href="#t:t/0">t</a>()) -> <a href="#t:id/0">id</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="incr_seq/1">
+
+  <div class="detail-header">
+    <a href="#incr_seq/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">incr_seq(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L564" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">incr_seq(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="info/1">
+
+  <div class="detail-header">
+    <a href="#info/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">info(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L739" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">info(<a href="#t:t/0">t</a>()) -> <a href="#t:details/0">details</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_security_enabled/1">
+
+  <div class="detail-header">
+    <a href="#is_security_enabled/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_security_enabled(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L599" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_security_enabled(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="list/0">
+
+  <div class="detail-header">
+    <a href="#list/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L670" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="list/1">
+
+  <div class="detail-header">
+    <a href="#list/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list(_)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L678" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="list_refs/1">
+
+  <div class="detail-header">
+    <a href="#list_refs/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list_refs(N)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L691" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="list_refs/2">
+
+  <div class="detail-header">
+    <a href="#list_refs/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list_refs(RealmUri, N)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L705" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="lookup/1">
+
+  <div class="detail-header">
+    <a href="#lookup/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup(Id)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L616" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup(<a href="#t:id/0">id</a>() | <a href="bondy_ref.html#t:t/0">bondy_ref:t</a>()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Retrieves the session identified by Id from the tuplespace or 'not_found' if it doesn't exist.
+  </section>
+</section>
+<section class="detail" id="lookup/2">
+
+  <div class="detail-header">
+    <a href="#lookup/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup(RealmUri, Id)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L638" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup(RealmUri :: <a href="#t:uri/0">uri</a>(), Id :: <a href="#t:id/0">id</a>()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Retrieves the session identified by Id from the tuplespace or 'not_found' if it doesn't exist.
+  </section>
+</section>
+<section class="detail" id="new/2">
+
+  <div class="detail-header">
+    <a href="#new/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(RealmUri, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L194" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(<a href="#t:uri/0">uri</a>() | <a href="bondy_realm.html#t:t/0">bondy_realm:t</a>(), <a href="#t:properties/0">properties</a>()) -> <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+Creates a new transient session (not persisted)
+  </section>
+</section>
+<section class="detail" id="new/3">
+
+  <div class="detail-header">
+    <a href="#new/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Id, RealmUri, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L209" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(<a href="#t:id/0">id</a>(), <a href="#t:uri/0">uri</a>() | <a href="bondy_realm.html#t:t/0">bondy_realm:t</a>(), <a href="#t:properties/0">properties</a>()) -> <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="node/1">
+
+  <div class="detail-header">
+    <a href="#node/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">node(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L376" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">node(<a href="#t:t/0">t</a>()) -> atom().</pre>
+
+      </div>
+
+Returns the node of the process managing the transport that the session identified by Id runs on.
+  </section>
+</section>
+<section class="detail" id="nodestring/1">
+
+  <div class="detail-header">
+    <a href="#nodestring/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">nodestring(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L391" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">nodestring(<a href="#t:t/0">t</a>()) -> <a href="#t:nodestring/0">nodestring</a>().</pre>
+
+      </div>
+
+Returns the node of the process managing the transport that the session identified by Id runs on.
+  </section>
+</section>
+<section class="detail" id="peer/1">
+
+  <div class="detail-header">
+    <a href="#peer/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">peer(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L431" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">peer(<a href="#t:t/0">t</a>()) -> <a href="#t:peer/0">peer</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="pid/1">
+
+  <div class="detail-header">
+    <a href="#pid/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">pid(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L361" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">pid(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> pid().</pre>
+
+      </div>
+
+Returns the pid of the process managing the transport that the session identified by Id runs on.
+  </section>
+</section>
+<section class="detail" id="rbac_context/1">
+
+  <div class="detail-header">
+    <a href="#rbac_context/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">rbac_context(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L518" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">rbac_context(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> <a href="bondy_rbac.html#t:context/0">bondy_rbac:context</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="realm_uri/1">
+
+  <div class="detail-header">
+    <a href="#realm_uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">realm_uri(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L320" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">realm_uri(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> <a href="#t:uri/0">uri</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="ref/1">
+
+  <div class="detail-header">
+    <a href="#ref/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">ref(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L346" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">ref(<a href="#t:t/0">t</a>()) -> <a href="bondy_ref.html#t:client/0">bondy_ref:client</a>() | <a href="bondy_ref.html#t:relay/0">bondy_ref:relay</a>().</pre>
+
+      </div>
+
+Returns the identifier for the owner of this session
+  </section>
+</section>
+<section class="detail" id="refresh_rbac_context/1">
+
+  <div class="detail-header">
+    <a href="#refresh_rbac_context/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">refresh_rbac_context(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L551" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">refresh_rbac_context(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> <a href="bondy_rbac.html#t:context/0">bondy_rbac:context</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="roles/1">
+
+  <div class="detail-header">
+    <a href="#roles/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">roles(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L333" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">roles(<a href="#t:id/0">id</a>() | <a href="#t:t/0">t</a>()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="size/0">
+
+  <div class="detail-header">
+    <a href="#size/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">size()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L587" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">size() -> non_neg_integer().</pre>
+
+      </div>
+
+Returns the number of sessions in the tuplespace.
+  </section>
+</section>
+<section class="detail" id="store/1">
+
+  <div class="detail-header">
+    <a href="#store/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">store(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L255" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">store(<a href="#t:t/0">t</a>()) -> ok | no_return().</pre>
+
+      </div>
+
+Creates a new session provided the RealmUri exists or can be dynamically created. It calls <code>bondy_utils:get_realm/1</code> which will fail with an exception if the realm does not exist or cannot be created -----------------------------------------------------------------------------
+  </section>
+</section>
+<section class="detail" id="to_external/1">
+
+  <div class="detail-header">
+    <a href="#to_external/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">to_external(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L717" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">to_external(<a href="#t:t/0">t</a>()) -> <a href="#t:details/0">details</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="type/1">
+
+  <div class="detail-header">
+    <a href="#type/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">type(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L242" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">type(<a href="#t:t/0">t</a>()) -> bondy_ref:type().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="update/1">
+
+  <div class="detail-header">
+    <a href="#update/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">update(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L274" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update(<a href="#t:t/0">t</a>()) -> ok.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="user/1">
+
+  <div class="detail-header">
+    <a href="#user/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">user(Session)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_session.erl#L505" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">user(<a href="#t:t/0">t</a>()) -> <a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

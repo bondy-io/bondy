@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_ticket — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_ticket</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L144" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>This module implements the functions to issue and manage authentication tickets.</p><p>An authentication ticket (**ticket**) is a signed (and possibly encrypted) assertion of a user's identity, that a client can use to authenticate the user without the need to ask it to re-enter its credentials.</p><p>Tickets MUST be issued by a session that was opened using an authentication method that is neither <code>ticket</code> nor <code>anonymous</code> authentication.</p><p>### Claims</p><p>* id: provides a unique identifier for the ticket. * issued_by: identifies the principal that issued the ticket. Most of the time this is an application identifier (a.k.asl username or client_id) but sometimes can be the WAMP session's username (a.k.a <code>authid</code>). * authid: identifies the principal that is the subject of the ticket. The Claims in a ticket are normally statements. This is the WAMP session's username (a.k.a <code>authid</code>). * authrealm: identifies the recipients that the ticket is intended for. The value is <code>RealmUri</code>. * expires_at: identifies the expiration time on or after which the ticket MUST NOT be accepted for processing. The processing of the &quot;exp&quot; claim requires that the current date/time MUST be before the expiration date/ time listed in the &quot;exp&quot; claim. Bondy considers a small leeway of 2 mins by default. * issued_at: identifies the time at which the ticket was issued. This claim can be used to determine the age of the ticket. Its value is a timestamp in seconds. * issued_on: the bondy nodename in which the ticket was issued. * scope: the scope of the ticket, consisting of * realm: If <code>undefined</code> the ticket grants access to all realms the user has access to by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket is valid on.</p><p>## Claims Storage</p><p>Claims for a ticket are stored in PlumDB using the prefix <code>{bondy_ticket, Suffix :: binary()}</code> where Suffix is the concatenation of the authentication realm's URI and the user's username (a.k.a <code>authid</code>) and a key which is derived by the ticket's scope. The scope itself is the result of the combination of the different options provided by the <a href="#issue/2"><code>issue/2</code></a> function.</p><p>Thes decision to use this key as opposed to the ticket's unique identifier is to bounds the number of tickets a user can have at any point in time in order to reduce data storage and traffic.</p><p>### Ticket Scopes A ticket can be issued using different scopes. The scope is determined based on the options used to issue the ticket.</p><p>#### Local scope The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on the session's realm only.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.local&quot;&gt;&gt;</code> resource.</p><p>#### SSO Scope The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on any realm the user has access to through SSO.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.sso&quot;&gt;&gt;</code> resource.</p><p>#### Client-Local scope The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client (a local or sso ticket). The ticket can be used to authenticate on the session's realm only.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><p>#### Client-SSO scope The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client ( a local or sso ticket). The ticket can be used to authenticate on any realm the user has access to through SSO.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><p>### Scope Summary * <code>uri()</code> in the following table refers to the scope realm (not the Authentication realm which is used in the prefix)</p><p>|SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value| |---|---|---|---|---|---| |Local|no|no|no|<code>uri()</code>|<code>claims()</code>| |SSO|yes|no|no|<code>username()</code>|<code>claims()</code>| |Client-Local|no|yes|no|<code>client_id()</code>|<code>[{uri(), claims()}]</code>| |Client-Local|no|yes|yes|<code>client_id()</code>|<code>[{{uri(), instance_id()}, claims()}]</code>| |Client-SSO|yes|yes|no|<code>client_id()</code>|<code>[{undefined, claims()}]</code>| |Client-SSO|yes|yes|yes|<code>client_id()</code>|<code>[{{undefined, instance_id()}, claims()}]</code>|</p>### Permissions Summary Issuing tickets requires the user to be granted certain permissions beyond the WAMP permission required to call the procedures. |Scope|Permission|Resource| |---|---|---| |Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.local</code>| |SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.sso</code>| |Client-Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_local</code>| |Client-SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_sso</code>|
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:authid/0" translate="no">authid/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:claims/0" translate="no">claims/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:issue_error/0" translate="no">issue_error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:maybe/1" translate="no">maybe/1</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:opts/0" translate="no">opts/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:scope/0" translate="no">scope/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:t/0" translate="no">t/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:ticket_id/0" translate="no">ticket_id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:verify_opts/0" translate="no">verify_opts/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#issue/2" translate="no">issue(Session, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Issues a ticket to be used with the WAMP Ticket authentication method. The function stores the ticket claims data and replicates it across all nodes in the cluster.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup/3" translate="no">lookup(RealmUri, Authid, Scope)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke/1" translate="no">revoke(Ticket)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_all/2" translate="no">revoke_all(RealmUri, Authid)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Revokes all tickets issued to user with <code>Username</code> in realm <code>RealmUri</code>. Notice that the ticket could have been issued by itself or by a client application.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_all/3" translate="no">revoke_all(RealmUri, Username, Scope)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Revokes all tickets issued to user with <code>Username</code> in realm <code>RealmUri</code> matching the scope <code>Scope</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#verify/1" translate="no">verify(Ticket)</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:authid/0">
+
+  <div class="detail-header">
+    <a href="#t:authid/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">authid/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L223" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authid() :: <a href="bondy_rbac_user.html#t:username/0">bondy_rbac_user:username</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:claims/0">
+
+  <div class="detail-header">
+    <a href="#t:claims/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">claims/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L210" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">claims() ::
+    #{id := <a href="#t:ticket_id/0">ticket_id</a>(),
+      authrealm := <a href="#t:uri/0">uri</a>(),
+      authid := <a href="#t:authid/0">authid</a>(),
+      authmethod := binary(),
+      issued_by := <a href="#t:authid/0">authid</a>(),
+      issued_on := node(),
+      issued_at := pos_integer(),
+      expires_at := pos_integer(),
+      scope := <a href="#t:scope/0">scope</a>(),
+      kid := binary()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:issue_error/0">
+
+  <div class="detail-header">
+    <a href="#t:issue_error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">issue_error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L224" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">issue_error() ::
+    {no_such_user, <a href="#t:authid/0">authid</a>()} | no_such_realm | invalid_request | invalid_ticket | not_authorized.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:maybe/1">
+
+  <div class="detail-header">
+    <a href="#t:maybe/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">maybe/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L116" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">maybe(T) :: T | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:opts/0">
+
+  <div class="detail-header">
+    <a href="#t:opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L195" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">opts() ::
+    #{expiry_time_secs => pos_integer(),
+      allow_sso => boolean(),
+      client_ticket => <a href="#t:t/0">t</a>(),
+      client_id => binary(),
+      client_instance_id => binary()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:scope/0">
+
+  <div class="detail-header">
+    <a href="#t:scope/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">scope/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L205" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">scope() ::
+    #{realm := <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()), client_id := <a href="#t:maybe/1">maybe</a>(<a href="#t:authid/0">authid</a>()), client_instance_id := <a href="#t:maybe/1">maybe</a>(binary())}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:t/0">
+
+  <div class="detail-header">
+    <a href="#t:t/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">t/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L194" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">t() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:ticket_id/0">
+
+  <div class="detail-header">
+    <a href="#t:ticket_id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">ticket_id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L222" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">ticket_id() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:verify_opts/0">
+
+  <div class="detail-header">
+    <a href="#t:verify_opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">verify_opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L202" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">verify_opts() :: #{allow_not_found => boolean()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="issue/2">
+
+  <div class="detail-header">
+    <a href="#issue/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">issue(Session, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L271" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">issue(Session :: <a href="bondy_session.html#t:t/0">bondy_session:t</a>(), Opts :: <a href="#t:opts/0">opts</a>()) ->
+         {ok, Ticket :: <a href="#t:t/0">t</a>(), Claims :: <a href="#t:claims/0">claims</a>()} | {error, <a href="#t:issue_error/0">issue_error</a>()} | no_return().</pre>
+
+      </div>
+
+<p>Issues a ticket to be used with the WAMP Ticket authentication method. The function stores the ticket claims data and replicates it across all nodes in the cluster.</p><p>The session <code>Session</code> must have been opened using an authentication method that is neither <code>ticket</code> nor <code>anonymous</code> authentication.</p>The function takes an options map <code>opts()</code> that can contain the following keys: * <code>expiry_time_secs</code>: the expiration time on or after which the ticket MUST NOT be accepted for processing. This is a request that might not be honoured by the router as it depends on the router configuration, so the returned value might defer. To issue a client-scoped ticket, either the option <code>client_ticket</code> or <code>client_id</code> must be present. The <code>client_ticket</code> option takes a valid ticket issued by a different user (normally a client). Otherwise the call will return the error tuple with reason <code>invalid_request</code>.
+  </section>
+</section>
+<section class="detail" id="lookup/3">
+
+  <div class="detail-header">
+    <a href="#lookup/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup(RealmUri, Authid, Scope)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L376" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup(RealmUri :: <a href="#t:uri/0">uri</a>(), Authid :: <a href="bondy_rbac_user.html#t:username/0">bondy_rbac_user:username</a>(), Scope :: <a href="#t:scope/0">scope</a>()) ->
+          {ok, Claims :: <a href="#t:claims/0">claims</a>()} | {error, no_found}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke/1">
+
+  <div class="detail-header">
+    <a href="#revoke/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke(Ticket)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L404" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke(<a href="#t:maybe/1">maybe</a>(<a href="#t:t/0">t</a>())) -> ok | {error, any()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_all/2">
+
+  <div class="detail-header">
+    <a href="#revoke_all/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_all(RealmUri, Authid)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L438" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_all(RealmUri :: <a href="#t:uri/0">uri</a>(), Authid :: <a href="bondy_rbac_user.html#t:username/0">bondy_rbac_user:username</a>()) -> ok.</pre>
+
+      </div>
+
+Revokes all tickets issued to user with <code>Username</code> in realm <code>RealmUri</code>. Notice that the ticket could have been issued by itself or by a client application.
+  </section>
+</section>
+<section class="detail" id="revoke_all/3">
+
+  <div class="detail-header">
+    <a href="#revoke_all/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_all(RealmUri, Username, Scope)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L459" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_all(RealmUri :: <a href="#t:uri/0">uri</a>(), Username :: all | <a href="bondy_rbac_user.html#t:username/0">bondy_rbac_user:username</a>(), Scope :: <a href="#t:scope/0">scope</a>()) ->
+              ok.</pre>
+
+      </div>
+
+Revokes all tickets issued to user with <code>Username</code> in realm <code>RealmUri</code> matching the scope <code>Scope</code>.
+  </section>
+</section>
+<section class="detail" id="verify/1">
+
+  <div class="detail-header">
+    <a href="#verify/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">verify(Ticket)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ticket.erl#L297" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">verify(Ticket :: binary()) -> {ok, <a href="#t:claims/0">claims</a>()} | {error, expired | invalid}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

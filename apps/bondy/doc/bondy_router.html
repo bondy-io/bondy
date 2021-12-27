@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_router — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_router</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L92" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>bondy_router provides the routing logic for all interactions.</p><p>In general bondy_router tries to handle all messages asynchronously. It does it by using either a static or a dynamic pool of workers based on configuration. This module implements both type of workers as a gen_server (this module). A static pool uses a set of supervised processes whereas a dynamic pool spawns a new erlang process for each message. In both cases, sidejob supervises the processes. By default bondy_router uses a dynamic pool.</p><p>The pools are implemented using the sidejob library in order to provide load regulation. Inn case a maximum pool capacity has been reached, the router will handle the message synchronously i.e. blocking the calling processes (usually the one that handles the transport connection e.g. <a href="bondy_wamp_ws_connection_handler.html"><code>bondy_wamp_ws_connection_handler</code></a>).</p><p>The router also handles messages synchronously in those cases where it needs to preserve message ordering guarantees.</p><p>This module handles only the concurrency and basic routing logic, delegating the rest to either <a href="bondy_broker.html"><code>bondy_broker</code></a> or <a href="bondy_dealer.html"><code>bondy_dealer</code></a>, which implement the actual PubSub and RPC logic respectively.</p><pre><code class="makeup erlang" translate="no"><span class="w">  </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">                                    </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">
+  </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">                                    </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">
+  </span><span class="err">`</span><span class="o">--</span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="ss">&#39;                                    `--+---&#39;</span><span class="w">
+     </span><span class="p">|</span><span class="w">                                           </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">               </span><span class="n">TCP</span><span class="w"> </span><span class="ss">established</span><span class="w">             </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">                                           </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">               </span><span class="n">TLS</span><span class="w"> </span><span class="ss">established</span><span class="w">             </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="w">                                         </span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="w">           </span><span class="n">WebSocket</span><span class="w"> </span><span class="ss">established</span><span class="w">         </span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">            </span><span class="n">WAMP</span><span class="w"> </span><span class="ss">established</span><span class="w">           </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">                                     </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">                                     </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">            </span><span class="n">WAMP</span><span class="w"> </span><span class="ss">closed</span><span class="w">              </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">            </span><span class="n">WAMP</span><span class="w"> </span><span class="ss">established</span><span class="w">           </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">                                     </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">                                     </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="w">            </span><span class="n">WAMP</span><span class="w"> </span><span class="ss">closed</span><span class="w">              </span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">           </span><span class="n">WebSocket</span><span class="w"> </span><span class="ss">closed</span><span class="w">            </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="p">|</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="w">                                         </span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="w">              </span><span class="n">TLS</span><span class="w"> </span><span class="ss">closed</span><span class="w">                 </span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">+</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="o">+</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">                                           </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">               </span><span class="n">TCP</span><span class="w"> </span><span class="ss">closed</span><span class="w">                  </span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="o">&lt;-</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">&gt;</span><span class="p">|</span><span class="w">
+     </span><span class="p">|</span><span class="w">                                           </span><span class="p">|</span><span class="w">
+  </span><span class="p">,</span><span class="o">--</span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="p">.</span><span class="w">                                    </span><span class="p">,</span><span class="o">--</span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="p">.</span><span class="w">
+  </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">                                    </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">
+  </span><span class="err">`</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="ss">&#39;                                    `------&#39;</span></code></pre>(Diagram copied from WAMP RFC Draft)
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:event/0" translate="no">event/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:id/0" translate="no">id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_abort/0" translate="no">wamp_abort/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_authenticate/0" translate="no">wamp_authenticate/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_call/0" translate="no">wamp_call/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_cancel/0" translate="no">wamp_cancel/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_challenge/0" translate="no">wamp_challenge/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_error/0" translate="no">wamp_error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_event/0" translate="no">wamp_event/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_event_received/0" translate="no">wamp_event_received/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_goodbye/0" translate="no">wamp_goodbye/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_hello/0" translate="no">wamp_hello/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_interrupt/0" translate="no">wamp_interrupt/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_invocation/0" translate="no">wamp_invocation/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_message/0" translate="no">wamp_message/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_publish/0" translate="no">wamp_publish/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_published/0" translate="no">wamp_published/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_register/0" translate="no">wamp_register/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_registered/0" translate="no">wamp_registered/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_result/0" translate="no">wamp_result/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscribe/0" translate="no">wamp_subscribe/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscribed/0" translate="no">wamp_subscribed/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscriber_received/0" translate="no">wamp_subscriber_received/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unregister/0" translate="no">wamp_unregister/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unregistered/0" translate="no">wamp_unregistered/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unsubscribe/0" translate="no">wamp_unsubscribe/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unsubscribed/0" translate="no">wamp_unsubscribed/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_welcome/0" translate="no">wamp_welcome/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_yield/0" translate="no">wamp_yield/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#agent/0" translate="no">agent()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the Bondy agent identification string</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#close_context/1" translate="no">close_context(Ctxt)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#forward/2" translate="no">forward(M, Ctxt)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Forwards a WAMP message to the Dealer or Broker based on message type. The message might end up being handled synchronously (performed by the calling process i.e. the transport handler) or asynchronously (by sending the message to the router load regulated worker pool).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#forward/3" translate="no">forward(Msg, To, Opts)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#pre_stop/0" translate="no">pre_stop()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Sends a GOODBYE message to all existing client connections. The client should reply with another GOODBYE within the configured time and when it does or on timeout, Bondy will close the connection triggering the cleanup of all the client sessions.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#roles/0" translate="no">roles()</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#stop/0" translate="no">stop()</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:event/0">
+
+  <div class="detail-header">
+    <a href="#t:event/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">event/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L104" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">event() :: {<a href="#t:wamp_message/0">wamp_message</a>(), <a href="bondy_context.html#t:t/0">bondy_context:t</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:id/0">
+
+  <div class="detail-header">
+    <a href="#t:id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L52" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id() :: 0..9007199254740992.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_abort/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_abort/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_abort/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L828" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_abort() :: #abort{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_authenticate/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_authenticate/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_authenticate/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L900" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_authenticate() :: #authenticate{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_call/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_call/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_call/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1204" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_call() :: #call{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_cancel/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_cancel/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_cancel/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1312" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_cancel() :: #cancel{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_challenge/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_challenge/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_challenge/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L848" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_challenge() :: #challenge{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_error/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L937" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_error() :: #error{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_event/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_event/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_event/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1103" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_event() :: #event{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_event_received/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_event_received/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_event_received/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1152" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_event_received() :: #event_received{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_goodbye/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_goodbye/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_goodbye/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L912" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_goodbye() :: #goodbye{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_hello/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_hello/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_hello/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L675" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_hello() :: #hello{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_interrupt/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_interrupt/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_interrupt/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1527" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_interrupt() :: #interrupt{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_invocation/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_invocation/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_invocation/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1474" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_invocation() :: #invocation{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_message/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_message/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_message/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L601" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_message() ::
+    <a href="#t:wamp_hello/0">wamp_hello</a>() |
+    <a href="#t:wamp_challenge/0">wamp_challenge</a>() |
+    <a href="#t:wamp_authenticate/0">wamp_authenticate</a>() |
+    <a href="#t:wamp_welcome/0">wamp_welcome</a>() |
+    <a href="#t:wamp_abort/0">wamp_abort</a>() |
+    <a href="#t:wamp_goodbye/0">wamp_goodbye</a>() |
+    <a href="#t:wamp_error/0">wamp_error</a>() |
+    <a href="#t:wamp_publish/0">wamp_publish</a>() |
+    <a href="#t:wamp_published/0">wamp_published</a>() |
+    <a href="#t:wamp_subscribe/0">wamp_subscribe</a>() |
+    <a href="#t:wamp_subscribed/0">wamp_subscribed</a>() |
+    <a href="#t:wamp_unsubscribe/0">wamp_unsubscribe</a>() |
+    <a href="#t:wamp_unsubscribed/0">wamp_unsubscribed</a>() |
+    <a href="#t:wamp_event/0">wamp_event</a>() |
+    <a href="#t:wamp_event_received/0">wamp_event_received</a>() |
+    <a href="#t:wamp_subscriber_received/0">wamp_subscriber_received</a>() |
+    <a href="#t:wamp_call/0">wamp_call</a>() |
+    <a href="#t:wamp_cancel/0">wamp_cancel</a>() |
+    <a href="#t:wamp_result/0">wamp_result</a>() |
+    <a href="#t:wamp_register/0">wamp_register</a>() |
+    <a href="#t:wamp_registered/0">wamp_registered</a>() |
+    <a href="#t:wamp_unregister/0">wamp_unregister</a>() |
+    <a href="#t:wamp_unregistered/0">wamp_unregistered</a>() |
+    <a href="#t:wamp_invocation/0">wamp_invocation</a>() |
+    <a href="#t:wamp_interrupt/0">wamp_interrupt</a>() |
+    <a href="#t:wamp_yield/0">wamp_yield</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_publish/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_publish/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_publish/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L955" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_publish() :: #publish{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_published/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_published/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_published/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1027" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_published() :: #published{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_register/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_register/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_register/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1354" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_register() :: #register{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_registered/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_registered/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_registered/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1411" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_registered() :: #registered{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_result/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_result/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_result/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1334" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_result() :: #result{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscribe/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscribe/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscribe/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1039" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscribe() :: #subscribe{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscribed/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscribed/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscribed/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1069" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscribed() :: #subscribed{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscriber_received/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscriber_received/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscriber_received/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1168" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscriber_received() :: #subscriber_received{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unregister/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unregister/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unregister/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1422" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unregister() :: #unregister{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unregistered/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unregistered/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unregistered/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1433" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unregistered() :: #unregistered{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unsubscribe/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unsubscribe/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unsubscribe/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1079" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unsubscribe() :: #unsubscribe{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unsubscribed/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unsubscribed/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unsubscribed/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1088" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unsubscribed() :: #unsubscribed{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_welcome/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_welcome/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_welcome/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L754" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_welcome() :: #welcome{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_yield/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_yield/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_yield/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L1550" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_yield() :: #yield{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="agent/0">
+
+  <div class="detail-header">
+    <a href="#agent/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">agent()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L139" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Returns the Bondy agent identification string
+  </section>
+</section>
+<section class="detail" id="close_context/1">
+
+  <div class="detail-header">
+    <a href="#close_context/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">close_context(Ctxt)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L242" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">close_context(<a href="bondy_context.html#t:t/0">bondy_context:t</a>()) -> <a href="bondy_context.html#t:t/0">bondy_context:t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="forward/2">
+
+  <div class="detail-header">
+    <a href="#forward/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">forward(M, Ctxt)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L160" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">forward(M :: <a href="#t:wamp_message/0">wamp_message</a>(), Ctxt :: <a href="bondy_context.html#t:t/0">bondy_context:t</a>()) ->
+           {ok, <a href="bondy_context.html#t:t/0">bondy_context:t</a>()} |
+           {reply, Reply :: <a href="#t:wamp_message/0">wamp_message</a>(), <a href="bondy_context.html#t:t/0">bondy_context:t</a>()} |
+           {stop, Reply :: <a href="#t:wamp_message/0">wamp_message</a>(), <a href="bondy_context.html#t:t/0">bondy_context:t</a>()}.</pre>
+
+      </div>
+
+Forwards a WAMP message to the Dealer or Broker based on message type. The message might end up being handled synchronously (performed by the calling process i.e. the transport handler) or asynchronously (by sending the message to the router load regulated worker pool).
+  </section>
+</section>
+<section class="detail" id="forward/3">
+
+  <div class="detail-header">
+    <a href="#forward/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">forward(Msg, To, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L173" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">forward(<a href="#t:wamp_message/0">wamp_message</a>(), <a href="bondy_ref.html#t:t/0">bondy_ref:t</a>(), map()) -> ok | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="pre_stop/0">
+
+  <div class="detail-header">
+    <a href="#pre_stop/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">pre_stop()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L203" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Sends a GOODBYE message to all existing client connections. The client should reply with another GOODBYE within the configured time and when it does or on timeout, Bondy will close the connection triggering the cleanup of all the client sessions.
+  </section>
+</section>
+<section class="detail" id="roles/0">
+
+  <div class="detail-header">
+    <a href="#roles/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">roles()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L130" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">roles() -> #{binary() => #{binary() => boolean()}}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="stop/0">
+
+  <div class="detail-header">
+    <a href="#stop/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">stop()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_router.erl#L232" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

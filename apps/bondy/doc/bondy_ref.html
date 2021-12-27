@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_ref — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_ref</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L20" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>A <code>bondy_ref</code> (reference) acts as a fully qualified name for a process or callback function in a Bondy network. The reference is used by Bondy in the <code>bondy_registry</code> when registering procedures and subscriptions so that the <code>bondy_router</code> can forward and/or relay a message to a process, or callback function.</p><p>## Types ### Internal</p><p>### Relay</p><p>### Client</p>### Callback
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:bridge_relay/0" translate="no">bridge_relay/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:client/0" translate="no">client/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:id/0" translate="no">id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:internal/0" translate="no">internal/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:maybe/1" translate="no">maybe/1</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:mf/0" translate="no">mf/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:name/0" translate="no">name/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:nodestring/0" translate="no">nodestring/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:ref_type/0" translate="no">ref_type/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:relay/0" translate="no">relay/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:t/0" translate="no">t/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:target/0" translate="no">target/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:target_type/0" translate="no">target_type/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wildcard/1" translate="no">wildcard/1</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#callback/1" translate="no">callback(Bondy_ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_bridge_relay/1" translate="no">is_bridge_relay(Ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_client/1" translate="no">is_client(Ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_internal/1" translate="no">is_internal(Ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_local/1" translate="no">is_local(Ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns whether this is a reference to a local target i.e. located on the caller's node.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_relay/1" translate="no">is_relay(Ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_self/1" translate="no">is_self(Ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns whether this is a reference to the calling process.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_type/1" translate="no">is_type(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if term <code>Term</code> is a reference. Otherwise returns <code>false</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#name/1" translate="no">name(Bondy_ref)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/2" translate="no">new(Type, RealmUri)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/3" translate="no">new(Type, RealmUri, Target)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/4" translate="no">new(Type, RealmUri, Target, SessionId)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/5" translate="no">new(Type, RealmUri, Target, SessionId, Node)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Creates a new reference.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#node/1" translate="no">node(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the Bondy peer node in which the target of this reference is located and/or connected to.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#nodestring/1" translate="no">nodestring(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the Bondy peer binary string name of the node in which the target of this reference is located and/or connected to.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#pattern/5" translate="no">pattern(Type, RealmUri, Target, SessionId, Node)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#pid/1" translate="no">pid(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns a pid when target is of type <code>{pid, binary()}</code>, otherwise returns the atom <code>undefined</code>. If the reference is not local it fails with exception <code>not_my_node</code>. This is becuase process identifies can only be used on the node where they were created (this is because we are using Partisan and not Distributed Erlang).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#realm_uri/1" translate="no">realm_uri(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the realm URI of the reference.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#session_id/1" translate="no">session_id(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the session identifier of the reference or the atom <code>undefined</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#target/1" translate="no">target(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the target of the reference. A target is a process (<code>pid()</code>) a gproc registered name (<code>{name, GprocName}</code>) or a callback (<code>mf()</code>).</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#target_type/1" translate="no">target_type(Bondy_ref)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the target of the reference. A target is a process (<code>pid()</code>) a gproc registered name (<code>{name, GprocName}</code>) or a callback (<code>mf()</code>).</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#type/1" translate="no">type(Term)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the reference type.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#types/0" translate="no">types()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns all the supported reference types.</div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:bridge_relay/0">
+
+  <div class="detail-header">
+    <a href="#t:bridge_relay/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">bridge_relay/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L56" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">bridge_relay() :: #bondy_ref{type :: bridge_relay}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:client/0">
+
+  <div class="detail-header">
+    <a href="#t:client/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">client/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L57" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">client() :: #bondy_ref{type :: client}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:id/0">
+
+  <div class="detail-header">
+    <a href="#t:id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L52" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id() :: 0..9007199254740992.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:internal/0">
+
+  <div class="detail-header">
+    <a href="#t:internal/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">internal/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L58" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">internal() :: #bondy_ref{type :: internal}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:maybe/1">
+
+  <div class="detail-header">
+    <a href="#t:maybe/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">maybe/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L116" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">maybe(T) :: T | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:mf/0">
+
+  <div class="detail-header">
+    <a href="#t:mf/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">mf/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L65" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">mf() :: {M :: module(), F :: atom()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:name/0">
+
+  <div class="detail-header">
+    <a href="#t:name/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">name/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L64" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">name() :: term().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:nodestring/0">
+
+  <div class="detail-header">
+    <a href="#t:nodestring/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">nodestring/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L117" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">nodestring() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:ref_type/0">
+
+  <div class="detail-header">
+    <a href="#t:ref_type/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">ref_type/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L59" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">ref_type() :: relay | bridge_relay | internal | client.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:relay/0">
+
+  <div class="detail-header">
+    <a href="#t:relay/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">relay/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L55" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">relay() :: #bondy_ref{type :: relay}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:t/0">
+
+  <div class="detail-header">
+    <a href="#t:t/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">t/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L54" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">t() :: #bondy_ref{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:target/0">
+
+  <div class="detail-header">
+    <a href="#t:target/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">target/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L60" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">target() :: {pid, binary()} | {name, term()} | {callback, <a href="#t:mf/0">mf</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:target_type/0">
+
+  <div class="detail-header">
+    <a href="#t:target_type/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">target_type/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L63" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">target_type() :: pid | name | callback.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wildcard/1">
+
+  <div class="detail-header">
+    <a href="#t:wildcard/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wildcard/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L66" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wildcard(T) :: T | '_'.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="callback/1">
+
+  <div class="detail-header">
+    <a href="#callback/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">callback(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L472" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">callback(<a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="#t:mf/0">mf</a>()).</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_bridge_relay/1">
+
+  <div class="detail-header">
+    <a href="#is_bridge_relay/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_bridge_relay(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L312" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_bridge_relay(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_client/1">
+
+  <div class="detail-header">
+    <a href="#is_client/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_client(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L322" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_client(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_internal/1">
+
+  <div class="detail-header">
+    <a href="#is_internal/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_internal(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L332" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_internal(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_local/1">
+
+  <div class="detail-header">
+    <a href="#is_local/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_local(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L343" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_local(Ref :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns whether this is a reference to a local target i.e. located on the caller's node.
+  </section>
+</section>
+<section class="detail" id="is_relay/1">
+
+  <div class="detail-header">
+    <a href="#is_relay/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_relay(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L302" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_relay(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_self/1">
+
+  <div class="detail-header">
+    <a href="#is_self/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_self(Ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L353" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_self(Ref :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns whether this is a reference to the calling process.
+  </section>
+</section>
+<section class="detail" id="is_type/1">
+
+  <div class="detail-header">
+    <a href="#is_type/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_type(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L363" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_type(<a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if term <code>Term</code> is a reference. Otherwise returns <code>false</code>.
+  </section>
+</section>
+<section class="detail" id="name/1">
+
+  <div class="detail-header">
+    <a href="#name/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">name(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L431" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">name(<a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(term()).</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="new/2">
+
+  <div class="detail-header">
+    <a href="#new/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Type, RealmUri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L115" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Type :: <a href="#t:ref_type/0">ref_type</a>(), RealmUri :: <a href="#t:uri/0">uri</a>()) -> <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="new/3">
+
+  <div class="detail-header">
+    <a href="#new/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Type, RealmUri, Target)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L129" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Type :: <a href="#t:ref_type/0">ref_type</a>(), RealmUri :: <a href="#t:uri/0">uri</a>(), Target :: pid() | <a href="#t:mf/0">mf</a>() | <a href="#t:name/0">name</a>()) -> <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="new/4">
+
+  <div class="detail-header">
+    <a href="#new/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Type, RealmUri, Target, SessionId)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L143" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Type :: <a href="#t:ref_type/0">ref_type</a>(),
+    RealmUri :: <a href="#t:uri/0">uri</a>(),
+    Target :: pid() | <a href="#t:mf/0">mf</a>() | <a href="#t:name/0">name</a>(),
+    SessionId :: <a href="#t:maybe/1">maybe</a>(<a href="bondy_session.html#t:id/0">bondy_session:id</a>())) ->
+       <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="new/5">
+
+  <div class="detail-header">
+    <a href="#new/5" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Type, RealmUri, Target, SessionId, Node)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L159" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Type :: <a href="#t:ref_type/0">ref_type</a>(),
+    RealmUri :: <a href="#t:uri/0">uri</a>(),
+    Target :: pid() | <a href="#t:mf/0">mf</a>() | <a href="#t:name/0">name</a>(),
+    SessionId :: <a href="#t:maybe/1">maybe</a>(<a href="bondy_session.html#t:id/0">bondy_session:id</a>()),
+    Node :: node() | <a href="#t:nodestring/0">nodestring</a>()) ->
+       <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+Creates a new reference.
+  </section>
+</section>
+<section class="detail" id="node/1">
+
+  <div class="detail-header">
+    <a href="#node/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">node(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L282" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">node(<a href="#t:t/0">t</a>()) -> node().</pre>
+
+      </div>
+
+<p>Returns the Bondy peer node in which the target of this reference is located and/or connected to.</p>See <a href="#target/1"><code>target/1</code></a> for a description of the different targets and the relationship with the node.
+  </section>
+</section>
+<section class="detail" id="nodestring/1">
+
+  <div class="detail-header">
+    <a href="#nodestring/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">nodestring(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L268" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">nodestring(<a href="#t:t/0">t</a>()) -> <a href="#t:nodestring/0">nodestring</a>().</pre>
+
+      </div>
+
+<p>Returns the Bondy peer binary string name of the node in which the target of this reference is located and/or connected to.</p>See <a href="#target/1"><code>target/1</code></a> for a description of the different targets and the relationship with the node.
+  </section>
+</section>
+<section class="detail" id="pattern/5">
+
+  <div class="detail-header">
+    <a href="#pattern/5" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">pattern(Type, RealmUri, Target, SessionId, Node)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L196" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">pattern(Type :: <a href="#t:wildcard/1">wildcard</a>(<a href="#t:ref_type/0">ref_type</a>()),
+        RealmUri :: <a href="#t:uri/0">uri</a>(),
+        Target :: <a href="#t:wildcard/1">wildcard</a>(pid() | <a href="#t:mf/0">mf</a>() | <a href="#t:name/0">name</a>()),
+        SessionId :: <a href="#t:wildcard/1">wildcard</a>(<a href="#t:maybe/1">maybe</a>(<a href="bondy_session.html#t:id/0">bondy_session:id</a>())),
+        Node :: <a href="#t:wildcard/1">wildcard</a>(node() | <a href="#t:nodestring/0">nodestring</a>())) ->
+           <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="pid/1">
+
+  <div class="detail-header">
+    <a href="#pid/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">pid(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L448" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">pid(<a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(pid()) | no_return().</pre>
+
+      </div>
+
+Returns a pid when target is of type <code>{pid, binary()}</code>, otherwise returns the atom <code>undefined</code>. If the reference is not local it fails with exception <code>not_my_node</code>. This is becuase process identifies can only be used on the node where they were created (this is because we are using Partisan and not Distributed Erlang).
+  </section>
+</section>
+<section class="detail" id="realm_uri/1">
+
+  <div class="detail-header">
+    <a href="#realm_uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">realm_uri(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L254" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">realm_uri(<a href="#t:t/0">t</a>()) -> <a href="#t:uri/0">uri</a>().</pre>
+
+      </div>
+
+Returns the realm URI of the reference.
+  </section>
+</section>
+<section class="detail" id="session_id/1">
+
+  <div class="detail-header">
+    <a href="#session_id/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">session_id(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L292" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">session_id(<a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="#t:id/0">id</a>()).</pre>
+
+      </div>
+
+Returns the session identifier of the reference or the atom <code>undefined</code>.
+  </section>
+</section>
+<section class="detail" id="target/1">
+
+  <div class="detail-header">
+    <a href="#target/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">target(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L392" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">target(<a href="#t:t/0">t</a>()) -> <a href="#t:target/0">target</a>().</pre>
+
+      </div>
+
+<p>Returns the target of the reference. A target is a process (<code>pid()</code>) a gproc registered name (<code>{name, GprocName}</code>) or a callback (<code>mf()</code>).</p><p>If the reference type is <code>client</code> the target refers to the session and/or process owning the network connection to the client.</p><p>If the reference type is <code>internal</code> the target refers to an internal process acting as one of the Bondy client roles e.g. an internal subscriber. Messages destined to a target located on a different node are relayed by the router through the cluster distribution layer (Partisan).</p>If the reference type is <code>relay</code> the target refers to the session and/or process owning the network connection to the edge or remote cluster (See <a href="bondy_edge_uplink_client.html"><code>bondy_edge_uplink_client</code></a> and <a href="bondy_edge_uplink_server.html"><code>bondy_edge_uplink_server</code></a> respectively). The relay acts as a proxy for the actual edge or remote clients, internal and callback targets.
+  </section>
+</section>
+<section class="detail" id="target_type/1">
+
+  <div class="detail-header">
+    <a href="#target_type/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">target_type(Bondy_ref)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L418" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">target_type(<a href="#t:t/0">t</a>()) -> <a href="#t:wildcard/1">wildcard</a>(<a href="#t:target_type/0">target_type</a>()).</pre>
+
+      </div>
+
+<p>Returns the target of the reference. A target is a process (<code>pid()</code>) a gproc registered name (<code>{name, GprocName}</code>) or a callback (<code>mf()</code>).</p><p>If the reference type is <code>client</code> the target refers to the session and/or process owning the network connection to the client.</p><p>If the reference type is <code>internal</code> the target refers to an internal process acting as one of the Bondy client roles e.g. an internal subscriber. Messages destined to a target located on a different node are relayed by the router through the cluster distribution layer (Partisan).</p>If the reference type is <code>relay</code> the target refers to the session and/or process owning the network connection to the edge or remote cluster (See <a href="bondy_edge_uplink_client.html"><code>bondy_edge_uplink_client</code></a> and <a href="bondy_edge_uplink_server.html"><code>bondy_edge_uplink_server</code></a> respectively). The relay acts as a proxy for the actual edge or remote clients, internal and callback targets.
+  </section>
+</section>
+<section class="detail" id="type/1">
+
+  <div class="detail-header">
+    <a href="#type/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">type(Term)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L234" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">type(Term :: term()) -> <a href="#t:ref_type/0">ref_type</a>().</pre>
+
+      </div>
+
+Returns the reference type.
+  </section>
+</section>
+<section class="detail" id="types/0">
+
+  <div class="detail-header">
+    <a href="#types/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">types()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_ref.erl#L244" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">types() -> [<a href="#t:ref_type/0">ref_type</a>()].</pre>
+
+      </div>
+
+Returns all the supported reference types.
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

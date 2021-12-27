@@ -15,7 +15,10 @@
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
 %% =============================================================================
-
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -module(bondy_sensitive).
 
 -type sensitive()   ::  {sensitive, fun()}.
@@ -62,6 +65,7 @@ conforms(Mod) ->
 %%
 %% {@link gen_server:format_status/2} is called by a gen_server process in the
 %% following situations:
+%%
 %% * One of sys:get_status/1,2 is invoked to get the gen_server status. Opt is
 %% set to the atom normal.
 %% * The gen_server process terminates abnormally and
@@ -72,7 +76,7 @@ conforms(Mod) ->
 %% internal state of the gen_server process.
 %%
 %% The function is to return Status, a term that changes the details of the
-%% current state `State` and status of the gen_server process. There are no
+%% current state `State' and status of the gen_server process. There are no
 %% restrictions on the form Status can take.
 %% @end
 %% -----------------------------------------------------------------------------

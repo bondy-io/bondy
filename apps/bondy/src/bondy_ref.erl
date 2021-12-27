@@ -13,6 +13,8 @@
 %% ### Client
 %%
 %% ### Callback
+%%
+%% @since 0.1.0
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_ref).
@@ -436,7 +438,7 @@ name(#bondy_ref{}) ->
 %% -----------------------------------------------------------------------------
 %% @doc Returns a pid when target is of type `{pid, binary()}', otherwise
 %% returns the atom `undefined'.
-%% If the reference is not local it fails with exception `not_my_node`. This is
+%% If the reference is not local it fails with exception `not_my_node'. This is
 %% becuase process identifies can only be used on the node where they were
 %% created (this is because we are using Partisan and not Distributed Erlang).
 %% @end

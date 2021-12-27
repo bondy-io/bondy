@@ -1,0 +1,2015 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_rbac_user — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_rbac_user</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L30" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>A user is a role that is able to log into a Bondy Realm. Users have attributes associated with themelves like username, credentials (password or authorized keys) and metadata determined by the client applications. Users can be assigned group memberships.</p>
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:add_error/0" translate="no">add_error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:add_opts/0" translate="no">add_opts/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:external/0" translate="no">external/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:list_opts/0" translate="no">list_opts/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:maybe/1" translate="no">maybe/1</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:new_opts/0" translate="no">new_opts/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:t/0" translate="no">t/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:update_error/0" translate="no">update_error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:update_opts/0" translate="no">update_opts/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:username/0" translate="no">username/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add/2" translate="no">add(RealmUri, User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a new user to the RBAC store. <code>User</code> MUST have been created using <a href="#new/1"><code>new/1</code></a> or <a href="#new/2"><code>new/2</code></a>. This record is globally replicated.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_group/3" translate="no">add_group(RealmUri, Users, Groupname)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds group named <code>Groupname</code> to users <code>Users</code> in realm with uri <code>RealmUri</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_groups/3" translate="no">add_groups(RealmUri, Users, Groupnames)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds groups <code>Groupnames</code> to users <code>Users</code> in realm with uri <code>RealmUri</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_or_update/2" translate="no">add_or_update(RealmUri, User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a new user or updates an existing one. This change is globally replicated.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_or_update/3" translate="no">add_or_update(RealmUri, User, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a new user or updates an existing one. This change is globally replicated.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authorized_keys/1" translate="no">authorized_keys(_)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of authorized keys for this user. These keys are used with the WAMP Cryptosign authentication method or equivalent.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#change_password/3" translate="no">change_password(RealmUri, Username, New)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#change_password/4" translate="no">change_password(RealmUri, Username, New, Old)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#disable/2" translate="no">disable(RealmUri, User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Sets the value of the <code>enabled</code> property to <code>false</code>. See <a href="#is_enabled/2"><code>is_enabled/2</code></a>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#enable/2" translate="no">enable(RealmUri, User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Sets the value of the <code>enabled</code> property to <code>true</code>. See <a href="#is_enabled/2"><code>is_enabled/2</code></a>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#exists/2" translate="no">exists(RealmUri, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#fetch/2" translate="no">fetch(RealmUri, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#groups/1" translate="no">groups(_)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the group names the user <code>User</code> is member of.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#has_authorized_keys/1" translate="no">has_authorized_keys(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user <code>User</code> has a authorized keys. Otherwise returns <code>false</code>. See <a href="#authorized_keys/1"><code>authorized_keys/1</code></a>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#has_password/1" translate="no">has_password(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user <code>User</code> has a password. Otherwise returns <code>false</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_enabled/1" translate="no">is_enabled(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user <code>User</code> is active. Otherwise returns <code>false</code>. A user that is not active cannot establish a session. See <code>enable/3</code> and <code>disable/3</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_enabled/2" translate="no">is_enabled(RealmUri, Username)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user identified with <code>Username</code> is enabled. Otherwise returns <code>false</code>. A user that is not enabled cannot establish a session. See <a href="#enable/2"><code>enable/2</code></a> and <code>disable/3</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_member/2" translate="no">is_member(Name0, User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user <code>User</code> is a member of the group named <code>Name</code>. Otherwise returns <code>false</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_sso_user/1" translate="no">is_sso_user(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if user <code>User</code> is managed in a SSO Realm, <code>false</code> if it is locally managed.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list/1" translate="no">list(RealmUri)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list/2" translate="no">list(RealmUri, Opts)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup/2" translate="no">lookup(RealmUri, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#meta/1" translate="no">meta(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the metadata map associated with the user <code>User</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/1" translate="no">new(Data)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#new/2" translate="no">new(Data, Opts)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#normalise_username/1" translate="no">normalise_username(Term)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#password/1" translate="no">password(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the password object or <code>undefined</code> if the user does not have a password. See <a href="bondy_password.html"><code>bondy_password</code></a>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#remove/2" translate="no">remove(RealmUri, Username0)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#remove_group/3" translate="no">remove_group(RealmUri, Users, Groupname)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Removes groups <code>Groupnames</code> from users <code>Users</code> in realm with uri <code>RealmUri</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#remove_groups/3" translate="no">remove_groups(RealmUri, Users, Groupnames)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Removes groups <code>Groupnames</code> from users <code>Users</code> in realm with uri <code>RealmUri</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#resolve/1" translate="no">resolve(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>If the user <code>User</code> is not sso-managed, returns <code>User</code> unmodified. Otherwise, fetches the user's credentials, the enabled status and additional metadata from the SSO Realm and merges it into <code>User</code> using the following procedure</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sso_realm_uri/1" translate="no">sso_realm_uri(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the URI of the Same Sign-on Realm in case the user is a SSO user. Otherwise, returns <code>undefined</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#to_external/1" translate="no">to_external(User)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the external representation of the user <code>User</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#unknown/2" translate="no">unknown(RealmUri, Usernames)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Takes a list of usernames and returns any that can't be found.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#update/3" translate="no">update(RealmUri, Username, Data)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Updates an existing user. This change is globally replicated.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#update/4" translate="no">update(RealmUri, UserOrUsername, Data, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Updates an existing user. This change is globally replicated.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#username/1" translate="no">username(_)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the group names the user's username.</div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:add_error/0">
+
+  <div class="detail-header">
+    <a href="#t:add_error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">add_error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L194" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_error() :: no_such_realm | reserved_name | already_exists.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:add_opts/0">
+
+  <div class="detail-header">
+    <a href="#t:add_opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">add_opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L184" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_opts() :: #{password_opts => <a href="bondy_password.html#t:opts/0">bondy_password:opts</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:external/0">
+
+  <div class="detail-header">
+    <a href="#t:external/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">external/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L169" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">external() ::
+    #{type := user,
+      version := binary(),
+      username := <a href="#t:username/0">username</a>(),
+      groups := [binary()],
+      has_password := boolean(),
+      has_authorized_keys := boolean(),
+      sso_realm_uri => <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()),
+      meta => #{binary() => any()}}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:list_opts/0">
+
+  <div class="detail-header">
+    <a href="#t:list_opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">list_opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L191" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">list_opts() :: #{limit => pos_integer()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:maybe/1">
+
+  <div class="detail-header">
+    <a href="#t:maybe/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">maybe/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L116" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">maybe(T) :: T | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:new_opts/0">
+
+  <div class="detail-header">
+    <a href="#t:new_opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">new_opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L181" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new_opts() :: #{password_opts => <a href="bondy_password.html#t:opts/0">bondy_password:opts</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:t/0">
+
+  <div class="detail-header">
+    <a href="#t:t/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">t/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L155" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">t() ::
+    #{type := user,
+      version := binary(),
+      username := <a href="#t:username/0">username</a>(),
+      groups := [binary()],
+      password => <a href="bondy_password.html#t:future/0">bondy_password:future</a>() | <a href="bondy_password.html#t:t/0">bondy_password:t</a>(),
+      authorized_keys => [binary()],
+      sso_realm_uri => <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()),
+      meta => #{binary() => any()},
+      password_opts => <a href="bondy_password.html#t:opts/0">bondy_password:opts</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:update_error/0">
+
+  <div class="detail-header">
+    <a href="#t:update_error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">update_error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L195" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update_error() ::
+    no_such_realm | reserved_name |
+    {no_such_user, <a href="#t:username/0">username</a>()} |
+    {no_such_groups, [<a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()]}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:update_opts/0">
+
+  <div class="detail-header">
+    <a href="#t:update_opts/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">update_opts/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L187" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update_opts() :: #{update_credentials => boolean(), password_opts => <a href="bondy_password.html#t:opts/0">bondy_password:opts</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:username/0">
+
+  <div class="detail-header">
+    <a href="#t:username/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">username/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L180" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">username() :: binary() | anonymous.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="add/2">
+
+  <div class="detail-header">
+    <a href="#add/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add(RealmUri, User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L475" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add(<a href="#t:uri/0">uri</a>(), <a href="#t:t/0">t</a>()) -> {ok, <a href="#t:t/0">t</a>()} | {error, <a href="#t:add_error/0">add_error</a>()}.</pre>
+
+      </div>
+
+Adds a new user to the RBAC store. <code>User</code> MUST have been created using <a href="#new/1"><code>new/1</code></a> or <a href="#new/2"><code>new/2</code></a>. This record is globally replicated.
+  </section>
+</section>
+<section class="detail" id="add_group/3">
+
+  <div class="detail-header">
+    <a href="#add_group/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_group(RealmUri, Users, Groupname)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L791" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_group(RealmUri :: <a href="#t:uri/0">uri</a>(),
+          Users :: all | <a href="#t:t/0">t</a>() | [<a href="#t:t/0">t</a>()] | <a href="#t:username/0">username</a>() | [<a href="#t:username/0">username</a>()],
+          Groupname :: <a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()) ->
+             ok | {error, Reason :: any()}.</pre>
+
+      </div>
+
+Adds group named <code>Groupname</code> to users <code>Users</code> in realm with uri <code>RealmUri</code>.
+  </section>
+</section>
+<section class="detail" id="add_groups/3">
+
+  <div class="detail-header">
+    <a href="#add_groups/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_groups(RealmUri, Users, Groupnames)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L805" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_groups(RealmUri :: <a href="#t:uri/0">uri</a>(),
+           Users :: all | <a href="#t:t/0">t</a>() | [<a href="#t:t/0">t</a>()] | <a href="#t:username/0">username</a>() | [<a href="#t:username/0">username</a>()],
+           Groupnames :: [<a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()]) ->
+              ok | {error, Reason :: any()}.</pre>
+
+      </div>
+
+Adds groups <code>Groupnames</code> to users <code>Users</code> in realm with uri <code>RealmUri</code>.
+  </section>
+</section>
+<section class="detail" id="add_or_update/2">
+
+  <div class="detail-header">
+    <a href="#add_or_update/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_or_update(RealmUri, User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L496" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_or_update(RealmUri :: <a href="#t:uri/0">uri</a>(), User :: <a href="#t:t/0">t</a>()) -> {ok, <a href="#t:t/0">t</a>()} | {error, <a href="#t:add_error/0">add_error</a>()}.</pre>
+
+      </div>
+
+Adds a new user or updates an existing one. This change is globally replicated.
+  </section>
+</section>
+<section class="detail" id="add_or_update/3">
+
+  <div class="detail-header">
+    <a href="#add_or_update/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_or_update(RealmUri, User, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L508" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">add_or_update(RealmUri :: <a href="#t:uri/0">uri</a>(), User :: <a href="#t:t/0">t</a>(), Opts :: <a href="#t:update_opts/0">update_opts</a>()) ->
+                 {ok, <a href="#t:t/0">t</a>()} | {error, <a href="#t:add_error/0">add_error</a>()}.</pre>
+
+      </div>
+
+Adds a new user or updates an existing one. This change is globally replicated.
+  </section>
+</section>
+<section class="detail" id="authorized_keys/1">
+
+  <div class="detail-header">
+    <a href="#authorized_keys/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authorized_keys(_)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L451" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Returns the list of authorized keys for this user. These keys are used with the WAMP Cryptosign authentication method or equivalent.
+  </section>
+</section>
+<section class="detail" id="change_password/3">
+
+  <div class="detail-header">
+    <a href="#change_password/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">change_password(RealmUri, Username, New)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L700" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="change_password/4">
+
+  <div class="detail-header">
+    <a href="#change_password/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">change_password(RealmUri, Username, New, Old)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L709" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="disable/2">
+
+  <div class="detail-header">
+    <a href="#disable/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">disable(RealmUri, User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L760" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">disable(RealmUri :: <a href="#t:uri/0">uri</a>(), User :: <a href="#t:t/0">t</a>()) -> ok | {error, any()}.</pre>
+
+      </div>
+
+Sets the value of the <code>enabled</code> property to <code>false</code>. See <a href="#is_enabled/2"><code>is_enabled/2</code></a>.
+  </section>
+</section>
+<section class="detail" id="enable/2">
+
+  <div class="detail-header">
+    <a href="#enable/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">enable(RealmUri, User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L745" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">enable(RealmUri :: <a href="#t:uri/0">uri</a>(), User :: <a href="#t:t/0">t</a>()) -> ok | {error, any()}.</pre>
+
+      </div>
+
+Sets the value of the <code>enabled</code> property to <code>true</code>. See <a href="#is_enabled/2"><code>is_enabled/2</code></a>.
+  </section>
+</section>
+<section class="detail" id="exists/2">
+
+  <div class="detail-header">
+    <a href="#exists/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">exists(RealmUri, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L637" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">exists(RealmUri :: <a href="#t:uri/0">uri</a>(), Username :: binary()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="fetch/2">
+
+  <div class="detail-header">
+    <a href="#fetch/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">fetch(RealmUri, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L647" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">fetch(<a href="#t:uri/0">uri</a>(), binary()) -> <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="groups/1">
+
+  <div class="detail-header">
+    <a href="#groups/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">groups(_)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L289" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Returns the group names the user <code>User</code> is member of.
+  </section>
+</section>
+<section class="detail" id="has_authorized_keys/1">
+
+  <div class="detail-header">
+    <a href="#has_authorized_keys/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">has_authorized_keys(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L439" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">has_authorized_keys(User :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user <code>User</code> has a authorized keys. Otherwise returns <code>false</code>. See <a href="#authorized_keys/1"><code>authorized_keys/1</code></a>.
+  </section>
+</section>
+<section class="detail" id="has_password/1">
+
+  <div class="detail-header">
+    <a href="#has_password/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">has_password(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L404" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">has_password(User :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user <code>User</code> has a password. Otherwise returns <code>false</code>.
+  </section>
+</section>
+<section class="detail" id="is_enabled/1">
+
+  <div class="detail-header">
+    <a href="#is_enabled/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_enabled(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L340" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_enabled(User :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user <code>User</code> is active. Otherwise returns <code>false</code>. A user that is not active cannot establish a session. See <code>enable/3</code> and <code>disable/3</code>.
+  </section>
+</section>
+<section class="detail" id="is_enabled/2">
+
+  <div class="detail-header">
+    <a href="#is_enabled/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_enabled(RealmUri, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L356" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_enabled(RealmUri :: <a href="#t:uri/0">uri</a>(), Username :: binary()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user identified with <code>Username</code> is enabled. Otherwise returns <code>false</code>. A user that is not enabled cannot establish a session. See <a href="#enable/2"><code>enable/2</code></a> and <code>disable/3</code>.
+  </section>
+</section>
+<section class="detail" id="is_member/2">
+
+  <div class="detail-header">
+    <a href="#is_member/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_member(Name0, User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L299" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_member(Name0 :: <a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>(), User :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user <code>User</code> is a member of the group named <code>Name</code>. Otherwise returns <code>false</code>.
+  </section>
+</section>
+<section class="detail" id="is_sso_user/1">
+
+  <div class="detail-header">
+    <a href="#is_sso_user/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_sso_user(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L311" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_sso_user(User :: <a href="#t:t/0">t</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if user <code>User</code> is managed in a SSO Realm, <code>false</code> if it is locally managed.
+  </section>
+</section>
+<section class="detail" id="list/1">
+
+  <div class="detail-header">
+    <a href="#list/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list(RealmUri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L662" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">list(<a href="#t:uri/0">uri</a>()) -> [<a href="#t:t/0">t</a>()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="list/2">
+
+  <div class="detail-header">
+    <a href="#list/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list(RealmUri, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L672" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">list(RealmUri :: <a href="#t:uri/0">uri</a>(), Opts :: <a href="#t:list_opts/0">list_opts</a>()) -> [<a href="#t:t/0">t</a>()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="lookup/2">
+
+  <div class="detail-header">
+    <a href="#lookup/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup(RealmUri, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L617" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup(RealmUri :: <a href="#t:uri/0">uri</a>(), Username :: binary()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="meta/1">
+
+  <div class="detail-header">
+    <a href="#meta/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">meta(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L464" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">meta(User :: <a href="#t:t/0">t</a>()) -> map().</pre>
+
+      </div>
+
+Returns the metadata map associated with the user <code>User</code>.
+  </section>
+</section>
+<section class="detail" id="new/1">
+
+  <div class="detail-header">
+    <a href="#new/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Data)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L263" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Data :: map()) -> User :: <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="new/2">
+
+  <div class="detail-header">
+    <a href="#new/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">new(Data, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L273" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">new(Data :: map(), Opts :: <a href="#t:new_opts/0">new_opts</a>()) -> User :: <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="normalise_username/1">
+
+  <div class="detail-header">
+    <a href="#normalise_username/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">normalise_username(Term)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L895" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">normalise_username(Term :: <a href="#t:username/0">username</a>()) -> <a href="#t:username/0">username</a>() | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="password/1">
+
+  <div class="detail-header">
+    <a href="#password/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">password(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L416" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">password(User :: <a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="bondy_password.html#t:future/0">bondy_password:future</a>() | <a href="bondy_password.html#t:t/0">bondy_password:t</a>()).</pre>
+
+      </div>
+
+Returns the password object or <code>undefined</code> if the user does not have a password. See <a href="bondy_password.html"><code>bondy_password</code></a>.
+  </section>
+</section>
+<section class="detail" id="remove/2">
+
+  <div class="detail-header">
+    <a href="#remove/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">remove(RealmUri, Username0)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L579" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">remove(<a href="#t:uri/0">uri</a>(), binary() | map()) -> ok | {error, {no_such_user, <a href="#t:username/0">username</a>()} | reserved_name}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="remove_group/3">
+
+  <div class="detail-header">
+    <a href="#remove_group/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">remove_group(RealmUri, Users, Groupname)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L833" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">remove_group(RealmUri :: <a href="#t:uri/0">uri</a>(),
+             Users :: all | <a href="#t:t/0">t</a>() | [<a href="#t:t/0">t</a>()] | <a href="#t:username/0">username</a>() | [<a href="#t:username/0">username</a>()],
+             Groupname :: <a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()) ->
+                ok.</pre>
+
+      </div>
+
+Removes groups <code>Groupnames</code> from users <code>Users</code> in realm with uri <code>RealmUri</code>.
+  </section>
+</section>
+<section class="detail" id="remove_groups/3">
+
+  <div class="detail-header">
+    <a href="#remove_groups/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">remove_groups(RealmUri, Users, Groupnames)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L847" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">remove_groups(RealmUri :: <a href="#t:uri/0">uri</a>(),
+              Users :: all | <a href="#t:t/0">t</a>() | [<a href="#t:t/0">t</a>()] | <a href="#t:username/0">username</a>() | [<a href="#t:username/0">username</a>()],
+              Groupnames :: [<a href="bondy_rbac_group.html#t:name/0">bondy_rbac_group:name</a>()]) ->
+                 ok.</pre>
+
+      </div>
+
+Removes groups <code>Groupnames</code> from users <code>Users</code> in realm with uri <code>RealmUri</code>.
+  </section>
+</section>
+<section class="detail" id="resolve/1">
+
+  <div class="detail-header">
+    <a href="#resolve/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">resolve(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L378" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">resolve(User :: <a href="#t:t/0">t</a>()) -> Resolved :: <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+<p>If the user <code>User</code> is not sso-managed, returns <code>User</code> unmodified. Otherwise, fetches the user's credentials, the enabled status and additional metadata from the SSO Realm and merges it into <code>User</code> using the following procedure:</p><p>* Copies the <code>password</code> and <code>authorized_keys</code> from the SSO user into <code>User</code>. * Adds the <code>meta` contents from the SSO user to a key names `sso</code> to the <code>User</code><code>meta</code> map. * Sets the <code>enabled</code> property by performing the conjunction (logical AND) of both user records.</p>The call fails with an exception if the SSO user associated with <code>User</code> was not found.
+  </section>
+</section>
+<section class="detail" id="sso_realm_uri/1">
+
+  <div class="detail-header">
+    <a href="#sso_realm_uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sso_realm_uri(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L325" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">sso_realm_uri(User :: <a href="#t:t/0">t</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()).</pre>
+
+      </div>
+
+Returns the URI of the Same Sign-on Realm in case the user is a SSO user. Otherwise, returns <code>undefined</code>.
+  </section>
+</section>
+<section class="detail" id="to_external/1">
+
+  <div class="detail-header">
+    <a href="#to_external/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">to_external(User)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L772" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">to_external(User :: <a href="#t:t/0">t</a>()) -> <a href="#t:external/0">external</a>().</pre>
+
+      </div>
+
+Returns the external representation of the user <code>User</code>.
+  </section>
+</section>
+<section class="detail" id="unknown/2">
+
+  <div class="detail-header">
+    <a href="#unknown/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">unknown(RealmUri, Usernames)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L867" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">unknown(RealmUri :: <a href="#t:uri/0">uri</a>(), Usernames :: [<a href="#t:username/0">username</a>()]) -> Unknown :: [<a href="#t:username/0">username</a>()].</pre>
+
+      </div>
+
+Takes a list of usernames and returns any that can't be found.
+  </section>
+</section>
+<section class="detail" id="update/3">
+
+  <div class="detail-header">
+    <a href="#update/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">update(RealmUri, Username, Data)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L528" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update(RealmUri :: <a href="#t:uri/0">uri</a>(), Username :: binary(), Data :: map()) ->
+          {ok, NewUser :: <a href="#t:t/0">t</a>()} | {error, <a href="#t:update_error/0">update_error</a>()}.</pre>
+
+      </div>
+
+Updates an existing user. This change is globally replicated.
+  </section>
+</section>
+<section class="detail" id="update/4">
+
+  <div class="detail-header">
+    <a href="#update/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">update(RealmUri, UserOrUsername, Data, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L544" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update(RealmUri :: <a href="#t:uri/0">uri</a>(), UserOrUsername :: <a href="#t:t/0">t</a>() | binary(), Data :: map(), Opts :: <a href="#t:update_opts/0">update_opts</a>()) ->
+          {ok, NewUser :: <a href="#t:t/0">t</a>()} | {error, any()}.</pre>
+
+      </div>
+
+Updates an existing user. This change is globally replicated.
+  </section>
+</section>
+<section class="detail" id="username/1">
+
+  <div class="detail-header">
+    <a href="#username/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">username(_)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_rbac_user.erl#L282" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Returns the group names the user's username.
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

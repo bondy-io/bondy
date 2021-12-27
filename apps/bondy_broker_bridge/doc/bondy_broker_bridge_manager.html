@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy_broker_bridge v0.1.0">
+
+    <title>bondy_broker_bridge_manager — bondy_broker_bridge v0.1.0</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-5e056b4dcb.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy_broker_bridge
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v0.1.0
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_broker_bridge_manager</span> 
+  <small class="app-vsn" translate="no">(bondy_broker_bridge v0.1.0)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L99" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>This module provides event bridging functionality, allowing a supervised process (implemented via bondy_subscriber) to subscribe to WAMP events and process and/or forward those events to an external system, e.g. publish to another message broker.</p><p>A subscription can be created at runtime using the <code>subscribe/5</code>, or at system boot time by setting the application's <code>config_file</code> environment variable which should have the filename of a valid Broker Bridge Specification File.</p><p>Each broker bridge is implemented as a module implementing the bondy_broker_bridge behaviour.</p><p>## Action Specification Map.</p><p>## <code>mops</code> Evaluation Context</p><p>The mops context is map containing the following:</p><pre><code class="makeup erlang" translate="no"><span class="w">     </span><span class="ss">erlang</span><span class="w">
+  </span><span class="p" data-group-id="1808908069-1">#{</span><span class="w">
+      </span><span class="p">&lt;&lt;</span><span class="s">&quot;broker&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p" data-group-id="1808908069-2">#{</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;node&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">binary</span><span class="p" data-group-id="1808908069-3">(</span><span class="p" data-group-id="1808908069-3">)</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;agent&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">binary</span><span class="p" data-group-id="1808908069-4">(</span><span class="p" data-group-id="1808908069-4">)</span><span class="w">
+      </span><span class="p" data-group-id="1808908069-2">}</span><span class="p">,</span><span class="w">
+      </span><span class="p">&lt;&lt;</span><span class="s">&quot;event&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p" data-group-id="1808908069-5">#{</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;realm&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">uri</span><span class="p" data-group-id="1808908069-6">(</span><span class="p" data-group-id="1808908069-6">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;topic&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">uri</span><span class="p" data-group-id="1808908069-7">(</span><span class="p" data-group-id="1808908069-7">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;subscription_id&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">integer</span><span class="p" data-group-id="1808908069-8">(</span><span class="p" data-group-id="1808908069-8">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;publication_id&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">integer</span><span class="p" data-group-id="1808908069-9">(</span><span class="p" data-group-id="1808908069-9">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;details&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">map</span><span class="p" data-group-id="1808908069-10">(</span><span class="p" data-group-id="1808908069-10">)</span><span class="p">,</span><span class="w"> </span><span class="c1">% WAMP EVENT.details</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;args&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">list</span><span class="p" data-group-id="1808908069-11">(</span><span class="p" data-group-id="1808908069-11">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;kwargs&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">map</span><span class="p" data-group-id="1808908069-12">(</span><span class="p" data-group-id="1808908069-12">)</span><span class="p">,</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;ingestion_timestamp&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="nf">integer</span><span class="p" data-group-id="1808908069-13">(</span><span class="p" data-group-id="1808908069-13">)</span><span class="w">
+      </span><span class="p" data-group-id="1808908069-5">}</span><span class="w">
+  </span><span class="p" data-group-id="1808908069-1">}</span><span class="p">.</span></code></pre><p>## Broker Bridge Specification File.</p><p>Example:</p><pre><code class="makeup erlang" translate="no"><span class="w">     </span><span class="ss">json</span><span class="w">
+  </span><span class="p" data-group-id="6107440504-1">{</span><span class="w">
+      </span><span class="s">&quot;id&quot;</span><span class="p">:</span><span class="s">&quot;com.leapsight.test&quot;</span><span class="p">,</span><span class="w">
+      </span><span class="s">&quot;meta&quot;</span><span class="p">:</span><span class="p" data-group-id="6107440504-2">{</span><span class="p" data-group-id="6107440504-2">}</span><span class="p">,</span><span class="w">
+      </span><span class="s">&quot;subscriptions&quot;</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-3">[</span><span class="w">
+          </span><span class="p" data-group-id="6107440504-4">{</span><span class="w">
+              </span><span class="s">&quot;bridge&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;bondy_kafka_bridge&quot;</span><span class="p">,</span><span class="w">
+              </span><span class="s">&quot;match&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-5">{</span><span class="w">
+                  </span><span class="s">&quot;realm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;com.leapsight.test&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;topic&quot;</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s">&quot;com.leapsight.example_event&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;options&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-6">{</span><span class="s">&quot;match&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;exact&quot;</span><span class="p" data-group-id="6107440504-6">}</span><span class="w">
+              </span><span class="p" data-group-id="6107440504-5">}</span><span class="p">,</span><span class="w">
+              </span><span class="s">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-7">{</span><span class="w">
+                  </span><span class="s">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;produce_sync&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{kafka.topics.wamp_events}}&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;\&quot;{{event.topic}}/{{event.publication_id}}\&quot;&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{event}}&quot;</span><span class="p">,</span><span class="w">
+                  </span><span class="s">&quot;options&quot;</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-8">{</span><span class="w">
+                      </span><span class="s">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">,</span><span class="w">
+                      </span><span class="s">&quot;acknowledge&quot;</span><span class="p">:</span><span class="w"> </span><span class="ss">true</span><span class="p">,</span><span class="w">
+                      </span><span class="s">&quot;required_acks&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;all&quot;</span><span class="p">,</span><span class="w">
+                      </span><span class="s">&quot;partition&quot;</span><span class="p">:</span><span class="w"> </span><span class="ss">null</span><span class="p">,</span><span class="w">
+                      </span><span class="s">&quot;partitioner&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="6107440504-9">{</span><span class="w">
+                          </span><span class="s">&quot;algorithm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;fnv32a&quot;</span><span class="p">,</span><span class="w">
+                          </span><span class="s">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;\&quot;{{event.topic}}/{{event.publication_id}}\&quot;&quot;</span><span class="w">
+                      </span><span class="p" data-group-id="6107440504-9">}</span><span class="p">,</span><span class="w">
+                      </span><span class="s">&quot;encoding&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;json&quot;</span><span class="w">
+                  </span><span class="p" data-group-id="6107440504-8">}</span><span class="w">
+              </span><span class="p" data-group-id="6107440504-7">}</span><span class="w">
+          </span><span class="p" data-group-id="6107440504-4">}</span><span class="w">
+      </span><span class="p" data-group-id="6107440504-3">]</span><span class="w">
+  </span><span class="p" data-group-id="6107440504-1">}</span></code></pre>
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:bridge/0" translate="no">bridge/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:id/0" translate="no">id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:subscription_detail/0" translate="no">subscription_detail/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#bridge/1" translate="no">bridge(Mod)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the bridge configuration identified by its module name.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#bridges/0" translate="no">bridges()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Lists all the configured bridge configurations.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#code_change/3" translate="no">code_change(OldVsn, State, Extra)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_call/3" translate="no">handle_call(Event, From, State)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_cast/2" translate="no">handle_cast(Event, State)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_continue/2" translate="no">handle_continue(_, State0)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_info/2" translate="no">handle_info(Info, State)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#init/1" translate="no">init(_)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#load/1" translate="no">load(Term)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Parses the provided Broker Bridge Specification and creates all the provided subscriptions.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#start_link/0" translate="no">start_link()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Internal function called by bondy_broker_bridge_sup.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#subscribe/5" translate="no">subscribe(RealmUri, Opts, Topic, Bridge, Spec)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Creates a subscription using bondy_broker. This results in a new supervised bondy_subscriber processed that subcribes to {Realm, Topic} and forwards any received publication (event) to the bridge identified by <code>Bridge</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#subscriptions/1" translate="no">subscriptions(BridgeId)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#terminate/2" translate="no">terminate(Reason, State)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#unsubscribe/1" translate="no">unsubscribe(Id)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#validate_spec/1" translate="no">validate_spec(Map)</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:bridge/0">
+
+  <div class="detail-header">
+    <a href="#t:bridge/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">bridge/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L230" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">bridge() :: map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:id/0">
+
+  <div class="detail-header">
+    <a href="#t:id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L52" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id() :: 0..9007199254740992.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:subscription_detail/0">
+
+  <div class="detail-header">
+    <a href="#t:subscription_detail/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">subscription_detail/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L231" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">subscription_detail() :: map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="bridge/1">
+
+  <div class="detail-header">
+    <a href="#bridge/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">bridge(Mod)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L282" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">bridge(module()) -> [<a href="#t:bridge/0">bridge</a>()].</pre>
+
+      </div>
+
+Returns the bridge configuration identified by its module name.
+  </section>
+</section>
+<section class="detail" id="bridges/0">
+
+  <div class="detail-header">
+    <a href="#bridges/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">bridges()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L273" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">bridges() -> [<a href="#t:bridge/0">bridge</a>()].</pre>
+
+      </div>
+
+Lists all the configured bridge configurations.
+  </section>
+</section>
+<section class="detail" id="code_change/3">
+
+  <div class="detail-header">
+    <a href="#code_change/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">code_change(OldVsn, State, Extra)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L473" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="handle_call/3">
+
+  <div class="detail-header">
+    <a href="#handle_call/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_call(Event, From, State)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L396" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="handle_cast/2">
+
+  <div class="detail-header">
+    <a href="#handle_cast/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_cast(Event, State)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L434" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="handle_continue/2">
+
+  <div class="detail-header">
+    <a href="#handle_continue/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_continue(_, State0)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L376" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="handle_info/2">
+
+  <div class="detail-header">
+    <a href="#handle_info/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_info(Info, State)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L441" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="init/1">
+
+  <div class="detail-header">
+    <a href="#init/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">init(_)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L360" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="load/1">
+
+  <div class="detail-header">
+    <a href="#load/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">load(Term)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L294" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">load(<a href="https://www.erlang.org/doc/man/file.html#type-filename">file:filename</a>() | map()) -> ok | {error, invalid_specification_format | any()}.</pre>
+
+      </div>
+
+Parses the provided Broker Bridge Specification and creates all the provided subscriptions.
+  </section>
+</section>
+<section class="detail" id="start_link/0">
+
+  <div class="detail-header">
+    <a href="#start_link/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">start_link()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L264" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Internal function called by bondy_broker_bridge_sup.
+  </section>
+</section>
+<section class="detail" id="subscribe/5">
+
+  <div class="detail-header">
+    <a href="#subscribe/5" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">subscribe(RealmUri, Opts, Topic, Bridge, Spec)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L311" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">subscribe(<a href="#t:uri/0">uri</a>(), map(), <a href="#t:uri/0">uri</a>(), Bridge :: module(), Spec :: map()) ->
+             {ok, <a href="#t:id/0">id</a>()} | {error, already_exists}.</pre>
+
+      </div>
+
+<p>Creates a subscription using bondy_broker. This results in a new supervised bondy_subscriber processed that subcribes to {Realm, Topic} and forwards any received publication (event) to the bridge identified by <code>Bridge</code>.</p>Returns the tuple {ok, Pid} where Pid is the pid() of the supervised process or the tuple {error, Reason}.
+  </section>
+</section>
+<section class="detail" id="subscriptions/1">
+
+  <div class="detail-header">
+    <a href="#subscriptions/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">subscriptions(BridgeId)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L332" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">subscriptions(BridgeId :: <a href="#t:bridge/0">bridge</a>()) -> [<a href="#t:subscription_detail/0">subscription_detail</a>()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="terminate/2">
+
+  <div class="detail-header">
+    <a href="#terminate/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">terminate(Reason, State)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L460" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+
+  </section>
+</section>
+<section class="detail" id="unsubscribe/1">
+
+  <div class="detail-header">
+    <a href="#unsubscribe/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">unsubscribe(Id)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L322" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">unsubscribe(<a href="#t:id/0">id</a>()) -> ok | {error, not_found}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="validate_spec/1">
+
+  <div class="detail-header">
+    <a href="#validate_spec/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">validate_spec(Map)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/apps/bondy_broker_bridge/src/bondy_broker_bridge_manager.erl#L342" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">validate_spec(map()) -> {ok, map()} | {error, any()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

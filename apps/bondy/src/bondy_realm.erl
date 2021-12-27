@@ -24,14 +24,14 @@
 %% separately for each individual realm so sessions attached to a realm won’t
 %% see message and events occurring on another realm.
 %%
-%% ## Overview
+%% == Overview ==
 %%
 %% The realm is a central and fundamental concept in Bondy. It does not only
-%% serve as an authentication and authorization domain but also as a message
-%% routing domain. Bondy ensures no messages routed in one realm will leak into
-%% another realm.
+%% serve as an authentication and authorization domain but also as a
+%% <strong>message routing domain</strong>. Bondy ensures no messages routed in
+%% one realm will leak into another realm.
 %%
-%% ## Security
+%% == Security ==
 %%
 %% A realm's security may be checked, enabled, or disabled by an administrator
 %% through the WAMP and HTTP APIs. This allows an administrator to change
@@ -47,41 +47,53 @@
 %%
 %% Realm security is enabled by default.
 %%
-%% ## Storage
+%% == Storage ==
 %%
 %% Realms (and the associated users, credentials, groups, sources and
 %% permissions) are persisted to disk and replicated across the cluster using
 %% the `plum_db' subsystem.
 %%
-%% ## Bondy Master Realm
+%% == Bondy Master Realm ==
 %% When you start Bondy for the first time it creates and stores the Bondy
 %% Master realm a.k.a `com.leapsight.bondy'. This realm is the root realm which
 %% allows an admin user to create, list, modify and delete other realms.
 %%
-%% ## Realm Properties
+%% == Realm Properties ==
 %%
-%% * **uri** `uri()' *[required, immutable]* <br/>The realm identifier.
-%% * **description** `binary()' <br/>A textual description of the realm.
-%% * **is_prototype** `boolean()' *[immutable]*<br/>If `true' this realm is a
-%% realm used as a prototype.<br/>*Default*: `false'
-%% * **prototype_uri** `uri()' <br/>If present, this it the URI of the the realm
-%% prototype this realm inherits some of its behaviour and features from.
-%% * **sso_realm_uri** `uri()' <br/>If present, this it the URI of the SSO Realm
-%% this realm is connected to.
-%% * **is_sso_realm** `boolean()' *[immutable]*<br/>If `true' this realm is an SSO
-%% Realm.<br/>*Default*: `false'.
-%% * **allow_connections** `boolean()' <br/>If `true' this realm is allowing
-%% connections from clients. It is normally set to `false' when the realm is an
-%% SSO Realm.<br/>Default: `true'
-%% * **authmethods** `list(binary()' <br/>The list of the authentication methods
-%% allowed by this realm.<br/>*Default*:
-%% `[anonymous, password, ticket, oauth2, wampcra]'
-%% * **security_status** `binary()' <br/>The string `enabled' if security is
-%% enabled. Otherwise the string `disabled'.
-%% * **public_keys** `list()' <br/>A list of JWK values.
+%% <ul>
+%% <li><strong>uri</strong> `uri()' <em>[required, immutable]</em>
+%% <br/>The realm identifier.</li>
+%% <li><strong>description</strong> `binary()'
+%% <br/>A textual description of the realm.</li>
+%% <li><strong>is_prototype</strong> <code>boolean()' [immutable]
+%% <br/>If</code>true' this realm is a
+%% realm used as a prototype.<br/><em>Default</em>: `false'</li>
+%% <li><strong>prototype_uri</strong> `uri()'
+%% <br/>If present, this it the URI of the the realm prototype this realm
+%% inherits some of its behaviour and features from.</li>
+%% <li><strong>sso_realm_uri</strong> `uri()'
+%% <br/>If present, this it the URI of the SSO Realm this realm is connected to.
+%% </li>
+%% <li><strong>is_sso_realm</strong> <code>boolean()' [immutable]
+%% <br/>If</code>true' this realm is an SSO Realm.
+%% <br/><em>Default</em>: `false'.</li>
+%% <li><strong>allow_connections</strong> <code>boolean()'
+%% <br/>If</code>true' this realm is allowing connections from clients. It is
+%% normally set to <code>false' when the realm is an
+%% SSO Realm.
+%% <br/>Default:</code>true'</li>
+%% <li><strong>authmethods</strong> <code>list(binary()'
+%% <br/>The list of the authentication methods allowed by this realm.
+%% <br/>Default:</code>[anonymous, password, ticket, oauth2, wampcra]'</li>
+%% <li><strong>security_status</strong> <code>binary()'
+%% <br/>The string</code>enabled' if security is enabled. Otherwise the string
+%% `disabled'.</li>
+%% <li><strong>public_keys</strong> `list()'
+%% <br/>A list of JWK values.</li>
+%% </ul>
 %%
-%% ## Realm Prototypes
-%% A **Prototype Realm** is a realm that acts as a prototype for the
+%% == Realm Prototypes ==
+%% A <strong>Prototype Realm</strong> is a realm that acts as a prototype for the
 %% construction of other realms. A prototype realm is a normal realm whose
 %% property `is_prototype' has been set to true.
 %%
@@ -97,7 +109,7 @@
 %% inherit from another prototype*. This means the inheritance chain is bounded
 %% to one level.
 %%
-%% ### Inherited properties
+%% === Inherited properties ===
 %% The following is the list of properties which a realm inherits from a
 %% prototype when those properties have not been asigned a value. Setting a
 %% value to these properties is equivalente to overriding the prototype's.
@@ -121,7 +133,7 @@
 %% granted to `all' are merged between a realm and its prototype.
 %%
 %%
-%% ## Same Sign-on (SSO)
+%% == Same Sign-on (SSO) ==
 %% Bondy SSO (Same Sign-on) is a feature that allows users to access multiple
 %% realms using just one set of credentials.
 %%

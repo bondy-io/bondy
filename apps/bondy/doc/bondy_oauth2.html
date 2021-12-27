@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_oauth2 — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_oauth2</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L33" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>The following table documents the storage layout in plum_db of the token data and its indices:</p>|Datum|Prefix|Key|Value| |---|---|---|---| |Refresh Token|{oauth2_refresh_tokens, Realm ++ &quot;,&quot; ++ Issuer}|Token| TokenData| |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ &quot;,&quot; ++ Issuer}|Token|Issuer| |Refresh Token Index|{oauth2_refresh_tokens, Realm ++ &quot;,&quot; ++ Issuer ++ &quot;,&quot; ++ Username}|DeviceId| Token|
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:error/0" translate="no">error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:grant_type/0" translate="no">grant_type/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:token_data/0" translate="no">token_data/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:token_type/0" translate="no">token_type/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#decode_jwt/1" translate="no">decode_jwt(JWT)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#issue_token/6" translate="no">issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Generates an access token and a refresh token. The access token is a JWT whereas the refresh token is a binary.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#issued_at/1" translate="no">issued_at(Bondy_oauth2_token)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the timestamp for the token data.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#issuer/1" translate="no">issuer(TokenData)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the issuer a.k.a. ClientId of the token data.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup_token/3" translate="no">lookup_token(Realm, Issuer, Token)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the data token_data() associated with <code>Token</code> or the tuple <code>{error, not_found}</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#rebuild_token_indices/2" translate="no">rebuild_token_indices(RealmUri, Issuer0)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Rebuilds refresh_token indices. This function is used for db maintenance.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#refresh_token/3" translate="no">refresh_token(Realm, Issuer, Token)</a>
+
+        </div>
+
+          <div class="summary-synopsis">After refreshing a token, the previous refresh token will be revoked</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_dangling_tokens/2" translate="no">revoke_dangling_tokens(RealmUri, Issuer0)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Removes all refresh tokens whose user has been removed. This function is used for db maintenance.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_refresh_token/3" translate="no">revoke_refresh_token(Realm, IssuerOrData, Token)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Removes a refresh token from store using an index to match the function arguments. This also removes all store indices.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_refresh_token/4" translate="no">revoke_refresh_token(RealmUri, Issuer, Username, DeviceId)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Removes a refresh token from store using an index to match the function arguments. This also removes all store indices.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_refresh_tokens/2" translate="no">revoke_refresh_tokens(RealmUri, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_refresh_tokens/3" translate="no">revoke_refresh_tokens(RealmUri, Issuer, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_token/4" translate="no">revoke_token(Hint, RealmUri, Issuer, TokenOrUsername)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_token/5" translate="no">revoke_token(Hint, RealmUri, Issuer, Username, DeviceId)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_tokens/3" translate="no">revoke_tokens(Hint, Realm, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#revoke_tokens/4" translate="no">revoke_tokens(Hint, RealmUri, Issuer, Username)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#verify_jwt/2" translate="no">verify_jwt(RealmUri, JWT)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#verify_jwt/3" translate="no">verify_jwt(RealmUri, JWTString, MatchSpec)</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:error/0">
+
+  <div class="detail-header">
+    <a href="#t:error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L86" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">error() :: oauth2_invalid_grant | no_such_realm.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:grant_type/0">
+
+  <div class="detail-header">
+    <a href="#t:grant_type/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">grant_type/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L85" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">grant_type() :: client_credentials | password | authorization_code.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:token_data/0">
+
+  <div class="detail-header">
+    <a href="#t:token_data/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">token_data/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L84" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">token_data() :: #bondy_oauth2_token{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:token_type/0">
+
+  <div class="detail-header">
+    <a href="#t:token_type/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">token_type/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L87" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">token_type() :: access_token | refresh_token.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="decode_jwt/1">
+
+  <div class="detail-header">
+    <a href="#decode_jwt/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">decode_jwt(JWT)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L489" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">decode_jwt(binary()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="issue_token/6">
+
+  <div class="detail-header">
+    <a href="#issue_token/6" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">issue_token(GrantType, RealmUri, Issuer, Username, Groups, Meta)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L148" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">issue_token(<a href="#t:token_type/0">token_type</a>(), <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), binary(), binary(), [binary()], map()) ->
+               {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()} |
+               {error, any()}.</pre>
+
+      </div>
+
+<p>Generates an access token and a refresh token. The access token is a JWT whereas the refresh token is a binary.</p>The function stores the refresh token in the store and creates a number of store indices.
+  </section>
+</section>
+<section class="detail" id="issued_at/1">
+
+  <div class="detail-header">
+    <a href="#issued_at/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">issued_at(Bondy_oauth2_token)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L132" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">issued_at(<a href="#t:token_data/0">token_data</a>()) -> pos_integer().</pre>
+
+      </div>
+
+Returns the timestamp for the token data.
+  </section>
+</section>
+<section class="detail" id="issuer/1">
+
+  <div class="detail-header">
+    <a href="#issuer/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">issuer(TokenData)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L123" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">issuer(TokenData :: <a href="#t:token_data/0">token_data</a>()) -> binary().</pre>
+
+      </div>
+
+Returns the issuer a.k.a. ClientId of the token data.
+  </section>
+</section>
+<section class="detail" id="lookup_token/3">
+
+  <div class="detail-header">
+    <a href="#lookup_token/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup_token(Realm, Issuer, Token)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L188" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup_token(Realm :: <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), Issuer :: binary(), Token :: binary()) ->
+                <a href="#t:token_data/0">token_data</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Returns the data token_data() associated with <code>Token</code> or the tuple <code>{error, not_found}</code>.
+  </section>
+</section>
+<section class="detail" id="rebuild_token_indices/2">
+
+  <div class="detail-header">
+    <a href="#rebuild_token_indices/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">rebuild_token_indices(RealmUri, Issuer0)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L461" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Rebuilds refresh_token indices. This function is used for db maintenance.
+  </section>
+</section>
+<section class="detail" id="refresh_token/3">
+
+  <div class="detail-header">
+    <a href="#refresh_token/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">refresh_token(Realm, Issuer, Token)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L207" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">refresh_token(Realm :: <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), Issuer :: binary(), Token :: binary()) ->
+                 {ok, AccessToken :: binary(), RefreshToken :: binary(), Claims :: map()} |
+                 {error, oauth2_invalid_grant}.</pre>
+
+      </div>
+
+After refreshing a token, the previous refresh token will be revoked
+  </section>
+</section>
+<section class="detail" id="revoke_dangling_tokens/2">
+
+  <div class="detail-header">
+    <a href="#revoke_dangling_tokens/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_dangling_tokens(RealmUri, Issuer0)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L437" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Removes all refresh tokens whose user has been removed. This function is used for db maintenance.
+  </section>
+</section>
+<section class="detail" id="revoke_refresh_token/3">
+
+  <div class="detail-header">
+    <a href="#revoke_refresh_token/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_refresh_token(Realm, IssuerOrData, Token)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L304" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_refresh_token(Realm :: <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(),
+                     IssuerOrData :: binary() | <a href="#t:token_data/0">token_data</a>(),
+                     Token :: binary()) ->
+                        ok.</pre>
+
+      </div>
+
+Removes a refresh token from store using an index to match the function arguments. This also removes all store indices.
+  </section>
+</section>
+<section class="detail" id="revoke_refresh_token/4">
+
+  <div class="detail-header">
+    <a href="#revoke_refresh_token/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_refresh_token(RealmUri, Issuer, Username, DeviceId)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L332" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_refresh_token(<a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(),
+                     Issuer :: binary(),
+                     Username :: binary(),
+                     DeviceId :: binary()) ->
+                        ok.</pre>
+
+      </div>
+
+Removes a refresh token from store using an index to match the function arguments. This also removes all store indices.
+  </section>
+</section>
+<section class="detail" id="revoke_refresh_tokens/2">
+
+  <div class="detail-header">
+    <a href="#revoke_refresh_tokens/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_refresh_tokens(RealmUri, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L385" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_refresh_tokens(<a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), Username :: binary()) -> ok.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_refresh_tokens/3">
+
+  <div class="detail-header">
+    <a href="#revoke_refresh_tokens/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_refresh_tokens(RealmUri, Issuer, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L412" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_refresh_tokens(<a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), Issuer :: binary(), Username :: binary()) -> ok.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_token/4">
+
+  <div class="detail-header">
+    <a href="#revoke_token/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_token(Hint, RealmUri, Issuer, TokenOrUsername)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L266" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_token(Hint :: <a href="#t:token_type/0">token_type</a>() | undefined,
+             <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(),
+             Issuer :: binary(),
+             TokenOrUsername :: binary()) ->
+                ok | {error, unsupported_operation}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_token/5">
+
+  <div class="detail-header">
+    <a href="#revoke_token/5" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_token(Hint, RealmUri, Issuer, Username, DeviceId)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L284" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_token(Hint :: <a href="#t:token_type/0">token_type</a>() | undefined,
+             <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(),
+             Issuer :: binary(),
+             Username :: binary(),
+             DeviceId :: non_neg_integer()) ->
+                ok | {error, unsupported_operation}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_tokens/3">
+
+  <div class="detail-header">
+    <a href="#revoke_tokens/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_tokens(Hint, Realm, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L354" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_tokens(Hint :: <a href="#t:token_type/0">token_type</a>() | undefined, Realm :: <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(), Username :: binary()) ->
+                 ok | {error, unsupported_operation}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="revoke_tokens/4">
+
+  <div class="detail-header">
+    <a href="#revoke_tokens/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">revoke_tokens(Hint, RealmUri, Issuer, Username)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L372" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">revoke_tokens(Hint :: <a href="#t:token_type/0">token_type</a>() | undefined,
+              <a href="bondy_realm.html#t:uri/0">bondy_realm:uri</a>(),
+              Issuer :: binary(),
+              Username :: binary()) ->
+                 ok | {error, unsupported_operation}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="verify_jwt/2">
+
+  <div class="detail-header">
+    <a href="#verify_jwt/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">verify_jwt(RealmUri, JWT)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L500" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">verify_jwt(binary(), binary()) -> {ok, map()} | {error, <a href="#t:error/0">error</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="verify_jwt/3">
+
+  <div class="detail-header">
+    <a href="#verify_jwt/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">verify_jwt(RealmUri, JWTString, MatchSpec)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_oauth2.erl#L511" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">verify_jwt(RealmUri :: binary(), JWTString :: binary(), MatchSpec :: map()) ->
+              {ok, map()} | {error, <a href="#t:error/0">error</a>()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

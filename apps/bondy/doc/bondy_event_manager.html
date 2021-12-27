@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_event_manager — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_event_manager</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L55" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>This module is used by Bondy to manage event handlers and notify them of events. It implements the &quot;watched&quot; handler capability i.e. <code>add_watched_handler/2,3</code>, <code>swap_watched_handler/2,3</code>. In addition, this module mirrors most of the gen_event API and adds variants with two arguments were the first argument is the defaul event manager (<code>bondy_event_manager</code>).</p><pre><code class="makeup erlang" translate="no"><span class="w">       </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+       </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">
+       </span><span class="p">|</span><span class="w">          </span><span class="ss">bondy_event_manager</span><span class="w">          </span><span class="p">|</span><span class="w">
+       </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">
+       </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+                           </span><span class="p">|</span><span class="w">
+                           </span><span class="p">|</span><span class="w">
+                           </span><span class="ss">v</span><span class="w">
+       </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+       </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">
+       </span><span class="p">|</span><span class="w">    </span><span class="ss">bondy_event_handler_watcher_sup</span><span class="w">    </span><span class="p">|</span><span class="w">
+       </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">
+       </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+                           </span><span class="p">|</span><span class="w">
+                           </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">+</span><span class="w">
+                           </span><span class="p">|</span><span class="w">                                </span><span class="p">|</span><span class="w">
+        </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">       </span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+        </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">       </span><span class="p">|</span><span class="w">       </span><span class="p">|</span><span class="w">
+        </span><span class="p">|</span><span class="w">     </span><span class="ss">bondy_event_handler_watcher</span><span class="w"> </span><span class="mi">1</span><span class="w">     </span><span class="p">|</span><span class="w">       </span><span class="p">|</span><span class="w">   </span><span class="n">N</span><span class="w">   </span><span class="p">|</span><span class="w">
+        </span><span class="p">|</span><span class="w">                                       </span><span class="p">|</span><span class="w">       </span><span class="p">|</span><span class="w">       </span><span class="p">|</span><span class="w">
+        </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">       </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">
+ 
+                        </span><span class="ss">simple_one_for_one</span></code></pre>
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_handler/2" translate="no">add_handler(Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds an event handler. Calls <code>gen_event:add_handler(?MODULE, Handler, Args)</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_handler/3" translate="no">add_handler(Manager, Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds an event handler. Calls <code>gen_event:add_handler(Manager, Handler, Args)</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_sup_handler/2" translate="no">add_sup_handler(Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a supervised event handler, but also supervises the connection between the event handler and the calling process. Calls <code>gen_event:add_sup_handler(?MODULE, Handler, Args)</code>. %% Use this call if you want the event manager to remove the handler when the calling process terminates.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_sup_handler/3" translate="no">add_sup_handler(Manager, Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a supervised event handler, but also supervises the connection between the event handler and the calling process. Calls <code>gen_event:add_sup_handler(?MODULE, Handler, Args)</code>. Use this call if you want the event manager to remove the handler when the calling process terminates.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_watched_handler/2" translate="no">add_watched_handler(Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a watched event handler. As opposed to <code>add_sup_handler/2</code> which supervises the calling process, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which calls <code>add_sup_handler/2</code>. If the handler crashes, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#add_watched_handler/3" translate="no">add_watched_handler(Manager, Handler, Args)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Adds a supervised event handler. As opposed to <code>add_sup_handler/2</code> which monitors the calling process, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which calls <code>add_sup_handler/2</code>. If the handler crashes, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#notify/1" translate="no">notify(Event)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>notify(bondy_event_manager, Event)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#notify/2" translate="no">notify(Manager, Event)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>gen_event:notify(bondy_event_manager, Event)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_handler/2" translate="no">swap_handler(OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>swap_handler(bondy_event_manager, OldHandler, NewHandler)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_handler/3" translate="no">swap_handler(Manager, OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>gen_event:swap_handler/3</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_sup_handler/2" translate="no">swap_sup_handler(OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>swap_sup_handler(bondy_event_manager, OldHandler, NewHandler)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_sup_handler/3" translate="no">swap_sup_handler(Manager, OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>gen_event:swap_sup_handler/3</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_watched_handler/2" translate="no">swap_watched_handler(OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>swap_watched_handler(bondy_event_manager, OldHandler, NewHandler)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#swap_watched_handler/3" translate="no">swap_watched_handler(Manager, OldHandler, NewHandler)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Replaces an event handler in event manager <code>Manager</code> in the same way as <code>swap_sup_handler/3</code>. However, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which is the one calling calls <code>swap_sup_handler/2</code>. If the handler crashes or terminates with a reason other than <code>normal</code> or <code>shutdown</code>, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sync_notify/1" translate="no">sync_notify(Event)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>sync_notify(bondy_event_manager, Event)</code></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sync_notify/2" translate="no">sync_notify(Manager, Event)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function. Equivalent to calling <code>gen_event:sync_notify(bondy_event_manager, Event)</code></div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="add_handler/2">
+
+  <div class="detail-header">
+    <a href="#add_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_handler(Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L90" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds an event handler. Calls <code>gen_event:add_handler(?MODULE, Handler, Args)</code>.
+  </section>
+</section>
+<section class="detail" id="add_handler/3">
+
+  <div class="detail-header">
+    <a href="#add_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_handler(Manager, Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L99" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds an event handler. Calls <code>gen_event:add_handler(Manager, Handler, Args)</code>.
+  </section>
+</section>
+<section class="detail" id="add_sup_handler/2">
+
+  <div class="detail-header">
+    <a href="#add_sup_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_sup_handler(Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L112" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds a supervised event handler, but also supervises the connection between the event handler and the calling process. Calls <code>gen_event:add_sup_handler(?MODULE, Handler, Args)</code>. %% Use this call if you want the event manager to remove the handler when the calling process terminates.
+  </section>
+</section>
+<section class="detail" id="add_sup_handler/3">
+
+  <div class="detail-header">
+    <a href="#add_sup_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_sup_handler(Manager, Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L124" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds a supervised event handler, but also supervises the connection between the event handler and the calling process. Calls <code>gen_event:add_sup_handler(?MODULE, Handler, Args)</code>. Use this call if you want the event manager to remove the handler when the calling process terminates.
+  </section>
+</section>
+<section class="detail" id="add_watched_handler/2">
+
+  <div class="detail-header">
+    <a href="#add_watched_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_watched_handler(Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L138" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds a watched event handler. As opposed to <code>add_sup_handler/2</code> which supervises the calling process, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which calls <code>add_sup_handler/2</code>. If the handler crashes, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.
+  </section>
+</section>
+<section class="detail" id="add_watched_handler/3">
+
+  <div class="detail-header">
+    <a href="#add_watched_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">add_watched_handler(Manager, Handler, Args)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L152" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Adds a supervised event handler. As opposed to <code>add_sup_handler/2</code> which monitors the calling process, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which calls <code>add_sup_handler/2</code>. If the handler crashes, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.
+  </section>
+</section>
+<section class="detail" id="notify/1">
+
+  <div class="detail-header">
+    <a href="#notify/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">notify(Event)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L220" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>notify(bondy_event_manager, Event)</code>
+  </section>
+</section>
+<section class="detail" id="notify/2">
+
+  <div class="detail-header">
+    <a href="#notify/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">notify(Manager, Event)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L229" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>gen_event:notify(bondy_event_manager, Event)</code>
+  </section>
+</section>
+<section class="detail" id="swap_handler/2">
+
+  <div class="detail-header">
+    <a href="#swap_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_handler(OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L161" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>swap_handler(bondy_event_manager, OldHandler, NewHandler)</code>
+  </section>
+</section>
+<section class="detail" id="swap_handler/3">
+
+  <div class="detail-header">
+    <a href="#swap_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_handler(Manager, OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L169" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>gen_event:swap_handler/3</code>
+  </section>
+</section>
+<section class="detail" id="swap_sup_handler/2">
+
+  <div class="detail-header">
+    <a href="#swap_sup_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_sup_handler(OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L178" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>swap_sup_handler(bondy_event_manager, OldHandler, NewHandler)</code>
+  </section>
+</section>
+<section class="detail" id="swap_sup_handler/3">
+
+  <div class="detail-header">
+    <a href="#swap_sup_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_sup_handler(Manager, OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L186" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>gen_event:swap_sup_handler/3</code>
+  </section>
+</section>
+<section class="detail" id="swap_watched_handler/2">
+
+  <div class="detail-header">
+    <a href="#swap_watched_handler/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_watched_handler(OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L195" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>swap_watched_handler(bondy_event_manager, OldHandler, NewHandler)</code>
+  </section>
+</section>
+<section class="detail" id="swap_watched_handler/3">
+
+  <div class="detail-header">
+    <a href="#swap_watched_handler/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">swap_watched_handler(Manager, OldHandler, NewHandler)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L210" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+Replaces an event handler in event manager <code>Manager</code> in the same way as <code>swap_sup_handler/3</code>. However, this function calls <code>bondy_event_handler_watcher_sup:start_watcher(Handler, Args)</code> which spawns a supervised process (<code>bondy_event_handler_watcher</code>) which is the one calling calls <code>swap_sup_handler/2</code>. If the handler crashes or terminates with a reason other than <code>normal</code> or <code>shutdown</code>, <code>bondy_event_handler_watcher</code> will re-install it in the event manager.
+  </section>
+</section>
+<section class="detail" id="sync_notify/1">
+
+  <div class="detail-header">
+    <a href="#sync_notify/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sync_notify(Event)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L238" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>sync_notify(bondy_event_manager, Event)</code>
+  </section>
+</section>
+<section class="detail" id="sync_notify/2">
+
+  <div class="detail-header">
+    <a href="#sync_notify/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sync_notify(Manager, Event)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_event_manager.erl#L247" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+A util function. Equivalent to calling <code>gen_event:sync_notify(bondy_event_manager, Event)</code>
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

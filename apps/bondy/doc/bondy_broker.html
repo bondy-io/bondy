@@ -1,0 +1,1716 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_broker — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_broker</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L69" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+This module implements the capabilities of a Broker. It is used by <a href="bondy_router.html"><code>bondy_router</code></a>.
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:id/0" translate="no">id/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_abort/0" translate="no">wamp_abort/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_authenticate/0" translate="no">wamp_authenticate/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_call/0" translate="no">wamp_call/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_cancel/0" translate="no">wamp_cancel/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_challenge/0" translate="no">wamp_challenge/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_error/0" translate="no">wamp_error/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_event/0" translate="no">wamp_event/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_event_received/0" translate="no">wamp_event_received/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_goodbye/0" translate="no">wamp_goodbye/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_hello/0" translate="no">wamp_hello/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_interrupt/0" translate="no">wamp_interrupt/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_invocation/0" translate="no">wamp_invocation/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_message/0" translate="no">wamp_message/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_publish/0" translate="no">wamp_publish/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_published/0" translate="no">wamp_published/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_register/0" translate="no">wamp_register/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_registered/0" translate="no">wamp_registered/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_result/0" translate="no">wamp_result/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscribe/0" translate="no">wamp_subscribe/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscribed/0" translate="no">wamp_subscribed/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_subscriber_received/0" translate="no">wamp_subscriber_received/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unregister/0" translate="no">wamp_unregister/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unregistered/0" translate="no">wamp_unregistered/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unsubscribe/0" translate="no">wamp_unsubscribe/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_unsubscribed/0" translate="no">wamp_unsubscribed/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_welcome/0" translate="no">wamp_welcome/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:wamp_yield/0" translate="no">wamp_yield/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#close_context/1" translate="no">close_context(Ctxt)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#features/0" translate="no">features()</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_message/2" translate="no">handle_message(M, Ctxt)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Handles a wamp message. This function is called by the bondy_router module. The message might be handled synchronously (it is performed by the calling process i.e. the transport handler) or asynchronously (by sending the message to the broker worker pool).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#handle_message/3" translate="no">handle_message(M, To, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Handles a message sent by a peer node through the bondy_peer_wamp_relay.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_feature_enabled/1" translate="no">is_feature_enabled(F)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns true if feature F is enabled by the broker.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#publish/5" translate="no">publish(Opts, TopicUri, Args, ArgsKw, Ctxt)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#publish/6" translate="no">publish(ReqId, Opts, TopicUri, Args, ArgsKw, RealmUri)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#subscribe/3" translate="no">subscribe(RealmUri, Opts, Topic)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#subscribe/4" translate="no">subscribe(RealmUri, Opts, Topic, SubscriberOrFun)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>For internal use. If the last argument is a function, spawns a supervised instance of a bondy_subscriber by calling bondy_subscribers_sup:start_subscriber/4. The new process, calls subscribe/4 passing its pid as last argument.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#unsubscribe/1" translate="no">unsubscribe(Subscriber)</a>
+
+        </div>
+
+          <div class="summary-synopsis">For internal Bondy use. Terminates the process identified by Pid by bondy_subscribers_sup:terminate_subscriber/1</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#unsubscribe/2" translate="no">unsubscribe(SubsId, RealmUri)</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:id/0">
+
+  <div class="detail-header">
+    <a href="#t:id/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">id/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L52" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">id() :: 0..9007199254740992.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_abort/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_abort/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_abort/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L828" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_abort() :: #abort{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_authenticate/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_authenticate/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_authenticate/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L900" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_authenticate() :: #authenticate{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_call/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_call/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_call/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1204" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_call() :: #call{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_cancel/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_cancel/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_cancel/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1312" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_cancel() :: #cancel{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_challenge/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_challenge/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_challenge/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L848" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_challenge() :: #challenge{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_error/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_error/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_error/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L937" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_error() :: #error{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_event/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_event/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_event/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1103" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_event() :: #event{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_event_received/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_event_received/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_event_received/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1152" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_event_received() :: #event_received{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_goodbye/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_goodbye/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_goodbye/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L912" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_goodbye() :: #goodbye{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_hello/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_hello/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_hello/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L675" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_hello() :: #hello{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_interrupt/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_interrupt/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_interrupt/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1527" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_interrupt() :: #interrupt{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_invocation/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_invocation/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_invocation/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1474" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_invocation() :: #invocation{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_message/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_message/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_message/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L601" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_message() ::
+    <a href="#t:wamp_hello/0">wamp_hello</a>() |
+    <a href="#t:wamp_challenge/0">wamp_challenge</a>() |
+    <a href="#t:wamp_authenticate/0">wamp_authenticate</a>() |
+    <a href="#t:wamp_welcome/0">wamp_welcome</a>() |
+    <a href="#t:wamp_abort/0">wamp_abort</a>() |
+    <a href="#t:wamp_goodbye/0">wamp_goodbye</a>() |
+    <a href="#t:wamp_error/0">wamp_error</a>() |
+    <a href="#t:wamp_publish/0">wamp_publish</a>() |
+    <a href="#t:wamp_published/0">wamp_published</a>() |
+    <a href="#t:wamp_subscribe/0">wamp_subscribe</a>() |
+    <a href="#t:wamp_subscribed/0">wamp_subscribed</a>() |
+    <a href="#t:wamp_unsubscribe/0">wamp_unsubscribe</a>() |
+    <a href="#t:wamp_unsubscribed/0">wamp_unsubscribed</a>() |
+    <a href="#t:wamp_event/0">wamp_event</a>() |
+    <a href="#t:wamp_event_received/0">wamp_event_received</a>() |
+    <a href="#t:wamp_subscriber_received/0">wamp_subscriber_received</a>() |
+    <a href="#t:wamp_call/0">wamp_call</a>() |
+    <a href="#t:wamp_cancel/0">wamp_cancel</a>() |
+    <a href="#t:wamp_result/0">wamp_result</a>() |
+    <a href="#t:wamp_register/0">wamp_register</a>() |
+    <a href="#t:wamp_registered/0">wamp_registered</a>() |
+    <a href="#t:wamp_unregister/0">wamp_unregister</a>() |
+    <a href="#t:wamp_unregistered/0">wamp_unregistered</a>() |
+    <a href="#t:wamp_invocation/0">wamp_invocation</a>() |
+    <a href="#t:wamp_interrupt/0">wamp_interrupt</a>() |
+    <a href="#t:wamp_yield/0">wamp_yield</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_publish/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_publish/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_publish/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L955" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_publish() :: #publish{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_published/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_published/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_published/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1027" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_published() :: #published{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_register/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_register/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_register/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1354" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_register() :: #register{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_registered/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_registered/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_registered/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1411" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_registered() :: #registered{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_result/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_result/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_result/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1334" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_result() :: #result{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscribe/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscribe/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscribe/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1039" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscribe() :: #subscribe{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscribed/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscribed/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscribed/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1069" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscribed() :: #subscribed{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_subscriber_received/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_subscriber_received/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_subscriber_received/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1168" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_subscriber_received() :: #subscriber_received{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unregister/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unregister/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unregister/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1422" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unregister() :: #unregister{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unregistered/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unregistered/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unregistered/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1433" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unregistered() :: #unregistered{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unsubscribe/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unsubscribe/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unsubscribe/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1079" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unsubscribe() :: #unsubscribe{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_unsubscribed/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_unsubscribed/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_unsubscribed/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1088" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_unsubscribed() :: #unsubscribed{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_welcome/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_welcome/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_welcome/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L754" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_welcome() :: #welcome{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:wamp_yield/0">
+
+  <div class="detail-header">
+    <a href="#t:wamp_yield/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">wamp_yield/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L1550" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">wamp_yield() :: #yield{}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="close_context/1">
+
+  <div class="detail-header">
+    <a href="#close_context/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">close_context(Ctxt)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L100" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">close_context(<a href="bondy_context.html#t:t/0">bondy_context:t</a>()) -> <a href="bondy_context.html#t:t/0">bondy_context:t</a>().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="features/0">
+
+  <div class="detail-header">
+    <a href="#features/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">features()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L123" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">features() -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="handle_message/2">
+
+  <div class="detail-header">
+    <a href="#handle_message/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_message(M, Ctxt)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L148" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">handle_message(M :: <a href="#t:wamp_message/0">wamp_message</a>(), Ctxt :: <a href="bondy_context.html#t:t/0">bondy_context:t</a>()) -> ok | no_return().</pre>
+
+      </div>
+
+Handles a wamp message. This function is called by the bondy_router module. The message might be handled synchronously (it is performed by the calling process i.e. the transport handler) or asynchronously (by sending the message to the broker worker pool).
+  </section>
+</section>
+<section class="detail" id="handle_message/3">
+
+  <div class="detail-header">
+    <a href="#handle_message/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">handle_message(M, To, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L175" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">handle_message(M :: <a href="#t:wamp_publish/0">wamp_publish</a>(), To :: <a href="bondy_ref.html#t:t/0">bondy_ref:t</a>(), Opts :: map()) -> ok | no_return().</pre>
+
+      </div>
+
+Handles a message sent by a peer node through the bondy_peer_wamp_relay.
+  </section>
+</section>
+<section class="detail" id="is_feature_enabled/1">
+
+  <div class="detail-header">
+    <a href="#is_feature_enabled/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_feature_enabled(F)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L133" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_feature_enabled(binary()) -> boolean().</pre>
+
+      </div>
+
+Returns true if feature F is enabled by the broker.
+  </section>
+</section>
+<section class="detail" id="publish/5">
+
+  <div class="detail-header">
+    <a href="#publish/5" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">publish(Opts, TopicUri, Args, ArgsKw, Ctxt)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L224" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">publish(Opts :: map(),
+        {Realm :: <a href="#t:uri/0">uri</a>(), TopicUri :: <a href="#t:uri/0">uri</a>()} | <a href="#t:uri/0">uri</a>(),
+        Args :: [],
+        ArgsKw :: map(),
+        <a href="bondy_context.html#t:t/0">bondy_context:t</a>()) ->
+           {ok, <a href="#t:id/0">id</a>()} | {error, any()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="publish/6">
+
+  <div class="detail-header">
+    <a href="#publish/6" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">publish(ReqId, Opts, TopicUri, Args, ArgsKw, RealmUri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L242" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">publish(<a href="#t:id/0">id</a>(),
+        Opts :: map(),
+        {Realm :: <a href="#t:uri/0">uri</a>(), TopicUri :: <a href="#t:uri/0">uri</a>()} | <a href="#t:uri/0">uri</a>(),
+        Args :: list(),
+        ArgsKw :: map(),
+        <a href="bondy_context.html#t:t/0">bondy_context:t</a>() | <a href="#t:uri/0">uri</a>()) ->
+           {ok, <a href="#t:id/0">id</a>()} | {error, any()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="subscribe/3">
+
+  <div class="detail-header">
+    <a href="#subscribe/3" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">subscribe(RealmUri, Opts, Topic)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L443" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">subscribe(RealmUri :: <a href="#t:uri/0">uri</a>(), Opts :: map(), Topic :: <a href="#t:uri/0">uri</a>()) ->
+             {ok, <a href="#t:id/0">id</a>()} | {ok, <a href="#t:id/0">id</a>(), pid()} | {error, already_exists | any()}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="subscribe/4">
+
+  <div class="detail-header">
+    <a href="#subscribe/4" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">subscribe(RealmUri, Opts, Topic, SubscriberOrFun)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L464" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">subscribe(RealmUri :: <a href="#t:uri/0">uri</a>(), Opts :: map(), Topic :: <a href="#t:uri/0">uri</a>(), SubscriberOrFun :: pid() | function()) ->
+             {ok, <a href="#t:id/0">id</a>()} | {ok, <a href="#t:id/0">id</a>(), pid()} | {error, already_exists | any()}.</pre>
+
+      </div>
+
+<p>For internal use. If the last argument is a function, spawns a supervised instance of a bondy_subscriber by calling bondy_subscribers_sup:start_subscriber/4. The new process, calls subscribe/4 passing its pid as last argument.</p>If the last argument is a pid, it registers the pid as a subscriber (a.k.a a local subscription)
+  </section>
+</section>
+<section class="detail" id="unsubscribe/1">
+
+  <div class="detail-header">
+    <a href="#unsubscribe/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">unsubscribe(Subscriber)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L504" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">unsubscribe(pid()) -> ok | {error, not_found}.</pre>
+
+      </div>
+
+For internal Bondy use. Terminates the process identified by Pid by bondy_subscribers_sup:terminate_subscriber/1
+  </section>
+</section>
+<section class="detail" id="unsubscribe/2">
+
+  <div class="detail-header">
+    <a href="#unsubscribe/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">unsubscribe(SubsId, RealmUri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_broker.erl#L518" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">unsubscribe(<a href="#t:id/0">id</a>(), <a href="bondy_context.html#t:t/0">bondy_context:t</a>() | <a href="#t:uri/0">uri</a>()) -> ok | {error, not_found}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

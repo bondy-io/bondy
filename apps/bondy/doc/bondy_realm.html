@@ -1,0 +1,2136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy v1.0.0-beta.16">
+
+    <title>bondy_realm — bondy v1.0.0-beta.16</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-e5a8a75e50.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="modules">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v1.0.0-beta.16
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1>
+  <span translate="no">bondy_realm</span> 
+  <small class="app-vsn" translate="no">(bondy v1.0.0-beta.16)</small>
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L148" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+
+</h1>
+
+
+  <section id="moduledoc">
+<p>Realms are routing and administrative domains and act as namespaces for all resources in Bondy i.e. all users, groups, permissions, registrations and subscriptions belong to a Realm. Messages and events are routed separately for each individual realm so sessions attached to a realm won’t see message and events occurring on another realm.</p><h3 id="module-overview" class="section-heading">
+  <a href="#module-overview" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Overview">Overview</a>
+</h3>
+<p>The realm is a central and fundamental concept in Bondy. It does not only serve as an authentication and authorization domain but also as a <strong>message routing domain</strong>. Bondy ensures no messages routed in one realm will leak into another realm.</p><h3 id="module-security" class="section-heading">
+  <a href="#module-security" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Security">Security</a>
+</h3>
+<p>A realm's security may be checked, enabled, or disabled by an administrator through the WAMP and HTTP APIs. This allows an administrator to change security settings of a realm on the whole cluster quickly without needing to change settings on a node-by-node basis.</p><p>If you disable security, this means that you have disabled all of the various authentication and authorization checks that take place when establishing a session and executing operations against a Bondy Realm. Users, groups, and other security resources remain available for configuration while security is disabled, and will be applied if and when security is re-enabled.</p><p>Realm security is enabled by default.</p><h3 id="module-storage" class="section-heading">
+  <a href="#module-storage" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Storage">Storage</a>
+</h3>
+<p>Realms (and the associated users, credentials, groups, sources and permissions) are persisted to disk and replicated across the cluster using the <code>plum_db</code> subsystem.</p><h3 id="module-bondy-master-realm" class="section-heading">
+  <a href="#module-bondy-master-realm" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Bondy_Master_Realm">Bondy Master Realm</a>
+</h3>
+<p>When you start Bondy for the first time it creates and stores the Bondy Master realm a.k.a <code>com.leapsight.bondy</code>. This realm is the root realm which allows an admin user to create, list, modify and delete other realms.</p><h3 id="module-realm-properties" class="section-heading">
+  <a href="#module-realm-properties" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Realm_Properties">Realm Properties</a>
+</h3>
+<ul><li><strong>uri</strong><code>uri()</code><em>[required, immutable]</em><br/>The realm identifier.</li><li><strong>description</strong><code>binary()</code><br/>A textual description of the realm.</li><li><strong>is_prototype</strong><code>boolean()' [immutable] If</code>true' this realm is a realm used as a prototype.<br/><em>Default</em>: <code>false</code></li><li><strong>prototype_uri</strong><code>uri()</code><br/>If present, this it the URI of the the realm prototype this realm inherits some of its behaviour and features from.</li><li><strong>sso_realm_uri</strong><code>uri()</code><br/>If present, this it the URI of the SSO Realm this realm is connected to.</li><li><strong>is_sso_realm</strong><code>boolean()' [immutable] If</code>true' this realm is an SSO Realm.<br/><em>Default</em>: <code>false</code>.</li><li><strong>allow_connections</strong><code>boolean()' If</code>true' this realm is allowing connections from clients. It is normally set to <code>false' when the realm is an SSO Realm. Default:</code>true'</li><li><strong>authmethods</strong><code>list(binary()' The list of the authentication methods allowed by this realm. Default:</code>[anonymous, password, ticket, oauth2, wampcra]'</li><li><strong>security_status</strong><code>binary()' The string</code>enabled' if security is enabled. Otherwise the string <code>disabled</code>.</li><li><strong>public_keys</strong><code>list()</code><br/>A list of JWK values.</li></ul><h3 id="module-realm-prototypes" class="section-heading">
+  <a href="#module-realm-prototypes" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Realm_Prototypes">Realm Prototypes</a>
+</h3>
+<p>A <strong>Prototype Realm</strong> is a realm that acts as a prototype for the construction of other realms. A prototype realm is a normal realm whose property <code>is_prototype</code> has been set to true.</p><p>Prototypical inheritance allows us to reuse the properties (including RBAC definitions) from one realm to another through a reference URI configured on the <code>prototype_uri</code> property.</p><p>Prototypical inheritance is a form of single inheritance as realms are can only be related to a single prototype.</p><p>The <code>prototype_uri</code> property is defined as an *irreflexive property* i.e. a realm cannot have itself as prototype. In addition *a prototype cannot inherit from another prototype*. This means the inheritance chain is bounded to one level.</p><h4><a name="Inherited_properties">Inherited properties</a></h4><p>The following is the list of properties which a realm inherits from a prototype when those properties have not been asigned a value. Setting a value to these properties is equivalente to overriding the prototype's.</p><p>* **security_enabled** * **allow_connections** * **sso_realm_uri** * **authmethods**</p><p>In addition realms inherit Groups, Sources and Grants from their prototype. The following are the inheritance rules:</p><p>1. Users cannot be defined at the prototype i.e. no user inheritance. 1. A realm has access to all groups defined in the prototype i.e. from a realm perspective the prototype groups operate in the same way as if they have been defined in the realm itself. This enables roles (users and groups) in a realm to be members of groups defined in the prototype. 1. A group defined in a realm overrides any homonymous group in the prototype. This works at all levels of the group membership chain. 1. The previous rule does not apply to the special group <code>all</code>. Permissions granted to <code>all</code> are merged between a realm and its prototype.</p><h3 id="module-same-sign-on-sso" class="section-heading">
+  <a href="#module-same-sign-on-sso" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Same_Sign-on_(SSO)">Same Sign-on (SSO)</a>
+</h3>
+<p>Bondy SSO (Same Sign-on) is a feature that allows users to access multiple realms using just one set of credentials.</p><p>It is enabled by setting the realm's <code>sso_realm_uri</code> property during realm creation or during an update operation.</p>* It requires the user to authenticate when opening a session in a realm. * Changing credentials e.g. updating password can be performed while connected to any realm.
+  </section>
+
+
+  <section id="summary" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#summary">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+      Summary
+    </h1>
+
+  <div class="summary-types summary">
+    <h2>
+      <a href="#types">Types</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:external/0" translate="no">external/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:keyset/0" translate="no">keyset/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:maybe/1" translate="no">maybe/1</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:t/0" translate="no">t/0</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#t:uri/0" translate="no">uri/0</a>
+
+        </div>
+
+      </div>
+
+  </div>
+
+  <div class="summary-functions summary">
+    <h2>
+      <a href="#functions">Functions</a>
+    </h2>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#allow_connections/1" translate="no">allow_connections(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns <code>true</code> if the Realm is allowing connections. Otherwise returns <code>false</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#apply_config/0" translate="no">apply_config()</a>
+
+        </div>
+
+          <div class="summary-synopsis">Loads a security config file from <code>bondy_config:get([security, config_file])</code> if defined and applies its definitions.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#authmethods/1" translate="no">authmethods(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the list of supported authentication methods for Realm.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#create/1" translate="no">create(Map0)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#delete/1" translate="no">delete(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#description/1" translate="no">description(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#disable_security/1" translate="no">disable_security(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Disables security for realm <code>Realm</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#enable_security/1" translate="no">enable_security(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Enables security for realm <code>Realm</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#encryption_keys/1" translate="no">encryption_keys(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#exists/1" translate="no">exists(Uri)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#fetch/1" translate="no">fetch(Uri)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist it fails with reason '{badarg, Uri}'.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#from_file/1" translate="no">from_file(Filename)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Loads a security config file from <code>Filename</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get/1" translate="no">get(Uri)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist and automatic creation of realms is enabled, it will add a new one for Uri with the default configuration options.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get/2" translate="no">get(Uri, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist and automatic creation of realms is enabled, it will create a new one for Uri with configuration options <code>Opts</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get_encryption_key/2" translate="no">get_encryption_key(Realm, Kid)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get_private_key/2" translate="no">get_private_key(Realm, Kid)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get_public_key/2" translate="no">get_public_key(Realm, Kid)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get_random_encryption_kid/1" translate="no">get_random_encryption_kid(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#get_random_kid/1" translate="no">get_random_kid(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#grants/1" translate="no">grants(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of grants belonging to realm <code>Realm</code>. These includes the grants inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#grants/2" translate="no">grants(Realm, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of grants belonging to realm <code>Realm</code>. These includes the grants inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#groups/1" translate="no">groups(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of users belonging to realm <code>Realm</code>. These includes the groups inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#groups/2" translate="no">groups(Realm, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of groups belonging to realm <code>Realm</code>. These includes the groups inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#info/1" translate="no">info(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_allowed_authmethod/2" translate="no">is_allowed_authmethod(Realm, Method)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns <code>true</code> if Method is an authentication method supported by realm <code>Realm</code>. Otherwise returns <code>false</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_allowed_sso_realm/2" translate="no">is_allowed_sso_realm(Realm, SSORealmUri)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if realm <code>Realm</code> is associated with the SSO Realm identified by uri <code>SSORealmUri`. Otherwise returns `false</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_prototype/1" translate="no">is_prototype(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns <code>true</code> if realm <code>Realm</code> is a prototype. Otherwise, returns <code>false</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_security_enabled/1" translate="no">is_security_enabled(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns <code>true</code> if security is enabled. Otherwise returns <code>false</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_sso_realm/1" translate="no">is_sso_realm(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns <code>true</code> if the Realm is a Same Sign-on (SSO) realm. Otherwise returns <code>false</code>.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#is_value_inherited/2" translate="no">is_value_inherited(Realm, Property)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns <code>true</code> if the property value is inherited from a prototype. Otherwise returns <code>false</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#list/0" translate="no">list()</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#lookup/1" translate="no">lookup(Uri)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}' if it doesn't exist.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#password_opts/1" translate="no">password_opts(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the password options to be used as default when adding users to this realm. If the options have not been defined returns atom <code>undefined</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#private_keys/1" translate="no">private_keys(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#prototype_uri/1" translate="no">prototype_uri(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the uri of realm <code>Realm</code> prototype if defined. Otherwise returns <code>undefined</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#public_keys/1" translate="no">public_keys(Realm)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#security_status/1" translate="no">security_status(Term)</a>
+
+        </div>
+
+          <div class="summary-synopsis">A util function that returns the security status as an atom. See <a href="#is_security_enabled/1"><code>is_security_enabled/1</code></a>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sources/1" translate="no">sources(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of sources belonging to realm <code>Realm</code>. These includes the sources inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sources/2" translate="no">sources(Realm, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of sources belonging to realm <code>Realm</code>. These includes the sources inherited from the prototype (if defined).</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#sso_realm_uri/1" translate="no">sso_realm_uri(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis"><p>Returns the same sign on (SSO) realm URI used by the realm.</p></div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#to_external/1" translate="no">to_external(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the external map representation of the realm.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#update/2" translate="no">update(Realm, Data)</a>
+
+        </div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#uri/1" translate="no">uri(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the URI that identifies the realm <code>Realm</code>.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#users/1" translate="no">users(Realm)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of users belonging to realm <code>Realm</code>. Users are never inherited through prototypes.</div>
+
+      </div>
+
+      <div class="summary-row">
+        <div class="summary-signature">
+          <a href="#users/2" translate="no">users(Realm, Opts)</a>
+
+        </div>
+
+          <div class="summary-synopsis">Returns the list of users belonging to realm <code>Realm</code>. Users are never inherited through prototypes.</div>
+
+      </div>
+
+  </div>
+
+  </section>
+
+
+  <section id="types" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#types">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Types
+    </h1>
+    <div class="types-list">
+<section class="detail" id="t:external/0">
+
+  <div class="detail-header">
+    <a href="#t:external/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">external/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L623" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">external() ::
+    #{uri := <a href="#t:uri/0">uri</a>(),
+      is_prototype := boolean(),
+      prototype_uri := <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()),
+      description := binary(),
+      authmethods := [binary()],
+      is_sso_realm := boolean(),
+      allow_connections := boolean(),
+      public_keys := <a href="#t:keyset/0">keyset</a>(),
+      security_status := enabled | disabled}.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:keyset/0">
+
+  <div class="detail-header">
+    <a href="#t:keyset/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">keyset/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L622" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">keyset() :: [map()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:maybe/1">
+
+  <div class="detail-header">
+    <a href="#t:maybe/1" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">maybe/1</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L116" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">maybe(T) :: T | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:t/0">
+
+  <div class="detail-header">
+    <a href="#t:t/0" class="detail-link" title="Link to this opaque">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this opaque</span>
+    </a>
+    <h1 class="signature" translate="no">t/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L619" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+      <span class="note">(opaque)</span>
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">t()</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="t:uri/0">
+
+  <div class="detail-header">
+    <a href="#t:uri/0" class="detail-link" title="Link to this type">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this type</span>
+    </a>
+    <h1 class="signature" translate="no">uri/0</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L51" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri() :: binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+
+    </div>
+  </section>
+
+  <section id="functions" class="details-list">
+    <h1 class="section-heading">
+      <a class="hover-link" href="#functions">
+        <span class="icon-link" aria-hidden="true"></span>
+        <span class="sr-only">Link to this section</span>
+      </a>
+Functions
+    </h1>
+    <div class="functions-list">
+<section class="detail" id="allow_connections/1">
+
+  <div class="detail-header">
+    <a href="#allow_connections/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">allow_connections(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L878" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">allow_connections(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+<p>Returns <code>true</code> if the Realm is allowing connections. Otherwise returns <code>false</code>.</p><p>If the value is <code>undefined</code> and the realm has a prototype the prototype's value is returned. Otherwise if the realm doesn't have a prototype returns <code>false</code>.</p><p>Note that a Prototype realm never allows connections irrespective of the value set to this property. This this property is just used as a template for realms to inherit from.</p>This setting is used to either temporarilly restrict new connections to the realm or to avoid connections when the realm is used as a Single Sign-on Realm. When connections are not allowed the only way of managing the resources in the realm is through a connection to the Bondy Master Realm.
+  </section>
+</section>
+<section class="detail" id="apply_config/0">
+
+  <div class="detail-header">
+    <a href="#apply_config/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">apply_config()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1367" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">apply_config() -> ok | no_return().</pre>
+
+      </div>
+
+Loads a security config file from <code>bondy_config:get([security, config_file])</code> if defined and applies its definitions.
+  </section>
+</section>
+<section class="detail" id="authmethods/1">
+
+  <div class="detail-header">
+    <a href="#authmethods/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">authmethods(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L907" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">authmethods(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [binary()].</pre>
+
+      </div>
+
+<p>Returns the list of supported authentication methods for Realm.</p><p>If the value is <code>undefined</code> and the realm has a prototype the prototype's value is returned. Otherwise if the realm doesn't have a prototype returns the default list of authentication methods.</p>See <code>is_allowed_authmethod</code> for more information about how this affects the methods available for an authenticating user.
+  </section>
+</section>
+<section class="detail" id="create/1">
+
+  <div class="detail-header">
+    <a href="#create/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">create(Map0)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1269" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">create(<a href="#t:uri/0">uri</a>() | map()) -> <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="delete/1">
+
+  <div class="detail-header">
+    <a href="#delete/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">delete(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1317" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">delete(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> ok | {error, not_found | active_users} | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="description/1">
+
+  <div class="detail-header">
+    <a href="#description/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">description(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L710" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">description(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="disable_security/1">
+
+  <div class="detail-header">
+    <a href="#disable_security/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">disable_security(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1008" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">disable_security(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> ok | no_return().</pre>
+
+      </div>
+
+Disables security for realm <code>Realm</code>.
+  </section>
+</section>
+<section class="detail" id="enable_security/1">
+
+  <div class="detail-header">
+    <a href="#enable_security/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">enable_security(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L994" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">enable_security(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> ok.</pre>
+
+      </div>
+
+Enables security for realm <code>Realm</code>.
+  </section>
+</section>
+<section class="detail" id="encryption_keys/1">
+
+  <div class="detail-header">
+    <a href="#encryption_keys/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">encryption_keys(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1128" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">encryption_keys(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [map()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="exists/1">
+
+  <div class="detail-header">
+    <a href="#exists/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">exists(Uri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1190" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">exists(<a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="fetch/1">
+
+  <div class="detail-header">
+    <a href="#fetch/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">fetch(Uri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1219" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">fetch(<a href="#t:uri/0">uri</a>()) -> <a href="#t:t/0">t</a>().</pre>
+
+      </div>
+
+Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist it fails with reason '{badarg, Uri}'.
+  </section>
+</section>
+<section class="detail" id="from_file/1">
+
+  <div class="detail-header">
+    <a href="#from_file/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">from_file(Filename)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1382" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">from_file(Filename :: <a href="https://www.erlang.org/doc/man/file.html#type-filename_all">file:filename_all</a>()) -> ok | no_return().</pre>
+
+      </div>
+
+Loads a security config file from <code>Filename</code>.
+  </section>
+</section>
+<section class="detail" id="get/1">
+
+  <div class="detail-header">
+    <a href="#get/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get(Uri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1239" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get(<a href="#t:uri/0">uri</a>()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist and automatic creation of realms is enabled, it will add a new one for Uri with the default configuration options.
+  </section>
+</section>
+<section class="detail" id="get/2">
+
+  <div class="detail-header">
+    <a href="#get/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get(Uri, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1252" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get(<a href="#t:uri/0">uri</a>(), map()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Retrieves the realm identified by Uri from the tuplespace. If the realm does not exist and automatic creation of realms is enabled, it will create a new one for Uri with configuration options <code>Opts</code>.
+  </section>
+</section>
+<section class="detail" id="get_encryption_key/2">
+
+  <div class="detail-header">
+    <a href="#get_encryption_key/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get_encryption_key(Realm, Kid)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1147" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get_encryption_key(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Kid :: binary()) -> map() | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="get_private_key/2">
+
+  <div class="detail-header">
+    <a href="#get_private_key/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get_private_key(Realm, Kid)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1082" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get_private_key(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Kid :: binary()) -> map() | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="get_public_key/2">
+
+  <div class="detail-header">
+    <a href="#get_public_key/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get_public_key(Realm, Kid)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1098" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get_public_key(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Kid :: binary()) -> map() | undefined.</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="get_random_encryption_kid/1">
+
+  <div class="detail-header">
+    <a href="#get_random_encryption_kid/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get_random_encryption_kid(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1163" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get_random_encryption_kid(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="get_random_kid/1">
+
+  <div class="detail-header">
+    <a href="#get_random_kid/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">get_random_kid(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1114" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">get_random_kid(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> binary().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="grants/1">
+
+  <div class="detail-header">
+    <a href="#grants/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">grants(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1552" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">grants(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of grants belonging to realm <code>Realm</code>. These includes the grants inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="grants/2">
+
+  <div class="detail-header">
+    <a href="#grants/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">grants(Realm, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1563" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">grants(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Opts :: map()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of grants belonging to realm <code>Realm</code>. These includes the grants inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="groups/1">
+
+  <div class="detail-header">
+    <a href="#groups/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">groups(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1500" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">groups(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of users belonging to realm <code>Realm</code>. These includes the groups inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="groups/2">
+
+  <div class="detail-header">
+    <a href="#groups/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">groups(Realm, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1511" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">groups(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Opts :: map()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of groups belonging to realm <code>Realm</code>. These includes the groups inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="info/1">
+
+  <div class="detail-header">
+    <a href="#info/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">info(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1177" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">info(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> map().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="is_allowed_authmethod/2">
+
+  <div class="detail-header">
+    <a href="#is_allowed_authmethod/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_allowed_authmethod(Realm, Method)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L936" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_allowed_authmethod(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Method :: binary()) -> boolean().</pre>
+
+      </div>
+
+<p>Returns <code>true</code> if Method is an authentication method supported by realm <code>Realm</code>. Otherwise returns <code>false</code>.</p><p>The fact that method <code>Method</code> is included in the realm's <code>authmethods</code> (See {3link authmethods/1}) is no guarantee that the method will be available for a particular user.</p>The availability is also affected by the source rules defined for the realm and the capabilities of each user e.g. if the user has no password then the password-based authentication methods in this list will not be available.
+  </section>
+</section>
+<section class="detail" id="is_allowed_sso_realm/2">
+
+  <div class="detail-header">
+    <a href="#is_allowed_sso_realm/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_allowed_sso_realm(Realm, SSORealmUri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L832" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_allowed_sso_realm(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), SSORealmUri :: <a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+Returns <code>true</code> if realm <code>Realm</code> is associated with the SSO Realm identified by uri <code>SSORealmUri`. Otherwise returns `false</code>.
+  </section>
+</section>
+<section class="detail" id="is_prototype/1">
+
+  <div class="detail-header">
+    <a href="#is_prototype/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_prototype(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L730" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_prototype(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+<p>Returns <code>true</code> if realm <code>Realm</code> is a prototype. Otherwise, returns <code>false</code>.</p><p>**Pre-conditions** * The property <code>prototype_uri</code> MUST be <code>undefined</code>. * This property cannot be set to <code>false</code> once it has been set to <code>true</code>.</p>**Post-conditions** * If this property is <code>true</code>, the <code>prototype_uri</code> cannot be set.
+  </section>
+</section>
+<section class="detail" id="is_security_enabled/1">
+
+  <div class="detail-header">
+    <a href="#is_security_enabled/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_security_enabled(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L959" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_security_enabled(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+<p>Returns <code>true</code> if security is enabled. Otherwise returns <code>false</code>.</p><p>If the value is <code>undefined</code> and the realm has a prototype the prototype's value is returned. Otherwise if the realm doesn't have a prototype returns <code>true</code> (default).</p><p>Security for this realm can be enabled or disabled using the functions <a href="#enable_security/1"><code>enable_security/1</code></a> and <a href="#disable_security/1"><code>disable_security/1</code></a> respectively.</p>See <a href="#security_status/1"><code>security_status/1</code></a> if you want the security status representation as an atom.
+  </section>
+</section>
+<section class="detail" id="is_sso_realm/1">
+
+  <div class="detail-header">
+    <a href="#is_sso_realm/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_sso_realm(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L850" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_sso_realm(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> boolean().</pre>
+
+      </div>
+
+<p>Returns <code>true</code> if the Realm is a Same Sign-on (SSO) realm. Otherwise returns <code>false</code>.</p>If the value is <code>undefined</code> and the realm has a prototype the prototype's value is returned. Otherwise if the realm doesn't have a prototype returns <code>false</code>.
+  </section>
+</section>
+<section class="detail" id="is_value_inherited/2">
+
+  <div class="detail-header">
+    <a href="#is_value_inherited/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">is_value_inherited(Realm, Property)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L759" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">is_value_inherited(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Property :: atom()) -> boolean() | no_return().</pre>
+
+      </div>
+
+Returns <code>true</code> if the property value is inherited from a prototype. Otherwise returns <code>false</code>.
+  </section>
+</section>
+<section class="detail" id="list/0">
+
+  <div class="detail-header">
+    <a href="#list/0" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">list()</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1427" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">list() -> [<a href="#t:t/0">t</a>()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="lookup/1">
+
+  <div class="detail-header">
+    <a href="#lookup/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">lookup(Uri)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1202" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">lookup(<a href="#t:uri/0">uri</a>()) -> <a href="#t:t/0">t</a>() | {error, not_found}.</pre>
+
+      </div>
+
+Retrieves the realm identified by Uri from the tuplespace or '{error, not_found}' if it doesn't exist.
+  </section>
+</section>
+<section class="detail" id="password_opts/1">
+
+  <div class="detail-header">
+    <a href="#password_opts/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">password_opts(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1029" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">password_opts(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="bondy_password.html#t:opts/0">bondy_password:opts</a>()).</pre>
+
+      </div>
+
+Returns the password options to be used as default when adding users to this realm. If the options have not been defined returns atom <code>undefined</code>.
+  </section>
+</section>
+<section class="detail" id="private_keys/1">
+
+  <div class="detail-header">
+    <a href="#private_keys/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">private_keys(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1048" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">private_keys(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [map()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="prototype_uri/1">
+
+  <div class="detail-header">
+    <a href="#prototype_uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">prototype_uri(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L744" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">prototype_uri(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()).</pre>
+
+      </div>
+
+Returns the uri of realm <code>Realm</code> prototype if defined. Otherwise returns <code>undefined</code>.
+  </section>
+</section>
+<section class="detail" id="public_keys/1">
+
+  <div class="detail-header">
+    <a href="#public_keys/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">public_keys(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1065" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">public_keys(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [map()].</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="security_status/1">
+
+  <div class="detail-header">
+    <a href="#security_status/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">security_status(Term)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L981" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">security_status(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> enabled | disabled.</pre>
+
+      </div>
+
+A util function that returns the security status as an atom. See <a href="#is_security_enabled/1"><code>is_security_enabled/1</code></a>.
+  </section>
+</section>
+<section class="detail" id="sources/1">
+
+  <div class="detail-header">
+    <a href="#sources/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sources(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1526" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">sources(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of sources belonging to realm <code>Realm</code>. These includes the sources inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="sources/2">
+
+  <div class="detail-header">
+    <a href="#sources/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sources(Realm, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1537" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">sources(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Opts :: map()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of sources belonging to realm <code>Realm</code>. These includes the sources inherited from the prototype (if defined).
+  </section>
+</section>
+<section class="detail" id="sso_realm_uri/1">
+
+  <div class="detail-header">
+    <a href="#sso_realm_uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">sso_realm_uri(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L811" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">sso_realm_uri(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> <a href="#t:maybe/1">maybe</a>(<a href="#t:uri/0">uri</a>()).</pre>
+
+      </div>
+
+<p>Returns the same sign on (SSO) realm URI used by the realm.</p><p>If a value is set, then all authentication and user creation will be done on the the SSO Realm.</p><p>Groups, permissions and sources are still managed by this realm (or the prototype it inherits from).</p>If the value is <code>undefined</code> and the realm has a prototype the prototype's value is returned. Otherwise if the realm doesn't have a prototype returns <code>undefined</code>.
+  </section>
+</section>
+<section class="detail" id="to_external/1">
+
+  <div class="detail-header">
+    <a href="#to_external/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">to_external(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1438" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">to_external(<a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> <a href="#t:external/0">external</a>().</pre>
+
+      </div>
+
+Returns the external map representation of the realm.
+  </section>
+</section>
+<section class="detail" id="update/2">
+
+  <div class="detail-header">
+    <a href="#update/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">update(Realm, Data)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1295" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">update(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Data :: map()) -> Realm :: <a href="#t:t/0">t</a>() | no_return().</pre>
+
+      </div>
+
+
+  </section>
+</section>
+<section class="detail" id="uri/1">
+
+  <div class="detail-header">
+    <a href="#uri/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">uri(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L701" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">uri(Realm :: <a href="#t:t/0">t</a>()) -> <a href="#t:uri/0">uri</a>().</pre>
+
+      </div>
+
+Returns the URI that identifies the realm <code>Realm</code>.
+  </section>
+</section>
+<section class="detail" id="users/1">
+
+  <div class="detail-header">
+    <a href="#users/1" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">users(Realm)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1474" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">users(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of users belonging to realm <code>Realm</code>. Users are never inherited through prototypes.
+  </section>
+</section>
+<section class="detail" id="users/2">
+
+  <div class="detail-header">
+    <a href="#users/2" class="detail-link" title="Link to this function">
+      <span class="icon-link" aria-hidden="true"></span>
+      <span class="sr-only">Link to this function</span>
+    </a>
+    <h1 class="signature" translate="no">users(Realm, Opts)</h1>
+
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.16/apps/bondy/src/bondy_realm.erl#L1485" class="view-source" rel="help" title="View Source">
+       <span class="icon-code" aria-hidden="true"></span>
+       <span class="sr-only">View Source</span>
+     </a>
+
+
+  </div>
+
+  <section class="docstring">
+
+      <h2>Specs</h2>
+      <div class="specs">
+
+          <pre translate="no">users(Realm :: <a href="#t:t/0">t</a>() | <a href="#t:uri/0">uri</a>(), Opts :: map()) -> [<a href="bondy_rbac_user.html#t:t/0">bondy_rbac_user:t</a>()].</pre>
+
+      </div>
+
+Returns the list of users belonging to realm <code>Realm</code>. Users are never inherited through prototypes.
+  </section>
+</section>
+
+    </div>
+  </section>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>
