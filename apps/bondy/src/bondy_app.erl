@@ -29,7 +29,6 @@
 
 -export([prep_stop/1]).
 -export([start/2]).
--export([start_phase/3]).
 -export([status/0]).
 -export([stop/0]).
 -export([stop/1]).
@@ -84,103 +83,43 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    %% We initialise the environmentapplication
-    ok = setup_env(Args),
+    % dbg:tracer(), dbg:p(all,c),
+    % dbg:tpl(gen_event, server_update, []),
+    application:stop(partisan),
+    % application:unload(partisan),
 
-    {ok, Vsn} = application:get_env(bondy, vsn),
-    ?LOG_NOTICE(#{
-        description => "Initialising Bondy",
-        version => Vsn
-    }),
+    %% We initialised the Bondy app config
+    ok = bondy_config:init(Args),
+
+
+    logger:set_application_level(partisan, info),
 
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
     ok = suspend_aae(),
+
+    _ = application:ensure_all_started(tuplespace, permanent),
+    _ = application:ensure_all_started(plum_db, permanent),
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
             ok = bondy_router_worker:start_pool(),
-            ok = setup_bondy_realm(),
             ok = setup_event_handlers(),
+            ok = maybe_wait_for_plum_db_partitions(),
+            ok = configure_services(),
+            ok = init_registry(),
             ok = setup_wamp_subscriptions(),
-            ok = setup_partisan(),
-            %% After we return, OTP will call start_phase/3 based on
-            %% the order established in the start_phases in bondy.app.src
+            ok = start_admin_listeners(),
+            ok = restore_aae(),
+            ok = maybe_wait_for_plum_db_hashtrees(),
+            ok = maybe_wait_for_aae_exchange(),
+            ok = start_public_listeners(),
             {ok, Pid};
         Other  ->
             Other
     end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Application behaviour callback.
-%% The order in which this function is called with the different phases is
-%% defined in the bondy_app.src file.
-%% @end
-%% -----------------------------------------------------------------------------
-start_phase(init_db_partitions, normal, []) ->
-    %% The application master will call this same phase in plum_db
-    %% we do nothing here.
-    %% plum_db will initialise its partitions from disk.
-
-    %% Partisan must have started and init its config
-    ok;
-
-start_phase(configure_features, normal, []) ->
-    ok = bondy_realm:apply_config(),
-    %% ok = bondy_oauth2:apply_config(),
-    ok = bondy_http_gateway:apply_config(),
-    ok;
-
-start_phase(init_registry, normal, []) ->
-    bondy_registry:init_tries();
-
-start_phase(init_admin_listeners, normal, []) ->
-    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
-    %% This is to enable certain operations during startup i.e. liveness and
-    %% readiness http probes.
-    %% The /ping (liveness) and /metrics paths will now go live
-    %% The /ready (readyness) path will now go live but will return false as
-    %% bondy_config:get(status) will return `initialising'
-    bondy_http_gateway:start_admin_listeners();
-
-start_phase(init_db_hashtrees, normal, []) ->
-    ok = restore_aae(),
-    %% The application master will call this same phase in plum_db
-    %% we do nothing here.
-    %% plum_db will calculate the Active Anti-entropy hashtrees.
-    ok;
-
-start_phase(aae_exchange, normal, []) ->
-    %% The application master will call this same phase in plum_db
-    %% we do nothing here.
-    %% plum_db will try to perform an Active Anti-entropy exchange.
-    ok;
-
-start_phase(init_listeners, normal, []) ->
-    ?LOG_NOTICE(#{
-        description => "Starting listeners"
-    }),
-    %% Now that the registry has been initialised we can initialise
-    %% the remaining listeners for clients to connect
-    %% WAMP TCP listeners
-    ok = bondy_wamp_tcp:start_listeners(),
-
-    %% WAMP Websocket and REST Gateway HTTP listeners
-    %% @TODO We need to separate the /ws path into another listener/port number
-    ok = bondy_http_gateway:start_listeners(),
-
-    %% Bondy Edge (server) downlink connection listeners
-    ok = bondy_edge:start_listeners(),
-
-    %% Bondy Edge (client) uplink connection
-    ok = bondy_edge:start_uplinks(),
-
-    %% We flag the status, the /ready path will now return true.
-    ok = bondy_config:set(status, ready),
-    ok.
 
 
 %% -----------------------------------------------------------------------------
@@ -233,37 +172,146 @@ stop(_State) ->
 
 
 
-%% -----------------------------------------------------------------------------
 %% @private
-%% @doc A utility function we use to extract the version name that is
-%% injected by the bondy.app.src configuration file.
-%% @end
-%% -----------------------------------------------------------------------------
-setup_env(Args) ->
-    case lists:keyfind(vsn, 1, Args) of
-        {vsn, Vsn} ->
-            ok = bondy_config:set(status, initialising),
-            application:set_env(bondy, vsn, Vsn);
+maybe_wait_for_plum_db_partitions() ->
+    case wait_for_partitions() of
+        true ->
+            %% We block until all partitions are initialised
+            ?LOG_NOTICE(#{
+                description => "Application master is waiting for plum_db partitions to be initialised"
+            }),
+            plum_db_startup_coordinator:wait_for_partitions();
         false ->
             ok
     end.
 
 
 %% @private
-setup_bondy_realm() ->
+maybe_wait_for_plum_db_hashtrees() ->
+    case wait_for_hashtrees() of
+        true ->
+            %% We block until all hashtrees are built
+            ?LOG_NOTICE(#{
+                description => "Application master is waiting for plum_db hashtrees to be built"
+            }),
+            plum_db_startup_coordinator:wait_for_hashtrees();
+        false ->
+            ok
+    end,
+
+    %% We stop the coordinator as it is a transcient worker
+    plum_db_startup_coordinator:stop().
+
+
+%% @private
+maybe_wait_for_aae_exchange() ->
+    %% When plum_db is included in a principal application, the latter can
+    %% join the cluster before this phase and perform a first aae exchange
+    case wait_for_aae_exchange() of
+        true ->
+            MyNode = plum_db_peer_service:mynode(),
+            Members = partisan_plumtree_broadcast:broadcast_members(),
+
+            case lists:delete(MyNode, Members) of
+                [] ->
+                    %% We have not yet joined a cluster, so we finish
+                    ok;
+                Peers ->
+                    ?LOG_NOTICE(#{
+                        description => "Application master is waiting for plum_db AAE to perform exchange"
+                    }),
+                    %% We are in a cluster, we randomnly pick a peer and
+                    %% perform an AAE exchange
+                    [Peer|_] = lists_utils:shuffle(Peers),
+                    %% We block until the exchange finishes successfully
+                    %% or with error, we finish anyway
+                    _ = plum_db:sync_exchange(Peer),
+                    ok
+            end;
+        false ->
+            ok
+    end.
+
+
+%% @private
+wait_for_aae_exchange() ->
+    plum_db_config:get(aae_enabled) andalso
+    plum_db_config:get(wait_for_aae_exchange).
+
+
+%% @private
+wait_for_partitions() ->
+    %% Waiting for hashtrees implies waiting for partitions
+    plum_db_config:get(wait_for_partitions) orelse wait_for_hashtrees().
+
+
+%% @private
+wait_for_hashtrees() ->
+    %% If aae is disabled the hastrees will never get build
+    %% and we would block forever
+    (
+        plum_db_config:get(aae_enabled)
+        andalso plum_db_config:get(wait_for_hashtrees)
+    ) orelse wait_for_aae_exchange().
+
+
+%% @private
+configure_services() ->
+    ?LOG_NOTICE(#{
+        description => "Configuring master and user realms from configuration file"
+    }),
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
     _ = bondy_realm:get(?MASTER_REALM_URI),
+    ok = bondy_realm:apply_config(),
+
+    %% ok = bondy_oauth2:apply_config(),
+
+    ok = bondy_http_gateway:apply_config(),
     ok.
 
 
 %% @private
-setup_partisan() ->
-    %% We add the wamp_peer_messages channel to the configured channels
-    Channels0 = partisan_config:get(channels, []),
-    Channels1 = [wamp_peer_messages | Channels0],
-    ok = partisan_config:set(channels, Channels1),
-    ok = bondy_config:set(wamp_peer_channel, wamp_peer_messages),
+init_registry() ->
+    bondy_registry:init_tries().
+
+
+%% @private
+start_admin_listeners() ->
+    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
+    %% This is to enable certain operations during startup i.e. liveness and
+    %% readiness http probes.
+    %% The /ping (liveness) and /metrics paths will now go live
+    %% The /ready (readyness) path will now go live but will return false as
+    %% bondy_config:get(status) will return `initialising'
+    ?LOG_NOTICE(#{
+        description => "Starting Admin API listeners"
+    }),
+    bondy_http_gateway:start_admin_listeners().
+
+
+%% @private
+start_public_listeners() ->
+    ?LOG_NOTICE(#{
+        description => "Starting listeners"
+    }),
+    %% Now that the registry has been initialised we can initialise
+    %% the remaining listeners for clients to connect
+    %% WAMP TCP listeners
+    ok = bondy_wamp_tcp:start_listeners(),
+
+    %% WAMP Websocket and REST Gateway HTTP listeners
+    %% @TODO We need to separate the /ws path into another listener/port number
+    ok = bondy_http_gateway:start_listeners(),
+
+    %% Bondy Edge (server) downlink connection listeners
+    ok = bondy_edge:start_listeners(),
+
+    %% Bondy Edge (client) uplink connection
+    ok = bondy_edge:start_uplinks(),
+
+    %% We flag the status, the /ready path will now return true.
+    ok = bondy_config:set(status, ready),
     ok.
 
 
@@ -306,7 +354,7 @@ suspend_aae() ->
     case plum_db_config:get(aae_enabled, true) of
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
-            ok = plum_db_config:set(aae_enabled, false),
+            ok = application:set_env(plum_db, aae_enabled, false),
             ?LOG_NOTICE(#{
                 description => "Temporarily disabled active anti-entropy (AAE) during initialisation"
             }),
@@ -320,6 +368,7 @@ suspend_aae() ->
 restore_aae() ->
     case application:get_env(plum_db, priv_aae_enabled, false) of
         true ->
+            %% plum_db should have started so we call plum_db_config
             ok = plum_db_config:set(aae_enabled, true),
             ?LOG_NOTICE(#{description => "Active anti-entropy (AAE) re-enabled"}),
             ok;

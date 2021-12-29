@@ -11,6 +11,10 @@
 ## Explicit connections only.
 -connect_all false
 
+-auto_connect never
+
+-start_epmd false
+
 ## Connections between hidden nodes and other nodes are not transitive, they must be set up explicitly.
 -hidden
 

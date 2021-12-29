@@ -1551,6 +1551,26 @@ hidden
   {datatype, integer}
 ]}.
 
+{mapping, "cluster.lazy_tick_period", "partisan.lazy_tick_period", [
+  {default, "1s"},
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
+{mapping, "cluster.exchange_tick_period", "partisan.exchange_tick_period", [
+  {default, "10s"},
+  {datatype, {duration, ms}},
+  hidden
+]}.
+
+{mapping, "cluster.exchange_tick_period", "partisan.partisan_peer_service_manager", [
+  {default, partisan_pluggable_peer_service_manager},
+  {datatype, {enum, [
+    partisan_pluggable_peer_service_manager,
+    partisan_hyparview_peer_service_manager]}},
+  hidden
+]}.
+
 %% If enabled Bondy will discover peers using the defined
 %% cluster.peer_discovery.type e.g. bondy_peer_discovery_dns_agent.
 %% This can only be configured before tunning Bondy.
@@ -1847,10 +1867,11 @@ end}.
 
 %% Controls when will the AAE system will trigger the next
 %% data exchange.
-{mapping, "aae.exchange_timer", "plumtree.broadcast_exchange_timer", [
+{mapping, "aae.exchange_timer", "partisan.broadcast_exchange_timer", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
+
 
 %% -----------------------------------------------------------------------------
 %% @doc
