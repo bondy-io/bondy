@@ -235,9 +235,20 @@ setup_event_handlers() ->
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
     ),
+
+    %% An event handler that republishes some internal events to WAMP
     _ = bondy_event_manager:add_watched_handler(
-        bondy_wamp_router_event_handler, []
+        bondy_event_wamp_publisher, []
     ),
+
+    % Used for debugging
+    % _ = bondy_event_manager:add_watched_handler(
+    %     bondy_event_logger, []
+    % ),
+    % _ = plum_db_events:add_handler(
+    %     bondy_event_logger, []
+    % ),
+
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
     ok.
 
@@ -249,33 +260,6 @@ setup_event_handlers() ->
 %% @end
 %% -----------------------------------------------------------------------------
 setup_wamp_subscriptions() ->
-    %% TODO move this into each app when we finish restructuring
-    Opts = #{match => <<"exact">>},
-
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_ADDED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_DELETED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_UPDATED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
-    _ = bondy:subscribe(
-        ?CONTROL_REALM_URI,
-        Opts,
-        ?BONDY_USER_CREDENTIALS_CHANGED,
-        fun bondy_wamp_rbac_api:handle_event/2
-    ),
     ok.
 
 

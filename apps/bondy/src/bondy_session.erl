@@ -50,22 +50,23 @@
     %% If owner of the session.
     %% This is either pid of the TCP or WS handler process or
     %% the cowboy handler.
-    pid = self()                    ::  pid() | undefined,
+    pid = self()                    ::  maybe(pid()),
+    tab                             ::  maybe(ets:tid()),
     %% The {IP, Port} of the client
-    peer                            ::  peer() | undefined,
+    peer                            ::  maybe(peer()),
     %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
     %% Sequence number used for ID generation
     seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles played by peer
-    roles                           ::  map() | undefined,
+    roles                           ::  maybe(map()),
     %% WAMP Auth
     security_enabled = true         ::  boolean(),
-    is_anonymous = false            ::  boolean(),    authid                          ::  binary() | undefined,
-    authrole                        ::  binary() | undefined,
+    is_anonymous = false            ::  boolean(),    authid                          ::  maybe(binary()),
+    authrole                        ::  maybe(binary()),
     authroles = []                  ::  [binary()],
-    authmethod                      ::  binary() | undefined,
-    rbac_context                    ::  bondy_rbac:context() | undefined,
+    authmethod                      ::  maybe(binary()),
+    rbac_context                    ::  maybe(bondy_rbac:context()),
     %% Expiration and Limits
     created                         ::  pos_integer(),
     expires_in                      ::  pos_integer() | infinity,
@@ -99,6 +100,8 @@
 %% API
 -export([agent/1]).
 -export([authid/1]).
+-export([authrole/1]).
+-export([authroles/1]).
 -export([authmethod/1]).
 -export([close/1]).
 -export([created/1]).
@@ -122,6 +125,7 @@
 -export([peer_id/1]).
 -export([pid/1]).
 -export([rbac_context/1]).
+-export([refresh_rbac_context/1]).
 -export([realm_uri/1]).
 -export([roles/1]).
 -export([size/0]).
@@ -229,18 +233,17 @@ open(Id, Peer, RealmUri, Opts) when is_binary(RealmUri) ->
 
 open(Id, Peer, Realm, Opts) when is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
+
     S1 = new(Id, Peer, Realm, Opts),
-    Agent = S1#session.agent,
-
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    S2 = S1#session{tab = Tab},
 
-    case ets:insert_new(Tab, S1) of
+    case ets:insert_new(Tab, S2) of
         true ->
             Pid = self(),
             true = gproc:reg_other({n, l, {session, RealmUri, Id}}, Pid),
-            ok = bondy_event_manager:notify(
-                {session_opened, RealmUri, Id, Agent, Peer, Pid}),
-            S1;
+            ok = bondy_event_manager:notify({session_opened, S2}),
+            S2;
         false ->
             error({integrity_constraint_violation, Id})
     end.
@@ -265,13 +268,8 @@ update(#session{id = Id} = S) ->
 
 close(#session{id = Id} = S) ->
     Realm = S#session.realm_uri,
-    Agent = S#session.agent,
-    Peer = S#session.peer,
     Secs = erlang:system_time(seconds) - S#session.created,
-
-    ok = bondy_event_manager:notify(
-        {session_closed, Id, Realm, Agent, Peer, Secs}
-    ),
+    ok = bondy_event_manager:notify({session_closed, S, Secs}),
 
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     true = ets:delete(Tab, Id),
@@ -439,6 +437,37 @@ authid(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec authrole(t()) -> bondy_rbac_group:name().
+
+authrole(#session{authrole = undefined, authroles = []}) ->
+    undefined;
+
+authrole(#session{authrole = undefined}) ->
+    <<"">>;
+
+authrole(#session{authrole = Val}) ->
+    Val;
+
+authrole(Id) when is_integer(Id) ->
+    authrole(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authroles(t()) -> [bondy_rbac_group:name()].
+
+authroles(#session{authroles = Val}) ->
+    Val;
+
+authroles(Id) when is_integer(Id) ->
+    authroles(fetch(Id)).
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec authmethod(t()) -> binary().
 
 authmethod(#session{authmethod = Val}) ->
@@ -492,6 +521,20 @@ rbac_context(Id) when is_integer(Id) ->
         Ctxt ->
             refresh_context(Id, Ctxt)
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec refresh_rbac_context(id() | t()) -> bondy_rbac:context().
+
+refresh_rbac_context(#session{id = Id} = Session) ->
+    update_context(Id, get_context(Session));
+
+refresh_rbac_context(Id) when is_integer(Id) ->
+    refresh_rbac_context(fetch(Id)).
+
 
 %% -----------------------------------------------------------------------------
 %% @doc

@@ -24,6 +24,7 @@
 
 
 -export([format_status/3]).
+-export([conforms/1]).
 -export([wrap/1]).
 -export([unwrap/1]).
 -export([raise/3]).
@@ -44,6 +45,15 @@
 %% API
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns true is module `Mod' conforms with this behaviour.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec conforms(Mod :: module()) -> boolean().
+
+conforms(Mod) ->
+    erlang:function_exported(Mod, format_status, 2).
 
 
 %% -----------------------------------------------------------------------------
@@ -70,7 +80,7 @@
     Opt :: normal | terminate, Mod :: module(), State :: term()) -> term().
 
 format_status(Opt, Mod, State) ->
-     case erlang:function_exported(Mod, format_status, 2) of
+     case conforms(Mod) of
         true ->
             case catch Mod:format_status(Opt, State) of
                 {'EXIT', _} ->
@@ -78,7 +88,7 @@ format_status(Opt, Mod, State) ->
                 Formatted ->
                     Formatted
             end;
-        _ ->
+        false ->
             State
     end.
 

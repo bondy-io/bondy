@@ -41,9 +41,10 @@
     callback_mod            ::  module(),
     callback_config         ::  map(),
     callback_state          ::  any(),
+    initial_delay           ::  integer(),
     polling_interval        ::  integer(),
-    join_retry_interval     ::  integer(),
     timeout                 ::  integer(),
+    join_retry_interval     ::  integer(),
     peers = []              ::  [bondy_peer_service:peer()]
 }).
 
@@ -164,6 +165,7 @@ init([]) ->
         callback_mod = maps:get(type, Opts),
         callback_config = maps:from_list(maps:get(config, Opts, [])),
         polling_interval = maps:get(polling_interval, Opts),
+        initial_delay = maps:get(initial_delay, Opts),
         join_retry_interval = maps:get(join_retry_interval, Opts),
         timeout = maps:get(timeout, Opts)
     },
@@ -286,8 +288,23 @@ disabled(EventType, EventContent, State) ->
 do_init(State) ->
     case (State#state.callback_mod):init(State#state.callback_config) of
         {ok, CBState} ->
+            Delay = State#state.initial_delay,
+
+            Action = case Delay > 0 of
+                false ->
+                    {next_event, internal, lookup};
+                true ->
+                    ?LOG_INFO(#{
+                        description => "Peer discovery agent will start after initial delay",
+                        delay_msecs => Delay
+                    }),
+                    {state_timeout, Delay, lookup, []}
+            end,
+
             NewState = State#state{callback_state = CBState},
-            {ok, discovering, NewState, [{next_event, internal, lookup}]};
+
+            {ok, discovering, NewState, [Action]};
+
         {error, Reason} ->
             ?LOG_ERROR(#{
                 description => "Peer discovery agent could not start due to misconfiguration",
@@ -306,7 +323,6 @@ maybe_join({ok, Peers, CBState}, #state{automatic_join = false} = State) ->
     NewState = State#state{peers = Peers, callback_state = CBState},
     schedule_lookup_action(NewState);
 
-
 maybe_join({error, _, CBState}, State) ->
     NewState = State#state{callback_state = CBState},
     schedule_lookup_action(NewState).
@@ -317,12 +333,21 @@ do_maybe_join([], State) ->
     schedule_lookup_action(State);
 
 do_maybe_join([H|T], State) ->
-    case bondy_peer_service:join(H) of
+    try bondy_peer_service:join(H) of
         ok ->
             {next_state, joined, State};
         {error, _} ->
             do_maybe_join(T, State)
+    catch
+        Class:_ ->
+            ?LOG_ERROR(#{
+                description => "Could not join peer, the node might be down or not reachable",
+                peer => H,
+                class => Class
+            }),
+            do_maybe_join(T, State)
     end.
+
 
 %% @private
 schedule_lookup_action(State) ->
@@ -330,6 +355,7 @@ schedule_lookup_action(State) ->
     {next_state, discovering, State, [Action]}.
 
 
+%% @private
 handle_event(cast, joined, State) ->
     {next_state, joined, State};
 
@@ -338,4 +364,3 @@ handle_event({call, From}, disable, State) ->
 
 handle_event(_, _, State) ->
     {keep_state, State}.
-

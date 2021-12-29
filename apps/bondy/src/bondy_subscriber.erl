@@ -28,7 +28,6 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 
 -record(state, {
     realm_uri           ::  uri(),
@@ -79,7 +78,8 @@
 
 start_link(Id, RealmUri, Opts, Topic, Fun) ->
     gen_server:start_link(
-        {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []).
+        {local, name(Id)}, ?MODULE, [Id, RealmUri, Opts, Topic, Fun], []
+    ).
 
 
 %% -----------------------------------------------------------------------------
@@ -134,17 +134,21 @@ handle_event_sync(Subscriber, Event) ->
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
     Meta = maps:get(meta, Opts0, #{}),
-    {ok, Id} = bondy_broker:subscribe(RealmUri, Opts, Topic, self()),
+    case bondy_broker:subscribe(RealmUri, Opts, Topic, self()) of
+        {ok, Id} ->
+            State = #state{
+                realm_uri = RealmUri,
+                opts = maps:without([meta], Opts),
+                meta = Meta,
+                topic = Topic,
+                callback_fun = Fun,
+                subscription_id = Id
+            },
+            {ok, State};
+        {error, already_exists} = Error ->
+            Error
+    end.
 
-    State = #state{
-        realm_uri = RealmUri,
-        opts = maps:without([meta], Opts),
-        meta = Meta,
-        topic = Topic,
-        callback_fun = Fun,
-        subscription_id = Id
-    },
-    {ok, State}.
 
 
 handle_call(info, _From, State) ->

@@ -37,6 +37,7 @@
           [{type,bondy_peer_discovery_dns_agent},
            {timeout,5000},
            {polling_interval,10000},
+           {initial_delay, 30000},
            {join_retry_interval,5000},
            {automatic_join,true},
            {enabled,false},
@@ -124,6 +125,9 @@
            {enabled,true}]},
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
+      {session_manager_pool, [
+          {size, 50}
+      ]},
       {security,[
           {ticket, [
               {expiry_time_secs, 300},

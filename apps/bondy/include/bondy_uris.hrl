@@ -102,8 +102,8 @@
 -define(BONDY_SUBSCRIPTION_LIST,        <<"bondy.subscription.list">>).
 -define(BONDY_REGISTRATION_LIST,        <<"bondy.registration.list">>).
 -define(BONDY_TELEMETRY_METRICS,        <<"bondy.telemetry.metrics">>).
--define(BONDY_WAMP_CALLEE_GET,          <<"bondy.wamp.callee.get">>).
--define(BONDY_WAMP_CALLEE_LIST,         <<"bondy.wamp.callee.list">>).
+-define(BONDY_WAMP_CALLEE_GET,          <<"bondy.registry.callee.get">>).
+-define(BONDY_WAMP_CALLEE_LIST,         <<"bondy.registry.callee.list">>).
 
 
 %% =============================================================================
@@ -134,6 +134,7 @@
 -define(BONDY_USER_CREDENTIALS_CHANGED, <<"bondy.user.credentials_changed">>).
 -define(BONDY_USER_UPDATED,        <<"bondy.user.updated">>).
 -define(BONDY_REALM_CREATED,            <<"bondy.realm.created">>).
+-define(BONDY_REALM_UPDATED,            <<"bondy.realm.updated">>).
 -define(BONDY_REALM_DELETED,          <<"bondy.realm.deleted">>).
 
 

@@ -1219,7 +1219,7 @@ type_and_version(Map) ->
 %% @private
 on_create(RealmUri, #{username := Username}) ->
     ok = bondy_event_manager:notify(
-        {rbac_user_added, RealmUri, Username}
+        {user_added, RealmUri, Username}
     ),
     ok.
 
@@ -1227,7 +1227,7 @@ on_create(RealmUri, #{username := Username}) ->
 %% @private
 on_update(RealmUri, #{username := Username}) ->
     ok = bondy_event_manager:notify(
-        {rbac_user_updated, RealmUri, Username}
+        {user_updated, RealmUri, Username}
     ),
     ok.
 
@@ -1235,7 +1235,7 @@ on_update(RealmUri, #{username := Username}) ->
 %% @private
 on_credentials_change(RealmUri, #{username := Username} = User) ->
     ok = bondy_event_manager:notify(
-        {rbac_user_credentials_changed, RealmUri, Username}
+        {user_credentials_updated, RealmUri, Username}
     ),
     on_update(RealmUri, User).
 
@@ -1243,7 +1243,7 @@ on_credentials_change(RealmUri, #{username := Username} = User) ->
 %% @private
 on_delete(RealmUri, Username) ->
     ok = bondy_event_manager:notify(
-        {rbac_user_deleted, RealmUri, Username}
+        {user_deleted, RealmUri, Username}
     ),
     ok.
 

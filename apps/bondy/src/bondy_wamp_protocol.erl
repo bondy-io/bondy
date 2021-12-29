@@ -196,7 +196,9 @@ terminate(#wamp_state{context = undefined}) ->
     ok;
 
 terminate(#wamp_state{context = Ctxt}) ->
-    bondy_context:close(Ctxt).
+    Session = bondy_context:session(Ctxt),
+    bondy_context:close(Ctxt),
+    bondy_session_manager:close(Session).
 
 
 %% -----------------------------------------------------------------------------
@@ -384,6 +386,7 @@ handle_inbound_messages(
         state_name => Name,
         details => Details
     }),
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, St1};
 
@@ -397,13 +400,15 @@ handle_inbound_messages(
         ?WAMP_GOODBYE_AND_OUT
     ),
     Bin = wamp_encoding:encode(Reply, encoding(St0)),
+    ok = bondy_event_manager:notify({wamp, Reply, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, normal, lists:reverse([Bin|Acc]), St1};
 
 handle_inbound_messages(
-    [#goodbye{}|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
+    [#goodbye{} = M|_], #wamp_state{state_name = shutting_down} = St0, Acc) ->
     %% Client is replying to our goodbye, we ignore any subsequent messages
     %% We reply all previous messages and close
+    ok = bondy_event_manager:notify({wamp, M, St0#wamp_state.context}),
     St1 = St0#wamp_state{state_name = closed},
     {stop, shutdown, lists:reverse(Acc), St1};
 
@@ -584,13 +589,14 @@ open_session(Extra, St0) when is_map(Extra) ->
         ),
 
         %% We set the session in the context
-        Ctxt1 = Ctxt0#{session => Session},
+        Ctxt1 = bondy_context:set_session(Ctxt0, Session),
         St1 = update_context(Ctxt1, St0),
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             Id,
             #{
+                realm => RealmUri,
                 agent => bondy_router:agent(),
                 roles => bondy_router:roles(),
                 authprovider => Authprovider,

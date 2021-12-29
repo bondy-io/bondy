@@ -322,7 +322,7 @@ handle_cast(#event{} = Event, State) ->
     %% We informally implement bondy_subscriber
     Id = Event#event.subscription_id,
     Topic = maps:get(Id, State#state.subscriptions, undefined),
-    NewState = case {Topic, Event#event.arguments} of
+    NewState = case {Topic, Event#event.args} of
         {undefined, _} ->
             State;
         {?BONDY_REALM_DELETED, [Uri]} ->
@@ -462,7 +462,7 @@ subscribe(State) ->
     %% We subscribe to WAMP events
     %% We will handle then in handle_cast/2
     {ok, Id} = bondy:subscribe(
-        ?CONTROL_REALM_URI,
+        ?MASTER_REALM_URI,
         #{
             subscription_id => bondy_utils:get_id(global),
             match => <<"exact">>
@@ -481,7 +481,7 @@ unsubscribe(State) ->
     _ = plum_db_events:unsubscribe(object_update),
 
     _ = [
-        bondy_broker:unsubscribe(Id, ?CONTROL_REALM_URI)
+        bondy_broker:unsubscribe(Id, ?MASTER_REALM_URI)
         ||  Id <- maps:keys(State#state.subscriptions)
     ],
 

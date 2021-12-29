@@ -68,6 +68,8 @@
 %% API
 -export([agent/1]).
 -export([authid/1]).
+-export([authrole/1]).
+-export([authroles/1]).
 -export([call_timeout/1]).
 -export([close/1]).
 -export([close/2]).
@@ -213,14 +215,7 @@ close(Ctxt0, Reason) ->
         is_closing => true,
         is_shutting_down => Reason =:= shutdown
     },
-    %% We cleanup router first as cleanup requires the session
-    case maps:find(session, Ctxt) of
-        {ok, Session} ->
-            _ = bondy_router:close_context(Ctxt),
-            bondy_session_manager:close(Session);
-        error ->
-            ok
-    end.
+    bondy_router:close_context(Ctxt).
 
 
 %% -----------------------------------------------------------------------------
@@ -317,8 +312,14 @@ roles(Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(t()) -> maybe(uri()).
-realm_uri(#{realm_uri := Val}) -> Val;
-realm_uri(_) -> undefined.
+realm_uri(#{session := S}) ->
+    bondy_session:realm_uri(S);
+
+realm_uri(#{realm_uri := Val}) ->
+    Val;
+
+realm_uri(_) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -372,8 +373,44 @@ is_security_enabled(#{realm_uri := Uri}) ->
 authid(#{authid := Val}) ->
     Val;
 
+authid(#{session := Session}) ->
+    bondy_session:authid(Session);
+
 authid(#{}) ->
     undefined.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authrole(t()) -> binary() | anonymous | undefined.
+
+authrole(#{authrole := Val}) ->
+    Val;
+
+authrole(#{session := Session}) ->
+    bondy_session:authrole(Session);
+
+authrole(#{}) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec authroles(t()) -> [binary()].
+
+authroles(#{authroles := Val}) ->
+    Val;
+
+authroles(#{session := Session}) ->
+    bondy_session:authroles(Session);
+
+authroles(#{}) ->
+    [].
 
 
 %% -----------------------------------------------------------------------------
@@ -567,7 +604,6 @@ set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
 
 is_feature_enabled(Ctxt, Role, Feature) ->
     maps_utils:get_path([Role, Feature], roles(Ctxt), false).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc

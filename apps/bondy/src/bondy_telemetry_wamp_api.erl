@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_broker_bridge_event.erl -
+%%  bondy_telemetry_wamp_api.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
 %%
@@ -16,13 +16,18 @@
 %%  limitations under the License.
 %% =============================================================================
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_broker_bridge_event).
+-module(bondy_telemetry_wamp_api).
+-behaviour(bondy_wamp_api).
+
 -include_lib("wamp/include/wamp.hrl").
--export([new/3]).
+-include("bondy_uris.hrl").
+
+-export([handle_call/3]).
 
 
 
@@ -31,20 +36,26 @@
 %% =============================================================================
 
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(uri(), binary(), wamp_event()) -> map().
+-spec handle_call(
+    Proc :: uri(), M :: wamp_message:call(), Ctxt :: bondy_context:t()) -> ok
+    | continue
+    | {continue, uri() | wamp_call()}
+    | {continue, uri() | wamp_call(), fun(
+        (Reason :: any()) -> wamp_error() | undefined)
+    }
+    | {reply, wamp_result() | wamp_error()}.
 
-new(RealmUri, Topic, #event{} = Event) ->
-    #{
-        <<"realm">> => RealmUri,
-        <<"topic">> => Topic,
-        <<"subscription_id">> => Event#event.subscription_id,
-        <<"publication_id">> => Event#event.publication_id,
-        <<"details">> => Event#event.details,
-        <<"args">> => Event#event.args,
-        <<"kwargs">> => Event#event.kwargs,
-        <<"ingestion_timestamp">> => erlang:system_time(millisecond)
-    }.
+
+handle_call(?BONDY_TELEMETRY_METRICS, #call{} = M, _Ctxt) ->
+    %% TODO
+    E = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, E};
+
+handle_call(_, #call{} = M, _) ->
+    E = bondy_wamp_utils:no_such_procedure_error(M),
+    {reply, E}.

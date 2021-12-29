@@ -71,10 +71,10 @@ simple_1_test(_) ->
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.magenta.things.list">>,
                                 <<"options">> => #{},
-                                <<"arguments">> => [
+                                <<"args">> => [
                                     <<"{{request.query_params}}">>
                                 ],
-                                <<"arguments_kw">> => #{}
+                                <<"kwargs">> => #{}
                             },
                             <<"response">> => #{
                                 <<"on_error">> => #{
@@ -93,8 +93,8 @@ simple_1_test(_) ->
                                 <<"type">> => <<"wamp_call">>,
                                 <<"procedure">> => <<"com.myapi.foo">>,
                                 <<"options">> => #{},
-                                <<"arguments">> => [<<"{{variables.foo}}">>],
-                                <<"arguments_kw">> => #{}
+                                <<"args">> => [<<"{{variables.foo}}">>],
+                                <<"kwargs">> => #{}
                             },
                             <<"response">> => #{
                                 <<"on_error">> => #{

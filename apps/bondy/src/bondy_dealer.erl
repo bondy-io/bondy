@@ -171,6 +171,12 @@
     <<"Use of reserved namespace '", NS/binary, "'.">>
 ).
 
+-type invoke_opts() :: #{
+    error_formatter :=
+        maybe(fun((Reason :: any()) -> wamp_error() | undefined)),
+    call_opts       := map()
+}.
+
 %% API
 -export([close_context/1]).
 -export([features/0]).
@@ -184,6 +190,9 @@
 -export([callees/1]).
 -export([callees/2]).
 -export([callees/3]).
+-export([register/4]).
+-export([unregister/1]).
+-export([unregister/2]).
 
 -compile({no_auto_import, [register/2]}).
 
@@ -193,6 +202,81 @@
 %% API
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Creates a local registration.
+%% If the registration is done using a callback module, only the invoke single
+%% strategy can be used (i.e. shared_registration and sharded_registration are
+%% also disabled). Also the callback module needs to conform to the
+%% wamp_api_callback behaviour, otherwise the call fails with a badarg
+%% exception.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register(
+    RealmUri :: uri(),
+    Opts :: map(),
+    Procedure :: uri(),
+    Term :: pid() | function() | module()) ->
+    {ok, id()}
+    | {ok, id(), pid()}
+    | {error, already_exists | any()}
+    | no_return().
+
+register(_RealmUri, _Opts, _Procedure, Fun) when is_function(Fun, 2) ->
+    error(not_implemented);
+
+register(RealmUri, Opts0, Procedure, Pid) when is_pid(Pid) ->
+    Opts = Opts0#{shared_registration => true},
+    do_register(Procedure, Opts, {RealmUri, Pid});
+
+register(RealmUri, Opts, Procedure, Mod) when is_atom(Mod) ->
+    bondy_wamp_callback:conforms(Mod) orelse error({badarg, Mod}),
+    do_register(Procedure, Opts, {RealmUri, Mod}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc For internal Bondy use.
+%% Terminates the process identified by Pid by
+%% bondy_subscribers_sup:terminate_subscriber/1
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(pid()) -> ok | {error, not_found}.
+
+unregister(Callee) when is_integer(Callee) ->
+    error(not_implemented);
+
+unregister(Callee) when is_pid(Callee) ->
+    error(not_implemented).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(RegId :: id(), bondy_context:t() | uri()) ->
+    ok | {error, not_found}.
+
+unregister(RegId, RealmUri) when is_binary(RealmUri) ->
+    unregister(RegId, bondy_context:local_context(RealmUri));
+
+unregister(RegId, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
+    case bondy_registry:lookup(registration, RegId, RealmUri) of
+        {error, not_found} = Error ->
+            Error;
+        Entry ->
+            case bondy_registry:remove(Entry) of
+                ok ->
+                    on_unregister(Entry, Ctxt);
+                {ok, false} ->
+                    on_unregister(Entry, Ctxt);
+                {ok, true} ->
+                    on_delete(Entry, Ctxt);
+                Error ->
+                    Error
+            end
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -337,8 +421,6 @@ handle_message(M, Ctxt) ->
     Opts :: map()) ->
     ok | no_return().
 
-
-
 handle_peer_message(#yield{} = M, _Caller, Callee, _Opts) ->
     %% A remote callee is returning a yield to a local caller.
     Fun = fun
@@ -400,13 +482,22 @@ handle_peer_message(#interrupt{} = M, _Callee, Caller, _Opts) ->
     _ = bondy_rpc_promise:dequeue_invocation(InvocationId, Caller, Fun),
     ok;
 
+handle_peer_message(
+    #invocation{} = M, {RealmUri, _, undefined, Mod} = Callee, Caller, _Opts)
+    when is_atom(Mod) ->
+    Ctxt = bondy_context:local_context(RealmUri),
+    {reply, Reply} = Mod:handle_invocation(M, Ctxt),
+    bondy:send(Callee, Caller, Reply, #{});
+
 handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
     %% A remote caller is making a call to a local callee.
     %% We first need to find the registry entry to get the local callee
-    %% At the moment we might not get the Pid in the Calle tuple, so we fetch it
+    %% At the moment we might not get the Pid in the Callee tuple,
+    %% so we fetch it
     {RealmUri, Node, SessionId, _Pid} = Callee,
     Key = bondy_registry_entry:key_pattern(
-        registration, RealmUri, Node, SessionId, M#invocation.registration_id),
+        registration, RealmUri, Node, SessionId, M#invocation.registration_id
+    ),
 
     %% We use lookup because the key is ground
     case bondy_registry:lookup(Key) of
@@ -419,10 +510,13 @@ handle_peer_message(#invocation{} = M, Callee, Caller, Opts) ->
             );
         Entry ->
             LocalCallee = bondy_registry_entry:peer_id(Entry),
+
             %% We enqueue the invocation so that we can match it with the
             %% YIELD or ERROR
             Promise = bondy_rpc_promise:new(
-                M#invocation.request_id, LocalCallee, Caller),
+                M#invocation.request_id, LocalCallee, Caller
+            ),
+
             Timeout = bondy_utils:timeout(Opts),
 
             ok = bondy_rpc_promise:enqueue(RealmUri, Promise, Timeout),
@@ -508,7 +602,8 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
                     description => <<"The call was cancelled by the user.">>
                 },
                 Error = wamp_message:error(
-                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw),
+                    ?CANCEL, CallId, #{}, ?WAMP_CANCELLED, Args, ArgsKw
+                ),
                 ok = bondy:send(Callee, Caller, Error, #{}),
 
                 Interrupt = wamp_message:interrupt(InvocationId, Opts),
@@ -624,21 +719,23 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
 
 
 %% @private
+handle_call(#call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
+    callback(M, Ctxt, bondy_wamp_api);
+
+handle_call(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
+    callback(M, Ctxt, bondy_wamp_meta_api);
+
+handle_call(#call{procedure_uri = <<"com.bondy.", _/binary>>} = M, Ctxt) ->
+    %% Alias for "bondy"
+    callback(M, Ctxt, bondy_wamp_api);
+
 handle_call(
     #call{procedure_uri = <<"com.leapsight.bondy.", _/binary>>} = M, Ctxt) ->
-    %% Deprecated API prefix. Now "bondy."
-    maybe_callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(
-    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    maybe_callback(M, Ctxt, bondy_wamp_api);
-
-handle_call(
-    #call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    maybe_callback(M, Ctxt, bondy_wamp_meta_api);
+    %% Deprecated API prefix. Now "bondy"
+    callback(M, Ctxt, bondy_wamp_api);
 
 handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
-    do_handle_call(M, Ctxt, Uri).
+    do_handle_call(M, Ctxt, Uri, undefined).
 
 
 %% -----------------------------------------------------------------------------
@@ -647,54 +744,161 @@ handle_call(#call{procedure_uri = Uri} = M, Ctxt) ->
 %% registry
 %% @end
 %% -----------------------------------------------------------------------------
-maybe_callback(#call{procedure_uri = Uri} = M, Ctxt, Mod) ->
-    case Mod:handle_call(M, Ctxt) of
-        ok -> ok;
-        ignore -> do_handle_call(M, Ctxt, Uri);
-        {redirect, OtherUri} -> do_handle_call(M, Ctxt, OtherUri)
+callback(#call{} = M0, Ctxt, Mod) ->
+    PeerId = bondy_context:peer_id(Ctxt),
+    DefaultOpts = #{error_formatter => undefined},
+
+    try Mod:handle_call(M0, Ctxt) of
+        ok ->
+            ok;
+        continue ->
+            do_handle_call(M0, Ctxt, M0#call.procedure_uri, DefaultOpts);
+
+        {continue, #call{} = M1}  ->
+            do_handle_call(M1, Ctxt, M1#call.procedure_uri, DefaultOpts);
+
+        {continue, #call{} = M1, Fun}  ->
+            Opts = DefaultOpts#{error_formatter => Fun},
+            do_handle_call(M1, Ctxt, M1#call.procedure_uri, Opts);
+
+        {continue, Uri} when is_binary(Uri) ->
+            do_handle_call(M0, Ctxt, Uri, DefaultOpts);
+
+        {continue, Uri, Fun} when is_binary(Uri) ->
+            Opts = DefaultOpts#{error_formatter => Fun},
+            do_handle_call(M0, Ctxt, Uri, Opts);
+
+        {reply, Reply} ->
+            bondy:send(PeerId, Reply)
+    catch
+        throw:no_such_procedure ->
+            Error = bondy_wamp_utils:no_such_procedure_error(M0),
+            bondy:send(PeerId, Error);
+
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => <<"Error while handling WAMP call">>,
+                procedure => M0#call.procedure_uri,
+                caller => bondy_context:session_id(Ctxt),
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            %% We catch any exception from handle/3 and turn it
+            %% into a WAMP Error
+            Error = bondy_wamp_utils:maybe_error({error, Reason}, M0),
+            bondy:send(PeerId, Error)
     end.
 
 
+
 %% @private
-do_handle_call(#call{} = M, Ctxt0, Uri) ->
+do_handle_call(#call{} = M, Ctxt0, Uri, Opts0) ->
+    MyNode = bondy_peer_service:mynode(),
+
     %% invoke/5 takes a fun which takes the registration_id of the
     %% procedure and the callee
     %% Based on procedure registration and passed options, we will
     %% determine how many invocations and to whom we should do.
-
-    Caller = bondy_context:peer_id(Ctxt0),
+    %% fun(Entry, Callee, Ctxt)
     Fun = fun
-        (Entry, {_RealmUri, _Node, SessionId, Pid} = Callee, Ctxt1)
+        (Entry, {_, Node, undefined, Mod}, Ctxt1)
+        when is_atom(Mod), Node =:= MyNode, M#call.procedure_uri == Uri ->
+            %% A callback implemented procedure e.g. WAMP Session APIs
+            %% on this node
+            %% We send here as we do not need invoke/5 to enqueue a promise,
+            %% we will call the module sequentially.
+            Invocation = call_to_invocation(M, Uri, Entry, Ctxt1),
+
+            case Mod:handle_invocation(Invocation, Ctxt1) of
+                ok ->
+                    %% No reply needed
+                    {ok, Ctxt1};
+
+                {reply, #yield{} = Yield} ->
+                    Reply = yield_to_result(M#call.request_id, Yield),
+                    Caller = bondy_context:peer_id(Ctxt0),
+                    ok = bondy:send(Caller, Reply),
+                    {ok, Ctxt1};
+
+                {reply, #error{} = Error0} ->
+                    Caller = bondy_context:peer_id(Ctxt0),
+                    Error = Error0#error{
+                        request_id = M#call.request_id,
+                        request_type = ?CALL
+                    },
+                    ok = bondy:send(Caller, Error),
+                    {ok, Ctxt1};
+
+                Other ->
+                    %% we do not allow continue nor {continue, term()}
+                    %% at this point
+                    error({invalid_return, Other})
+
+            end;
+
+        (Entry, {_, _, undefined, Mod}, Ctxt1) when is_atom(Mod) ->
+            %% A callback implemented procedure e.g. WAMP Session APIs
+            %% on another node
+            R = call_to_invocation(M, Uri, Entry, Ctxt1),
+            {ok, R, Ctxt1};
+
+        (Entry, {_, _, undefined, Pid}, Ctxt1) when is_pid(Pid) ->
+            %% An internal callee process
+            R = call_to_invocation(M, Uri, Entry, Ctxt1),
+            {ok, R, Ctxt1};
+
+        (Entry, {_, _, SessionId, Pid}, Ctxt1)
         when is_integer(SessionId), is_pid(Pid) ->
-            %% TODO Revert to session-scoped Ids
-            %% ReqId = bondy_utils:get_id({session, SessionId}),
-            ReqId = bondy_utils:get_id(global),
-            Args = M#call.arguments,
-            Payload = M#call.arguments_kw,
-            RegId = bondy_registry_entry:id(Entry),
-            RegOpts = bondy_registry_entry:options(Entry),
-            CallOpts = M#call.options,
-            Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
-            R = wamp_message:invocation(ReqId, RegId, Details, Args, Payload),
-            ok = bondy:send(Caller, Callee, R, #{}),
-            {ok, ReqId, Ctxt1}
+            R = call_to_invocation(M, Uri, Entry, Ctxt1),
+            {ok, R, Ctxt1}
     end,
 
-    %% A response will be send asynchronously by another router process instance
-    invoke(M#call.request_id, Uri, Fun, M#call.options, Ctxt0).
+    %% A response will be send asynchronously
+    Opts = Opts0#{call_opts => M#call.options},
+    invoke(M#call.request_id, Uri, Fun, Opts, Ctxt0).
 
+
+%% @private
+-spec format_error(any(), map()) -> maybe(wamp_error()).
+
+format_error(_, undefined) ->
+    undefined;
+
+format_error(Error, #{error_formatter := Fun}) ->
+    Fun(Error).
+
+%% @private
+call_to_invocation(M, Uri, Entry, Ctxt1) ->
+    %% TODO Revert to session-scoped Ids
+    %% ReqId = bondy_utils:get_id({session, SessionId}),
+    ReqId = bondy_utils:get_id(global),
+    Args = M#call.args,
+    Payload = M#call.kwargs,
+    RegId = bondy_registry_entry:id(Entry),
+    RegOpts = bondy_registry_entry:options(Entry),
+    CallOpts = M#call.options,
+    Details = prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt1),
+    wamp_message:invocation(ReqId, RegId, Details, Args, Payload).
 
 
 %% @private
 prepare_invocation_details(Uri, CallOpts, RegOpts, Ctxt) ->
+    Details0 = #{
+        procedure => Uri,
+        trust_level => 0
+    },
+
     DiscloseMe = maps:get(disclose_me, CallOpts, true),
     DiscloseCaller = maps:get(disclose_caller, RegOpts, true),
-
-    Details0 = #{procedure => Uri, trust_level => 0},
-
     Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->
-            Details0#{caller => bondy_context:session_id(Ctxt)};
+            Details0#{
+                caller => bondy_context:session_id(Ctxt),
+                caller_authid => bondy_context:authid(Ctxt),
+                caller_authrole => bondy_context:authrole(Ctxt),
+                caller_authroles => bondy_context:authroles(Ctxt)
+            };
         false ->
             Details0
     end,
@@ -720,8 +924,12 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
     ok = bondy_rbac:authorize(<<"wamp.register">>, Uri, Ctxt),
 
-    #register{options = Opts, request_id = ReqId} = M,
+    #register{options = Opts0, request_id = ReqId} = M,
     PeerId = bondy_context:peer_id(Ctxt),
+
+    %% We add an option used by bondy_registry
+    Val = bondy_context:is_feature_enabled(Ctxt, callee, shared_registration),
+    Opts = Opts0#{shared_registration => Val},
 
     case bondy_registry:add(registration, Uri, Opts, Ctxt) of
         {ok, Entry, IsFirst} ->
@@ -743,6 +951,19 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
                 [Mssg]
             ),
             bondy:send(PeerId, Reply)
+    end.
+
+
+%% @private
+do_register(Procedure, Opts, Term) ->
+    case
+        bondy_registry:add(registration, Procedure, Opts, Term)
+    of
+        {ok, Entry, _} ->
+            {ok, bondy_registry_entry:id(Entry)};
+
+        {error, {already_exists, _}} ->
+            {error, already_exists}
     end.
 
 
@@ -898,61 +1119,6 @@ match_registrations({registration, _} = Cont) ->
     bondy_registry:match(Cont).
 
 
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% Throws {not_authorized, binary()}
-%% @end
-%% -----------------------------------------------------------------------------
--spec invoke(id(), uri(), function(), map(), bondy_context:t()) -> ok.
-
-invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
-    %% Contrary to pubusub, the _Caller_ can receive the
-    %% invocation even if the _Caller_ is also a _Callee_ registered
-    %% for that procedure.
-    case match_registrations(ProcUri, Ctxt0, #{}) of
-        {[], ?EOT} ->
-            reply_error(no_such_procedure(ProcUri, CallId), Ctxt0);
-        Regs ->
-            %% We invoke Fun for each entry
-            Fun = fun
-                ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
-                    ok = reply_error(error_from_map(ErrorMap, CallId), Ctxt1),
-                    {ok, Ctxt1};
-
-                ({error, noproc}, Ctxt1) ->
-                    %% The local process associated with the entry
-                    %% is no longer alive.
-                    ok = reply_error(no_such_procedure(ProcUri, CallId), Ctxt1),
-                    {ok, Ctxt1};
-                (Entry, Ctxt1) ->
-                    Callee = bondy_registry_entry:peer_id(Entry),
-
-                    %% We invoke the provided fun which actually makes the
-                    %% invocation
-                    {ok, InvocationId, Ctxt2} = UserFun(Entry, Callee, Ctxt1),
-
-                    %%  A promise is used to implement a capability and a
-                    %% feature:
-                    %% - the capability to match the callee response
-                    %% (wamp_yield() or wamp_error()) back to the originating
-                    %% wamp_call() and Caller
-                    %% - the call_timeout feature at the dealer level
-                    Promise = bondy_rpc_promise:new(
-                        InvocationId, CallId, ProcUri, Callee, Ctxt1),
-                    RealmUri = bondy_context:realm_uri(Ctxt1),
-                    %% We enqueue the promise with a timeout
-                    ok = bondy_rpc_promise:enqueue(
-                        RealmUri, Promise, bondy_utils:timeout(Opts)),
-
-                    {ok, Ctxt2}
-            end,
-            invoke_aux(Regs, Fun, Opts, Ctxt0)
-    end.
-
-
 %% @private
 -spec reply_error(wamp_error(), bondy_context:t()) -> ok.
 
@@ -1032,6 +1198,104 @@ no_matching_promise(M) ->
 
 
 
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% Throws {not_authorized, binary()}
+%% @end
+%% -----------------------------------------------------------------------------
+-spec invoke(id(), uri(), function(), invoke_opts(), bondy_context:t()) -> ok.
+
+invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 3) ->
+    %% Contrary to pubusub, the _Caller_ can receive the
+    %% invocation even if the _Caller_ is also a _Callee_ registered
+    %% for that procedure.
+
+    case match_registrations(ProcUri, Ctxt0, #{}) of
+        {[], ?EOT} ->
+            Error = case format_error(no_such_procedure, Opts) of
+                undefined ->
+                    bondy_wamp_utils:no_such_procedure_error(
+                        ProcUri, ?CALL, CallId
+                    );
+                Value ->
+                    Value
+            end,
+            reply_error(Error, Ctxt0);
+        Regs ->
+            %% We invoke Fun for each entry
+            Fun = fun
+                ({error, ErrorMap}, Ctxt1) when is_map(ErrorMap) ->
+                    Error = case format_error(no_such_procedure, Opts) of
+                        undefined ->
+                            error_from_map(ErrorMap, CallId);
+                        Value ->
+                            Value
+                    end,
+                    ok = reply_error(Error, Ctxt1),
+                    {ok, Ctxt1};
+
+                ({error, noproc}, Ctxt1) ->
+                    %% The local process associated with the entry
+                    %% is no longer alive, we turn this into no_such_procedure
+                    Error = case format_error(no_such_procedure, Opts) of
+                        undefined ->
+                            bondy_wamp_utils:no_such_procedure_error(
+                                ProcUri, ?CALL, CallId
+                            );
+                        Value ->
+                            Value
+                    end,
+
+                    ok = reply_error(Error, Ctxt1),
+                    {ok, Ctxt1};
+                (Entry, Ctxt1) ->
+                    Callee = bondy_registry_entry:peer_id(Entry),
+
+                    %% We invoke the provided fun which actually makes the
+                    %% invocation
+                    case UserFun(Entry, Callee, Ctxt1) of
+                        {ok, Ctxt2} ->
+                            %% UserFun sent a response sequentially, no need
+                            %% for promises
+                            {ok, Ctxt2};
+
+                        {ok, #invocation{} = Inv, Ctxt2} ->
+                            RealmUri = bondy_context:realm_uri(Ctxt1),
+                            Caller = bondy_context:peer_id(Ctxt1),
+                            InvId = Inv#invocation.request_id,
+
+                            %%  A promise is used to implement a capability and
+                            %% a feature:
+                            %% - the capability to match the callee response
+                            %% (wamp_yield() or wamp_error()) back to the
+                            %% originating wamp_call() and Caller
+                            %% - the call_timeout feature at the dealer level
+                            Promise = bondy_rpc_promise:new(
+                                InvId, CallId, ProcUri, Callee, Ctxt2
+                            ),
+
+                            %% We enqueue the promise with a timeout
+                            ok = bondy_rpc_promise:enqueue(
+                                RealmUri,
+                                Promise,
+                                bondy_utils:timeout(call_opts(Opts))
+                            ),
+
+                            ok = bondy:send(Caller, Callee, Inv, #{}),
+
+                            {ok, Ctxt2}
+                    end
+            end,
+            invoke_aux(Regs, Fun, Opts, Ctxt0)
+    end.
+
+
+call_opts(#{call_opts := Val}) -> Val;
+call_opts(_) -> #{}.
+
+
 %% @private
 invoke_aux({[], ?EOT}, _, _, _) ->
     ok;
@@ -1046,18 +1310,20 @@ invoke_aux({L, Cont}, Fun, Opts, Ctxt) ->
 invoke_aux(L, Fun, Opts, Ctxt) when is_list(L) ->
     %% Registrations have different invocation strategies provided by the
     %% 'invoke' key.
-    Triples = [{
-        bondy_registry_entry:uri(E),
-        maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
-        E
-    } || E <- L],
+    Triples = [
+        {
+            bondy_registry_entry:uri(E),
+            maps:get(invoke, bondy_registry_entry:options(E), ?INVOKE_SINGLE),
+            E
+        } || E <- L
+    ],
     invoke_aux(Triples, undefined, Fun, Opts, Ctxt).
 
 
 %% @private
 -spec invoke_aux(
     [{uri(), Strategy :: binary(), Entry :: tuple()}],
-    Acc :: tuple() | undefined,
+    Last :: tuple() | undefined,
     Fun :: function(),
     Opts :: map(),
     Ctxt :: bondy_context:t()) ->
@@ -1094,8 +1360,8 @@ invoke_aux([{Uri, Invoke, E}|T], undefined, Fun, Opts, Ctxt) ->
     invoke_aux(T, {Uri, Invoke, [E]}, Fun, Opts, Ctxt);
 
 invoke_aux([{Uri, Invoke, E}|T], {Uri, Invoke, L}, Fun, Opts, Ctxt)  ->
-    %% We do not apply the invocation yet as it is not single, so we need
-    %% to accummulate and apply at the end.
+    %% We do not invoke yet as it is not single, so we need
+    %% to accummulate and apply at the end using load balancing.
     %% We build a list for subsequent entries for same Uri.
     %% Invoke should match too, otherwise there is an inconsistency
     %% in the registry
@@ -1105,6 +1371,7 @@ invoke_aux([{Uri, ?INVOKE_SINGLE, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0) ->
     %% We found a different Uri so we invoke the previous one
     {ok, Ctxt1} = do_invoke({Invoke, L}, Fun, Opts, Ctxt0),
     %% The new one is a single so we also invoke and continue
+    %% TODO why do we invoke this one?
     {ok, Ctxt2} = do_invoke({?INVOKE_SINGLE, [E]}, Fun, Opts, Ctxt1),
     invoke_aux(T, {Uri, ?INVOKE_SINGLE, []}, Fun, Opts, Ctxt2);
 
@@ -1128,10 +1395,25 @@ invoke_aux([{Uri, Invoke, E}|T], {_, Invoke, L}, Fun, Opts, Ctxt0)  ->
 -spec do_invoke(term(), function(), map(), bondy_context:t()) ->
     {ok, bondy_context:t()}.
 
+
+do_invoke({?INVOKE_SINGLE, [Entry]}, Fun, _, Ctxt) ->
+    try
+        %% This might be a callback implemented procedure
+        Fun(Entry, Ctxt)
+    catch
+        throw:{error, _} = ErrorMap ->
+            %% Unexpected error ocurred
+            Fun(ErrorMap, Ctxt)
+    end;
+
 do_invoke({Strategy, L}, Fun, CallOpts0, Ctxt) ->
     try
         Opts = load_balancer_options(Strategy, CallOpts0),
 
+        %% All this entries need to be registered by a process (internal or
+        %% client), otherwise we will crash when bondy_rpc_load_balancer checks
+        %% the process is alive. A callback implemented procedure should never
+        %% reach this point anyway as they use INVOKE_SINGLE exclusively.
         case bondy_rpc_load_balancer:get(L, Opts) of
             {error, noproc} = Error ->
                 %% We trid all callees in the list `L' but none was alive
@@ -1200,8 +1482,8 @@ on_unregister(Entry, Ctxt) ->
 
 
 %% @private
-%% on_delete(Map, Ctxt) ->
-%%     bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
+on_delete(Map, Ctxt) ->
+    bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
 
 
 error_from_map(Error, CallId) ->
@@ -1216,23 +1498,6 @@ error_from_map(Error, CallId) ->
             message => Mssg,
             details => Error,
             description => <<"A required options parameter was missing in the request or while present they were malformed.">>
-        }
-    ).
-
-no_such_procedure(ProcUri, CallId) ->
-    Mssg = <<
-        "There are no registered procedures matching the uri",
-        $\s, $', ProcUri/binary, $', $.
-    >>,
-    wamp_message:error(
-        ?CALL,
-        CallId,
-        #{},
-        ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg],
-        #{
-            message => Mssg,
-            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
         }
     ).
 
@@ -1269,8 +1534,8 @@ yield_to_result(CallId, M) ->
         CallId,
         %% TODO check if yield.options should be assigned to result.details
         M#yield.options,
-        M#yield.arguments,
-        M#yield.arguments_kw
+        M#yield.args,
+        M#yield.kwargs
     ).
 
 

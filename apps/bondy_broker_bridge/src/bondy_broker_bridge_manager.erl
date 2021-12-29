@@ -49,8 +49,8 @@
 %%         <<"subscription_id">> => integer(),
 %%         <<"publication_id">> => integer(),
 %%         <<"details">> => map(), % WAMP EVENT.details
-%%         <<"arguments">> => list(),
-%%         <<"arguments_kw">> => map(),
+%%         <<"args">> => list(),
+%%         <<"kwargs">> => map(),
 %%         <<"ingestion_timestamp">> => integer()
 %%     }
 %% }.

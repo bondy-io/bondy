@@ -741,18 +741,34 @@ perform_action(
     #{<<"action">> := #{<<"type">> := <<"wamp_call">>} = Act} = Spec, St0) ->
     St1 = decode_body_in_context(Method, St0),
     ApiCtxt0 = maps:get(api_context, St1),
+
+    %% Mops path rewriting to replace legacy API naming
+    Callback = fun
+        (will_get_path, [A, B, <<"arguments">>]) ->
+            [A, B, <<"args">>];
+
+        (will_get_path, [A, B, <<"arguments_kw">>]) ->
+            [A, B, <<"kwargs">>];
+
+        (will_get_path, Path) ->
+            Path
+    end,
+
+    MopsOpts = #{callback => Callback},
+
     %% Arguments might be funs waiting for the
     %% request.* values to be bound
     %% so we need to evaluate them passing the context
     #{
         <<"procedure">> := P,
-        <<"arguments">> := A,
-        <<"arguments_kw">> := Akw,
+        <<"args">> := A,
+        <<"kwargs">> := Akw,
         <<"options">> := Opts,
         %% TODO use retries
         <<"retries">> := _R,
         <<"timeout">> := CallTimeout
-    } = mops_eval(Act, ApiCtxt0),
+    } = mops_eval(Act, ApiCtxt0, MopsOpts),
+
     RSpec = maps:get(<<"response">>, Spec),
 
     %% TODO We need to recreate ctxt and session from JWT
@@ -768,7 +784,9 @@ perform_action(
             %% mops uses binary keys
             Result1 = bondy_utils:to_binary_keys(Result0),
             ApiCtxt1 = update_context({result, Result1}, ApiCtxt0),
-            Response = mops_eval(maps:get(<<"on_result">>, RSpec), ApiCtxt1),
+            Response = mops_eval(
+                maps:get(<<"on_result">>, RSpec), ApiCtxt1, MopsOpts
+            ),
             St2 = maps:update(api_context, ApiCtxt1, St1),
             {ok, Response, St2};
         {error, WampError0, _} ->
@@ -776,7 +794,9 @@ perform_action(
             WampError1 = bondy_utils:to_binary_keys(WampError0),
             Error = maps:put(<<"status_code">>, StatusCode0, WampError1),
             ApiCtxt1 = update_context({error, Error}, ApiCtxt0),
-            Response0 = mops_eval(maps:get(<<"on_error">>, RSpec), ApiCtxt1),
+            Response0 = mops_eval(
+                maps:get(<<"on_error">>, RSpec), ApiCtxt1, MopsOpts
+            ),
             St2 = maps:update(api_context, ApiCtxt1, St1),
             {StatusCode1, Response1} = take_status_code(
                 Response0, ?HTTP_INTERNAL_SERVER_ERROR),
@@ -1090,10 +1110,13 @@ trim_trailing_slash(Bin) ->
     end.
 
 
-
 mops_eval(Expr, Ctxt) ->
+    mops_eval(Expr, Ctxt, #{}).
+
+
+mops_eval(Expr, Ctxt, Opts) ->
     try
-        mops:eval(Expr, Ctxt)
+        mops:eval(Expr, Ctxt, Opts)
     catch
         error:{invalid_expression, [Expr, Term]} ->
             throw(#{
@@ -1114,9 +1137,10 @@ mops_eval(Expr, Ctxt) ->
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             });
         error:{badkeypath, Path} ->
+            Bin = iolist_to_binary(Path),
             throw(#{
                 <<"code">> => ?BONDY_ERROR_HTTP_API_GATEWAY_INVALID_EXPR,
-                <<"message">> => <<"There is no value for path '", Path/binary, "' in the HTTP Request context.">>,
+                <<"message">> => <<"There is no value for path '", Bin/binary, "' in the HTTP Request context.">>,
                 <<"description">> => <<"This might be due to an error in the action expression (mops) itself or as a result of a key missing in the response to a gateway action (WAMP or HTTP call).">>
             })
     end.

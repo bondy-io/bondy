@@ -20,15 +20,24 @@
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-include_lib("wamp/include/wamp.hrl").
+-include("bondy_security.hrl").
+
 -compile([nowarn_export_all, export_all]).
 
 all() ->
     [
-        {group, exact_matching}
+        {group, exact_matching},
+        {group, rpc}
     ].
 
 groups() ->
     [
+        {rpc, [sequence], [
+            register_invoke_single,
+            register_shared,
+            register_callback
+        ]},
         {exact_matching, [sequence], [
             add_subscription,
             match_prefix
@@ -41,11 +50,21 @@ init_per_suite(Config) ->
     Realm = bondy_realm:create(<<"com.foobar">>),
     RealmUri = bondy_realm:uri(Realm),
     ok = bondy_realm:disable_security(Realm),
-    Ctxt = bondy_context:local_context(RealmUri),
+    Peer = {{127, 0, 0, 1}, 10000},
+    Session = bondy_session:new(Peer, RealmUri, #{
+        authid => <<"foo">>,
+        authmethod => ?WAMP_ANON_AUTH,
+        is_anonymous => true,
+        security_enabled => true,
+        authroles => [<<"anonymous">>],
+        roles => #{
+            caller => #{},
+            subscriber => #{}
+        }
+    }),
+    Ctxt0 = bondy_context:new(Peer, {ws, text, json}),
+    Ctxt = bondy_context:set_session(Ctxt0, Session),
 
-    meck:expect(bondy_context, peer_id, fun(_Map)->
-        {RealmUri, bondy_peer_service:mynode(), undefined, self()}
-    end),
 
     [{context, Ctxt}, {realm, Realm}, {realm_uri, RealmUri} |Config].
 
@@ -152,3 +171,59 @@ match_prefix(Config) ->
         )
     ).
 
+
+register_invoke_single(Config) ->
+    Realm = ?config(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_SINGLE},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(
+            Realm, #{invoke => ?INVOKE_ROUND_ROBIN}, Uri, self()
+        )
+    ).
+
+
+register_shared(Config) ->
+    Realm = ?config(realm_uri, Config),
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ),
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, self())
+    ).
+
+
+register_callback(Config) ->
+    Realm = ?config(realm_uri, Config),
+
+    Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
+    Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
+
+    ?assertMatch(
+        {ok, _},
+        bondy_dealer:register(Realm, Opts, Uri, bondy_wamp_api)
+    ),
+
+    ?assertMatch(
+        {error, already_exists},
+        bondy_dealer:register(Realm, Opts, Uri, bondy_wamp_api),
+        "Callbacks cannot use shared registration"
+    ).

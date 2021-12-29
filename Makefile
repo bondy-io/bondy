@@ -14,7 +14,7 @@ compile:
 docs:
 	${REBAR} as docs edoc
 
-test:
+test: xref
 	${REBAR} as test ct
 
 xref:

@@ -30,25 +30,26 @@
 -type wamp_error_map() :: #{
     error_uri => uri(),
     details => map(),
-    arguments => list(),
-    arguments_kw => map()
+    args => list(),
+    kwargs => map(),
+    payload => binary()
 }.
 
 -export_type([wamp_error_map/0]).
 
-
+-export([aae_exchanges/0]).
 -export([ack/2]).
 -export([call/5]).
+-export([cast/5]).
+-export([check_response/4]).
+-export([is_remote_peer/1]).
 -export([publish/5]).
--export([subscribe/3]).
--export([subscribe/4]).
 -export([send/2]).
 -export([send/3]).
 -export([send/4]).
 -export([start/0]).
--export([aae_exchanges/0]).
--export([is_remote_peer/1]).
-
+-export([subscribe/3]).
+-export([subscribe/4]).
 
 
 %% =============================================================================
@@ -107,6 +108,7 @@ send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
 when is_binary(RealmUri)
 andalso is_integer(SessionId)
 andalso is_pid(Pid) ->
+    %% Send a message to a local peer
     Node =:= bondy_peer_service:mynode() orelse error(not_my_node),
 
     %% We validate the message and the opts
@@ -120,6 +122,7 @@ andalso is_pid(Pid) ->
 
 send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
 when is_binary(RealmUri) ->
+    %% Send a message to a remote peer
     %% We validate the message and the opts
     wamp_message:is_message(M) orelse error(invalid_wamp_message),
     Opts = validate_send_opts(Opts0),
@@ -193,15 +196,14 @@ subscribe(RealmUri, Opts, TopicUri, Fun) ->
 
 
 
-publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
-    bondy_broker:publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm).
+publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
+    bondy_broker:publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
 
 
 
 %% =============================================================================
 %% API - CALLER ROLE
 %% =============================================================================
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -217,55 +219,85 @@ publish(Opts, TopicUri, Args, ArgsKw, CtxtOrRealm) ->
     {ok, map(), bondy_context:t()}
     | {error, wamp_error_map(), bondy_context:t()}.
 
-call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
-    %% @TODO ID should be session scoped and not global
-    %% FIXME we need to fix the wamp.hrl timeout
-    %% TODO also, according to WAMP the default is 0 which deactivates
-    %% the Call Timeout Feature
+call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     Timeout = case maps:find(timeout, Opts) of
         {ok, 0} -> bondy_config:get(wamp_call_timeout);
         {ok, Val} -> Val;
         error -> bondy_config:get(wamp_call_timeout)
     end,
+
+    case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
+        {ok, ReqId, Ctxt1} ->
+            check_response(Uri, ReqId, Timeout, Ctxt1);
+        {error, _, _} = Error ->
+            Error
+    end.
+
+
+check_response(Uri, ReqId, Timeout, Ctxt) ->
+    receive
+        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
+        when Ref == ReqId ->
+            %% ok = bondy:ack(Pid, Ref),
+            {ok, message_to_map(R), Ctxt};
+        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
+        when Ref == ReqId ->
+            %% ok = bondy:ack(Pid, Ref),
+            {error, message_to_map(R), Ctxt}
+    after
+        Timeout ->
+            Mssg = iolist_to_binary(
+                io_lib:format(
+                    "The operation could not be completed in time"
+                    " (~p milliseconds).",
+                    [Timeout]
+                )
+            ),
+            ErrorDetails = maps:new(),
+            ErrorArgs = [Mssg],
+            ErrorKWArgs = #{
+                procedure_uri => Uri,
+                timeout => Timeout
+            },
+            Error = wamp_message:error(
+                ?CALL,
+                ReqId,
+                ErrorDetails,
+                ?BONDY_ERROR_TIMEOUT,
+                ErrorArgs,
+                ErrorKWArgs
+            ),
+            ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
+            {error, message_to_map(Error), Ctxt}
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% A non-blocking call.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec cast(
+    binary(),
+    map(),
+    list() | undefined,
+    map() | undefined,
+    bondy_context:t()) ->
+    {ok, bondy_context:t()}
+    | {error, wamp_error_map(), bondy_context:t()}.
+
+cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
+    %% @TODO ID should be session scoped and not global
+    %% FIXME we need to fix the wamp.hrl timeout
+    %% TODO also, according to WAMP the default is 0 which deactivates
+    %% the Call Timeout Feature
     ReqId = bondy_utils:get_id(global),
 
-    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, ArgsKw),
+    M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 
     case bondy_router:forward(M, Ctxt0) of
         {ok, Ctxt1} ->
-            receive
-                {?BONDY_PEER_REQUEST, {_Pid, _Ref}, #result{} = R} ->
-                    %% ok = bondy:ack(Pid, Ref),
-                    {ok, message_to_map(R), Ctxt1};
-                {?BONDY_PEER_REQUEST, {_Pid, _Ref}, #error{} = R} ->
-                    %% ok = bondy:ack(Pid, Ref),
-                    {error, message_to_map(R), Ctxt1}
-            after
-                Timeout ->
-                    Mssg = iolist_to_binary(
-                        io_lib:format(
-                            "The operation could not be completed in time"
-                            " (~p milliseconds).",
-                            [Timeout]
-                        )
-                    ),
-                    ErrorDetails = maps:new(),
-                    ErrorArgs = [Mssg],
-                    ErrorArgsKw = #{
-                        procedure_uri => ProcedureUri,
-                        timeout => Timeout
-                    },
-                    Error = wamp_message:error(
-                        ?CALL,
-                        ReqId,
-                        ErrorDetails,
-                        ?BONDY_ERROR_TIMEOUT,
-                        ErrorArgs,
-                        ErrorArgsKw
-                    ),
-                    ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-                    {error, message_to_map(Error), Ctxt1}
-            end;
+            {ok, ReqId, Ctxt1};
         {reply, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             {error, message_to_map(Error), Ctxt1};
@@ -296,7 +328,6 @@ call(ProcedureUri, Opts, Args, ArgsKw, Ctxt0) ->
 %% =============================================================================
 %% API - CALLEE ROLE
 %% =============================================================================
-
 
 
 
@@ -334,15 +365,15 @@ do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
     %% so we will not get an ack, the ack is implicit
     ok;
 
-do_send({_, _, SessionId, Pid}, M, Opts) ->
+do_send({_, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
     case maybe_enqueue(SessionId, M, Opts) of
         true ->
             ok;
         false ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    Mref = erlang:monitor(process, Pid),
-                    Pid ! {?BONDY_PEER_REQUEST, {self(), Mref}, M},
+                    Ref = ref(M),
+                    Pid ! {?BONDY_PEER_REQUEST, {self(), Ref}, M},
                     ok;
                 false ->
                     ?LOG_DEBUG(#{
@@ -353,6 +384,16 @@ do_send({_, _, SessionId, Pid}, M, Opts) ->
                     ok
             end
     end.
+
+
+ref(M) ->
+    try
+        wamp_message:request_id(M)
+    catch
+        error:badarg ->
+            erlang:make_ref()
+    end.
+
 
 
 %% @private
@@ -373,14 +414,14 @@ message_to_map(#result{} = M) ->
     #result{
         request_id = Id,
         details = Details,
-        arguments = Args,
-        arguments_kw = ArgsKw
+        args = Args,
+        kwargs = KWArgs
     } = M,
     #{
         request_id => Id,
         details => Details,
-        arguments => args(Args),
-        arguments_kw => args_kw(ArgsKw)
+        args => args(Args),
+        kwargs => kwargs(KWArgs)
     };
 
 message_to_map(#error{} = M) ->
@@ -389,8 +430,8 @@ message_to_map(#error{} = M) ->
         request_id = Id,
         details = Details,
         error_uri = Uri,
-        arguments = Args,
-        arguments_kw = ArgsKw
+        args = Args,
+        kwargs = KWArgs
     } = M,
     %% We need these keys to be binaries, becuase we will
     %% inject this in a mops context.
@@ -399,8 +440,8 @@ message_to_map(#error{} = M) ->
         request_id => Id,
         details => Details,
         error_uri => Uri,
-        arguments => args(Args),
-        arguments_kw => args_kw(ArgsKw)
+        args => args(Args),
+        kwargs => kwargs(KWArgs)
     }.
 
 
@@ -409,5 +450,5 @@ args(undefined) -> [];
 args(L) -> L.
 
 %% @private
-args_kw(undefined) -> #{};
-args_kw(M) -> M.
+kwargs(undefined) -> #{};
+kwargs(M) -> M.

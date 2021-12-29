@@ -75,11 +75,11 @@ new(From0, To0, Payload0, Opts) ->
     MyNode = bondy_peer_service:mynode(),
     element(2, To0) =/= MyNode orelse error(badarg),
 
-    %% FromPid = bondy_utils:pid_to_bin(element(4, From0)),
-    From1 = setelement(4, From0, undefined),
+    FromPid = maybe_pid_to_bin(element(4, From0)),
+    From1 = setelement(4, From0, FromPid),
 
-    %% ToPid = bondy_utils:pid_to_bin(element(4, To0)),
-    To1 = setelement(4, To0, undefined),
+    ToPid = maybe_pid_to_bin(element(4, To0)),
+    To1 = setelement(4, To0, ToPid),
 
     #peer_message{
         payload = validate_payload(Payload0),
@@ -159,6 +159,9 @@ options(#peer_message{options = Val}) -> Val.
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% @private
 validate_payload(#call{} = M) ->
     M;
 
@@ -180,3 +183,12 @@ validate_payload(#publish{} = M) ->
 
 validate_payload(M) ->
     error({badarg, [M]}).
+
+
+
+%% @private
+maybe_pid_to_bin(Pid) when is_pid(Pid) ->
+    bondy_utils:pid_to_bin(Pid);
+
+maybe_pid_to_bin(Term) ->
+    Term.

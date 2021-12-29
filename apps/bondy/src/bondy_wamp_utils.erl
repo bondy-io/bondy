@@ -28,8 +28,8 @@
 -export([maybe_error/2]).
 -export([error/2]).
 -export([no_such_procedure_error/1]).
+-export([no_such_procedure_error/3]).
 -export([no_such_registration_error/1]).
--export([no_such_session_error/1]).
 -export([validate_admin_call_args/3]).
 -export([validate_admin_call_args/4]).
 -export([validate_call_args/3]).
@@ -59,7 +59,7 @@ validate_call_args(Msg, Ctxt, Min) ->
 %% @end
 %% -----------------------------------------------------------------------------
 validate_call_args(Msg, Ctxt, Min, Max) ->
-    Len = args_len(Msg#call.arguments),
+    Len = args_len(args(Msg)),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, false).
 
 
@@ -76,7 +76,7 @@ validate_admin_call_args(Msg, Ctxt, Min) ->
 %% @end
 %% -----------------------------------------------------------------------------
 validate_admin_call_args(Msg, Ctxt, Min, Max) ->
-    Len = args_len(Msg#call.arguments),
+    Len = args_len(args(Msg)),
     do_validate_call_args(Msg, Ctxt, Min, Max, Len, true).
 
 
@@ -85,11 +85,11 @@ validate_admin_call_args(Msg, Ctxt, Min, Max) ->
 %% @doc Returns a CALL RESULT or ERROR based on the first Argument
 %% @end
 %% -----------------------------------------------------------------------------
-maybe_error(ok, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{});
+maybe_error(ok, M) ->
+    wamp_message:result(wamp_message:request_id(M), #{});
 
-maybe_error({ok, Val}, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val]);
+maybe_error({ok, Val}, M) ->
+    wamp_message:result(wamp_message:request_id(M), #{}, [Val]);
 
 maybe_error({'EXIT', {Reason, _}}, M) ->
     maybe_error({error, Reason}, M);
@@ -100,18 +100,18 @@ maybe_error(#error{} = Error, _) ->
 maybe_error({error, #error{} = Error}, _) ->
     Error;
 
-maybe_error({error, Reason}, #call{} = M) ->
+maybe_error({error, Reason}, M) ->
     error(Reason, M);
 
-maybe_error(Val, #call{} = M) ->
-    wamp_message:result(M#call.request_id, #{}, [Val]).
+maybe_error(Val, M) ->
+    wamp_message:result(wamp_message:request_id(M), #{}, [Val]).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-error({not_authorized, Reason}, #call{} = M) ->
+error({not_authorized, Reason}, M) ->
     Map = bondy_error:map(Reason),
 
     wamp_message:error_from(
@@ -137,18 +137,29 @@ error(Reason, #call{} = M) ->
 %% @doc Creates a wamp_error() based on a wamp_call().
 %% @end
 %% -----------------------------------------------------------------------------
-no_such_procedure_error(#call{} = M) ->
+no_such_procedure_error(#call{procedure_uri = Uri} = M) ->
+    no_such_procedure_error(Uri, ?CALL, M#call.request_id);
+
+no_such_procedure_error(#invocation{details = #{procedure := Uri}} = M) ->
+    no_such_procedure_error(Uri, ?CALL, M#invocation.request_id).
+
+
+no_such_procedure_error(ProcUri, MType, ReqId) ->
     Mssg = <<
         "There are no registered procedures matching the uri",
-        $\s, $', (M#call.procedure_uri)/binary, $', $.
+        $\s, $', ProcUri/binary, $', $.
     >>,
-    wamp_message:error_from(
-        M,
+    wamp_message:error(
+        MType,
+        ReqId,
         #{},
         ?WAMP_NO_SUCH_PROCEDURE,
-        [Mssg]
+        [Mssg],
+        #{
+            message => Mssg,
+            description => <<"Either no registration exists for the requested procedure or the match policy used did not match any registered procedures.">>
+        }
     ).
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -161,20 +172,6 @@ no_such_registration_error(RegId) when is_integer(RegId) ->
         #{},
         ?WAMP_NO_SUCH_REGISTRATION,
         [<<"No registration exists for the supplied RegistrationId">>]
-    ).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-no_such_session_error(SessionId) when is_integer(SessionId) ->
-    wamp_message:error(
-        ?UNREGISTER,
-        SessionId,
-        #{},
-        ?WAMP_NO_SUCH_SESSION,
-        [<<"No session exists for the supplied identifier">>]
     ).
 
 
@@ -206,7 +203,7 @@ no_such_session_error(SessionId) when is_integer(SessionId) ->
 do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
     E = wamp_message:error(
         ?CALL,
-        Msg#call.request_id,
+        wamp_message:request_id(Msg),
         #{},
         ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of positional arguments.">>],
@@ -222,7 +219,7 @@ do_validate_call_args(Msg, _, Min, _, Len, _) when Len + 1 < Min ->
 do_validate_call_args(Msg, _, _, Max, Len, _) when Len > Max ->
     E = wamp_message:error(
         ?CALL,
-        Msg#call.request_id,
+        wamp_message:request_id(Msg),
         #{},
         ?WAMP_INVALID_ARGUMENT,
         [<<"Invalid number of positional arguments.">>],
@@ -249,7 +246,7 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len == 0 ->
     end;
 
 do_validate_call_args(
-    #call{arguments = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
+    #call{args = [Uri|_]} = Msg, Ctxt, Min, _, Len, AdminOnly)
     when Len >= Min ->
     %% A call can only proceed if the session's Realm matches the one passed in
     %% the arguments, unless the session's Realm is the Root Realm which allows
@@ -257,10 +254,10 @@ do_validate_call_args(
     case bondy_context:realm_uri(Ctxt) of
         Uri when AdminOnly == false ->
             %% Matches arg URI
-            to_list(Msg#call.arguments);
+            to_list(args(Msg));
         ?MASTER_REALM_URI ->
             %% Users logged in root realm can operate on any realm
-            to_list(Msg#call.arguments);
+            to_list(args(Msg));
         _ ->
             error(unauthorized(Msg, Ctxt))
     end;
@@ -272,9 +269,9 @@ do_validate_call_args(Msg, Ctxt, Min, _, Len, AdminOnly) when Len + 1 >= Min ->
     %% operations on other realms
     case {AdminOnly, bondy_context:realm_uri(Ctxt)} of
         {false, Uri} ->
-            [Uri | to_list(Msg#call.arguments)];
+            [Uri | to_list(args(Msg))];
         {_, ?MASTER_REALM_URI} ->
-            [?MASTER_REALM_URI | to_list(Msg#call.arguments)];
+            [?MASTER_REALM_URI | to_list(args(Msg))];
         {_, _} ->
             error(unauthorized(Msg, Ctxt))
     end.
@@ -295,6 +292,9 @@ unauthorized(#unregister{} = M, Ctxt) ->
 
 unauthorized(#call{} = M, Ctxt) ->
     unauthorized(?CALL, M#call.request_id, Ctxt);
+
+unauthorized(#invocation{} = M, Ctxt) ->
+    unauthorized(?INVOCATION, M#invocation.request_id, Ctxt);
 
 unauthorized(#cancel{} = M, Ctxt) ->
     unauthorized(?CANCEL, M#cancel.request_id, Ctxt).
@@ -321,6 +321,11 @@ unauthorized(Type, ReqId, Ctxt) ->
         [Mssg],
         #{description => Description}
     ).
+
+
+%% @private
+args(#call{args = Args}) -> Args;
+args(#invocation{args = Args}) -> Args.
 
 
 %% @private

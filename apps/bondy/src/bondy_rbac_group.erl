@@ -729,7 +729,7 @@ update_groups(RealmUri, GroupName, Groupnames, Fun) when is_binary(GroupName) ->
 %% @private
 on_create(RealmUri, Name) ->
     ok = bondy_event_manager:notify(
-        {rbac_group_added, RealmUri, Name}
+        {group_added, RealmUri, Name}
     ),
     ok.
 
@@ -737,7 +737,7 @@ on_create(RealmUri, Name) ->
 %% @private
 on_update(RealmUri, Name) ->
     ok = bondy_event_manager:notify(
-        {rbac_group_updated, RealmUri, Name}
+        {group_updated, RealmUri, Name}
     ),
     ok.
 
@@ -745,7 +745,7 @@ on_update(RealmUri, Name) ->
 %% @private
 on_delete(RealmUri, Name) ->
     ok = bondy_event_manager:notify(
-        {rbac_group_deleted, RealmUri, Name}
+        {group_deleted, RealmUri, Name}
     ),
     ok.
 

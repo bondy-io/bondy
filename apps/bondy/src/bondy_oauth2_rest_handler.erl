@@ -673,9 +673,10 @@ token_response(JWT, RefreshToken, Claims, Req0) ->
 
 
 %% @private
-on_login(RealmUri, Username, Meta) ->
-    bondy_event_manager:notify(
-        {rbac_user_logged_in, RealmUri, Username, Meta}).
+on_login(_RealmUri, _Username, _Meta) ->
+    % bondy_event_manager:notify(
+    %     {user_log_in, RealmUri, Username, Meta}).
+    ok.
 
 
 set_resp_headers(Headers, Req0) ->
