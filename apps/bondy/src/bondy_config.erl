@@ -91,12 +91,19 @@
         {prefixes, ?PLUM_DB_PREFIXES}
     ]},
     {partisan, [
-        {connect_disterl, false},
+        {broadcast_mods, [plum_db, partisan_plumtree_backend]},
         {channels, [wamp_peer_relay, data, rpc, membership]},
-        {partisan_peer_service_manager, partisan_pluggable_peer_service_manager},
+        {connect_disterl, false},
+        {exchange_tick_period, timer:minutes(1)},
+        {lazy_tick_period, timer:seconds(5)},
+        {parallelism, 3},
+        {membership_strategy, partisan_full_membership_strategy},
+        {partisan_peer_service_manager,
+            partisan_pluggable_peer_service_manager},
+        {peer_ip, {127,0,0,1}},
+        {peer_port, 18086},
         {pid_encoding, false},
-        {ref_encoding, false},
-        {broadcast_mods, [plum_db, partisan_plumtree_backend]}
+        {ref_encoding, false}
     ]},
     %% Local in-memory storage
     {tuplespace, [

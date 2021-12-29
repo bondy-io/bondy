@@ -1867,7 +1867,7 @@ end}.
 
 %% Controls when will the AAE system will trigger the next
 %% data exchange.
-{mapping, "aae.exchange_timer", "partisan.broadcast_exchange_timer", [
+{mapping, "aae.exchange_timer", "partisan.exchange_tick_period", [
   {default, "1m"},
   {datatype, {duration, ms}}
 ]}.
