@@ -24,10 +24,10 @@
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
         "offering both Publish and Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC)."
     },
-    {vsn, "1.0.0-beta.16"},
+    {vsn, "1.0.0-beta.17"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {application_starter, [bondy_app, [{vsn, "1.0.0-beta.16"}]]}},
+    {mod, {application_starter, [bondy_app, [{vsn, "1.0.0-beta.17"}]]}},
     {start_phases, [
         %% We conditionally wait for plum_db partitions to be initialised
         {init_db_partitions, []},
