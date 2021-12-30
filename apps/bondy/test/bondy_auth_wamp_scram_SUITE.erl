@@ -38,14 +38,14 @@ all() ->
 
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_wamp_scram">>,
     ok = add_realm(RealmUri),
 
     [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
-    % common:stop_bondy(),
+    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 

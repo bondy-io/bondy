@@ -41,14 +41,14 @@ all() ->
 
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     KeyPairs = [enacl:crypto_sign_ed25519_keypair() || _ <- lists:seq(1, 3)],
     RealmUri = <<"com.example.test.auth_ticket">>,
     ok = add_realm(RealmUri, KeyPairs),
     [{realm_uri, RealmUri}, {keypairs, KeyPairs} | Config].
 
 end_per_suite(Config) ->
-    % common:stop_bondy(),
+    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 

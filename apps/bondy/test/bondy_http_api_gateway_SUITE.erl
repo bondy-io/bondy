@@ -22,10 +22,10 @@
 
 
 all() ->
-    common:all().
+    bondy_ct:all().
 
 groups() ->
-    [{main, [parallel], common:tests(?MODULE)}].
+    [{main, [parallel], bondy_ct:tests(?MODULE)}].
 
 simple_1_test(_) ->
     Spec = #{
