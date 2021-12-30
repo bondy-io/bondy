@@ -230,7 +230,8 @@
             {partitions,16},
             {wait_for_aae_exchange,false},
             {wait_for_hashtrees,true},
-            {wait_for_partitions,true}]},
+            {wait_for_partitions,true}]
+        },
     {partisan,[
         {connect_disterl, false},
         {channels, [data, rpc, membership]},
@@ -243,7 +244,7 @@
         {exchange_tick_period, 60000},
         {lazy_tick_period, 1000},
         {partisan_peer_service_manager,
-          partisan_pluggable_peer_service_manager}
+          partisan_pluggable_peer_service_manager},
 
         {tls_options,
             [{cacertfile,"./etc/cacert.pem"},
