@@ -791,14 +791,11 @@ do_handle_message(#yield{} = M, Ctxt0) ->
             SendOpts0 = #{from => Callee, via => Via},
             {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
 
-            IsRemoteCaller =
-                Via =/= undefined orelse not bondy_ref:is_local(Caller),
-
-            case IsRemoteCaller of
-                true ->
+            case bondy_ref:is_local(Caller) of
+                false ->
                     %% We return the YIELD message
                     bondy:send(To, M, SendOpts);
-                false ->
+                true ->
                     Result = yield_to_result(CallId, M),
                     bondy:send(To, Result, SendOpts)
             end;
