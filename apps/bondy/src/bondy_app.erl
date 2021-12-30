@@ -83,16 +83,11 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(gen_event, server_update, []),
     application:stop(partisan),
     % application:unload(partisan),
 
     %% We initialised the Bondy app config
     ok = bondy_config:init(Args),
-
-
-    logger:set_application_level(partisan, info),
 
     %% We temporarily disable plum_db's AAE to avoid rebuilding hashtrees
     %% until we are ready to do it
