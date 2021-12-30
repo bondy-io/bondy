@@ -44,7 +44,7 @@
          {port,18093},
          {enabled,false}]},
 
-         {edge_tcp,
+    {edge_tcp,
          [{max_frame_size,infinity},
           {idle_timeout,28800000},
           {ping,[{max_retries,3},{interval,30000},{enabled,true}]},
@@ -155,6 +155,7 @@
            {acceptors_pool_size,200},
            {port,18081},
            {enabled,true}]},
+    {session_manager_pool,[{size,50}]},
       {router_pool,[{capacity,10000},{size,8},{type,transient}]},
       {load_regulation_enabled,true},
       {request_timeout,20000},
@@ -167,17 +168,18 @@
            {enabled,true}]},
       {wamp_call_timeout,10000},
       {wamp_connection_lifetime,session},
-      {session_manager_pool, [
-          {size, 50}
-      ]},
       {security,[
           {ticket, [
-              {expiry_time_secs, 300},
-              {max_expiry_time_secs, 600},
-              {allow_not_found, true},
-              {authmethods, [
-                <<"cryptosign">>, <<"password">>, <<"ticket">>, <<"tls">>, <<"trust">>,<<"wamp-scram">>, <<"wampcra">>
-                ]}
+            {allow_not_found,true},
+            {client_sso,[{persistence,true}]},
+            {client_local,[{persistence,true}]},
+            {sso,[{persistence,true}]},
+            {local,[{persistence,true}]},
+            {max_expiry_time_secs,2592000},
+            {expiry_time_secs,2592000},
+            {authmethods,
+                [<<"cryptosign">>,<<"password">>,<<"ticket">>,<<"tls">>,
+                 <<"trust">>,<<"wamp-scram">>,<<"wampcra">>]}
             ]},
           {password,
                [{cra,[{kdf,pbkdf2}]},
@@ -219,40 +221,30 @@
          {config_file,"./etc/broker_bridge_config.json"}]},
     {plum_db,
         [{aae_exchange_on_cluster_join,true},
-            {hashtree_ttl,604800},
-            {hashtree_timer,10000},
-            {aae_enabled,true},
-            {data_exchange_timeout,60000},
-            {data_dir,"./data"},
-            {store_open_retries_delay,2000},
-            {store_open_retry_limit,30},
-            {shard_by,prefix},
-            {partitions,16},
-            {wait_for_aae_exchange,false},
-            {wait_for_hashtrees,true},
-            {wait_for_partitions,true}]
-        },
-    {partisan,[
-        {connect_disterl, false},
-        {channels, [data, rpc, membership]},
-        {peer_ip, {127,0,0,1}},
-        {peer_port, 18086},
-        {parallelism, 4},
-        {pid_encoding, false},
-        {ref_encoding, false},
-        {broadcast_exchange_timer,60000},
-        {exchange_tick_period, 60000},
-        {lazy_tick_period, 1000},
-        {partisan_peer_service_manager,
-          partisan_pluggable_peer_service_manager},
-
-        {tls_options,
-            [{cacertfile,"./etc/cacert.pem"},
-            {keyfile,"./etc/key.pem"},
-            {certfile,"./etc/cert.pem"}]},
-        {tls,false},
-        {parallelism,1},
-        {peer_port,18086}]}
+         {hashtree_ttl,604800},
+         {hashtree_timer,10000},
+         {aae_enabled,true},
+         {data_exchange_timeout,60000},
+         {data_dir,"./data"},
+         {store_open_retries_delay,2000},
+         {store_open_retry_limit,30},
+         {shard_by,prefix},
+         {partitions,16},
+         {wait_for_aae_exchange,false},
+         {wait_for_hashtrees,true},
+         {wait_for_partitions,true}]},
+    {partisan,
+        [{exchange_tick_period,60000},
+         {tls_options,
+             [{cacertfile,"./etc/cacert.pem"},
+              {keyfile,"./etc/key.pem"},
+              {certfile,"./etc/cert.pem"},
+              {versions,['tlsv1.3']}]},
+         {tls,false},
+         {partisan_peer_service_manager,partisan_pluggable_peer_service_manager},
+         {lazy_tick_period,1000},
+         {parallelism,1},
+         {peer_port,18086}]}
 ]).
 
 -export([
@@ -285,11 +277,14 @@ is_a_test(Function) ->
 start_bondy() ->
     case persistent_term:get({?MODULE, bondy_started}, false) of
         false ->
+            Apps = [App || {App, _} <- ?CONFIG],
+
             _ = [
                 begin
+                    application:stop(App),
                     application:unload(App),
                     application:load(App)
-                end || {App, _} <- ?CONFIG
+                end || App <- Apps
             ],
 
             _ = [
@@ -305,12 +300,21 @@ start_bondy() ->
             length(?BONDY) == length(application:get_all_env(bondy))
             orelse exit(configuration_error),
 
+            % _ = [
+            %     begin
+            %         maybe_error(application:ensure_all_started(App))
+            %     end || App <- Apps
+            % ],
+
             maybe_error(application:ensure_all_started(gproc)),
             maybe_error(application:ensure_all_started(jobs)),
             maybe_error(application:ensure_all_started(wamp)),
             maybe_error(application:ensure_all_started(enacl)),
             maybe_error(application:ensure_all_started(pbkdf2)),
             maybe_error(application:ensure_all_started(stringprep)),
+            maybe_error(application:ensure_all_started(tuplespace)),
+            % maybe_error(application:ensure_all_started(partisan)),
+            % maybe_error(application:ensure_all_started(plum_db)),
             maybe_error(application:ensure_all_started(bondy)),
             persistent_term:put({?MODULE, bondy_started}, true),
             ok;
