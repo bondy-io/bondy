@@ -99,12 +99,14 @@ size(Mssg) ->
     term_size(Mssg).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec match(continuation()) -> {[t()] | continuation()} | eot().
+-spec match(continuation() | eot()) -> {[t()] | continuation()} | eot().
+
+match(?EOT) ->
+    ?EOT;
 
 match(#bondy_retained_continuation{opts = undefined}) ->
     ?EOT;
@@ -148,7 +150,7 @@ match(Realm, Topic, SessionId, Strategy) ->
 match(Realm, Topic, SessionId, <<"exact">>, _) ->
     Result = get(Realm, Topic),
     {Matches, _} = maybe_append(Result, SessionId, {[], 0}),
-    {Matches, #bondy_retained_continuation{}};
+    {Matches, ?EOT};
 
 match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
     Len = byte_size(Topic),

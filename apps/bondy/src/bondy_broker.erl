@@ -939,7 +939,7 @@ send_retained(Entry) ->
 
     bondy_utils:foreach(
         fun
-            ({continuation, Cont}) ->
+            ({continue, Cont}) ->
                 bondy_retained_message_manager:match(Cont);
             (M) ->
                 Event = bondy_retained_message:to_event(M, SubsId),
