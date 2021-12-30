@@ -45,7 +45,6 @@ bondy_http_gateway_rest_handler.html
 bondy_http_gateway_utils.html
 bondy_http_gateway_wamp_api.html
 bondy_json.html
-bondy_lager_logger_backend.html
 bondy_logger_formatter.html
 bondy_logger_utils.html
 bondy_oauth2.html
@@ -118,8 +117,8 @@ dist/html/fonts/icomoon.eot
 dist/html/fonts/icomoon.svg
 dist/html/fonts/icomoon.ttf
 dist/html/fonts/icomoon.woff
-dist/search_items-44e8745b3e.js
-dist/sidebar_items-e5a8a75e50.js
+dist/search_items-9c6238b4cc.js
+dist/sidebar_items-98159d30e6.js
 index.html
 license.html
 readme.html

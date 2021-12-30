@@ -245,23 +245,23 @@ Initialises the Kafka clients provided by the configuration.
   <section class="docstring">
 
 <p>Validates the action specification. An action spec is a map containing the following keys:</p><p>* <code>type :: binary()</code> - <code>&lt;&lt;&quot;produce_sync&quot;&gt;&gt;</code>. Optional, the default value is <code>&lt;&lt;&quot;produce_sync&quot;&gt;&gt;</code>. * <code>topic :: binary()</code> - the Kafka topic we should produce to. * <code>key :: binary()</code> - the kafka message's key * <code>value :: any()</code> - the kafka message's value * <code>options :: map()</code> - a map containing the following keys</p><pre><code class="makeup erlang" translate="no"><span class="w">     </span><span class="ss">erlang</span><span class="w">
-  </span><span class="p" data-group-id="3706059008-1">#{</span><span class="w">
+  </span><span class="p" data-group-id="9665750451-1">#{</span><span class="w">
       </span><span class="p">&lt;&lt;</span><span class="s">&quot;type&quot;</span><span class="p">&gt;&gt;</span><span class="w"> </span><span class="p">&lt;&lt;</span><span class="s">&quot;produce&quot;</span><span class="p">&gt;&gt;</span><span class="p">,</span><span class="w">
       </span><span class="p">&lt;&lt;</span><span class="s">&quot;topic&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">&lt;&lt;</span><span class="s">&quot;com.magenta.wamp_events&quot;</span><span class="p">,</span><span class="w">
       </span><span class="p">&lt;&lt;</span><span class="s">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;\&quot;{{event.topic}}/{{event.publication_id}}\&quot;&quot;</span><span class="p">,</span><span class="w">
       </span><span class="p">&lt;&lt;</span><span class="s">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;{{event}}&quot;</span><span class="p">,</span><span class="w">
-      </span><span class="p">&lt;&lt;</span><span class="s">&quot;options&quot;</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="3706059008-2">{</span><span class="w">
+      </span><span class="p">&lt;&lt;</span><span class="s">&quot;options&quot;</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="9665750451-2">{</span><span class="w">
           </span><span class="p">&lt;&lt;</span><span class="s">&quot;client_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;default&quot;</span><span class="p">,</span><span class="w">
           </span><span class="p">&lt;&lt;</span><span class="s">&quot;acknowledge&quot;</span><span class="p">:</span><span class="w"> </span><span class="ss">true</span><span class="p">,</span><span class="w">
           </span><span class="p">&lt;&lt;</span><span class="s">&quot;required_acks&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;all&quot;</span><span class="p">,</span><span class="w">
           </span><span class="p">&lt;&lt;</span><span class="s">&quot;partition&quot;</span><span class="p">:</span><span class="w"> </span><span class="ss">null</span><span class="p">,</span><span class="w">
-          </span><span class="p">&lt;&lt;</span><span class="s">&quot;partitioner&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="3706059008-3">{</span><span class="w">
+          </span><span class="p">&lt;&lt;</span><span class="s">&quot;partitioner&quot;</span><span class="p">:</span><span class="w"> </span><span class="p" data-group-id="9665750451-3">{</span><span class="w">
               </span><span class="s">&quot;algorithm&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;fnv32a&quot;</span><span class="p">,</span><span class="w">
               </span><span class="s">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;\&quot;{{event.topic}}/{{event.publication_id}}\&quot;&quot;</span><span class="w">
-          </span><span class="p" data-group-id="3706059008-3">}</span><span class="p">,</span><span class="w">
+          </span><span class="p" data-group-id="9665750451-3">}</span><span class="p">,</span><span class="w">
           </span><span class="p">&lt;&lt;</span><span class="s">&quot;encoding&quot;</span><span class="p">&gt;&gt;</span><span class="p">:</span><span class="w"> </span><span class="p">&lt;&lt;</span><span class="s">&quot;json&quot;</span><span class="p">&gt;&gt;</span><span class="w">
-      </span><span class="p" data-group-id="3706059008-2">}</span><span class="w">
-  </span><span class="p" data-group-id="3706059008-1">}</span></code></pre>
+      </span><span class="p" data-group-id="9665750451-2">}</span><span class="w">
+  </span><span class="p" data-group-id="9665750451-1">}</span></code></pre>
   </section>
 </section>
 
