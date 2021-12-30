@@ -122,9 +122,16 @@ send(To, Msg, Opts) ->
             do_send(To, Msg, Opts);
 
         false ->
+
             case peek_via(Opts) of
                 Relay when Relay == undefined ->
-                    error({badarg, [{ref, To}, {via, Relay}]});
+                    %% Here we could validate if destination is a cluster peer
+                    %% node, but that would penalise performance, so we trust
+                    %% the caller of this function has configured the Opts
+                    %% properly.
+                    Node = bondy_ref:node(To),
+                    PeerMsg = {forward, To, Msg, Opts},
+                    bondy_peer_wamp_relay:forward(Node, PeerMsg);
 
                 Relay ->
                     Type = bondy_ref:type(Relay),
@@ -145,7 +152,7 @@ send(To, Msg, Opts) ->
                             bondy_peer_wamp_relay:forward(Node, PeerMsg);
 
                         {_, _} ->
-                            error({badarg, [{via, Relay}]})
+                            error({badarg, [{ref, To}, {via, Relay}]})
                     end
             end
     end.
