@@ -83,7 +83,7 @@ bondy
   <span translate="no">bondy_ticket</span> 
   <small class="app-vsn" translate="no">(bondy v1.0.0-beta.17)</small>
 
-    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L144" title="View Source" class="view-source" rel="help">
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L156" title="View Source" class="view-source" rel="help">
       <span class="icon-code" aria-hidden="true"></span>
       <span class="sr-only">View Source</span>
     </a>
@@ -93,7 +93,19 @@ bondy
 
 
   <section id="moduledoc">
-<p>This module implements the functions to issue and manage authentication tickets.</p><p>An authentication ticket (**ticket**) is a signed (and possibly encrypted) assertion of a user's identity, that a client can use to authenticate the user without the need to ask it to re-enter its credentials.</p><p>Tickets MUST be issued by a session that was opened using an authentication method that is neither <code>ticket</code> nor <code>anonymous</code> authentication.</p><p>### Claims</p><p>* id: provides a unique identifier for the ticket. * issued_by: identifies the principal that issued the ticket. Most of the time this is an application identifier (a.k.asl username or client_id) but sometimes can be the WAMP session's username (a.k.a <code>authid</code>). * authid: identifies the principal that is the subject of the ticket. The Claims in a ticket are normally statements. This is the WAMP session's username (a.k.a <code>authid</code>). * authrealm: identifies the recipients that the ticket is intended for. The value is <code>RealmUri</code>. * expires_at: identifies the expiration time on or after which the ticket MUST NOT be accepted for processing. The processing of the &quot;exp&quot; claim requires that the current date/time MUST be before the expiration date/ time listed in the &quot;exp&quot; claim. Bondy considers a small leeway of 2 mins by default. * issued_at: identifies the time at which the ticket was issued. This claim can be used to determine the age of the ticket. Its value is a timestamp in seconds. * issued_on: the bondy nodename in which the ticket was issued. * scope: the scope of the ticket, consisting of * realm: If <code>undefined</code> the ticket grants access to all realms the user has access to by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket is valid on.</p><p>## Claims Storage</p><p>Claims for a ticket are stored in PlumDB using the prefix <code>{bondy_ticket, Suffix :: binary()}</code> where Suffix is the concatenation of the authentication realm's URI and the user's username (a.k.a <code>authid</code>) and a key which is derived by the ticket's scope. The scope itself is the result of the combination of the different options provided by the <a href="#issue/2"><code>issue/2</code></a> function.</p><p>Thes decision to use this key as opposed to the ticket's unique identifier is to bounds the number of tickets a user can have at any point in time in order to reduce data storage and traffic.</p><p>### Ticket Scopes A ticket can be issued using different scopes. The scope is determined based on the options used to issue the ticket.</p><p>#### Local scope The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on the session's realm only.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.local&quot;&gt;&gt;</code> resource.</p><p>#### SSO Scope The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on any realm the user has access to through SSO.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.sso&quot;&gt;&gt;</code> resource.</p><p>#### Client-Local scope The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client (a local or sso ticket). The ticket can be used to authenticate on the session's realm only.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><p>#### Client-SSO scope The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client ( a local or sso ticket). The ticket can be used to authenticate on any realm the user has access to through SSO.</p><p>**Authorization** To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><p>### Scope Summary * <code>uri()</code> in the following table refers to the scope realm (not the Authentication realm which is used in the prefix)</p><p>|SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value| |---|---|---|---|---|---| |Local|no|no|no|<code>uri()</code>|<code>claims()</code>| |SSO|yes|no|no|<code>username()</code>|<code>claims()</code>| |Client-Local|no|yes|no|<code>client_id()</code>|<code>[{uri(), claims()}]</code>| |Client-Local|no|yes|yes|<code>client_id()</code>|<code>[{{uri(), instance_id()}, claims()}]</code>| |Client-SSO|yes|yes|no|<code>client_id()</code>|<code>[{undefined, claims()}]</code>| |Client-SSO|yes|yes|yes|<code>client_id()</code>|<code>[{{undefined, instance_id()}, claims()}]</code>|</p>### Permissions Summary Issuing tickets requires the user to be granted certain permissions beyond the WAMP permission required to call the procedures. |Scope|Permission|Resource| |---|---|---| |Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.local</code>| |SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.sso</code>| |Client-Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_local</code>| |Client-SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_sso</code>|
+<p>This module implements the functions to issue and manage authentication tickets.</p><h1>Overview</h1><p>An authentication ticket is a signed (and possibly encrypted) assertion of a user's identity, that a client can use to authenticate the user without the need to ask it to re-enter its credentials.</p><p>Tickets MUST be issued by a session that was opened using an authentication method that is neither <code>ticket</code> nor <code>anonymous</code> authentication.</p><h3 id="module-claims" class="section-heading">
+  <a href="#module-claims" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Claims">Claims</a>
+</h3>
+<ul><li><code>id</code>: provides a unique identifier for the ticket.</li><li><code>issued_by</code>: identifies the principal that issued the ticket. Most of the time this is an application identifier (a.k.asl username or client_id) but sometimes can be the WAMP session's username (a.k.a <code>authid</code>).</li><li><code>authid</code>: identifies the principal that is the subject of the ticket. The Claims in a ticket are normally statements. This is the WAMP session's username (a.k.a <code>authid</code>).</li><li><code>authrealm</code>: identifies the recipients that the ticket is intended for. The value is <code>RealmUri</code>.</li><li><code>expires_at</code>: identifies the expiration time on or after which the ticket MUST NOT be accepted for processing. The processing of th thia claim requires that the current date/time MUST be before the expiration date/ time listed in the &quot;exp&quot; claim. Bondy considers a small leeway of 2 mins by default.</li><li><code>issued_at</code>: identifies the time at which the ticket was issued. This claim can be used to determine the age of the ticket. Its value is a timestamp in seconds.</li><li><code>issued_on</code>: the bondy nodename in which the ticket was issued.</li><li><code>scope</code>: the scope of the ticket, consisting of<ul><li><code>realm</code>: If <code>undefined</code> the ticket grants access to all realms the user has access to by the authrealm (an SSO realm). Otherwise, the value is the realm this ticket is valid on.</li></ul></li></ul><h3 id="module-claims-storage" class="section-heading">
+  <a href="#module-claims-storage" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Claims_Storage">Claims Storage</a>
+</h3>
+<p>Claims for a ticket are stored in PlumDB using the prefix <code>{bondy_ticket, Suffix :: binary()}</code> where <code>Suffix</code> is the concatenation of the authentication realm's URI and the user's username (a.k.a <code>authid</code>) and a key which is derived by the ticket's scope. The scope itself is the result of the combination of the different options provided by the <a href="#issue/2"><code>issue/2</code></a> function.</p><p>The decision to use this key as opposed to the ticket's unique identifier is so that we are able to bound the number of tickets a user can have at any point in time in order to reduce data storage and cluster replication traffic.</p><h3 id="module-ticket-scopes" class="section-heading">
+  <a href="#module-ticket-scopes" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  <a name="Ticket_Scopes">Ticket Scopes</a>
+</h3>
+<p>A ticket can be issued using different scopes. The scope is determined based on the options used to issue the ticket.</p><h4><a name="Local_scope">Local scope</a></h4><p>The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on the session's realm only.</p><h5><a name="Authorization">Authorization</a></h5><p>To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.local&quot;&gt;&gt;</code> resource.</p><h4><a name="SSO_Scope">SSO Scope</a></h4><p>The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was not provided. The ticket can be used to authenticate on any realm the user has access to through SSO.</p><h5><a name="Authorization">Authorization</a></h5><p>To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.sso&quot;&gt;&gt;</code> resource.</p><h4><a name="Client-Local_scope">Client-Local scope</a></h4><p>The ticket was issued with <code>allow_sso</code> option set to <code>false</code> or when set to <code>true</code> the user did not have SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client (a local or sso ticket). The ticket can be used to authenticate on the session's realm only.</p><h5><a name="Authorization">Authorization</a></h5><p>To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><h4><a name="Client-SSO_scope">Client-SSO scope</a></h4><p>The ticket was issued with <code>allow_sso</code> option set to <code>true</code> and the user has SSO credentials, and the option <code>client_ticket</code> was provided having a valid ticket issued by a client ( a local or sso ticket). The ticket can be used to authenticate on any realm the user has access to through SSO.</p><h5><a name="Authorization">Authorization</a></h5><p>To be able to issue this ticket, the session must have been granted the permission <code>&lt;&lt;&quot;bondy.issue&quot;&gt;&gt;</code> on the <code>&lt;&lt;&quot;bondy.ticket.scope.client_local&quot;&gt;&gt;</code> resource.</p><h4><a name="Scope_Summary">Scope Summary</a></h4><p>* <code>uri()</code> in the following table refers to the scope realm (not the Authentication realm which is used in the prefix)</p><div class="markdown">|SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value| |---|---|---|---|---|---| |Local|no|no|no|<code>uri()</code>|<code>claims()</code>| |SSO|yes|no|no|<code>username()</code>|<code>claims()</code>| |Client-Local|no|yes|no|<code>client_id()</code>|<code>[{uri(), claims()}]</code>| |Client-Local|no|yes|yes|<code>client_id()</code>|<code>[{{uri(), instance_id()}, claims()}]</code>| |Client-SSO|yes|yes|no|<code>client_id()</code>|<code>[{undefined, claims()}]</code>| |Client-SSO|yes|yes|yes|<code>client_id()</code>|<code>[{{undefined, instance_id()}, claims()}]</code>|</div><h4><a name="Permissions_Summary">Permissions Summary</a></h4><p>Issuing tickets requires the user to be granted certain permissions beyond the WAMP permission required to call the procedures.</p><div class="markdown">|Scope|Permission|Resource| |---|---|---| |Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.local</code>| |SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.sso</code>| |Client-Local|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_local</code>| |Client-SSO|<code>bondy.issue</code>|<code>bondy.ticket.scope.client_sso</code>|</div>
   </section>
 
 
@@ -275,7 +287,7 @@ Types
     </a>
     <h1 class="signature" translate="no">authid/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L223" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L235" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -304,7 +316,7 @@ Types
     </a>
     <h1 class="signature" translate="no">claims/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L210" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L222" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -343,7 +355,7 @@ Types
     </a>
     <h1 class="signature" translate="no">issue_error/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L224" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L236" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -402,7 +414,7 @@ Types
     </a>
     <h1 class="signature" translate="no">opts/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L195" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L207" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -436,7 +448,7 @@ Types
     </a>
     <h1 class="signature" translate="no">scope/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L205" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L217" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -466,7 +478,7 @@ Types
     </a>
     <h1 class="signature" translate="no">t/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L194" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L206" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -495,7 +507,7 @@ Types
     </a>
     <h1 class="signature" translate="no">ticket_id/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L222" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L234" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -553,7 +565,7 @@ Types
     </a>
     <h1 class="signature" translate="no">verify_opts/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L202" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L214" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -595,7 +607,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">issue(Session, Opts)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L271" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L283" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -625,7 +637,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">lookup(RealmUri, Authid, Scope)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L376" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L388" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -655,7 +667,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">revoke(Ticket)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L404" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L416" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -684,7 +696,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">revoke_all(RealmUri, Authid)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L438" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L450" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -713,7 +725,7 @@ Revokes all tickets issued to user with <code>Username</code> in realm <code>Rea
     </a>
     <h1 class="signature" translate="no">revoke_all(RealmUri, Username, Scope)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L459" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L471" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -743,7 +755,7 @@ Revokes all tickets issued to user with <code>Username</code> in realm <code>Rea
     </a>
     <h1 class="signature" translate="no">verify(Ticket)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L297" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_ticket.erl#L309" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>

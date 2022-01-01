@@ -1,4 +1,4 @@
-%% =============================================================================
+%% ===========================================================================
 %%  bondy_ticket.erl -
 %%
 %%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
@@ -14,113 +14,120 @@
 %%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 %%  See the License for the specific language governing permissions and
 %%  limitations under the License.
-%% =============================================================================
+%% ===========================================================================
 
 %% -----------------------------------------------------------------------------
 %% @doc This module implements the functions to issue and manage authentication
 %% tickets.
 %%
-%% An authentication ticket (**ticket**) is a signed (and possibly encrypted)
+%% <h1>Overview</h1>
+%% An authentication ticket is a signed (and possibly encrypted)
 %% assertion of a user's identity, that a client can use to authenticate the
 %% user without the need to ask it to re-enter its credentials.
 %%
 %% Tickets MUST be issued by a session that was opened using an authentication
 %% method that is neither `ticket' nor `anonymous' authentication.
 %%
-%% ### Claims
+%% == Claims ==
 %%
-%% * id: provides a unique identifier for the ticket.
-%% * issued_by: identifies the principal that issued the ticket. Most
+%% <ul>
+%% <li>`id': provides a unique identifier for the ticket.</li>
+%% <li>`issued_by': identifies the principal that issued the ticket. Most
 %% of the time this is an application identifier (a.k.asl username or client_id)
-%% but sometimes can be the WAMP session's username (a.k.a `authid').
-%% * authid: identifies the principal that is the subject of the ticket.
+%% but sometimes can be the WAMP session's username (a.k.a `authid').</li>
+%% <li>`authid': identifies the principal that is the subject of the ticket.
 %% The Claims in a ticket are normally statements. This is the WAMP session's
-%% username (a.k.a `authid').
-%% * authrealm: identifies the recipients that the ticket is intended for.
-%% The value is `RealmUri'.
-%% * expires_at: identifies the expiration time on or after which
-%% the ticket MUST NOT be accepted for processing.  The processing of the "exp"
+%% username (a.k.a `authid').</li>
+%% <li>`authrealm': identifies the recipients that the ticket is intended for.
+%% The value is `RealmUri'.</li>
+%% <li>`expires_at': identifies the expiration time on or after which
+%% the ticket MUST NOT be accepted for processing.  The processing of th thia
 %% claim requires that the current date/time MUST be before the expiration date/
-%% time listed in the "exp" claim. Bondy considers a small leeway of 2 mins by
-%% default.
-%% * issued_at: identifies the time at which the ticket was issued.
+%% time listed in the &quot;exp&quot; claim. Bondy considers a small leeway of
+%% 2 mins by default.</li>
+%% <li>`issued_at': identifies the time at which the ticket was issued.
 %% This claim can be used to determine the age of the ticket. Its value is a
-%% timestamp in seconds.
-%% * issued_on: the bondy nodename in which the ticket was issued.
-%% * scope: the scope of the ticket, consisting of
-%%     * realm: If `undefined' the ticket grants access to all realms the user
+%% timestamp in seconds.</li>
+%% <li>`issued_on': the bondy nodename in which the ticket was issued.</li>
+%% <li>`scope': the scope of the ticket, consisting of<ul>
+%% <li>`realm': If `undefined' the ticket grants access to all realms the user
 %% has access to by the authrealm (an SSO realm). Otherwise, the value is the
-%% realm this ticket is valid on.
+%% realm this ticket is valid on.</li>
+%% </ul>
+%% </li>
+%% </ul>
 %%
-%% ## Claims Storage
+%% == Claims Storage ==
 %%
 %% Claims for a ticket are stored in PlumDB using the prefix
-%% `{bondy_ticket, Suffix :: binary()}' where Suffix is the concatenation of
+%% `{bondy_ticket, Suffix :: binary()}' where `Suffix' is the concatenation of
 %% the authentication realm's URI and the user's username (a.k.a `authid') and
 %% a key which is derived by the ticket's scope. The scope itself is the result
 %% of the combination of the different options provided by the {@link issue/2}
 %% function.
 %%
-%% Thes decision to use this key as opposed to the ticket's unique identifier
-%% is to bounds the number of tickets a user can have at any point in time in
-%% order to reduce data storage and traffic.
+%% The decision to use this key as opposed to the ticket's unique identifier
+%% is so that we are able to bound the number of tickets a user can have at any
+%% point in time in order to reduce data storage and cluster replication
+%% traffic.
 %%
-%% ### Ticket Scopes
+%% == Ticket Scopes ==
 %% A ticket can be issued using different scopes. The scope is determined based
 %% on the options used to issue the ticket.
 %%
-%% #### Local scope
+%% === Local scope ===
 %% The ticket was issued with `allow_sso' option set to `false' or when set to
 %% `true' the user did not have SSO credentials, and the option `client_ticket'
 %% was not provided.
 %% The ticket can be used to authenticate on the session's realm only.
 %%
-%% **Authorization**
+%% ==== Authorization ====
 %% To be able to issue this ticket, the session must have been granted the
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.local">>'
 %% resource.
 %%
 %%
-%% #### SSO Scope
+%% === SSO Scope ===
 %% The ticket was issued with `allow_sso' option set to `true' and the user has
 %% SSO credentials, and the option `client_ticket' was not provided.
 %% The ticket can be used to authenticate  on any realm the user has access to
 %% through SSO.
 %%
-%% **Authorization**
+%% ==== Authorization ====
 %% To be able to issue this ticket, the session must have been granted the
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.sso">>'
 %% resource.
 %%
-%% #### Client-Local scope
+%% === Client-Local scope ===
 %% The ticket was issued with `allow_sso' option set to `false' or when set to
 %% `true' the user did not have SSO credentials, and the option `client_ticket'
 %% was provided having a valid ticket issued by a client
 %% (a local or sso ticket).
 %% The ticket can be used to authenticate on the session's realm only.
 %%
-%% **Authorization**
+%% ==== Authorization ====
 %% To be able to issue this ticket, the session must have been granted the
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
 %% resource.
 %%
 %%
-%% #### Client-SSO scope
+%% === Client-SSO scope ===
 %% The ticket was issued with `allow_sso' option set to `true' and the user has
 %% SSO credentials, and the option `client_ticket' was provided having a valid
 %% ticket issued by a client ( a local or sso ticket).
 %% The ticket can be used to authenticate on any realm the user has access to
 %% through SSO.
 %%
-%% **Authorization**
+%% ==== Authorization ====
 %% To be able to issue this ticket, the session must have been granted the
 %% permission `<<"bondy.issue">>' on the `<<"bondy.ticket.scope.client_local">>'
 %% resource.
 %%
-%% ### Scope Summary
+%% === Scope Summary ===
 %% * `uri()' in the following table refers to the scope realm (not the
 %% Authentication realm which is used in the prefix)
 %%
+%% <div class="markdown">
 %% |SCOPE|Allow SSO|Client Ticket|Client Instance ID|Key|Value|
 %% |---|---|---|---|---|---|
 %% |Local|no|no|no|`uri()'|`claims()'|
@@ -129,15 +136,20 @@
 %% |Client-Local|no|yes|yes|`client_id()'|`[{{uri(), instance_id()}, claims()}]'|
 %% |Client-SSO|yes|yes|no|`client_id()'|`[{undefined, claims()}]'|
 %% |Client-SSO|yes|yes|yes|`client_id()'|`[{{undefined, instance_id()}, claims()}]'|
+%% </div>
 %%
-%% ### Permissions Summary
-%% Issuing tickets requires the user to be granted certain permissions beyond the WAMP permission required to call the procedures.
+%% === Permissions Summary ===
+%% Issuing tickets requires the user to be granted certain permissions beyond
+%% the WAMP permission required to call the procedures.
+%%
+%% <div class="markdown">
 %% |Scope|Permission|Resource|
 %% |---|---|---|
 %% |Local|`bondy.issue'|`bondy.ticket.scope.local'|
 %% |SSO|`bondy.issue'|`bondy.ticket.scope.sso'|
 %% |Client-Local|`bondy.issue'|`bondy.ticket.scope.client_local'|
 %% |Client-SSO|`bondy.issue'|`bondy.ticket.scope.client_sso'|
+%% </div>
 %%
 %% @end
 %% -----------------------------------------------------------------------------
@@ -486,9 +498,9 @@ revoke_all(_RealmUri, _Authid, _Scope) ->
 
 
 
-%% =============================================================================
+%% ===========================================================================
 %% PRIVATE
-%% =============================================================================
+%% ===========================================================================
 
 
 
