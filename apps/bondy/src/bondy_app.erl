@@ -83,8 +83,8 @@ vsn() ->
 %% @end
 %% -----------------------------------------------------------------------------
 start(_Type, Args) ->
+    %% Partisan will be re-started by plum_db
     application:stop(partisan),
-    % application:unload(partisan),
 
     %% We initialised the Bondy app config
     ok = bondy_config:init(Args),
@@ -322,6 +322,17 @@ setup_event_handlers() ->
         bondy_event_wamp_publisher, []
     ),
 
+    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
+
+    %% We subscribe to partisan up and down events and republish them
+    Mod = partisan_peer_service:manager(),
+    Mod:on_up('_', fun(Node) ->
+        bondy_event_manager:notify({cluster_connection_up, Node})
+    end),
+    Mod:on_down('_', fun(Node) ->
+        bondy_event_manager:notify({cluster_connection_down, Node})
+    end),
+
     % Used for debugging
     % _ = bondy_event_manager:add_watched_handler(
     %     bondy_event_logger, []
@@ -330,7 +341,6 @@ setup_event_handlers() ->
     %     bondy_event_logger, []
     % ),
 
-    _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
     ok.
 
 

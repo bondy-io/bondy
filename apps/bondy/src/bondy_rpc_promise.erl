@@ -81,6 +81,7 @@
 -export([dequeue/1]).
 -export([dequeue/2]).
 -export([enqueue/3]).
+-export([enqueue/4]).
 -export([flush/1]).
 -export([invocation_id/1]).
 -export([key_pattern/5]).
@@ -237,55 +238,26 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) -> Val.
 %% will receive an error with reason "wamp.error.timeout".
 %% @end
 %% -----------------------------------------------------------------------------
-enqueue(RealmUri, #bondy_rpc_promise{call_id = undefined} = P, Timeout) ->
-    InvocationId = P#bondy_rpc_promise.invocation_id,
-    Caller = P#bondy_rpc_promise.caller,
-    Callee = P#bondy_rpc_promise.callee,
+enqueue(RealmUri, Promise, Timeout) ->
+    enqueue(RealmUri, Promise, Timeout, undefined).
 
-    Key = key(RealmUri, InvocationId, undefined, Callee, Caller),
 
-    Secs = erlang:round(Timeout / 1000),
-    Opts = #{key => Key, ttl => Secs},
-    tuplespace_queue:enqueue(?PROMISE_QUEUE, P, Opts);
-
-enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout) ->
+%% -----------------------------------------------------------------------------
+%% @doc Adds the invocation promise `P' to the promise queue for realm
+%% `RealmUri' using a timeout of `Timeout'.
+%%
+%% If the promise is not dequeued before `Timeout' milliseconds, the caller
+%% will receive an error with reason "wamp.error.timeout".
+%% @end
+%% -----------------------------------------------------------------------------
+enqueue(RealmUri, #bondy_rpc_promise{} = P, Timeout, OnEvict)
+when OnEvict =:= undefined orelse is_function(OnEvict, 1) ->
     InvocationId = P#bondy_rpc_promise.invocation_id,
     CallId = P#bondy_rpc_promise.call_id,
-    ProcUri = P#bondy_rpc_promise.procedure_uri,
     Caller = P#bondy_rpc_promise.caller,
     Callee = P#bondy_rpc_promise.callee,
 
     Key = key(RealmUri, InvocationId, CallId, Callee, Caller),
-
-    OnEvict = fun(_) ->
-        ?LOG_DEBUG(#{
-            description => "RPC Promise evicted from queue",
-            realm_uri => RealmUri,
-            caller => Caller,
-            procedure_uri => ProcUri,
-            invocation_id => InvocationId,
-            call_id => CallId,
-            timeout => Timeout
-        }),
-        Mssg = iolist_to_binary(
-            io_lib:format(
-                "The operation could not be completed in time"
-                " (~p milliseconds).",
-                [Timeout]
-            )
-        ),
-        Error = wamp_message:error(
-            ?CALL,
-            CallId,
-            #{
-                procedure_uri => ProcUri,
-                timeout => Timeout
-            },
-            ?WAMP_TIMEOUT,
-            [Mssg]
-        ),
-        bondy:send(Caller, Error)
-    end,
 
     Secs = erlang:round(Timeout / 1000),
     Opts = #{key => Key, ttl => Secs, on_evict => OnEvict},

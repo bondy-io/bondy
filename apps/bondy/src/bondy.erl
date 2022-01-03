@@ -125,13 +125,7 @@ send(To, Msg, Opts) ->
 
             case peek_via(Opts) of
                 Relay when Relay == undefined ->
-                    %% Here we could validate if destination is a cluster peer
-                    %% node, but that would penalise performance, so we trust
-                    %% the caller of this function has configured the Opts
-                    %% properly.
-                    Node = bondy_ref:node(To),
-                    PeerMsg = {forward, To, Msg, Opts},
-                    bondy_peer_wamp_relay:forward(Node, PeerMsg);
+                    relay_message(To, Msg, Opts);
 
                 Relay ->
                     Type = bondy_ref:type(Relay),
@@ -139,17 +133,16 @@ send(To, Msg, Opts) ->
 
                     case {Type, IsLocalRelay} of
                         {bridge_relay, true} ->
-                            %% We consume the relay from stack
+                            %% We consume the relay from via stack
                             {Relay, Opts1} = take_via(Opts),
-                            do_send(Relay, {forward, To, Msg, Opts1}, Opts1);
+                            RelayMsg = {forward, To, Msg, Opts1},
+                            do_send(Relay, RelayMsg, Opts1);
 
                         {bridge_relay, false} ->
                             %% We cannot send directly, we need to go through
-                            %% the cluster so we use a relay, this means we do
-                            %% not consume from stack.
-                            Node = bondy_ref:node(Relay),
-                            PeerMsg = {forward, To, Msg, Opts},
-                            bondy_peer_wamp_relay:forward(Node, PeerMsg);
+                            %% the cluster so we use a cluster relay, this
+                            %% means we do not consume from via stack.
+                            relay_message(To, Msg, Opts);
 
                         {_, _} ->
                             error({badarg, [{ref, To}, {via, Relay}]})
@@ -187,19 +180,6 @@ prepare_send(undefined, Ref, Opts) ->
 prepare_send(Ref, undefined, Opts) ->
     %% We keep 'via' as it has the route back to the origin
     {Ref, Opts};
-    % case bondy_ref:is_local(Ref) of
-    %     true ->
-    %         %% We keep 'via' as it has the route back to the origin
-    %         {Ref, Opts};
-    %     false when is_map_key(via, Opts), map_get(via, Opts) =/= undefined ->
-    %         {Ref, Opts};
-    %     false ->
-    %         %% Ref is located in another peer node,
-    %         %% we need to use a relay
-    %         RealmUri = bondy_ref:realm_uri(Ref),
-    %         Relay = bondy_peer_wamp_relay:ref(RealmUri),
-    %         {Ref, add_via(Relay, Opts)}
-    %     end;
 
 prepare_send(Ref, Origin, Opts) ->
     %% We do not check if ref is relay or bridge_relay here, that will happen
@@ -224,28 +204,6 @@ add_via(Relay, #{via := Term} = Opts) when is_map(Opts) ->
 
     Q1 = queue:in(Relay, Q0),
     Opts#{via => Q1};
-    % case bondy_ref:is_local(Relay) of
-    %     true ->
-    %         bondy_ref:is_relay(Relay)
-    %             orelse bondy_ref:is_bridge_relay(Relay)
-    %             orelse error({badarg, Relay}),
-
-    %         Q1 = queue:in(Relay, Q0),
-    %         Opts#{via => Q1};
-
-    %     false ->
-    %         bondy_ref:is_bridge_relay(Relay)
-    %             orelse error({badarg, Relay}),
-
-    %         Q1 = queue:in(Relay, Q0),
-
-    %         %% We need to route this through a peer relay
-    %         RealmUri = bondy_ref:realm_uri(Relay),
-    %         PeerRelay = bondy_peer_wamp_relay:ref(RealmUri),
-    %         Q2 = queue:in(PeerRelay, Q1),
-
-    %         Opts#{via => Q2}
-    % end;
 
 add_via(Relay, Opts) ->
     add_via(Relay, Opts#{via => queue:new()}).
@@ -504,6 +462,27 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+relay_message(To, Msg, Opts) ->
+    %% Here we could validate if destination is a cluster peer
+    %% node, but that would penalise performance and also if we
+    %% are using Hyparview we only have a partial view of the
+    %% cluster.
+    Node = bondy_ref:node(To),
+    RealmUri = bondy_ref:realm_uri(To),
+    RelayMsg = {forward, To, Msg, Opts},
+    RelayOpts = #{
+        ack => true,
+        retransmission => true,
+        partition_key => erlang:phash2(RealmUri)
+    },
+    bondy_router_relay:forward(Node, RelayMsg, RelayOpts).
 
 
 %% -----------------------------------------------------------------------------

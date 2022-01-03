@@ -151,8 +151,9 @@
 %% @end
 %% =============================================================================
 -module(bondy_dealer).
--include_lib("wamp/include/wamp.hrl").
+
 -include_lib("kernel/include/logger.hrl").
+-include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
 
@@ -172,8 +173,8 @@
 -export([callees/3]).
 -export([close_context/1]).
 -export([features/0]).
--export([handle_message/2]).
--export([handle_message/3]).
+-export([forward/2]).
+-export([forward/3]).
 -export([is_feature_enabled/1]).
 -export([match_registrations/2]).
 -export([register/3]).
@@ -192,6 +193,50 @@
 %% =============================================================================
 
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features() -> map().
+
+features() ->
+    ?DEALER_FEATURES.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_feature_enabled(binary()) -> boolean().
+
+is_feature_enabled(F) when is_binary(F) ->
+    maps:get(F, ?DEALER_FEATURES, false).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec close_context(bondy_context:t()) -> bondy_context:t().
+
+close_context(Ctxt) ->
+    try
+        %% Cleanup registrations
+        ok = unregister_all(Ctxt),
+        %% Cleanup invocations queue
+        ok = bondy_rpc_promise:flush(bondy_context:ref(Ctxt)),
+        Ctxt
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_WARNING(#{
+                description => "Error while closing context",
+                class => Class,
+                reason => Reason,
+                trace => Stacktrace
+            }),
+            Ctxt
+    end.
 
 %% -----------------------------------------------------------------------------
 %% @doc Creates a local registration.
@@ -271,11 +316,11 @@ unregister(RegId, Ctxt) ->
         Entry ->
             case bondy_registry:remove(Entry) of
                 ok ->
-                    on_unregister(Entry, Ctxt);
+                    on_unregister(Entry);
                 {ok, false} ->
-                    on_unregister(Entry, Ctxt);
+                    on_unregister(Entry);
                 {ok, true} ->
-                    on_delete(Entry, Ctxt);
+                    on_delete(Entry);
                 Error ->
                     Error
             end
@@ -361,56 +406,11 @@ callees(RealmUri, ProcedureUri, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_context(bondy_context:t()) -> bondy_context:t().
+-spec forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
-close_context(Ctxt) ->
+forward(M, Ctxt) ->
     try
-        %% Cleanup registrations
-        ok = unregister_all(Ctxt),
-        %% Cleanup invocations queue
-        ok = bondy_rpc_promise:flush(bondy_context:ref(Ctxt)),
-        Ctxt
-    catch
-        Class:Reason:Stacktrace ->
-            ?LOG_WARNING(#{
-                description => "Error while closing context",
-                class => Class,
-                reason => Reason,
-                trace => Stacktrace
-            }),
-            Ctxt
-    end.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec features() -> map().
-
-features() ->
-    ?DEALER_FEATURES.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_feature_enabled(binary()) -> boolean().
-
-is_feature_enabled(F) when is_binary(F) ->
-    maps:get(F, ?DEALER_FEATURES, false).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
-
-handle_message(M, Ctxt) ->
-    try
-        do_handle_message(M, Ctxt)
+        do_forward(M, Ctxt)
     catch
         _:{not_authorized, Reason} ->
             Reply = wamp_message:error_from(
@@ -432,11 +432,11 @@ handle_message(M, Ctxt) ->
 %% or bridge_relay i.e. edge client or server.
 %% @end
 %% -----------------------------------------------------------------------------
--spec handle_message(wamp_message(), To :: bondy_ref:t(), Opts :: map()) ->
+-spec forward(wamp_message(), To :: bondy_ref:t(), Opts :: map()) ->
     ok | no_return().
 
 
-handle_message(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
+forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
     %% A remote Caller is making a CALL to a local Callee via a Relay.
     {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
@@ -467,8 +467,9 @@ handle_message(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
                 %% If we are handling this here is because any remaining relays
                 %% in the 'via' stack are part of the route back to the Caller.
                 %% If this was an INVOCATION destined to another peer node then
-                %% bondy_peer_wamp_relay would have forwarded itself.
+                %% bondy_router_relay would have forwarded itself.
                 Via = maps:get(via, SendOpts, undefined),
+
                 %% We enqueue an invocation promise so that we can match it
                 %% with the future YIELD or ERROR response from the Callee.
                 %% We add the relay so that we can route back the YIELD or
@@ -493,7 +494,7 @@ handle_message(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
             end
     end;
 
-handle_message(#yield{} = M, Caller, #{from := Callee}) ->
+forward(#yield{} = M, Caller, #{from := Callee}) ->
     %% A remote Callee is returning a YIELD to an INVOCATION done
     %% on behalf of a local Caller.
     InvocationId = M#yield.request_id,
@@ -517,7 +518,7 @@ handle_message(#yield{} = M, Caller, #{from := Callee}) ->
 
     ok;
 
-handle_message(
+forward(
     #error{request_type = ?INVOCATION} = M, Caller, #{from := Callee}) ->
     %% A remote callee is returning an ERROR to an INVOCATION done
     %% on behalf of a local Caller.
@@ -543,7 +544,7 @@ handle_message(
 
     ok;
 
-handle_message(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee}) ->
+forward(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee}) ->
     %% A CANCEL a local Caller made to a remote Callee has failed.
     %% We send the error back to the local Caller, keeping the promise to be
     %% able to match the still pending YIELD message,
@@ -564,7 +565,7 @@ handle_message(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee}) ->
             bondy:send(Caller, M, #{from => Callee})
     end;
 
-handle_message(#interrupt{} = M, Callee, #{from := Caller}) ->
+forward(#interrupt{} = M, Callee, #{from := Caller}) ->
     %% A remote Caller is cancelling a previous CALL/INVOCATION
     %% made to a local Callee.
     InvocationId = M#interrupt.request_id,
@@ -617,15 +618,15 @@ maybe_reroute_invocation(#invocation{} = Msg, To, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec do_handle_message(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
+-spec do_forward(M :: wamp_message(), Ctxt :: map()) -> ok | no_return().
 
-do_handle_message(#register{} = M, Ctxt) ->
+do_forward(#register{} = M, Ctxt) ->
     handle_register(M, Ctxt);
 
-do_handle_message(#unregister{} = M, Ctxt) ->
+do_forward(#unregister{} = M, Ctxt) ->
     handle_unregister(M, Ctxt);
 
-do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
+do_forward(#call{procedure_uri = Uri} = M, Ctxt) ->
     %% A local caller
     ok = bondy_rbac:authorize(<<"wamp.call">>, Uri, Ctxt),
 
@@ -649,7 +650,7 @@ do_handle_message(#call{procedure_uri = Uri} = M, Ctxt) ->
             handle_call(M, Ctxt, Uri, Opts)
     end;
 
-do_handle_message(#cancel{} = M, Ctxt0) ->
+do_forward(#cancel{} = M, Ctxt0) ->
     %% A local Caller is cancelling a previous call
     CallId = M#cancel.request_id,
     Caller = bondy_context:ref(Ctxt0),
@@ -767,7 +768,7 @@ do_handle_message(#cancel{} = M, Ctxt0) ->
             ok
     end;
 
-do_handle_message(#yield{} = M, Ctxt0) ->
+do_forward(#yield{} = M, Ctxt0) ->
     %% A local Callee is replying to an INVOCATION.
     %% We match the YIELD with the original INVOCATION
     %% using the request_id, and with that match the CALL request_id
@@ -785,7 +786,7 @@ do_handle_message(#yield{} = M, Ctxt0) ->
             Caller = bondy_rpc_promise:caller(Promise),
 
             %% Via might be undefined. If might have been set when handling the
-            %% INVOCATION in handle_message/3 and provides the route back to
+            %% INVOCATION in forward/3 and provides the route back to
             %% the Caller i.e. a pipe of relays.
             Via = bondy_rpc_promise:via(Promise),
             SendOpts0 = #{from => Callee, via => Via},
@@ -808,7 +809,7 @@ do_handle_message(#yield{} = M, Ctxt0) ->
 
     ok;
 
-do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
+do_forward(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     %% A local Callee is replying to a previous INVOCATION.
     %% We match the ERROR with the original INVOCATION
     %% using the request_id, and with that match the CALL request_id
@@ -825,7 +826,7 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
             CallId = bondy_rpc_promise:call_id(Promise),
             Caller = bondy_rpc_promise:caller(Promise),
             %% Via might be undefined. If might have been set when handling the
-            %% INVOCATION in handle_message/3
+            %% INVOCATION in forward/3
             Via = bondy_rpc_promise:via(Promise),
             SendOpts0 = #{from => Callee, via => Via},
 
@@ -850,7 +851,7 @@ do_handle_message(#error{request_type = ?INVOCATION} = M, Ctxt0) ->
     _ = bondy_rpc_promise:dequeue(Key, Fun),
     ok;
 
-do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
+do_forward(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
     %% A callee is responding with an error to an INTERRUPT message
     %% We need to turn this into a CANCEL error
     Callee = bondy_context:ref(Ctxt0),
@@ -865,7 +866,7 @@ do_handle_message(#error{request_type = ?INTERRUPT} = M, Ctxt0) ->
             CallId = bondy_rpc_promise:call_id(Promise),
             Caller = bondy_rpc_promise:caller(Promise),
             %% Via might be undefined. If might have been set when handling the
-            %% INVOCATION in handle_message/3
+            %% INVOCATION in forward/3
             Via = bondy_rpc_promise:via(Promise),
             SendOpts0 = #{from => Callee, via => Via},
             {To, SendOpts} = bondy:prepare_send(Caller, SendOpts0),
@@ -1184,7 +1185,7 @@ handle_register(#register{procedure_uri = Uri} = M, Ctxt) ->
 
     case bondy_registry:add(registration, Uri, Opts, Ref) of
         {ok, Entry, IsFirst} ->
-            ok = on_register(IsFirst, Entry, Ctxt),
+            ok = on_register(IsFirst, Entry),
             Id = bondy_registry_entry:id(Entry),
             Reply = wamp_message:registered(ReqId, Id),
             bondy:send(Ref, Reply);
@@ -1238,7 +1239,7 @@ unregister(Uri, M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
     RegId = M#unregister.request_id,
     ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
-    ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/2),
+    ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/1),
     Reply = wamp_message:unregistered(RegId),
     bondy:send(bondy_context:ref(Ctxt), Reply).
 
@@ -1251,7 +1252,7 @@ unregister(Uri, M, Ctxt) ->
 -spec unregister_all(bondy_context:t()) -> ok.
 
 unregister_all(Ctxt) ->
-    bondy_registry:remove_all(registration, Ctxt, fun on_unregister/2).
+    bondy_registry:remove_all(registration, Ctxt, fun on_unregister/1).
 
 
 %% -----------------------------------------------------------------------------
@@ -1539,10 +1540,43 @@ invoke(CallId, ProcUri, UserFun, Opts, Ctxt0) when is_function(UserFun, 2) ->
                                 }
                             ),
 
+                            Timeout = bondy_utils:timeout(call_opts(SendOpts)),
+
+                            OnEvict = fun(_) ->
+                                ?LOG_DEBUG(#{
+                                    description => "RPC Promise evicted from queue",
+                                    realm_uri => RealmUri,
+                                    caller => Caller,
+                                    procedure_uri => ProcUri,
+                                    invocation_id => ReqId,
+                                    call_id => CallId,
+                                    timeout => Timeout
+                                }),
+                                Mssg = iolist_to_binary(
+                                    io_lib:format(
+                                        "The operation could not be completed in time"
+                                        " (~p milliseconds).",
+                                        [Timeout]
+                                    )
+                                ),
+                                Error = wamp_message:error(
+                                    ?CALL,
+                                    CallId,
+                                    #{
+                                        procedure_uri => ProcUri,
+                                        timeout => Timeout
+                                    },
+                                    ?WAMP_TIMEOUT,
+                                    [Mssg]
+                                ),
+                                bondy:send(Caller, Error)
+                            end,
+
                             ok = bondy_rpc_promise:enqueue(
                                 RealmUri,
                                 Promise,
-                                bondy_utils:timeout(call_opts(SendOpts))
+                                Timeout,
+                                OnEvict
                             ),
 
                             ok = bondy:send(Callee, Msg, SendOpts),
@@ -1731,21 +1765,21 @@ coerce_routing_key(CallOpts) ->
 
 
 %% @private
-on_register(true, Entry, Ctxt) ->
-    bondy_event_manager:notify({registration_created, Entry, Ctxt});
+on_register(true, Entry) ->
+    bondy_event_manager:notify({registration_created, Entry});
 
-on_register(false, Entry, Ctxt) ->
-    bondy_event_manager:notify({registration_added, Entry, Ctxt}).
-
-
-%% @private
-on_unregister(Entry, Ctxt) ->
-    bondy_event_manager:notify({registration_removed, Entry, Ctxt}).
+on_register(false, Entry) ->
+    bondy_event_manager:notify({registration_added, Entry}).
 
 
 %% @private
-on_delete(Map, Ctxt) ->
-    bondy_event_manager:notify({registration_deleted, Map, Ctxt}).
+on_unregister(Entry) ->
+    bondy_event_manager:notify({registration_removed, Entry}).
+
+
+%% @private
+on_delete(Entry) ->
+    bondy_event_manager:notify({registration_deleted, Entry}).
 
 
 error_from_map(Error, CallId) ->

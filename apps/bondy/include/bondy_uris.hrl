@@ -117,6 +117,10 @@
 -define(BONDY_BACKUP_RESTORE_FINISHED,  <<"bondy.backup.restore_finished">>).
 -define(BONDY_BACKUP_RESTORE_STARTED,   <<"bondy.backup.restore_started">>).
 -define(BONDY_BACKUP_STARTED,           <<"bondy.backup.started">>).
+
+-define(BONDY_CLUSTER_CONN_UP,      <<"bondy.cluster.connection.up">>).
+-define(BONDY_CLUSTER_CONN_DOWN,      <<"bondy.cluster.connection.down">>).
+
 -define(BONDY_OAUTH2_CLIENT_ADDED,      <<"bondy.oauth2.client.added">>).
 -define(BONDY_OAUTH2_CLIENT_DELETED,    <<"bondy.oauth2.client.deleted">>).
 -define(BONDY_OAUTH2_CLIENT_UPDATED,    <<"bondy.oauth2.client.updated">>).

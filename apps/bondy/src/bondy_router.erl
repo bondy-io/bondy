@@ -18,9 +18,9 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc bondy_router provides the routing logic for all interactions.
+%% @doc This module provides the routing logic for all WAMP interactions.
 %%
-%% In general bondy_router tries to handle all messages asynchronously.
+%% In general `bondy_router' tries to handle all messages asynchronously.
 %% It does it by
 %% using either a static or a dynamic pool of workers based on configuration.
 %% This module implements both type of workers as a gen_server (this module).
@@ -39,8 +39,9 @@
 %% cases where it needs to preserve message ordering guarantees.
 %%
 %% This module handles only the concurrency and basic routing logic,
-%% delegating the rest to either {@link bondy_broker} or {@link bondy_dealer},
-%% which implement the actual PubSub and RPC logic respectively.
+%% delegating the rest to either {@link bondy_broker} for PubSub interactions,
+%% {@link bondy_dealer} for RPC interactions and {@link bondy_router_relay} for
+%% all interactions targetting a remote peer.
 %%
 %% ```
 %% ,------.                                    ,------.
@@ -142,8 +143,7 @@ agent() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Forwards a WAMP message to the Dealer or Broker based on message type.
+%% @doc Forwards a WAMP message to the Dealer or Broker based on message type.
 %% The message might end up being handled synchronously
 %% (performed by the calling process i.e. the transport handler)
 %% or asynchronously (by sending the message to the router load regulated
@@ -168,10 +168,11 @@ forward(M, #{session := _} = Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(wamp_message(), bondy_ref:t(), map()) -> ok | no_return().
+-spec forward(wamp_message(), maybe(bondy_ref:t()), map()) -> ok | no_return().
 
 forward(Msg, To, Opts) ->
-    case bondy_ref:is_local(To) of
+    %% To == undefined when Msg == #publish{}
+    case To == undefined orelse bondy_ref:is_local(To) of
         true ->
             do_forward(Msg, To, Opts);
         false ->
@@ -179,7 +180,7 @@ forward(Msg, To, Opts) ->
                 undefined ->
                     Node = bondy_ref:node(To),
                     PeerMsg = {forward, To, Msg, Opts},
-                    bondy_peer_wamp_relay:forward(Node, PeerMsg);
+                    bondy_router_relay:forward(Node, PeerMsg);
                 Relay ->
                     case bondy_ref:is_local(Relay) of
                         true ->
@@ -187,7 +188,7 @@ forward(Msg, To, Opts) ->
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
-                            bondy_peer_wamp_relay:forward(Node, PeerMsg)
+                            bondy_router_relay:forward(Node, PeerMsg)
                     end
             end
     end.
@@ -399,32 +400,32 @@ async_forward(M, Ctxt0) ->
 -spec sync_forward(event()) -> ok.
 
 sync_forward({#subscribe{} = M, Ctxt}) ->
-    bondy_broker:handle_message(M, Ctxt);
+    bondy_broker:forward(M, Ctxt);
 
 sync_forward({#unsubscribe{} = M, Ctxt}) ->
-    bondy_broker:handle_message(M, Ctxt);
+    bondy_broker:forward(M, Ctxt);
 
 sync_forward({#publish{} = M, Ctxt}) ->
-    bondy_broker:handle_message(M, Ctxt);
+    bondy_broker:forward(M, Ctxt);
 
 sync_forward({#register{} = M, Ctxt}) ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({#unregister{} = M, Ctxt}) ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({#call{} = M, Ctxt}) ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({#cancel{} = M, Ctxt}) ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({#yield{} = M, Ctxt}) ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({#error{request_type = Type} = M, Ctxt})
 when Type == ?INVOCATION orelse Type == ?INTERRUPT ->
-    bondy_dealer:handle_message(M, Ctxt);
+    bondy_dealer:forward(M, Ctxt);
 
 sync_forward({M, _Ctxt}) ->
     error({unexpected_message, M}).
@@ -433,21 +434,20 @@ sync_forward({M, _Ctxt}) ->
 
 
 do_forward(#publish{} = M, To, Opts) ->
-    bondy_broker:handle_message(M, To, Opts);
+    bondy_broker:forward(M, To, Opts);
 
 do_forward(#error{} = M, To, Opts) ->
     %% This is a CALL, INVOCATION or INTERRUPT error
-    %% see bondy_peer_message for more details
-    bondy_dealer:handle_message(M, To, Opts);
+    bondy_dealer:forward(M, To, Opts);
 
 do_forward(#interrupt{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+    bondy_dealer:forward(M, To, Opts);
 
 do_forward(#call{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+    bondy_dealer:forward(M, To, Opts);
 
 do_forward(#invocation{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts);
+    bondy_dealer:forward(M, To, Opts);
 
 do_forward(#yield{} = M, To, Opts) ->
-    bondy_dealer:handle_message(M, To, Opts).
+    bondy_dealer:forward(M, To, Opts).

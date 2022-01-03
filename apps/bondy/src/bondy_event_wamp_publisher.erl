@@ -53,6 +53,28 @@ init([]) ->
     {ok, State}.
 
 
+handle_event({cluster_connection_up, Node}, State) ->
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
+    MyNode = bondy_config:node(),
+    Topic = ?BONDY_CLUSTER_CONN_UP,
+
+    _ = bondy:publish(
+        ReqId, #{}, Topic, [MyNode, Node], #{}, ?MASTER_REALM_URI
+    ),
+    {ok, State};
+
+handle_event({cluster_connection_down, Node}, State) ->
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
+    MyNode = bondy_config:node(),
+    Topic = ?BONDY_CLUSTER_CONN_DOWN,
+
+    _ = bondy:publish(
+        ReqId, #{}, Topic, [MyNode, Node], #{}, ?MASTER_REALM_URI
+    ),
+    {ok, State};
+
 handle_event({realm_created, Uri}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
@@ -249,168 +271,137 @@ handle_event({backup_restore_failed, Args}, State) ->
 
 %% REGISTRATION META API
 
-handle_event({registration_created, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_REG_ON_CREATE,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = bondy_registry_entry:id(Entry),
-            Map = bondy_registry_entry:to_details_map(Entry),
+handle_event({registration_created, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    RegId = bondy_registry_entry:id(Entry),
+    Map = bondy_registry_entry:to_details_map(Entry),
+    Uri = ?WAMP_REG_ON_CREATE,
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            {ok, _} = bondy_broker:publish(
-                ReqId, #{}, Uri, [SessionId, RegId], Map, Ctxt
-            ),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    {ok, _} = bondy_broker:publish(
+        ReqId, #{}, Uri, [SessionId, RegId], Map, RealmUri
+    ),
+    {ok, State};
 
-handle_event({registration_added, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_REG_ON_REGISTER,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = bondy_registry_entry:id(Entry),
-            Map = bondy_registry_entry:to_details_map(Entry),
+handle_event({registration_added, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    RegId = bondy_registry_entry:id(Entry),
+    Map = bondy_registry_entry:to_details_map(Entry),
+    Uri = ?WAMP_REG_ON_REGISTER,
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            {ok, _} = bondy_broker:publish(
-                ReqId, #{}, Uri, [SessionId, RegId], Map, Ctxt),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    {ok, _} = bondy_broker:publish(
+        ReqId, #{}, Uri, [SessionId, RegId], Map, RealmUri
+    ),
+    {ok, State};
 
-handle_event({registration_deleted, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_REG_ON_DELETE,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = bondy_registry_entry:id(Entry),
-            Map = bondy_registry_entry:to_details_map(Entry),
+handle_event({registration_deleted, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    RegId = bondy_registry_entry:id(Entry),
+    Map = bondy_registry_entry:to_details_map(Entry),
+    Uri = ?WAMP_REG_ON_DELETE,
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            {ok, _} = bondy_broker:publish(
-                ReqId, #{}, Uri, [SessionId, RegId], Map, Ctxt
-            ),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    {ok, _} = bondy_broker:publish(
+        ReqId, #{}, Uri, [SessionId, RegId], Map, RealmUri
+    ),
+    {ok, State};
 
-handle_event({registration_removed, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_REG_ON_UNREGISTER,
-            SessionId = bondy_context:session_id(Ctxt),
-            RegId = bondy_registry_entry:id(Entry),
-            Map = bondy_registry_entry:to_details_map(Entry),
+handle_event({registration_removed, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    RegId = bondy_registry_entry:id(Entry),
+    Map = bondy_registry_entry:to_details_map(Entry),
+    Uri = ?WAMP_REG_ON_UNREGISTER,
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            {ok, _} = bondy_broker:publish(
-                ReqId, #{}, Uri, [SessionId, RegId], Map, Ctxt
-            ),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    {ok, _} = bondy_broker:publish(
+        ReqId, #{}, Uri, [SessionId, RegId], Map, RealmUri
+    ),
+    {ok, State};
 
 %% SUBSCRIPTION META API
 
-handle_event({subscription_created, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
-            Opts = #{},
-            Args = [
-                bondy_registry_entry:session_id(Entry),
-                bondy_registry_entry:to_details_map(Entry)
-            ],
+handle_event({subscription_created, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
+    Opts = #{},
+    Args = [
+        bondy_registry_entry:session_id(Entry),
+        bondy_registry_entry:to_details_map(Entry)
+    ],
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            KWArgs = #{},
-            _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    KWArgs = #{},
+    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, RealmUri),
+    {ok, State};
 
-handle_event({subscription_added, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
-            Opts = #{},
-            Args = [
-                bondy_registry_entry:session_id(Entry),
-                bondy_registry_entry:to_details_map(Entry)
-            ],
+handle_event({subscription_added, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
+    Opts = #{},
+    Args = [
+        bondy_registry_entry:session_id(Entry),
+        bondy_registry_entry:to_details_map(Entry)
+    ],
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            KWArgs = #{},
-            _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    KWArgs = #{},
+    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, RealmUri),
+    {ok, State};
 
-handle_event({subscription_removed, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
-            Opts = #{},
-            Args = [
-                bondy_registry_entry:session_id(Entry),
-                bondy_registry_entry:id(Entry)
-            ],
+handle_event({subscription_removed, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
+    Opts = #{},
+    Args = [
+        bondy_registry_entry:session_id(Entry),
+        bondy_registry_entry:id(Entry)
+    ],
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
-            KWArgs = #{
-                <<"topic">> => bondy_registry_entry:uri(Entry)
-            },
-            _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
+    KWArgs = #{
+        <<"topic">> => bondy_registry_entry:uri(Entry)
+    },
+    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, RealmUri),
+    {ok, State};
 
-handle_event({subscription_deleted, Entry, Ctxt}, State) ->
-    case bondy_context:has_session(Ctxt) of
-        true ->
-            Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
-            Opts = #{},
-            Args = [
-                bondy_registry_entry:session_id(Entry),
-                bondy_registry_entry:id(Entry)
-            ],
+handle_event({subscription_deleted, Entry}, State) ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
+    Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
+    Opts = #{},
+    Args = [
+        bondy_registry_entry:session_id(Entry),
+        bondy_registry_entry:id(Entry)
+    ],
 
-            %% We use a global ID as this is not a publishers request
-            ReqId = bondy_utils:get_id(global),
+    %% We use a global ID as this is not a publishers request
+    ReqId = bondy_utils:get_id(global),
 
-            %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
-            KWArgs = #{
-                <<"topic">> => bondy_registry_entry:uri(Entry)
-            },
-            _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, Ctxt),
-            {ok, State};
-        false ->
-            {ok, State}
-    end;
+    %% Based on https://github.com/wamp-proto/wamp-proto/issues/349
+    KWArgs = #{
+        <<"topic">> => bondy_registry_entry:uri(Entry)
+    },
+    _ = bondy_broker:publish(ReqId, Opts, Uri, Args, KWArgs, RealmUri),
+    {ok, State};
 
 handle_event(_, State) ->
     {ok, State}.
