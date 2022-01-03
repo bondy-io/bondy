@@ -60,11 +60,20 @@ init([RealmUri, SessionId, Pid]) ->
     {ok, State}.
 
 
-handle_event({_, _, Ctxt} = Event, State) ->
-    RealmUri = bondy_context:realm_uri(Ctxt),
+handle_event({Tag, Entry}, State)
+when Tag =:= registration_created
+orelse Tag =:= registration_added
+orelse Tag =:= registration_deleted
+orelse Tag =:= registration_removed
+orelse Tag =:= subscription_created
+orelse Tag =:= subscription_added
+orelse Tag =:= subscription_removed
+orelse Tag =:= subscription_deleted ->
+    RealmUri = bondy_registry_entry:realm_uri(Entry),
     case RealmUri == State#state.realm_uri of
         true ->
-            do_handle_event(Event, State);
+            ok = forward({Tag, bondy_registry_entry:to_external(Entry)}, State),
+            {ok, State};
         false ->
             {ok, State}
     end;
@@ -104,41 +113,3 @@ forward(Msg, State) ->
     Pid = State#state.pid,
     SessionId = State#state.session_id,
     bondy_edge_uplink_client:forward(Pid, Msg, SessionId).
-
-
-do_handle_event({registration_created = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({registration_added = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({registration_deleted = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({registration_removed = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({subscription_created = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({subscription_added = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({subscription_removed = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event({subscription_deleted = T, Entry}, State) ->
-    ok = forward({T, bondy_registry_entry:to_external(Entry)}, State),
-    {ok, State};
-
-do_handle_event(_, State) ->
-    %% We are not interested in this event
-    {ok, State}.
-
