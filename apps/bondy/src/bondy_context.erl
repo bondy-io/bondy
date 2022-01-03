@@ -623,6 +623,9 @@ set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 %% -----------------------------------------------------------------------------
 -spec caller_details(Ctxt :: t(), Details :: map()) -> map().
 
+caller_details(#{authid := '$internal'}, Details) ->
+    Details;
+
 caller_details(Ctxt, Details) ->
     Details#{
         caller => session_id(Ctxt),
@@ -637,6 +640,9 @@ caller_details(Ctxt, Details) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec publisher_details(Ctxt :: t(), Details :: map()) -> map().
+
+publisher_details(#{authid := '$internal'}, Details) ->
+    Details;
 
 publisher_details(Ctxt, Details) ->
     Details#{
