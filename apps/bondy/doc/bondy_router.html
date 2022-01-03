@@ -10,7 +10,7 @@
     <title>bondy_router — bondy v1.0.0-beta.17</title>
     <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
 
-    <script src="dist/sidebar_items-98159d30e6.js"></script>
+    <script src="dist/sidebar_items-ea33df30de.js"></script>
 
       <script src="docs_config.js"></script>
 
@@ -83,7 +83,7 @@ bondy
   <span translate="no">bondy_router</span> 
   <small class="app-vsn" translate="no">(bondy v1.0.0-beta.17)</small>
 
-    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L92" title="View Source" class="view-source" rel="help">
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L93" title="View Source" class="view-source" rel="help">
       <span class="icon-code" aria-hidden="true"></span>
       <span class="sr-only">View Source</span>
     </a>
@@ -93,7 +93,7 @@ bondy
 
 
   <section id="moduledoc">
-<p>bondy_router provides the routing logic for all interactions.</p><p>In general bondy_router tries to handle all messages asynchronously. It does it by using either a static or a dynamic pool of workers based on configuration. This module implements both type of workers as a gen_server (this module). A static pool uses a set of supervised processes whereas a dynamic pool spawns a new erlang process for each message. In both cases, sidejob supervises the processes. By default bondy_router uses a dynamic pool.</p><p>The pools are implemented using the sidejob library in order to provide load regulation. Inn case a maximum pool capacity has been reached, the router will handle the message synchronously i.e. blocking the calling processes (usually the one that handles the transport connection e.g. <a href="bondy_wamp_ws_connection_handler.html"><code>bondy_wamp_ws_connection_handler</code></a>).</p><p>The router also handles messages synchronously in those cases where it needs to preserve message ordering guarantees.</p><p>This module handles only the concurrency and basic routing logic, delegating the rest to either <a href="bondy_broker.html"><code>bondy_broker</code></a> or <a href="bondy_dealer.html"><code>bondy_dealer</code></a>, which implement the actual PubSub and RPC logic respectively.</p><pre><code class="makeup erlang" translate="no"><span class="w">  </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">                                    </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">
+<p>This module provides the routing logic for all WAMP interactions.</p><p>In general <code>bondy_router</code> tries to handle all messages asynchronously. It does it by using either a static or a dynamic pool of workers based on configuration. This module implements both type of workers as a gen_server (this module). A static pool uses a set of supervised processes whereas a dynamic pool spawns a new erlang process for each message. In both cases, sidejob supervises the processes. By default bondy_router uses a dynamic pool.</p><p>The pools are implemented using the sidejob library in order to provide load regulation. Inn case a maximum pool capacity has been reached, the router will handle the message synchronously i.e. blocking the calling processes (usually the one that handles the transport connection e.g. <a href="bondy_wamp_ws_connection_handler.html"><code>bondy_wamp_ws_connection_handler</code></a>).</p><p>The router also handles messages synchronously in those cases where it needs to preserve message ordering guarantees.</p><p>This module handles only the concurrency and basic routing logic, delegating the rest to either <a href="bondy_broker.html"><code>bondy_broker</code></a> for PubSub interactions, <a href="bondy_dealer.html"><code>bondy_dealer</code></a> for RPC interactions and <a href="bondy_router_relay.html"><code>bondy_router_relay</code></a> for all interactions targetting a remote peer.</p><pre><code class="makeup erlang" translate="no"><span class="w">  </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">                                    </span><span class="p">,</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="p">.</span><span class="w">
   </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">                                    </span><span class="p">|</span><span class="w"> </span><span class="n">Peer</span><span class="w"> </span><span class="p">|</span><span class="w">
   </span><span class="err">`</span><span class="o">--</span><span class="o">+</span><span class="o">--</span><span class="o">-</span><span class="ss">&#39;                                    `--+---&#39;</span><span class="w">
      </span><span class="p">|</span><span class="w">                                           </span><span class="p">|</span><span class="w">
@@ -482,7 +482,7 @@ Types
     </a>
     <h1 class="signature" translate="no">event/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L104" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L105" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1391,7 +1391,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">agent()</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L139" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L140" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1413,7 +1413,7 @@ Returns the Bondy agent identification string
     </a>
     <h1 class="signature" translate="no">close_context(Ctxt)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L242" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L243" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1442,7 +1442,7 @@ Returns the Bondy agent identification string
     </a>
     <h1 class="signature" translate="no">forward(M, Ctxt)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L160" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L161" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1474,7 +1474,7 @@ Forwards a WAMP message to the Dealer or Broker based on message type. The messa
     </a>
     <h1 class="signature" translate="no">forward(Msg, To, Opts)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L173" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L174" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1503,7 +1503,7 @@ Forwards a WAMP message to the Dealer or Broker based on message type. The messa
     </a>
     <h1 class="signature" translate="no">pre_stop()</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L203" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L204" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1525,7 +1525,7 @@ Sends a GOODBYE message to all existing client connections. The client should re
     </a>
     <h1 class="signature" translate="no">roles()</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L130" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L131" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1554,7 +1554,7 @@ Sends a GOODBYE message to all existing client connections. The client should re
     </a>
     <h1 class="signature" translate="no">stop()</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L232" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router.erl#L233" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>

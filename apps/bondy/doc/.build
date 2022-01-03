@@ -61,7 +61,6 @@ bondy_peer_discovery_dns_agent.html
 bondy_peer_discovery_static_agent.html
 bondy_peer_message.html
 bondy_peer_service.html
-bondy_peer_wamp_relay.html
 bondy_prometheus.html
 bondy_prometheus_collector.html
 bondy_prometheus_cowboy_collector.html
@@ -84,6 +83,7 @@ bondy_retained_message.html
 bondy_retained_message_manager.html
 bondy_retry.html
 bondy_router.html
+bondy_router_relay.html
 bondy_router_worker.html
 bondy_rpc_load_balancer.html
 bondy_rpc_promise.html
@@ -117,8 +117,8 @@ dist/html/fonts/icomoon.eot
 dist/html/fonts/icomoon.svg
 dist/html/fonts/icomoon.ttf
 dist/html/fonts/icomoon.woff
-dist/search_items-32afba7088.js
-dist/sidebar_items-98159d30e6.js
+dist/search_items-7dab79bb46.js
+dist/sidebar_items-ea33df30de.js
 index.html
 license.html
 readme.html

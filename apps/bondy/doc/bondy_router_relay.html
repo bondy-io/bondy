@@ -7,10 +7,10 @@
     <meta name="generator" content="ExDoc v0.26.0">
     <meta name="project" content="bondy v1.0.0-beta.17">
 
-    <title>bondy_peer_wamp_relay — bondy v1.0.0-beta.17</title>
+    <title>bondy_router_relay — bondy v1.0.0-beta.17</title>
     <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
 
-    <script src="dist/sidebar_items-98159d30e6.js"></script>
+    <script src="dist/sidebar_items-ea33df30de.js"></script>
 
       <script src="docs_config.js"></script>
 
@@ -80,10 +80,10 @@ bondy
     <div id="content" class="content-inner">
 
 <h1>
-  <span translate="no">bondy_peer_wamp_relay</span> 
+  <span translate="no">bondy_router_relay</span> 
   <small class="app-vsn" translate="no">(bondy v1.0.0-beta.17)</small>
 
-    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L82" title="View Source" class="view-source" rel="help">
+    <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L82" title="View Source" class="view-source" rel="help">
       <span class="icon-code" aria-hidden="true"></span>
       <span class="sr-only">View Source</span>
     </a>
@@ -105,7 +105,7 @@ bondy
   </span><span class="p">|</span><span class="w">    </span><span class="err">^</span><span class="w">          </span><span class="p">|</span><span class="w">         </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w">         </span><span class="p">|</span><span class="w">          </span><span class="err">^</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">          </span><span class="ss">v</span><span class="w">         </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w">         </span><span class="ss">v</span><span class="w">          </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
-  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="ss">bondy_peer_wamp</span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="ss">bondy_peer_wamp</span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
+  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">  </span><span class="ss">bondy_router</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">  </span><span class="ss">bondy_router</span><span class="w"> </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">_</span><span class="ss">relay</span><span class="w">     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">    </span><span class="p">_</span><span class="ss">relay</span><span class="w">     </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">               </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">               </span><span class="p">|</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">  </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w">  </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
@@ -114,8 +114,8 @@ bondy
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">          </span><span class="p">|</span><span class="w">         </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w">         </span><span class="p">|</span><span class="w">          </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">          </span><span class="ss">v</span><span class="w">         </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w">         </span><span class="ss">v</span><span class="w">          </span><span class="p">|</span><span class="w">    </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w"> </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="o">+</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">--</span><span class="o">-</span><span class="o">+</span><span class="w"> </span><span class="p">|</span><span class="w">
-  </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">       </span><span class="n">Worker</span><span class="w">        </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">       </span><span class="n">Worker</span><span class="w">        </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
-  </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">    </span><span class="p" data-group-id="3606366592-1">(</span><span class="ss">router_pool</span><span class="p" data-group-id="3606366592-1">)</span><span class="w">    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">    </span><span class="p" data-group-id="3606366592-2">(</span><span class="ss">router_pool</span><span class="p" data-group-id="3606366592-2">)</span><span class="w">    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
+  </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="ss">bondy_router_worker</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="ss">bondy_router_worker</span><span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
+  </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">    </span><span class="p" data-group-id="6492542134-1">(</span><span class="ss">router_pool</span><span class="p" data-group-id="6492542134-1">)</span><span class="w">    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">    </span><span class="p" data-group-id="6492542134-2">(</span><span class="ss">router_pool</span><span class="p" data-group-id="6492542134-2">)</span><span class="w">    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
   </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                    </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">                     </span><span class="p">|</span><span class="w"> </span><span class="p">|</span><span class="w">
@@ -439,7 +439,7 @@ bondy
 
         </div>
 
-          <div class="summary-synopsis"><p>Forwards a wamp message to a peer (cluster node). It returns <code>ok</code> when the remote bondy_peer_wamp_relay acknoledges the reception of the message, but it does not imply the message handler has actually received the message.</p></div>
+          <div class="summary-synopsis"><p>Forwards a wamp message to a peer (cluster node). It returns <code>ok</code> when the remote bondy_router_relay acknoledges the reception of the message, but it does not imply the message handler has actually received the message.</p></div>
 
       </div>
 
@@ -530,7 +530,7 @@ Types
     </a>
     <h1 class="signature" translate="no">id/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L52" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L52" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -559,7 +559,7 @@ Types
     </a>
     <h1 class="signature" translate="no">uri/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L51" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L51" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -588,7 +588,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_abort/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L828" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L828" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -617,7 +617,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_authenticate/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L900" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L900" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -646,7 +646,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_call/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1204" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1204" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -675,7 +675,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_cancel/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1312" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1312" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -704,7 +704,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_challenge/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L848" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L848" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -733,7 +733,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_error/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L937" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L937" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -762,7 +762,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_event/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1103" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1103" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -791,7 +791,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_event_received/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1152" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1152" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -820,7 +820,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_goodbye/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L912" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L912" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -849,7 +849,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_hello/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L675" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L675" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -878,7 +878,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_interrupt/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1527" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1527" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -907,7 +907,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_invocation/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1474" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1474" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -936,7 +936,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_message/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L601" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L601" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -991,7 +991,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_publish/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L955" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L955" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1020,7 +1020,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_published/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1027" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1027" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1049,7 +1049,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_register/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1354" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1354" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1078,7 +1078,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_registered/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1411" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1411" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1107,7 +1107,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_result/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1334" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1334" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1136,7 +1136,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_subscribe/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1039" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1039" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1165,7 +1165,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_subscribed/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1069" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1069" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1194,7 +1194,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_subscriber_received/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1168" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1168" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1223,7 +1223,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_unregister/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1422" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1422" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1252,7 +1252,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_unregistered/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1433" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1433" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1281,7 +1281,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_unsubscribe/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1079" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1079" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1310,7 +1310,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_unsubscribed/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1088" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1088" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1339,7 +1339,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_welcome/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L754" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L754" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1368,7 +1368,7 @@ Types
     </a>
     <h1 class="signature" translate="no">wamp_yield/0</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L1550" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L1550" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1410,7 +1410,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">async_forward(Ref, Msg, Opts)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L185" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L185" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1440,7 +1440,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">broadcast(From, Nodes, M, Opts)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L209" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L209" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1470,7 +1470,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">code_change(OldVsn, State, Extra)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L438" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L438" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1492,7 +1492,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">forward(Node, Msg)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L170" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L170" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1514,7 +1514,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">forward(Node, Msg, Opts)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L165" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L165" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1531,7 +1531,7 @@ Functions
 
       </div>
 
-<p>Forwards a wamp message to a peer (cluster node). It returns <code>ok</code> when the remote bondy_peer_wamp_relay acknoledges the reception of the message, but it does not imply the message handler has actually received the message.</p><p>This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP message types. It will fail with an exception if another type is passed as the third argument.</p>This is equivalent to calling async_forward/3 and then yield/2.
+<p>Forwards a wamp message to a peer (cluster node). It returns <code>ok</code> when the remote bondy_router_relay acknoledges the reception of the message, but it does not imply the message handler has actually received the message.</p><p>This only works for PUBLISH, ERROR, INTERRUPT, INVOCATION and RESULT WAMP message types. It will fail with an exception if another type is passed as the third argument.</p>This is equivalent to calling async_forward/3 and then yield/2.
   </section>
 </section>
 <section class="detail" id="handle_call/3">
@@ -1543,7 +1543,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">handle_call(Event, From, State)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L275" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L275" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1565,7 +1565,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">handle_cast(Event, State)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L284" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L284" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1587,7 +1587,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">handle_info(Info, State)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L419" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L419" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1609,7 +1609,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">init(_)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L270" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L270" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1631,7 +1631,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">receive_ack(Id, Timeout)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L234" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L234" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1660,7 +1660,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">ref(RealmUri)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L256" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L256" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1689,7 +1689,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">start_link()</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L140" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L140" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
@@ -1718,7 +1718,7 @@ Functions
     </a>
     <h1 class="signature" translate="no">terminate(Reason, State)</h1>
 
-      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_peer_wamp_relay.erl#L427" class="view-source" rel="help" title="View Source">
+      <a href="https://gitlab.com/leapsight/bondy/blob/v1.0.0-beta.17/apps/bondy/src/bondy_router_relay.erl#L427" class="view-source" rel="help" title="View Source">
        <span class="icon-code" aria-hidden="true"></span>
        <span class="sr-only">View Source</span>
      </a>
