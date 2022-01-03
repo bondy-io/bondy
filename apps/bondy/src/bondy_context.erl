@@ -167,7 +167,8 @@ local_context(RealmUri) when is_binary(RealmUri) ->
 
     Ctxt#{
         realm_uri => RealmUri,
-        security_enabled => bondy_realm:is_security_enabled(RealmUri)
+        security_enabled => bondy_realm:is_security_enabled(RealmUri),
+        authid => '$internal'
     }.
 
 

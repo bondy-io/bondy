@@ -220,6 +220,9 @@ authorize(Permission, Ctxt) ->
 authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
     do_authorize(Permission, Resource, Ctxt);
 
+authorize(_, _, #{authid := '$internal'}) ->
+    ok;
+
 authorize(Permission, Resource, Ctxt) ->
     case bondy_context:is_security_enabled(Ctxt) of
         true ->
