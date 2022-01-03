@@ -79,6 +79,7 @@
 -export([is_client/1]).
 -export([is_internal/1]).
 -export([is_local/1]).
+-export([is_local/2]).
 -export([is_self/1]).
 -export([is_type/1]).
 -export([types/0]).
@@ -342,6 +343,17 @@ is_internal(Ref) ->
 
 is_local(#bondy_ref{nodestring = Val}) ->
     Val =:= bondy_config:nodestring().
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns whether this is a reference to a target local to the node
+%% represented by `Nodestring'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_local(Ref :: t(), nodestring()) -> boolean().
+
+is_local(#bondy_ref{nodestring = Val}, Nodestring) ->
+    Val =:= Nodestring.
 
 
 %% -----------------------------------------------------------------------------

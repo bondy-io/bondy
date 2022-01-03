@@ -100,6 +100,7 @@
 -export([is_entry/1]).
 -export([is_key/1]).
 -export([is_local/1]).
+-export([is_local/2]).
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_field/1]).
@@ -469,7 +470,21 @@ is_local(#entry{key = Key}) ->
     is_local(Key);
 
 is_local(#entry_key{nodestring = Val}) ->
-    Val =:= bondy_config:node().
+    Val =:= bondy_config:nodestring().
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns `true' if the entry represents a handler local to the node
+%% represented by `Nodestring'. Otherwise returns `false'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_local(t_or_key(), nodestring()) -> boolean().
+
+is_local(#entry{key = Key}, Nodestring) ->
+    is_local(Key, Nodestring);
+
+is_local(#entry_key{nodestring = Val}, Nodestring) ->
+    Val =:= Nodestring.
 
 
 %% -----------------------------------------------------------------------------
