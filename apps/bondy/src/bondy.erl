@@ -125,7 +125,13 @@ send(To, Msg, Opts) ->
 
             case peek_via(Opts) of
                 Relay when Relay == undefined ->
-                    relay_message(To, Msg, Opts);
+                    %% Here we could validate if destination is a cluster peer
+                    %% node, but that would penalise performance and also if we
+                    %% are using Hyparview we only have a partial view of the
+                    %% cluster. SO we trust the prepase_send or caller is doing
+                    %% the correct thing.
+                    Node = bondy_ref:node(To),
+                    relay_message(Node, To, Msg, Opts);
 
                 Relay ->
                     Type = bondy_ref:type(Relay),
@@ -139,10 +145,11 @@ send(To, Msg, Opts) ->
                             do_send(Relay, RelayMsg, Opts1);
 
                         {bridge_relay, false} ->
-                            %% We cannot send directly, we need to go through
-                            %% the cluster so we use a cluster relay, this
+                            %% We cannot send directly to Bridge Relay
+                            %% we need to go through a router relay, this
                             %% means we do not consume from via stack.
-                            relay_message(To, Msg, Opts);
+                            Node = bondy_ref:node(Relay),
+                            relay_message(Node, To, Msg, Opts);
 
                         {_, _} ->
                             error({badarg, [{ref, To}, {via, Relay}]})
@@ -469,12 +476,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-relay_message(To, Msg, Opts) ->
-    %% Here we could validate if destination is a cluster peer
-    %% node, but that would penalise performance and also if we
-    %% are using Hyparview we only have a partial view of the
-    %% cluster.
-    Node = bondy_ref:node(To),
+relay_message(Node, To, Msg, Opts) ->
     RealmUri = bondy_ref:realm_uri(To),
     RelayMsg = {forward, To, Msg, Opts},
     RelayOpts = #{
