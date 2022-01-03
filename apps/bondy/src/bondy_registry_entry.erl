@@ -228,6 +228,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
 
     #entry{
         key = KeyPattern,
+
         uri = RegUri,
         match_policy = MatchPolicy,
         ref = '_',
@@ -564,11 +565,8 @@ pid(#entry_key{}) ->
 %% -----------------------------------------------------------------------------
 -spec session_id(t_or_key()) -> wildcard(maybe(id())).
 
-session_id(#entry{ref = '_'}) ->
-    '_';
-
-session_id(#entry{ref = Ref}) ->
-    bondy_ref:session_id(Ref);
+session_id(#entry{key = Key}) ->
+    session_id(Key);
 
 session_id(#entry_key{session_id = Val}) ->
     Val.

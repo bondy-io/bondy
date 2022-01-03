@@ -263,9 +263,13 @@ add(subscription = Type, Uri, Opts, Ref) ->
     RealmUri = bondy_ref:realm_uri(Ref),
     Nodestring = bondy_ref:nodestring(Ref),
     Target = bondy_ref:target(Ref),
+    SessionId = case bondy_ref:session_id(Ref) of
+        undefined -> '_';
+        Val -> Val
+    end,
 
     %% We do a full match, we should get none or 1 results
-    Extra = #{node => Nodestring, target => Target},
+    Extra = #{node => Nodestring, target => Target, session_id => SessionId},
     Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts, Extra),
     TrieKey = trie_key(Pattern),
 
@@ -869,6 +873,9 @@ maybe_resolve(Object) ->
 maybe_fun(undefined, _) ->
     undefined;
 
+maybe_fun(Fun, _) when is_function(Fun, 1) ->
+    Fun;
+
 maybe_fun(Fun, Ctxt) when is_function(Fun, 2) ->
     fun(Entry) -> Fun(Entry, Ctxt) end.
 
@@ -1126,7 +1133,7 @@ trie_key(Entry) ->
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    Node = term_to_trie_key_part(bondy_registry_entry:node(Entry)),
+    Nodestring = term_to_trie_key_part(bondy_registry_entry:nodestring(Entry)),
     SessionId = term_to_trie_key_part(bondy_registry_entry:session_id(Entry)),
 
     Id = case bondy_registry_entry:id(Entry) of
@@ -1150,9 +1157,9 @@ trie_key(Entry, Policy) ->
     %% trie
     case Policy of
         ?PREFIX_MATCH ->
-            {<<Key/binary, ?ANY/binary>>, Node, SessionId, Id};
+            {<<Key/binary, ?ANY/binary>>, Nodestring, SessionId, Id};
         _ ->
-            {Key, Node, SessionId, Id}
+            {Key, Nodestring, SessionId, Id}
     end.
 
 
@@ -1164,7 +1171,10 @@ term_to_trie_key_part(Term) when is_atom(Term) ->
     atom_to_binary(Term, utf8);
 
 term_to_trie_key_part(Term) when is_integer(Term) ->
-    integer_to_binary(Term).
+    integer_to_binary(Term);
+
+term_to_trie_key_part(Term) when is_binary(Term) ->
+    Term.
 
 
 %% @private
@@ -1173,6 +1183,8 @@ term_to_trie_key_part(Term) when is_integer(Term) ->
 trie_ms(Opts) ->
     %% {{$1, $2, $2, $4}, $5},
     %% {{Key, Node, SessionIdBin, EntryIdBin}, '_'},
+    Node = maps:get(nodestring, Opts, '_'),
+
     Conds1 = case maps:find(eligible, Opts) of
         {ok, []} ->
             %% Non eligible! Most probably a mistake but we need to
@@ -1214,14 +1226,14 @@ trie_ms(Opts) ->
         [_] ->
             [
                 {
-                    {{'_', '_', '$3', '_'}, '_'}, Conds2, ['$_']
+                    {{'_', Node, '$3', '_'}, '_'}, Conds2, ['$_']
                 }
             ];
         _ ->
             Conds3 = [list_to_tuple(['andalso' | Conds2])],
             [
                 {
-                    {{'_', '_', '$3', '_'}, '_'}, Conds3, ['$_']
+                    {{'_', Node, '$3', '_'}, '_'}, Conds3, ['$_']
                 }
             ]
     end.
