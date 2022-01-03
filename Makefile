@@ -11,7 +11,7 @@ genvars:
 compile:
 	${REBAR} compile
 
-docs:
+docs: xref
 	${REBAR} ex_doc
 
 test: xref
