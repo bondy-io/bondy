@@ -382,7 +382,7 @@ remove(Type, EntryId, Ctxt) ->
     task() | undefined) -> ok.
 
 remove(Type, EntryId, Ctxt, Task)
-when is_function(Task, 2) orelse Task == undefined ->
+when Task == undefined orelse is_function(Task, 1)->
     RealmUri = bondy_context:realm_uri(Ctxt),
     Node = bondy_context:node(Ctxt),
     SessionId = bondy_context:session_id(Ctxt),
@@ -434,7 +434,7 @@ remove_all(Type, Ctxt) ->
     ok.
 
 remove_all(Type, #{realm_uri := RealmUri} = Ctxt, Task)
-when is_function(Task, 2) orelse Task == undefined ->
+when Task == undefined orelse is_function(Task, 1) ->
     case bondy_context:session_id(Ctxt) of
         undefined ->
             ?LOG_INFO(#{
@@ -458,10 +458,7 @@ when is_function(Task, 2) orelse Task == undefined ->
                 full_prefix(Type, RealmUri), Pattern, MatchOpts
             ),
             do_remove_all(Matches, SessionId, MaybeFun)
-    end;
-
-remove_all(_, _, _) ->
-    ok.
+    end.
 
 
 %% -----------------------------------------------------------------------------
