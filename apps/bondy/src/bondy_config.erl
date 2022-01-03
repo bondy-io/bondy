@@ -103,7 +103,13 @@
         {peer_ip, {127,0,0,1}},
         {peer_port, 18086},
         {pid_encoding, false},
-        {ref_encoding, false}
+        {ref_encoding, false},
+        {binary_padding, false},
+        {disable_fast_forward, false},
+        %% Broadcast options
+        {broadcast, false},
+        {tree_refresh, 1000},
+        {relay_ttl, 5}
     ]},
     %% Local in-memory storage
     {tuplespace, [
