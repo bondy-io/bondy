@@ -8,7 +8,8 @@
 -define(NAME(RealmUri, Id), {bondy_session, RealmUri, Id}).
 
 -record(state, {
-    name :: atom()
+    name                :: atom(),
+    monitor_refs = #{}  :: #{id() => reference()}
 }).
 
 %% API
@@ -123,7 +124,7 @@ init([Pool, Name]) ->
     {ok, #state{name = Name}}.
 
 
-handle_call({open, Session}, _From, State) ->
+handle_call({open, Session}, _From, State0) ->
     Id = bondy_session:id(Session),
     RealmUri = bondy_session:realm_uri(Session),
     Pid = bondy_session:pid(Session),
@@ -134,11 +135,19 @@ handle_call({open, Session}, _From, State) ->
 
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates
-    ok = gproc_monitor:subscribe({n, l, Name}),
+    Ref = erlang:monitor(process, Pid),
 
     %% We register WAMP procedures
     ok = register_procedures(Session),
 
+    Refs = State0#state.monitor_refs,
+
+    State = State0#state{
+        monitor_refs = Refs#{
+            Id => Ref,
+            Ref => Id
+        }
+    },
     {reply, ok, State};
 
 handle_call(Event, From, State) ->
@@ -149,16 +158,29 @@ handle_call(Event, From, State) ->
     }),
     {reply, {error, {unsupported_call, Event}}, State}.
 
-handle_cast({close, Session}, State) ->
+
+handle_cast({close, Session}, State0) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
-    ok = gproc_monitor:unsubscribe(?NAME(Uri, Id)),
 
     ?LOG_DEBUG(#{
         description => "Session closing, demonitoring session connection",
-        realm => bondy_session:realm_uri(Session),
+        realm => Uri,
         session_id => Id
     }),
+    Refs = State0#state.monitor_refs,
+
+    State = case maps:find(Id, Refs) of
+        {ok, Ref} ->
+            true = erlang:demonitor(Ref),
+            State0#state{
+                monitor_refs = maps:without([Id, Ref], Refs)
+            };
+        error ->
+            State0#state{
+                monitor_refs = maps:without([Id], Refs)
+            }
+    end,
 
     ok = bondy_session:close(Session),
 
@@ -172,29 +194,30 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info({gproc_monitor, {n, l, {bondy_session, Uri, Id}}, undefined}, State) ->
-    %% The connection process has died or closed
+handle_info({'DOWN', Ref, _, _, _}, State0) ->
+    %% The connection process has terminated
+    Refs = State0#state.monitor_refs,
 
-    case bondy_session:lookup(Id) of
-        {error, not_found} ->
-            ok;
-        Session ->
-            ?LOG_DEBUG(#{
-                description => "Connection process for session terminated, cleaning up",
-                realm => Uri,
-                session_id => Id
-            }),
-            cleanup(Session)
+    State = case maps:find(Ref, Refs) of
+        {ok, SessionId} ->
+            case bondy_session:lookup(SessionId) of
+                {error, not_found} ->
+                    ok;
+                Session ->
+                    ?LOG_DEBUG(#{
+                        description => "Connection process for session terminated, cleaning up",
+                        session_id => SessionId
+                    }),
+                    cleanup(Session)
+            end,
+            State0#state{
+                monitor_refs = maps:without([Ref, SessionId], Refs)
+            };
+        error ->
+            State0#state{
+                monitor_refs = maps:without([Ref], Refs)
+            }
     end,
-    {noreply, State};
-
-handle_info({gproc_monitor, {n, l, {bondy_session, Uri, Id}}, Pid}, State) ->
-    ?LOG_DEBUG(#{
-        description => "Monitoring session connection",
-        session_id => Id,
-        realm => Uri,
-        pid => Pid
-    }),
     {noreply, State};
 
 handle_info(Info, State) ->
