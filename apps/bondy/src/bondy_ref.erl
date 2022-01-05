@@ -52,6 +52,7 @@
 }).
 
 -type t()               ::  #bondy_ref{}.
+% -type t_or_uri()        ::  t() | uri().
 -type relay()           ::  #bondy_ref{type :: relay}.
 -type bridge_relay()    ::  #bondy_ref{type :: bridge_relay}.
 -type client()          ::  #bondy_ref{type :: client}.
@@ -97,6 +98,9 @@
 -export([target/1]).
 -export([target_type/1]).
 -export([type/1]).
+-export([to_uri/1]).
+-export([from_uri/1]).
+-export([to_key/1]).
 
 
 
@@ -406,23 +410,7 @@ target(#bondy_ref{target = Val}) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the target of the reference. A target is a process (`pid()') a
-%% gproc registered name (`{name, GprocName}') or a callback (`mf()').
-%%
-%% If the reference type is `client' the target refers to the
-%% session and/or process owning the network connection to the client.
-%%
-%% If the reference type is `internal' the target refers to an internal
-%% process acting as one of the Bondy client roles e.g. an internal subscriber.
-%% Messages destined to a target located on a different node are relayed by the
-%% router through the cluster distribution layer (Partisan).
-%%
-%% If the reference type is `relay' the target refers to the session
-%% and/or process owning the network connection to the edge or
-%% remote cluster (See {@link bondy_edge_uplink_client} and
-%% {@link bondy_edge_uplink_server} respectively). The relay acts as a proxy
-%% for the actual edge or remote clients, internal and callback targets.
-%%
+%% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec target_type(t()) -> wildcard(target_type()).
@@ -469,7 +457,7 @@ pid(#bondy_ref{target = {name, Name}} = Ref) ->
     %% Also we only use gproc locally, if this ref is for another node then we
     %% do not have the session here.
     is_local(Ref) orelse error(not_my_node),
-    gproc:lookup_pid({n, l, Name});
+    bondy:lookup_pid(Name);
 
 pid(#bondy_ref{}) ->
     undefined.
@@ -486,6 +474,83 @@ callback(#bondy_ref{target = {callback, Val}}) ->
 
 callback(#bondy_ref{}) ->
     undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_uri(t()) -> uri().
+
+to_uri(#bondy_ref{} = Ref) ->
+    RealmUri = Ref#bondy_ref.realm_uri,
+    Nodestring = Ref#bondy_ref.nodestring,
+    SessionKey = integer_to_binary(Ref#bondy_ref.session_id),
+    Type = atom_to_binary(Ref#bondy_ref.type),
+
+    Target =
+        case Ref#bondy_ref.target of
+            {pid, PidBin} ->
+                Name = binary:replace(PidBin, [<<$<>>, <<$>>>], <<>>, [global]),
+                <<"p#", Name/binary>>;
+            {name, Name} ->
+                <<"n#", Name/binary>>;
+            {callback, {M, F}} ->
+                MBin = atom_to_binary(M),
+                FBin = atom_to_binary(F),
+                <<"c#", MBin/binary, $,, FBin/binary>>
+        end,
+
+    <<
+        "bondy:", Nodestring/binary, $:,
+        RealmUri/binary, $:,
+        Type/binary, $:,
+        SessionKey/binary, $:,
+        Target/binary
+    >>.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_key(t()) -> uri().
+
+to_key(#bondy_ref{} = Ref) ->
+    RealmUri = Ref#bondy_ref.realm_uri,
+    Nodestring = Ref#bondy_ref.nodestring,
+    SessionKey = integer_to_binary(Ref#bondy_ref.session_id),
+    Type = atom_to_binary(Ref#bondy_ref.type),
+
+    Target = encode_target(Ref#bondy_ref.target),
+
+    <<
+        RealmUri/binary, $\31,
+        Nodestring/binary, $\31,
+        Target/binary, $\31,
+        SessionKey/binary, $\31,
+        Type/binary
+    >>.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec from_uri(uri()) -> t().
+
+from_uri(Uri) ->
+    case binary:split(Uri, uri_pattern(), [global]) of
+        [<<"bondy">>, Nodestring, RealmUri, Type, SessionId, Target] ->
+            #bondy_ref{
+                realm_uri = RealmUri,
+                nodestring = Nodestring,
+                type = binary_to_existing_atom(Type),
+                session_id = binary_to_integer(SessionId),
+                target = decode_target(Target)
+            };
+        _ ->
+            error(badarg)
+    end.
 
 
 
@@ -519,4 +584,56 @@ validate_target(Target, AllowPattern) ->
 
         Term ->
             {name, Term}
+    end.
+
+
+uri_pattern() ->
+    Key = {?MODULE, uri_pattern},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            CP = binary:compile_pattern([<<$:>>]),
+            _ = persistent_term:put(Key, CP),
+            CP;
+        CP ->
+            CP
+    end.
+
+target_pattern() ->
+    Key = {?MODULE, target_pattern},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            CP = binary:compile_pattern([<<$,>>]),
+            _ = persistent_term:put(Key, CP),
+            CP;
+        CP ->
+            CP
+    end.
+
+
+encode_target({pid, PidBin}) ->
+    Name = binary:replace(PidBin, [<<$<>>, <<$>>>], <<>>, [global]),
+    <<"p#", Name/binary>>;
+
+encode_target({name, Name}) ->
+    <<"n#", Name/binary>>;
+
+encode_target({callback, {M, F}}) ->
+    MBin = atom_to_binary(M),
+    FBin = atom_to_binary(F),
+    <<"c#", MBin/binary, $,, FBin/binary>>.
+
+
+decode_target(<<"p#", Rest/binary>>) ->
+    {pid, <<$<, Rest/binary, $>>>};
+
+decode_target(<<"n#", Rest/binary>>) ->
+    {name, Rest};
+
+decode_target(<<"c#", Rest/binary>>) ->
+    case binary:split(Rest, target_pattern()) of
+        [BM, BF] ->
+            MF = {binary_to_existing_atom(BM), binary_to_existing_atom(BF)},
+            {callback, MF};
+        _ ->
+            error({badarg, target})
     end.

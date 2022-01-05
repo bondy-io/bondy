@@ -664,9 +664,11 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
         ),
 
         %% Add to registry and set properties so that we can perform queries
-        true = gproc:reg_other({n, l, {subscriber, Id}}, Pid),
-        true = gproc:reg_other({r, l, subscription_id}, Pid, Id),
-        true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
+        true = bondy:register({subscriber, Id}, Pid),
+        true = bondy:register(subscription_id, Pid, resource_property, Id),
+        true = bondy:register(
+            bondy_broker_bridge, Pid, resource_property, Bridge
+        ),
 
         Res
 
@@ -708,7 +710,7 @@ subscribers(Bridge) ->
         [],
         ['$1']
     }],
-    gproc:select({l, resources}, MatchSpec).
+    bondy:select(MatchSpec).
 
 
 %% @private

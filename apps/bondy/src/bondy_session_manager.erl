@@ -5,7 +5,7 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
--define(REG_KEY(RealmUri, Id), {n, l, {bondy_session, RealmUri, Id}}).
+-define(NAME(RealmUri, Id), {bondy_session, RealmUri, Id}).
 
 -record(state, {
     name :: atom()
@@ -127,14 +127,14 @@ handle_call({open, Session}, _From, State) ->
     Id = bondy_session:id(Session),
     RealmUri = bondy_session:realm_uri(Session),
     Pid = bondy_session:pid(Session),
-    Key = ?REG_KEY(RealmUri, Id),
+    Name = ?NAME(RealmUri, Id),
 
     %% We register the session owner (pid) under the realm and session id.
-    true = gproc:reg_other(Key, Pid),
+    true = bondy:register(Name, Pid),
 
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates
-    ok = gproc_monitor:subscribe(Key),
+    ok = gproc_monitor:subscribe({n, l, Name}),
 
     %% We register WAMP procedures
     ok = register_procedures(Session),
@@ -152,7 +152,7 @@ handle_call(Event, From, State) ->
 handle_cast({close, Session}, State) ->
     Id = bondy_session:id(Session),
     Uri = bondy_session:realm_uri(Session),
-    ok = gproc_monitor:unsubscribe(?REG_KEY(Uri, Id)),
+    ok = gproc_monitor:unsubscribe(?NAME(Uri, Id)),
 
     ?LOG_DEBUG(#{
         description => "Session closing, demonitoring session connection",

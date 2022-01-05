@@ -187,7 +187,7 @@ ref(RealmUri) ->
 
 
 init([]) ->
-    true = gproc:reg({n, l, ?MODULE}),
+    true = bondy:register(?MODULE),
     {ok, #state{}}.
 
 
