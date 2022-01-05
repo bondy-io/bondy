@@ -201,14 +201,14 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
     State = case maps:find(Ref, Refs) of
         {ok, SessionId} ->
             case bondy_session:lookup(SessionId) of
-                {error, not_found} ->
-                    ok;
-                Session ->
+                {ok, Session} ->
                     ?LOG_DEBUG(#{
                         description => "Connection process for session terminated, cleaning up",
                         session_id => SessionId
                     }),
-                    cleanup(Session)
+                    cleanup(Session);
+                {error, not_found} ->
+                    ok
             end,
             State0#state{
                 monitor_refs = maps:without([Ref, SessionId], Refs)

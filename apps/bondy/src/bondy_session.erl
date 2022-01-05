@@ -611,17 +611,10 @@ is_security_enabled(Id) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(id() | bondy_ref:t()) -> t() | {error, not_found}.
+-spec lookup(id() | bondy_ref:t()) -> {ok, t()} | {error, not_found}.
 
 lookup(Id) when is_integer(Id) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-
-    case ets:lookup(Tab, Id)  of
-        [#session{} = Session] ->
-            Session;
-        [] ->
-            {error, not_found}
-    end;
+    do_lookup(Id);
 
 lookup(Ref) ->
     lookup(bondy_ref:realm_uri(Ref), bondy_ref:session_id(Ref)).
@@ -633,12 +626,12 @@ lookup(Ref) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(RealmUri :: uri(), Id :: id()) -> t() | {error, not_found}.
+-spec lookup(RealmUri :: uri(), Id :: id()) -> {ok, t()} | {error, not_found}.
 
 lookup(RealmUri, Id) ->
     case do_lookup(Id) of
-        #session{realm_uri = Val} = Session when Val == RealmUri ->
-            Session;
+        {ok, #session{realm_uri = Val} = Session} when Val == RealmUri ->
+            {ok, Session};
         _ ->
             {error, not_found}
     end.
@@ -654,10 +647,10 @@ lookup(RealmUri, Id) ->
 
 fetch(Id) ->
     case lookup(Id) of
+        {ok, Session} ->
+            Session;
         {error, not_found} ->
-            error({badarg, Id});
-        Session ->
-            Session
+            error({badarg, Id})
     end.
 
 
@@ -875,13 +868,13 @@ parse_roles([_|T], Roles) ->
 
 
 %% @private
--spec do_lookup(id()) -> t() | {error, not_found}.
+-spec do_lookup(id()) -> {ok, t()} | {error, not_found}.
 
 do_lookup(Id) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
     case ets:lookup(Tab, Id)  of
         [#session{} = Session] ->
-            Session;
+            {ok, Session};
         [] ->
             {error, not_found}
     end.

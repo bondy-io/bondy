@@ -715,14 +715,14 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                         Pid ! Event,
                         NodeAcc;
 
-                    _ESessionId ->
+                    ESessionId ->
                         %% A WAMP session
-                        case bondy_session:lookup(SubscriberRef) of
-                            {error, not_found} ->
-                                NodeAcc;
-                            _ESession ->
+                        case bondy_session:lookup(RealmUri, ESessionId) of
+                            {ok, _ESession} ->
                                 Event = MakeEvent(SubsId),
                                 ok = bondy:send(SubscriberRef, Event),
+                                NodeAcc;
+                            {error, not_found} ->
                                 NodeAcc
                         end
                 end;

@@ -303,18 +303,19 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
     case binary_to_integer(Part) == SessionId of
         true ->
             case bondy_session:lookup(RealmUri, SessionId) of
-                {error, not_found} ->
-                    E = no_such_session_error(
-                        ?INVOCATION, M#invocation.request_id
-                    ),
-                    {reply, E};
-                Session ->
+                {ok, Session} ->
                     R = wamp_message:yield(
                         M#invocation.request_id,
                         #{},
                         [bondy_session:info(Session)]
                     ),
-                    {reply, R}
+                    {reply, R};
+
+                {error, not_found} ->
+                    E = no_such_session_error(
+                        ?INVOCATION, M#invocation.request_id
+                    ),
+                    {reply, E}
             end;
         false ->
             E = wamp_message:error_from(
