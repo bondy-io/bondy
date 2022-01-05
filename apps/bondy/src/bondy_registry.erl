@@ -325,7 +325,7 @@ lookup(Type, EntryId, RealmUri) when is_integer(EntryId) ->
 %% -----------------------------------------------------------------------------
 lookup(Type, EntryId, RealmUri, _Details) when is_integer(EntryId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, '_', #{entry_id => EntryId}
+        RealmUri, '_', #{entry_id => EntryId}
     ),
     MatchOpts = [{remove_tombstones, true}, {resolver, lww}],
 
@@ -389,7 +389,7 @@ when Task == undefined orelse is_function(Task, 1)->
     Prefix = full_prefix(Type, RealmUri),
 
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, #{session_id => SessionId, entry_id => EntryId}
+        RealmUri, Node, #{session_id => SessionId, entry_id => EntryId}
     ),
 
     MatchOpts = [
@@ -445,7 +445,7 @@ when Task == undefined orelse is_function(Task, 1) ->
         SessionId ->
             Node = bondy_context:node(Ctxt),
             Pattern = bondy_registry_entry:key_pattern(
-                Type, RealmUri, Node, #{session_id => SessionId}
+                RealmUri, Node, #{session_id => SessionId}
             ),
             MaybeFun = maybe_fun(Task, Ctxt),
             MatchOpts = [
@@ -474,7 +474,7 @@ when Task == undefined orelse is_function(Task, 1) ->
 
 remove_all(Type, RealmUri, Node, SessionId) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, #{session_id => SessionId}
+        RealmUri, Node, #{session_id => SessionId}
     ),
     MatchOpts = [
         {limit, 100},
@@ -542,7 +542,7 @@ entries(Type, RealmUri, Node, SessionId) ->
 
 entries(Type, RealmUri, Node, SessionId, Limit) ->
     Pattern = bondy_registry_entry:key_pattern(
-        Type, RealmUri, Node, #{session_id => SessionId}
+        RealmUri, Node, #{session_id => SessionId}
     ),
     Opts = [{limit, Limit}, {remove_tombstones, true}, {resolver, lww}],
     case plum_db:match(full_prefix(Type, RealmUri), Pattern, Opts) of

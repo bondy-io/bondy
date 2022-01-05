@@ -39,13 +39,13 @@
     nodestring          ::  nodestring(),
     target              ::  wildcard(bondy_ref:target()),
     session_id          ::  wildcard(maybe(id())),
-    type                ::  wildcard(entry_type()),
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())
 }).
 
 -record(entry, {
     key                 ::  key(),
+    type                ::  wildcard(entry_type()),
     uri                 ::  uri() | atom(),
     match_policy        ::  binary(),
     ref                 ::  bondy_ref:t(),
@@ -104,8 +104,8 @@
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_field/1]).
--export([key_pattern/2]).
--export([key_pattern/4]).
+-export([key_pattern/1]).
+-export([key_pattern/3]).
 -export([match_policy/1]).
 -export([new/4]).
 -export([new/5]).
@@ -166,7 +166,6 @@ when Type == registration orelse Type == subscription ->
         nodestring = Nodestring,
         target = Target,
         session_id = SessionId,
-        type = Type,
         entry_id = RegId
     },
 
@@ -176,6 +175,7 @@ when Type == registration orelse Type == subscription ->
 
     #entry{
         key = Key,
+        type = Type,
         uri = Uri,
         match_policy = MatchPolicy,
         ref = Ref,
@@ -220,15 +220,13 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
     ),
     Target = bondy_ref:target(PatternRef),
 
-    KeyPattern = key_pattern(
-        Type, RealmUri, Node, Extra#{target => Target}
-    ),
+    KeyPattern = key_pattern(RealmUri, Node, Extra#{target => Target}),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
     #entry{
         key = KeyPattern,
-
+        type = Type,
         uri = RegUri,
         match_policy = MatchPolicy,
         ref = '_',
@@ -244,9 +242,9 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec key_pattern(entry_type(), Ref :: bondy_ref:t()) -> key().
+-spec key_pattern(Ref :: bondy_ref:t()) -> key().
 
-key_pattern(Type, Ref) ->
+key_pattern(Ref) ->
     bondy_ref:is_type(Ref)
         orelse error({badarg, {ref, Ref}}),
 
@@ -260,14 +258,14 @@ key_pattern(Type, Ref) ->
         session_id => SessionId
     },
 
-    key_pattern(Type, RealmUri, Nodestring, Extra).
+    key_pattern(RealmUri, Nodestring, Extra).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-key_pattern(Type, RealmUri, Node, Extra) ->
+key_pattern(RealmUri, Node, Extra) ->
     Nodestring =
         case Node of
             '_' ->
@@ -285,11 +283,6 @@ key_pattern(Type, RealmUri, Node, Extra) ->
     EntryId = maps:get(entry_id, Extra, '_'),
     IsProxy = maps:get(is_proxy, Extra, '_'),
 
-    Type =:= subscription
-        orelse Type =:= registration
-        orelse Type == '_'
-        orelse error({badarg, {type, Type}}),
-
     is_binary(RealmUri)
         orelse RealmUri == '_'
         orelse error({badarg, {realm_uri, RealmUri}}),
@@ -303,7 +296,6 @@ key_pattern(Type, RealmUri, Node, Extra) ->
         nodestring = Nodestring,
         target = Target,
         session_id = SessionId,
-        type = Type,
         entry_id = EntryId,
         is_proxy = IsProxy
     }.
@@ -327,9 +319,6 @@ key_field(session_id) ->
 
 key_field(entry_id) ->
     #entry_key.entry_id;
-
-key_field(type) ->
-    #entry_key.type;
 
 key_field(is_proxy) ->
     #entry_key.is_proxy.
@@ -377,12 +366,9 @@ id(#entry_key{entry_id = Val}) ->
 %% Returns the type of the entry, the atom 'registration' or 'subscription'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec type(t_or_key()) -> entry_type().
+-spec type(t()) -> entry_type().
 
-type(#entry{key = Key}) ->
-    Key#entry_key.type;
-
-type(#entry_key{type = Val}) ->
+type(#entry{type = Val}) ->
     Val.
 
 
@@ -692,7 +678,8 @@ to_details_map(#entry{key = Key} = E) ->
 
 to_external(#entry{key = Key} = E) ->
     #{
-        type => Key#entry_key.type,
+        realm_uri => Key#entry_key.realm_uri,
+        type => E#entry.type,
         entry_id => Key#entry_key.entry_id,
         uri => E#entry.uri,
         match_policy => E#entry.match_policy,
@@ -740,11 +727,11 @@ proxy(Ref, External) ->
             realm_uri = RealmUri,
             nodestring = Nodestring,
             target = Target,
-            type = Type,
             session_id = SessionId,
             entry_id = Id,
             is_proxy = true
         },
+        type = Type,
         ref = Ref,
         uri = Uri,
         match_policy = MatchPolicy,
