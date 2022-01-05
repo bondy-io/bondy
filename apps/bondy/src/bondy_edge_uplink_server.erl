@@ -570,7 +570,7 @@ handle_session_message({forward, To, Msg, Opts}, _SessionId, State) ->
 
 %% @private
 add_registry_entry(SessionId, ExtEntry, State) ->
-    RealmUri = bondy_ref:realm_uri(maps:get(ref, ExtEntry)),
+    RealmUri = maps:get(realm_uri, ExtEntry),
     Nodestring = bondy_config:nodestring(),
 
     Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId, Nodestring),
