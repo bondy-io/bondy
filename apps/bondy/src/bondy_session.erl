@@ -317,8 +317,8 @@ id(#session{id = Id}) ->
 %% -----------------------------------------------------------------------------
 -spec realm_uri(id() | t()) -> uri().
 
-realm_uri(#session{ref = Ref}) ->
-    bondy_ref:realm_uri(Ref);
+realm_uri(#session{realm_uri = Val}) ->
+    Val;
 
 realm_uri(Id) when is_integer(Id) ->
     realm_uri(fetch(Id)).
