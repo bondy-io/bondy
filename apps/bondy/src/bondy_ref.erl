@@ -442,7 +442,14 @@ callback(#bondy_ref{}) ->
 
 to_uri(#bondy_ref{} = Ref) ->
     Nodestring = Ref#bondy_ref.nodestring,
-    SessionId = Ref#bondy_ref.session_id,
+    SessionId =
+        case Ref#bondy_ref.session_id of
+            undefined ->
+                <<>>;
+            Val ->
+                Val
+        end,
+
     Type = atom_to_binary(Ref#bondy_ref.type),
 
     Target =
@@ -496,6 +503,13 @@ to_key(#bondy_ref{} = Ref) ->
 from_uri(Uri) ->
     case binary:split(Uri, uri_pattern(), [global]) of
         [<<"bondy">>, Nodestring, Type, SessionId, Target] ->
+            case SessionId of
+                <<>> ->
+                    undefined;
+                Val ->
+                    Val
+            end,
+
             #bondy_ref{
                 nodestring = Nodestring,
                 type = binary_to_existing_atom(Type),
