@@ -6,7 +6,8 @@
 
 -type t()             ::  #{
     %% Common to client and server
-    id => ksuid:t(),
+    id := bondy_session_id:t(),
+    ref := bondy_ref:t(),
     realm := uri(),
     authid := binary(),
     pubkey := binary(),

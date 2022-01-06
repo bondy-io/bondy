@@ -16,8 +16,7 @@ get(Key, SessionId, _Details) ->
                     OtherId ->
                         ?LOG_WARNING(#{
                             description => "Session data inconsistency. SessionId should be " ++ integer_to_list(SessionId) ++ ".",
-                            session_id => OtherId,
-                            session_key => Key
+                            session_id => OtherId
                         }),
                         throw(no_such_session)
                 end;

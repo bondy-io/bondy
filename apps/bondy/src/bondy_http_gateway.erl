@@ -461,7 +461,7 @@ subscribe(State) ->
 
     %% We subscribe to WAMP events
     %% We will handle then in handle_cast/2
-    {ok, Id} = bondy:subscribe(
+    {ok, Id} = bondy_broker:subscribe(
         ?MASTER_REALM_URI,
         #{
             subscription_id => bondy_utils:get_id(global),

@@ -72,6 +72,7 @@
 
 -type external()         ::  #{
     type             :=  entry_type(),
+    realm_uri        :=  uri(),
     entry_id         :=  id(),
     uri              :=  uri(),
     match_policy     :=  binary(),
@@ -103,11 +104,10 @@
 -export([is_proxy/1]).
 -export([key/1]).
 -export([key_field/1]).
--export([key_pattern/1]).
 -export([key_pattern/2]).
 -export([match_policy/1]).
--export([new/4]).
 -export([new/5]).
+-export([new/6]).
 -export([nodestring/1]).
 -export([options/1]).
 -export([origin_id/1]).
@@ -138,23 +138,21 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), bondy_ref:t(), uri(), map()) -> t().
+-spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, Ref, Uri, Options) ->
-    RealmUri = bondy_ref:realm_uri(Ref),
+new(Type, RealmUri, Ref, Uri, Options) ->
     RegId = bondy_utils:get_id({router, RealmUri}),
-    new(Type, RegId, Ref, Uri, Options).
+    new(Type, RegId, RealmUri, Ref, Uri, Options).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), id(), bondy_ref:t(), uri(), map()) -> t().
+-spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RegId, Ref, Uri, Opts0)
+new(Type, RegId, RealmUri, Ref, Uri, Opts0)
 when Type == registration orelse Type == subscription ->
-    RealmUri = bondy_ref:realm_uri(Ref),
     Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),
 
@@ -210,9 +208,7 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
     Target0 = maps:get(target, Extra, '_'),
 
-    PatternRef = bondy_ref:pattern(
-        '_', RealmUri, Target0, SessionId, '_'
-    ),
+    PatternRef = bondy_ref:pattern('_', Target0, SessionId, '_'),
     Target = bondy_ref:target(PatternRef),
 
     KeyPattern = key_pattern(RealmUri, Extra#{target => Target}),
@@ -237,29 +233,9 @@ pattern(Type, RealmUri, RegUri, Options, Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec key_pattern(Ref :: bondy_ref:t()) -> key().
+-spec key_pattern(RealmUri :: uri(), Ref :: bondy_ref:t()) -> key().
 
-key_pattern(Ref) ->
-    bondy_ref:is_type(Ref)
-        orelse error({badarg, {ref, Ref}}),
-
-    RealmUri = bondy_ref:realm_uri(Ref),
-    SessionId = bondy_ref:session_id(Ref),
-    Target = bondy_ref:target(Ref),
-
-    Extra = #{
-        target => Target,
-        session_id => SessionId
-    },
-
-    key_pattern(RealmUri, Extra).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-key_pattern(RealmUri, Extra) ->
+key_pattern(RealmUri, Extra) when is_map(Extra) ->
     SessionId = maps:get(session_id, Extra, '_'),
     Target = maps:get(target, Extra, '_'),
     EntryId = maps:get(entry_id, Extra, '_'),
@@ -279,7 +255,21 @@ key_pattern(RealmUri, Extra) ->
         session_id = SessionId,
         entry_id = EntryId,
         is_proxy = IsProxy
-    }.
+    };
+
+key_pattern(RealmUri, Ref) ->
+    bondy_ref:is_type(Ref)
+        orelse error({badarg, {ref, Ref}}),
+
+    SessionId = bondy_ref:session_id(Ref),
+    Target = bondy_ref:target(Ref),
+
+    Extra = #{
+        target => Target,
+        session_id => SessionId
+    },
+
+    key_pattern(RealmUri, Extra).
 
 
 %% -----------------------------------------------------------------------------
@@ -631,8 +621,8 @@ to_details_map(#entry{key = Key} = E) ->
 
 to_external(#entry{key = Key} = E) ->
     #{
-        realm_uri => Key#entry_key.realm_uri,
         type => E#entry.type,
+        realm_uri => Key#entry_key.realm_uri,
         entry_id => Key#entry_key.entry_id,
         uri => E#entry.uri,
         match_policy => E#entry.match_policy,
@@ -659,6 +649,7 @@ to_external(#entry{key = Key} = E) ->
 proxy(Ref, External) ->
     #{
         type := Type,
+        realm_uri := RealmUri,
         entry_id := OriginId,
         ref := OriginRef,
         uri := Uri,
@@ -666,8 +657,6 @@ proxy(Ref, External) ->
         created := Created,
         options := Options
     } = External,
-
-    RealmUri = bondy_ref:realm_uri(OriginRef),
 
     Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),

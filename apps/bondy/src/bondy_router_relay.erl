@@ -93,7 +93,6 @@
 %% API
 -export([forward/2]).
 -export([forward/3]).
--export([ref/1]).
 -export([start_link/0]).
 
 %% GEN_SERVER CALLBACKS
@@ -164,19 +163,6 @@ forward(Nodes, Msg, Opts) when is_list(Nodes) ->
         || Node <- Nodes
     ],
     ok.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec ref(RealmUri :: uri()) -> bondy_ref:t().
-
-ref(RealmUri) ->
-    %% We use our name which we registered using gproc on init/1
-    %% By using a registered name we might be able to continue routing messages
-    %% after a relay crash (provided it comes back on time).
-    bondy_ref:new(relay, RealmUri, ?MODULE).
 
 
 

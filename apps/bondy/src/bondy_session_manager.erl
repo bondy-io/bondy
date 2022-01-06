@@ -266,11 +266,11 @@ register_procedures(Session) ->
     %% reducing memory consumption.
     RealmUri = bondy_session:realm_uri(Session),
     MF = {bondy_session_api, get},
-    Ref = bondy_ref:new(internal, RealmUri, MF, SessionId),
+    Ref = bondy_ref:new(internal, MF, SessionId),
 
     Args = [SessionId],
     Opts = #{match => ?PREFIX_MATCH, callback_args => Args},
-    {ok, _} = bondy_dealer:register(ProcUri, Opts, Ref),
+    {ok, _} = bondy_dealer:register(ProcUri, Opts, RealmUri, Ref),
 
     ok.
 

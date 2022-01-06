@@ -72,6 +72,13 @@
 -include("bondy.hrl").
 
 
+-define(GET_REALM_URI(Map),
+    case maps:find(realm_uri, Map) of
+        {ok, Val} -> Val;
+        error -> error(no_realm)
+    end
+).
+
 %% API
 -export([close_context/1]).
 -export([features/0]).
@@ -246,9 +253,9 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
 
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     %% Add a local subscription
-    Ref = bondy_ref:new(internal, RealmUri, Pid),
+    Ref = bondy_ref:new(internal, Pid),
 
-    case bondy_registry:add(subscription, Topic, Opts, Ref) of
+    case bondy_registry:add(subscription, Topic, Opts, RealmUri, Ref) of
         {ok, Entry, true} ->
             on_create(Entry),
             {ok, bondy_registry_entry:id(Entry)};
@@ -321,6 +328,8 @@ unsubscribe(SubsId, Ctxt) ->
     ok | no_return().
 
 forward(M, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
     try
         do_forward(M, Ctxt)
     catch
@@ -329,16 +338,16 @@ forward(M, Ctxt) ->
             case maps:get(acknowledge, Opts, false) of
                 true ->
                     Reply = not_authorized_error(M, Reason),
-                    bondy:send(bondy_context:ref(Ctxt), Reply);
+                    bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
                 false ->
                     ok
             end;
         _:{not_authorized, Reason} ->
             Reply = not_authorized_error(M, Reason),
-            bondy:send(bondy_context:ref(Ctxt), Reply);
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
-            bondy:send(bondy_context:ref(Ctxt), Reply)
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
     end.
 
 
@@ -346,12 +355,17 @@ forward(M, Ctxt) ->
 %% @doc Handles a message sent by a peer node through the bondy_router_relay.
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(M :: wamp_publish(), To :: maybe(bondy_ref:t()), Opts :: map()) ->
+-spec forward(
+    M :: wamp_publish(),
+    To :: maybe(bondy_ref:t()),
+    Opts :: bondy:send_opts()) ->
     ok | no_return().
 
 forward(#publish{} = M, undefined, #{from := Publisher} = Opts) ->
+    %% Fails with no_realm exception if not present
+    RealmUri = ?GET_REALM_URI(Opts),
+
     PubId = maps:get(publication_id, Opts),
-    RealmUri = bondy_ref:realm_uri(Publisher),
     TopicUri = M#publish.topic_uri,
     Args = M#publish.args,
     ArgsKW = M#publish.kwargs,
@@ -365,7 +379,7 @@ forward(#publish{} = M, undefined, #{from := Publisher} = Opts) ->
         SubsId = bondy_registry_entry:id(Entry),
         Subscriber = bondy_registry_entry:ref(Entry),
         Event = wamp_message:event(SubsId, PubId, Opts, Args, ArgsKW),
-        catch bondy:send(Subscriber, Event, #{from => Publisher}),
+        catch bondy:send(RealmUri, Subscriber, Event, #{from => Publisher}),
         ok
     end,
 
@@ -385,6 +399,7 @@ forward(#publish{} = M, undefined, #{from := Publisher} = Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do_forward(#subscribe{} = M, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
     Topic = M#subscribe.topic_uri,
 
     ok = bondy_rbac:authorize(<<"wamp.subscribe">>, Topic, Ctxt),
@@ -393,31 +408,34 @@ do_forward(#subscribe{} = M, Ctxt) ->
     Opts = M#subscribe.options,
     ReqId = M#subscribe.request_id,
 
-    case bondy_registry:add(subscription, Topic, Opts, Ref) of
+    case bondy_registry:add(subscription, Topic, Opts, RealmUri, Ref) of
         {ok, Entry, true} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(Ref, wamp_message:subscribed(ReqId, Id)),
+            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_create(Entry);
         {ok, Entry, false} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(Ref, wamp_message:subscribed(ReqId, Id)),
+            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
-            bondy:send(Ref, wamp_message:subscribed(ReqId, Id))
+            bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id))
     end;
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+
     case unsubscribe(M, Ctxt) of
         ok ->
             ReqId = M#unsubscribe.request_id,
             Reply = wamp_message:unsubscribed(ReqId),
-            bondy:send(bondy_context:ref(Ctxt), Reply);
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         {error, not_found} ->
             throw(not_found)
     end;
 
 do_forward(#publish{} = M, Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
     Topic = M#publish.topic_uri,
     ok = bondy_rbac:authorize(<<"wamp.publish">>, Topic, Ctxt),
 
@@ -441,7 +459,7 @@ do_forward(#publish{} = M, Ctxt) ->
     case do_publish(ReqId, Opts, Topic, Args, Payload, Ctxt) of
         {ok, PubId} when Ack == true ->
             Reply = wamp_message:published(ReqId, PubId),
-            bondy:send(bondy_context:ref(Ctxt), Reply);
+            bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
         {ok, _} when Ack == false ->
             ok
     end.
@@ -515,6 +533,7 @@ unsubscribe_all(Ctxt) ->
 
 subscriptions(?EOT) ->
     ?EOT;
+
 subscriptions({subscription, _} = Cont) ->
     bondy_registry:entries(Cont).
 
@@ -721,7 +740,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                         case bondy_session:lookup(RealmUri, ESessionId) of
                             {ok, _ESession} ->
                                 Event = MakeEvent(SubsId),
-                                ok = bondy:send(SubscriberRef, Event),
+                                ok = bondy:send(RealmUri, SubscriberRef, Event),
                                 NodeAcc;
                             {error, not_found} ->
                                 NodeAcc
@@ -774,7 +793,10 @@ forward_publication(Nodes, #publish{} = M, Opts0, Ctxt) ->
     %% use a per node reference counter
     Publisher = bondy_context:ref(Ctxt),
     RealmUri = bondy_context:realm_uri(Ctxt),
-    Opts = Opts0#{from => Publisher},
+    Opts = Opts0#{
+        realm_uri => RealmUri,
+        from => Publisher
+    },
     RelayMsg = {forward, undefined, M, Opts},
     RelayOpts = #{
         ack => true,
@@ -883,7 +905,7 @@ send_retained(Entry) ->
                 bondy_retained_message_manager:match(Cont);
             (M) ->
                 Event = bondy_retained_message:to_event(M, SubsId),
-                catch bondy:send(Ref, Event)
+                catch bondy:send(RealmUri, Ref, Event)
         end,
         Matches
     ).

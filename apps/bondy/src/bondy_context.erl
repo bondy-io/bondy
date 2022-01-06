@@ -39,7 +39,7 @@
 
 -type t()       ::  #{
     realm_uri => uri(),
-    session_id => maybe(ksuid:t()),
+    session_id => maybe(bondy_session_id:t()),
     session => maybe(bondy_session:t()),
     security_enabled => boolean(),
     %% Peer Info

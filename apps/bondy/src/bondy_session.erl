@@ -216,12 +216,7 @@ new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
 
     S1 = parse_details(Opts, #session{}),
 
-    Ref = bondy_ref:new(
-        S1#session.type,
-        RealmUri,
-        self(),
-        Id
-    ),
+    Ref = bondy_ref:new(S1#session.type, self(), Id),
 
     S1#session{
         %% We choose seconds as we are not interested in the accuracy of time
@@ -973,7 +968,7 @@ when is_binary(RealmUri) orelse RealmUri == '_' ->
         '_' -> [];
         _ ->  [{'=:=', '$1', RealmUri}]
     end,
-    Projection = ['$2'],
+    Projection = [{{'$1', '$2'}}],
     MS = [{Pattern, Conds, Projection}],
 
     case ets:select(Tab, MS, N) of

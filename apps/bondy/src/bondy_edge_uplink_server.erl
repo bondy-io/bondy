@@ -206,7 +206,7 @@ when ?SOCKET_DATA(Tag) ->
             ?LOG_INFO(#{
                 description => "Got session message from edge",
                 reason => Msg,
-                session_key => SessionId
+                session_id => SessionId
             }),
             safe_handle_session_message(Msg, SessionId, State);
         Msg ->
@@ -232,7 +232,7 @@ connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
-    SessionId = session_key(RealmUri, State),
+    SessionId = session_id(RealmUri, State),
     ok = send_message({receive_message, SessionId, M}, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
@@ -376,6 +376,7 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
         end,
 
     Session = Session0#{
+        ref => bondy_ref:new(bridge_relay, self(), SessionId),
         auth_context => AuthCtxt,
         start_ts => erlang:system_time(millisecond)
     },
@@ -549,14 +550,15 @@ handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({forward, To, Msg, Opts}, _SessionId, State) ->
+handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
     %% We either need to implement Partisan 4 plus:
     %% a) causality or
     %% b) a pool of relays (selecting one by hashing {CallerID, CalleeId}) and
     %% do it sync
+    RealmUri = session_realm(SessionId, State),
     Job = fun() ->
-        bondy_router:forward(Msg, To, Opts)
+        bondy_router:forward(Msg, To, Opts#{realm_uri => RealmUri})
     end,
 
     case bondy_router_worker:cast(Job) of
@@ -572,10 +574,8 @@ handle_session_message({forward, To, Msg, Opts}, _SessionId, State) ->
 
 %% @private
 add_registry_entry(SessionId, ExtEntry, State) ->
-    RealmUri = maps:get(realm_uri, ExtEntry),
-    Nodestring = bondy_config:nodestring(),
+    Ref = session_ref(SessionId, State),
 
-    Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId, Nodestring),
     ProxyEntry = bondy_registry_entry:proxy(Ref, ExtEntry),
 
     Id = bondy_registry_entry:id(ProxyEntry),
@@ -586,6 +586,7 @@ add_registry_entry(SessionId, ExtEntry, State) ->
             Index0 = State#state.registrations,
             Index = key_value:put([SessionId, OriginId], Id, Index0),
             State#state{registrations = Index};
+
         {error, already_exists} ->
             ok
     end.
@@ -604,7 +605,7 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
             Ctxt = #{
                 realm_uri => RealmUri,
                 node => Node,
-                session_key => SessionId
+                session_id => SessionId
             },
 
             ok = bondy_registry:remove(registration, ProxyId, Ctxt),
@@ -618,20 +619,12 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 
 remove_all_registry_entries(State) ->
-    Node = bondy_config:node(),
-
     maps:foreach(
-        fun(RealmUri, SessionId) ->
-            Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
-            Ctxt = #{
-                realm_uri => RealmUri,
-                session_key => SessionId,
-                node => Node,
-                ref => Ref
-            },
-            bondy_router:close_context(Ctxt)
+        fun(Session) ->
+            FakeCtxt = maps:with([id, ref, realm_uri], Session),
+            bondy_router:close_context(FakeCtxt)
         end,
-        State#state.sessions_by_uri
+        State#state.sessions
     ).
 
 
@@ -738,5 +731,11 @@ session_realm(SessionId, #state{sessions = Map}) ->
     maps:get(realm, maps:get(SessionId, Map)).
 
 
-session_key(RealmUri, #state{sessions_by_uri = Map}) ->
+%% @private
+session_ref(SessionId, #state{sessions = Map}) ->
+    maps:get(ref, maps:get(SessionId, Map)).
+
+
+%% @private
+session_id(RealmUri, #state{sessions_by_uri = Map}) ->
     maps:get(RealmUri, Map).

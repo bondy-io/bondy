@@ -27,7 +27,13 @@
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
--type wamp_error_map() :: #{
+-type send_opts()       ::  #{
+    from := bondy_ref:t(),
+    realm_uri := uri(),
+    via => maybe(queue:queue())
+}.
+
+-type wamp_error_map() ::  #{
     error_uri => uri(),
     details => map(),
     args => list(),
@@ -36,6 +42,7 @@
 }.
 
 -export_type([wamp_error_map/0]).
+-export_type([send_opts/0]).
 
 -export([aae_exchanges/0]).
 -export([ack/2]).
@@ -47,17 +54,13 @@
 -export([peek_via/1]).
 -export([prepare_send/2]).
 -export([prepare_send/3]).
--export([publish/5]).
--export([publish/6]).
 -export([register/1]).
 -export([register/2]).
 -export([register/4]).
 -export([request/3]).
 -export([select/1]).
--export([send/2]).
 -export([send/3]).
--export([subscribe/3]).
--export([subscribe/4]).
+-export([send/4]).
 -export([take_via/1]).
 -export([unregister/1]).
 -export([unregister/2]).
@@ -95,10 +98,10 @@ request(Pid, RealmUri, M) ->
 %% It calls `send/3' with a an empty map for Options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(bondy_ref:t(), wamp_message()) -> ok.
+-spec send(RealmUri :: uri(), bondy_ref:t(), wamp_message()) -> ok.
 
-send(Ref, M) ->
-    send(Ref, M, #{}).
+send(RealmUri, Ref, M) ->
+    send(RealmUri, Ref, M, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -116,17 +119,21 @@ send(Ref, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(Ref :: bondy_ref:t(), Msg :: wamp_message(), Opts :: map()) ->
+-spec send(
+    RealmUri :: uri(),
+    Ref :: bondy_ref:t(),
+    Msg :: wamp_message(),
+    Opts :: send_opts()) ->
     ok | no_return().
 
-send(To, Msg, Opts) ->
+send(RealmUri, To, Msg, Opts) ->
     %% We validate the message
     wamp_message:is_message(Msg)
         orelse error(invalid_wamp_message),
 
     case bondy_ref:is_local(To) of
         true ->
-            do_send(To, Msg, Opts);
+            do_send(To, Msg, Opts#{realm_uri => RealmUri});
 
         false ->
 
@@ -138,7 +145,7 @@ send(To, Msg, Opts) ->
                     %% cluster. SO we trust the prepase_send or caller is doing
                     %% the correct thing.
                     Node = bondy_ref:node(To),
-                    relay_message(Node, To, Msg, Opts);
+                    relay_message(RealmUri, Node, To, Msg, Opts);
 
                 Relay ->
                     Type = bondy_ref:type(Relay),
@@ -148,15 +155,16 @@ send(To, Msg, Opts) ->
                         {bridge_relay, true} ->
                             %% We consume the relay from via stack
                             {Relay, Opts1} = take_via(Opts),
-                            RelayMsg = {forward, To, Msg, Opts1},
-                            do_send(Relay, RelayMsg, Opts1);
+                            Opts2 = Opts1#{realm_uri => RealmUri},
+                            RelayMsg = {forward, To, Msg, Opts2},
+                            do_send(Relay, RelayMsg, Opts2);
 
                         {bridge_relay, false} ->
                             %% We cannot send directly to Bridge Relay
                             %% we need to go through a router relay, this
                             %% means we do not consume from via stack.
                             Node = bondy_ref:node(Relay),
-                            relay_message(Node, To, Msg, Opts);
+                            relay_message(RealmUri, Node, To, Msg, Opts);
 
                         {_, _} ->
                             error({badarg, [{ref, To}, {via, Relay}]})
@@ -382,50 +390,6 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     ok.
 
 
-
-%% =============================================================================
-%% API - SESSION
-%% =============================================================================
-
-
-
-
-%% =============================================================================
-%% API - SUBSCRIBER ROLE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Calls bondy_broker:subscribe/3.
-%% @end
-%% -----------------------------------------------------------------------------
-subscribe(RealmUri, Opts, TopicUri) ->
-    bondy_broker:subscribe(RealmUri, Opts, TopicUri).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Calls bondy_broker:subscribe/4.
-%% @end
-%% -----------------------------------------------------------------------------
-subscribe(RealmUri, Opts, TopicUri, Fun) ->
-    bondy_broker:subscribe(RealmUri, Opts, TopicUri, Fun).
-
-
-
-%% =============================================================================
-%% API - PUBLISHER ROLE
-%% =============================================================================
-
-
-
-publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
-    bondy_broker:publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
-
-
-publish(ReqId, Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
-    bondy_broker:publish(ReqId, Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
-
-
 %% =============================================================================
 %% API - CALLER ROLE
 %% =============================================================================
@@ -571,14 +535,15 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-relay_message(Node, To, Msg, Opts) ->
-    RealmUri = bondy_ref:realm_uri(To),
-    RelayMsg = {forward, To, Msg, Opts},
+relay_message(RealmUri, Node, To, Msg, Opts) ->
+    RelayMsg = {forward, To, Msg, Opts#{realm_uri => RealmUri}},
+
     RelayOpts = #{
         ack => true,
         retransmission => true,
         partition_key => erlang:phash2(RealmUri)
     },
+
     bondy_router_relay:forward(Node, RelayMsg, RelayOpts).
 
 
@@ -587,8 +552,7 @@ relay_message(Node, To, Msg, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send(To, M, Opts) ->
-    RealmUri = bondy_ref:realm_uri(To),
+do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
     Pid = bondy_ref:pid(To),
 
     case bondy_ref:is_self(To) of

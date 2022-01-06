@@ -80,7 +80,7 @@
 -export([dequeue/2]).
 -export([enqueue/3]).
 -export([enqueue/4]).
--export([flush/1]).
+-export([flush/2]).
 -export([invocation_id/1]).
 -export([key_pattern/5]).
 -export([new/3]).
@@ -351,11 +351,10 @@ peek(Key) ->
 %% @doc Removes all pending promises from the queue for the reference
 %% @end
 %% -----------------------------------------------------------------------------
--spec flush(bondy_ref:t()) -> ok.
+-spec flush(uri(), bondy_ref:t()) -> ok.
 
-flush(Ref) ->
+flush(RealmUri, Ref) ->
     %% Ref can be caller and callee
-    RealmUri = bondy_ref:realm_uri(Ref),
     AsCaller =  key_pattern(RealmUri, '_', '_', '_', Ref),
     AsCallee =  key_pattern(RealmUri, '_', '_', Ref, '_'),
 

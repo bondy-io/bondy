@@ -59,7 +59,7 @@ handle_event({cluster_connection_up, Node}, State) ->
     MyNode = bondy_config:node(),
     Topic = ?BONDY_CLUSTER_CONN_UP,
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, Topic, [MyNode, Node], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -70,7 +70,7 @@ handle_event({cluster_connection_down, Node}, State) ->
     MyNode = bondy_config:node(),
     Topic = ?BONDY_CLUSTER_CONN_DOWN,
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, Topic, [MyNode, Node], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -79,7 +79,7 @@ handle_event({realm_created, Uri}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_REALM_CREATED, [Uri], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -88,7 +88,7 @@ handle_event({realm_updated, Uri}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_REALM_UPDATED, [Uri], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -97,7 +97,7 @@ handle_event({realm_deleted, Uri}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_REALM_DELETED, [Uri], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -109,7 +109,7 @@ handle_event({session_opened, Session}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(ReqId, #{}, ?WAMP_SESSION_ON_JOIN, Args, #{}, Uri),
+    _ = bondy_broker:publish(ReqId, #{}, ?WAMP_SESSION_ON_JOIN, Args, #{}, Uri),
     {ok, State};
 
 handle_event({session_closed, Session, _DurationSecs}, State) ->
@@ -123,14 +123,14 @@ handle_event({session_closed, Session, _DurationSecs}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(ReqId, #{}, ?WAMP_SESSION_ON_LEAVE, Args, #{}, Uri),
+    _ = bondy_broker:publish(ReqId, #{}, ?WAMP_SESSION_ON_LEAVE, Args, #{}, Uri),
     {ok, State};
 
 handle_event({group_added, RealmUri, Name}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_GROUP_ADDED, [RealmUri, Name], #{}, RealmUri
     ),
     {ok, State};
@@ -139,7 +139,7 @@ handle_event({group_updated, RealmUri, Name}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_GROUP_UPDATED, [RealmUri, Name], #{}, RealmUri
     ),
     {ok, State};
@@ -148,7 +148,7 @@ handle_event({group_deleted, RealmUri, Name}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_GROUP_DELETED, [RealmUri, Name], #{}, RealmUri
     ),
     {ok, State};
@@ -157,7 +157,7 @@ handle_event({user_added, RealmUri, Username}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_USER_ADDED, [Username], #{}, RealmUri
     ),
     {ok, State};
@@ -169,7 +169,7 @@ handle_event({user_updated, RealmUri, Username}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_USER_UPDATED, [RealmUri, Username], #{}, RealmUri
     ),
     %% TODO Refresh any sessions' rbac_ctxt caches this user has in this node
@@ -185,7 +185,7 @@ handle_event({user_deleted, RealmUri, Username}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_USER_DELETED, [RealmUri, Username], #{}, RealmUri
     ),
 
@@ -200,7 +200,7 @@ handle_event({user_credentials_updated, RealmUri, Username}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, Uri, [RealmUri, Username], #{}, RealmUri
     ),
 
@@ -212,14 +212,14 @@ handle_event({user_log_in, RealmUri, Username, Meta}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(ReqId, #{}, Uri, [Username, Meta], #{}, RealmUri),
+    _ = bondy_broker:publish(ReqId, #{}, Uri, [Username, Meta], #{}, RealmUri),
     {ok, State};
 
 handle_event({backup_started, #{filename := File}}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_BACKUP_STARTED, [File], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -228,7 +228,7 @@ handle_event({backup_finished, Args}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_BACKUP_FINISHED, Args, #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -237,7 +237,7 @@ handle_event({backup_failed, Args}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_BACKUP_FAILED, Args, #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -246,7 +246,7 @@ handle_event({backup_restore_started, File}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_BACKUP_RESTORE_STARTED, [File], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -255,7 +255,7 @@ handle_event({backup_restore_finished, Args}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(
+    _ = bondy_broker:publish(
         ReqId, #{}, ?BONDY_BACKUP_RESTORE_FINISHED, [Args], #{}, ?MASTER_REALM_URI
     ),
     {ok, State};
@@ -266,7 +266,7 @@ handle_event({backup_restore_failed, Args}, State) ->
     %% We use a global ID as this is not a publishers request
     ReqId = bondy_utils:get_id(global),
 
-    _ = bondy:publish(ReqId, #{}, Uri, Args, #{}, ?MASTER_REALM_URI),
+    _ = bondy_broker:publish(ReqId, #{}, Uri, Args, #{}, ?MASTER_REALM_URI),
     {ok, State};
 
 %% REGISTRATION META API

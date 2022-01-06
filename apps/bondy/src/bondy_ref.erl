@@ -25,7 +25,6 @@
 -define(TYPES, [relay, bridge_relay, internal, client]).
 
 -record(bondy_ref, {
-    realm_uri           ::  uri(),
     nodestring          ::  wildcard(nodestring()),
     session_id          ::  wildcard(maybe(bondy_session_id:t())),
     target              ::  wildcard(target()),
@@ -56,32 +55,31 @@
 -export_type([target/0]).
 
 -export([callback/1]).
--export([is_relay/1]).
+-export([from_uri/1]).
 -export([is_bridge_relay/1]).
 -export([is_client/1]).
 -export([is_internal/1]).
 -export([is_local/1]).
 -export([is_local/2]).
+-export([is_relay/1]).
 -export([is_self/1]).
 -export([is_type/1]).
--export([types/0]).
 -export([name/1]).
+-export([new/1]).
 -export([new/2]).
 -export([new/3]).
 -export([new/4]).
--export([new/5]).
 -export([node/1]).
 -export([nodestring/1]).
--export([pattern/5]).
+-export([pattern/4]).
 -export([pid/1]).
--export([realm_uri/1]).
 -export([session_id/1]).
 -export([target/1]).
 -export([target_type/1]).
--export([type/1]).
--export([to_uri/1]).
--export([from_uri/1]).
 -export([to_key/1]).
+-export([to_uri/1]).
+-export([type/1]).
+-export([types/0]).
 
 
 
@@ -95,11 +93,21 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(Type :: ref_type(), RealmUri :: uri()) ->
+-spec new(Type :: ref_type()) ->
     t().
 
-new(Type, RealmUri) ->
-    new(Type, RealmUri, self()).
+new(Type) ->
+    new(Type, self()).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec new(Type :: ref_type(), Target :: pid() | mf() | name()) -> t().
+
+new(Type, Target) ->
+    new(Type, Target, undefined).
 
 
 %% -----------------------------------------------------------------------------
@@ -108,27 +116,12 @@ new(Type, RealmUri) ->
 %% -----------------------------------------------------------------------------
 -spec new(
     Type :: ref_type(),
-    RealmUri :: uri(),
-    Target :: pid() | mf() | name()) ->
-    t().
-
-new(Type, RealmUri, Target) ->
-    new(Type, RealmUri, Target, undefined).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec new(
-    Type :: ref_type(),
-    RealmUri :: uri(),
     Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session_id:t())) -> t().
 
-new(Type, RealmUri, Target, SessionId) ->
-    Node = bondy_config:nodestring(),
-    new(Type, RealmUri, Target, SessionId, Node).
+new(Type, Target, SessionId) ->
+    Nodestring = bondy_config:nodestring(),
+    new(Type, Target, SessionId, Nodestring).
 
 
 %% -----------------------------------------------------------------------------
@@ -137,16 +130,14 @@ new(Type, RealmUri, Target, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec new(
     Type :: ref_type(),
-    RealmUri :: uri(),
     Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session_id:t()),
     Node :: node() | nodestring()) -> t().
 
-new(Type, RealmUri, Target, SessionId, Node) when is_atom(Node) ->
-    new(Type, RealmUri, Target, SessionId, atom_to_binary(Node, utf8));
+new(Type, Target, SessionId, Node) when is_atom(Node) ->
+    new(Type, Target, SessionId, atom_to_binary(Node, utf8));
 
-new(Type, RealmUri, Target0, SessionId, Nodestring)
-when is_binary(RealmUri), is_binary(Nodestring) ->
+new(Type, Target0, SessionId, Nodestring) when is_binary(Nodestring) ->
 
     is_binary(SessionId)
         orelse SessionId == undefined
@@ -159,7 +150,6 @@ when is_binary(RealmUri), is_binary(Nodestring) ->
 
     #bondy_ref{
         type = Type,
-        realm_uri = RealmUri,
         nodestring = Nodestring,
         session_id = SessionId,
         target = Target
@@ -173,14 +163,12 @@ when is_binary(RealmUri), is_binary(Nodestring) ->
 %% -----------------------------------------------------------------------------
 -spec pattern(
     Type :: wildcard(ref_type()),
-    RealmUri :: uri(),
     Target :: wildcard(pid() | mf() | name()),
     SessionId :: wildcard(maybe(bondy_session_id:t())),
     Node :: wildcard(node() | nodestring())) -> t().
 
 
-pattern(Type, RealmUri, Target0, SessionId, Node)
-when is_binary(RealmUri) ->
+pattern(Type, Target0, SessionId, Node) ->
 
     Nodestring = case Node of
         '_' ->
@@ -204,7 +192,6 @@ when is_binary(RealmUri) ->
 
     #bondy_ref{
         type = Type,
-        realm_uri = RealmUri,
         nodestring = Nodestring,
         session_id = SessionId,
         target = Target
@@ -229,16 +216,6 @@ type(#bondy_ref{type = Val}) ->
 
 types() ->
     ?TYPES.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Returns the realm URI of the reference.
-%% @end
-%% -----------------------------------------------------------------------------
--spec realm_uri(t()) -> uri().
-
-realm_uri(#bondy_ref{realm_uri = Val}) ->
-    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -464,7 +441,6 @@ callback(#bondy_ref{}) ->
 -spec to_uri(t()) -> uri().
 
 to_uri(#bondy_ref{} = Ref) ->
-    RealmUri = Ref#bondy_ref.realm_uri,
     Nodestring = Ref#bondy_ref.nodestring,
     SessionId = Ref#bondy_ref.session_id,
     Type = atom_to_binary(Ref#bondy_ref.type),
@@ -483,8 +459,8 @@ to_uri(#bondy_ref{} = Ref) ->
         end,
 
     <<
-        "bondy:", Nodestring/binary, $:,
-        RealmUri/binary, $:,
+        "bondy:",
+        Nodestring/binary, $:,
         Type/binary, $:,
         SessionId/binary, $:,
         Target/binary
@@ -498,7 +474,6 @@ to_uri(#bondy_ref{} = Ref) ->
 -spec to_key(t()) -> uri().
 
 to_key(#bondy_ref{} = Ref) ->
-    RealmUri = Ref#bondy_ref.realm_uri,
     Nodestring = Ref#bondy_ref.nodestring,
     SessionId = Ref#bondy_ref.session_id,
     Type = atom_to_binary(Ref#bondy_ref.type),
@@ -506,7 +481,6 @@ to_key(#bondy_ref{} = Ref) ->
     Target = encode_target(Ref#bondy_ref.target),
 
     <<
-        RealmUri/binary, $\31,
         Nodestring/binary, $\31,
         Target/binary, $\31,
         SessionId/binary, $\31,
@@ -521,9 +495,8 @@ to_key(#bondy_ref{} = Ref) ->
 
 from_uri(Uri) ->
     case binary:split(Uri, uri_pattern(), [global]) of
-        [<<"bondy">>, Nodestring, RealmUri, Type, SessionId, Target] ->
+        [<<"bondy">>, Nodestring, Type, SessionId, Target] ->
             #bondy_ref{
-                realm_uri = RealmUri,
                 nodestring = Nodestring,
                 type = binary_to_existing_atom(Type),
                 session_id = SessionId,

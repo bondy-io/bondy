@@ -701,8 +701,12 @@ open_sessions(State0) ->
 
 
 %% @private
-init_session(Id, #state{} = State0) ->
-    Session = maps:put(id, Id, State0#state.session),
+init_session(SessionId, #state{session = Session0} = State0) ->
+    Session = Session0#{
+        id => SessionId,
+        ref => bondy_ref:new(bridge_relay, self(), SessionId)
+    },
+
     State1 = add_session(Session, State0),
 
     %% Synchronise the realm configuraiton state before proxying
@@ -711,6 +715,7 @@ init_session(Id, #state{} = State0) ->
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
     State3 = subscribe(Session, State2),
+    State3 = State2,
 
     %% Get the already registered registrations and subscriptions and proxy them
     State4 = proxy_existing(Session, State3),
@@ -904,11 +909,10 @@ send_session_message(SessionId, Msg, State) ->
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
 handle_session_message(Msg, To, Opts, SessionId, State) ->
-    #{realm := RealmUri} = session(SessionId, State),
-    Myself = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
+    #{realm := RealmUri, ref := MyRef} = session(SessionId, State),
 
-    SendOpts = bondy:add_via(Myself, Opts),
-    bondy_router:forward(Msg, To, SendOpts).
+    SendOpts = bondy:add_via(MyRef, Opts),
+    bondy_router:forward(Msg, To, SendOpts#{realm_uri => RealmUri}).
 
 
 

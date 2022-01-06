@@ -223,7 +223,7 @@ forward(M, #{session := _} = Ctxt) ->
 %% -----------------------------------------------------------------------------
 -spec forward(wamp_message(), maybe(bondy_ref:t()), map()) -> ok | no_return().
 
-forward(Msg, To, Opts) ->
+forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
     %% To == undefined when Msg == #publish{}
     case To == undefined orelse bondy_ref:is_local(To) of
         true ->
@@ -233,7 +233,7 @@ forward(Msg, To, Opts) ->
                 undefined ->
                     Node = bondy_ref:node(To),
                     PeerMsg = {forward, To, Msg, Opts},
-                    bondy_router_relay:forward(Node, PeerMsg);
+                    bondy_router_relay:forward(Node, RealmUri, PeerMsg);
                 Relay ->
                     case bondy_ref:is_local(Relay) of
                         true ->
@@ -241,7 +241,7 @@ forward(Msg, To, Opts) ->
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
-                            bondy_router_relay:forward(Node, PeerMsg)
+                            bondy_router_relay:forward(Node, RealmUri, PeerMsg)
                     end
             end
     end.
@@ -274,8 +274,8 @@ pre_stop() ->
                     }),
                     []
             end;
-        (Ref) ->
-            catch bondy:send(Ref, M),
+        ({RealmUri, Ref}) ->
+            catch bondy:send(RealmUri, Ref, M),
             ok
     end,
 

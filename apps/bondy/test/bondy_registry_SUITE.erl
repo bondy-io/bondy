@@ -90,7 +90,7 @@ add_subscription(Config) ->
 
     Ref = bondy_context:ref(Ctxt),
     {ok, Entry, true} = bondy_registry:add(
-        subscription, Uri, Opts, Ref
+        subscription, Uri, Opts, Realm, Ref
     ),
 
     Id1 = bondy_registry_entry:id(Entry),
@@ -107,7 +107,7 @@ add_subscription(Config) ->
 
     ?assertEqual(
         {error, {already_exists, Entry}},
-        bondy_registry:add(subscription, Uri, Opts, Ref)
+        bondy_registry:add(subscription, Uri, Opts, Realm, Ref)
     ),
 
     ?assertEqual(
@@ -116,7 +116,7 @@ add_subscription(Config) ->
     ),
 
     {ok, Entry2, true} = bondy_registry:add(
-        subscription, <<"com.a">>, Opts, Ref
+        subscription, <<"com.a">>, Opts, Realm, Ref
     ),
 
     Id2 = bondy_registry_entry:id(Entry2),
@@ -127,7 +127,7 @@ add_subscription(Config) ->
     ),
 
     {ok, Entry3, true} = bondy_registry:add(
-        subscription, <<"com.a.b">>, #{match => <<"prefix">>}, Ref
+        subscription, <<"com.a.b">>, #{match => <<"prefix">>}, Realm, Ref
     ),
 
     Id3 = bondy_registry_entry:id(Entry3),
@@ -145,7 +145,7 @@ match_prefix(Config) ->
     Ref = bondy_context:ref(Ctxt),
 
     {ok, Entry, false} = bondy_registry:add(
-        subscription, <<"com.a">>, #{match => <<"prefix">>}, Ref
+        subscription, <<"com.a">>, #{match => <<"prefix">>}, Realm, Ref
     ),
 
     Id = bondy_registry_entry:id(Entry),
@@ -181,21 +181,21 @@ register_invoke_single(Config) ->
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_SINGLE},
 
-    Ref = bondy_ref:new(internal, Realm, self()),
+    Ref = bondy_ref:new(internal),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Ref)
+        bondy_dealer:register(Uri, Opts, Realm, Ref)
     ),
 
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri, Opts, Ref)
+        bondy_dealer:register(Uri, Opts, Realm, Ref)
     ),
 
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri, #{invoke => ?INVOKE_ROUND_ROBIN}, Ref)
+        bondy_dealer:register(Uri, #{invoke => ?INVOKE_ROUND_ROBIN}, Realm, Ref)
     ).
 
 
@@ -204,16 +204,16 @@ register_shared(Config) ->
     Uri = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
-    Ref = bondy_ref:new(internal, Realm, self()),
+    Ref = bondy_ref:new(internal),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Ref)
+        bondy_dealer:register(Uri, Opts, Realm, Ref)
     ),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri, Opts, Ref)
+        bondy_dealer:register(Uri, Opts, Realm, Ref)
     ).
 
 
@@ -226,14 +226,15 @@ register_callback(Config) ->
 
     Opts = #{invoke => ?INVOKE_ROUND_ROBIN},
 
-    Ref1 = bondy_ref:new(internal, Realm, {bondy_wamp_api, handle_call}),
+    Ref1 = bondy_ref:new(internal, {bondy_wamp_api, handle_call}),
+
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri1, Opts, Ref1)
+        bondy_dealer:register(Uri1, Opts, Realm, Ref1)
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Ref1),
+        bondy_dealer:register(Uri1, Opts, Realm, Ref1),
         "Callbacks cannot use shared registration"
     ),
 
@@ -241,32 +242,33 @@ register_callback(Config) ->
     %% Uri2 = <<"com.example.", (bondy_utils:generate_fragment(12))/binary>>,
     % ?assertMatch(
     %     {ok, _},
-    %     bondy_dealer:register(Uri2, Opts, Ref1),
+    %     bondy_dealer:register(Uri2, Opts, Realm, Ref1),
     %     "We can have multiple URIs associates with the same Ref"
     % ),
 
-    Ref2 = bondy_ref:new(internal, Realm, {bondy_wamp_api, resolve}),
+    Ref2 = bondy_ref:new(internal, {bondy_wamp_api, resolve}),
+
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Ref2)
+        bondy_dealer:register(Uri1, Opts, Realm, Ref2)
     ),
 
     ?assertMatch(
         {ok, _},
-        bondy_dealer:register(Uri2, Opts, Ref2),
+        bondy_dealer:register(Uri2, Opts, Realm, Ref2),
         "We can register another URI"
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri2, Opts, Ref2),
+        bondy_dealer:register(Uri2, Opts, Realm, Ref2),
         "Callbacks cannot use shared registration"
     ),
 
     %% This should fail, for this we should be using static callbacks
     Ref3 = bondy_ref:new(
-        internal, Realm, {bondy_wamp_api, handle_call}, undefined, 'bondy2@127.0.0.1'
+        internal, {bondy_wamp_api, handle_call}, undefined, 'bondy2@127.0.0.1'
     ),
     ?assertMatch(
         {error, already_exists},
-        bondy_dealer:register(Uri1, Opts, Ref3)
+        bondy_dealer:register(Uri1, Opts, Realm, Ref3)
     ).
