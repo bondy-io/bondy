@@ -543,7 +543,7 @@ load_config(Map, State) when is_map(Map) ->
             Subscriptions = sets:to_list(sets:from_list(L)),
             %% We instantiate the subscribers
             Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
-                Bridges = State#state.bridges,
+                Bridges = Acc#state.bridges,
 
                 case key_value:get([Bridge, enabled], Bridges, false) of
                     true ->
