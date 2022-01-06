@@ -539,6 +539,15 @@ validate_target(Target, AllowPattern) ->
         undefined ->
             error({badarg, {target, Target}});
 
+        {pid, Bin} = Val when is_binary(Bin) ->
+            Val;
+
+        {name, _} = Val ->
+            Val;
+
+        {callback, {M, F}} = Val when is_atom(M), is_atom(F) ->
+            Val;
+
         {M, F} when is_atom(M), is_atom(F) ->
             {callback, Target};
 
@@ -550,7 +559,7 @@ validate_target(Target, AllowPattern) ->
                 orelse error({badarg, {target, Target}}),
             '_';
 
-        Term ->
+        Term when is_binary(Term)->
             {name, Term}
     end.
 
