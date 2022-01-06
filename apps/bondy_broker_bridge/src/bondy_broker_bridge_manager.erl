@@ -500,7 +500,7 @@ init_bridges(State) ->
                         end
                 end
         end,
-        Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
+        Bridges1 = maps:fold(Fun, #{}, Bridges0),
         {ok, State#state{bridges = Bridges1}}
     catch
         Class:Reason:Stacktrace->
