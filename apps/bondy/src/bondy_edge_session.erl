@@ -6,7 +6,7 @@
 
 -type t()             ::  #{
     %% Common to client and server
-    id => id(),
+    id => ksuid:t(),
     realm := uri(),
     authid := binary(),
     pubkey := binary(),

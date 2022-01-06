@@ -162,7 +162,7 @@ anon_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {
@@ -193,7 +193,7 @@ ticket_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {error, {not_authorized, _}},
@@ -221,7 +221,7 @@ local_scope(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {error, {not_authorized, _}},
@@ -242,13 +242,13 @@ local_scope(Config) ->
     ),
 
     %% Re-insert session so that we cleanup the rbac_ctxt
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(
@@ -285,7 +285,7 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(AppSession)), AppSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(AppSession)), AppSession),
 
     %% We issue a self-issued ticket
     {ok, AppTicket, _} = bondy_ticket:issue(AppSession, #{
@@ -303,7 +303,7 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
@@ -312,7 +312,7 @@ client_scope_with_ticket(Config) ->
     }),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(
@@ -341,7 +341,7 @@ client_scope_with_id(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, Details} = bondy_ticket:issue(
@@ -358,7 +358,7 @@ client_scope_with_id(Config) ->
     ),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(

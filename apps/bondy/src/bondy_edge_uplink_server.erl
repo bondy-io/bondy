@@ -37,7 +37,9 @@
 }).
 
 % -type t()                   ::  #state{}.
--type reg_indx()            ::  #{SessionId :: id() => proxy_map()}.
+-type reg_indx()            ::  #{
+    SessionId :: bondy_session_id:t() => proxy_map()
+}.
 -type proxy_map()           ::  #{OrigEntryId :: id() => ProxyEntryId :: id()}.
 
 %% API.
@@ -204,7 +206,7 @@ when ?SOCKET_DATA(Tag) ->
             ?LOG_INFO(#{
                 description => "Got session message from edge",
                 reason => Msg,
-                session_id => SessionId
+                session_key => SessionId
             }),
             safe_handle_session_message(Msg, SessionId, State);
         Msg ->
@@ -230,7 +232,7 @@ connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
-    SessionId = session_id(RealmUri, State),
+    SessionId = session_key(RealmUri, State),
     ok = send_message({receive_message, SessionId, M}, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
@@ -288,7 +290,7 @@ challenge(Realm, Details, State0) ->
     SessionsByUri0 = State0#state.sessions_by_uri,
 
     Uri = bondy_realm:uri(Realm),
-    SessionId = bondy_utils:get_id(global),
+    SessionId = bondy_session_id:new(),
     Authid = maps:get(authid, Details),
     Roles = maps:get(authroles, Details, []),
 
@@ -602,7 +604,7 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
             Ctxt = #{
                 realm_uri => RealmUri,
                 node => Node,
-                session_id => SessionId
+                session_key => SessionId
             },
 
             ok = bondy_registry:remove(registration, ProxyId, Ctxt),
@@ -623,7 +625,7 @@ remove_all_registry_entries(State) ->
             Ref = bondy_ref:new(bridge_relay, RealmUri, self(), SessionId),
             Ctxt = #{
                 realm_uri => RealmUri,
-                session_id => SessionId,
+                session_key => SessionId,
                 node => Node,
                 ref => Ref
             },
@@ -736,5 +738,5 @@ session_realm(SessionId, #state{sessions = Map}) ->
     maps:get(realm, maps:get(SessionId, Map)).
 
 
-session_id(RealmUri, #state{sessions_by_uri = Map}) ->
+session_key(RealmUri, #state{sessions_by_uri = Map}) ->
     maps:get(RealmUri, Map).

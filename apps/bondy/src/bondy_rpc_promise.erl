@@ -46,14 +46,12 @@
 %% We need realm and nodestrings because session ids are not globally unique,
 %% and request ids are in the session scope sequences.
 -type key()                 ::  {
-                                    RealmUri :: uri(),
-                                    InvocationId :: wildcard(id()),
-                                    CallId :: wildcard(id()),
-                                    CalleeNodestring :: wildcard(nodestring()),
-                                    CalleeSession :: wildcard(id()),
-                                    CallerNodestring :: wildcard(nodestring()),
-                                    CallerSession :: wildcard(id())
-                                }.
+                                RealmUri :: uri(),
+                                InvocationId :: wildcard(id()),
+                                CallId :: wildcard(id()),
+                                CalleeSession :: wildcard(bondy_session_id:t()),
+                                CallerSession :: wildcard(bondy_session_id:t())
+                            }.
 -type match_opts()          ::  #{
                                     id => id(),
                                     caller => bondy_ref:t(),
@@ -167,7 +165,7 @@ new(InvocationId, Callee, Caller, Opts) when is_integer(InvocationId) ->
         caller = Caller,
         callee = Callee,
         via = Via,
-        timestamp = erlang:monotonic_time()
+        timestamp = erlang:system_time(millisecond)
     }.
 
 
@@ -282,31 +280,27 @@ key_pattern(RealmUri, InvocationId, CallId, Callee, Caller) ->
     CallId == '_' orelse is_integer(CallId)
         orelse error({badarg, {invocation_id, CallId}}),
 
-    P0 = {
+    CalleeSession = case Callee of
+        '_' ->
+            '_';
+        _ ->
+            bondy_ref:session_id(Callee)
+    end,
+
+    CallerSession = case Caller of
+        '_' ->
+            '_';
+        _ ->
+            bondy_ref:session_id(Caller)
+    end,
+
+    {
         RealmUri,
         InvocationId,
         CallId,
-        '_', '_',
-        '_', '_'
-    },
-
-    P1 = case Callee of
-        '_' ->
-            P0;
-        _ ->
-            CalleeNode = bondy_ref:nodestring(Callee),
-            CalleeSession = bondy_ref:session_id(Callee),
-            setelement(5, setelement(4, P0, CalleeNode), CalleeSession)
-    end,
-
-    case Caller of
-        '_' ->
-            P1;
-        _ ->
-            CallerNode = bondy_ref:nodestring(Caller),
-            CallerSession = bondy_ref:session_id(Caller),
-            setelement(7, setelement(6, P0, CallerNode), CallerSession)
-    end.
+        CalleeSession,
+        CallerSession
+    }.
 
 
 %% -----------------------------------------------------------------------------
@@ -362,12 +356,8 @@ peek(Key) ->
 flush(Ref) ->
     %% Ref can be caller and callee
     RealmUri = bondy_ref:realm_uri(Ref),
-    AsCaller =  key_pattern(
-        RealmUri, '_', '_', '_', Ref
-    ),
-    AsCallee =  key_pattern(
-        RealmUri, '_', '_', Ref, '_'
-    ),
+    AsCaller =  key_pattern(RealmUri, '_', '_', '_', Ref),
+    AsCallee =  key_pattern(RealmUri, '_', '_', Ref, '_'),
 
     %% We remove all pending calls by Ref (as caller)
     _ = tuplespace_queue:remove(?PROMISE_QUEUE, #{key => AsCaller}),
@@ -390,16 +380,14 @@ queue_size() ->
 
 %% @private
 key(RealmUri, InvocationId, CallId, Callee, Caller) ->
-    CalleeNode = bondy_ref:nodestring(Callee),
     CalleeSession = bondy_ref:session_id(Callee),
-    CallerNode = bondy_ref:nodestring(Caller),
     CallerSession = bondy_ref:session_id(Caller),
     {
         RealmUri,
         InvocationId,
         CallId,
-        CalleeNode, CalleeSession,
-        CallerNode, CallerSession
+        CalleeSession,
+        CallerSession
     }.
 
 

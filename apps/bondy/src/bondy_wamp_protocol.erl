@@ -566,9 +566,10 @@ open_session(Extra, St0) when is_map(Extra) ->
     try
         Ctxt0 = St0#wamp_state.context,
         AuthCtxt = St0#wamp_state.auth_context,
-        Id = bondy_context:id(Ctxt0),
         RealmUri = bondy_context:realm_uri(Ctxt0),
+        SessionId0 = bondy_context:session_id(Ctxt0),
         ReqDetails = bondy_context:request_details(Ctxt0),
+
         Authid = bondy_auth:user_id(AuthCtxt),
         Authrole = bondy_auth:role(AuthCtxt),
         Authroles = bondy_auth:roles(AuthCtxt),
@@ -591,7 +592,11 @@ open_session(Extra, St0) when is_map(Extra) ->
         },
 
         %% We open a session
-        Session = bondy_session_manager:open(Id, RealmUri, Properties),
+        Session = bondy_session_manager:open(SessionId0, RealmUri, Properties),
+
+        %% This might be different than the SessionId0 in case we found a
+        %% collision while storing (almost impossible).
+        SessionId = bondy_session:external_id(Session),
 
         %% We set the session in the context
         Ctxt1 = bondy_context:set_session(Ctxt0, Session),
@@ -599,7 +604,7 @@ open_session(Extra, St0) when is_map(Extra) ->
 
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
-            Id,
+            SessionId,
             #{
                 realm => RealmUri,
                 agent => bondy_router:agent(),
@@ -609,6 +614,7 @@ open_session(Extra, St0) when is_map(Extra) ->
                 authrole => to_bin(Authrole),
                 authid => maybe_gen_authid(Authid),
                 authextra => Extra#{
+                    'x_session_id' => bondy_session:id(Session),
                     'x_authroles' => [to_bin(R) || R <- Authroles],
                     'x_meta' => UserMeta
                 }
@@ -664,7 +670,7 @@ when UserId =/= <<"anonymous">> ->
     Ctxt = bondy_context:set_authid(Ctxt1, UserId),
     St1 = update_context(Ctxt, St0),
 
-    SessionId = bondy_context:id(Ctxt),
+    SessionId = bondy_context:session_id(Ctxt),
     Roles = authroles(Details),
     Peer = bondy_context:peer(Ctxt),
 
@@ -691,7 +697,7 @@ maybe_auth_challenge(enabled, Details, Realm, St0) ->
     Ctxt = bondy_context:set_authid(Ctxt1, anonymous),
     St1 = update_context(Ctxt, St0),
 
-    SessionId = bondy_context:id(Ctxt),
+    SessionId = bondy_context:session_id(Ctxt),
     Roles = [<<"anonymous">>],
     Peer = bondy_context:peer(Ctxt),
 

@@ -156,12 +156,65 @@ agent() ->
     | {reply, Reply :: wamp_message(), bondy_context:t()}
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
+forward(#subscribe{} = M, #{session := _} = Ctxt) ->
+    %% This is a sync call as clients can call subscribe multiple times
+    %% concurrently. This is becuase matching and adding to the registry is not
+    %% done atomically: bondy_registry:add uses art_server:match/2 to
+    %% determine if a subscription already exists and then adds to the registry
+    %% (and trie). If we allow this request to be concurrent 2 or more request
+    %% could get no matches from match and thus create 3 subscriptions when
+    %% according to the protocol the subscriber should always get the same
+    %% subscription as result.
+    %% REVIEW An alternative approach would be for this to be handled async and
+    %% a pool of register servers to block.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
 
-forward(M, #{session := _} = Ctxt0) ->
-    Ctxt1 = bondy_context:set_request_timestamp(Ctxt0, erlang:monotonic_time()),
-    %% Client has a session so this should be either a message
-    %% for broker or dealer roles
-    do_forward(M, Ctxt1).
+forward(#register{} = M, #{session := _} = Ctxt) ->
+    %% This is a sync call as it is an easy way to preserve RPC ordering as
+    %% defined by RFC 11.2:
+    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
+    %% message will be sent by _Dealer_ to _Callee A_ before any
+    %% "INVOCATION" message for *Procedure 1*.
+    %% Because we block the callee until we get the response,
+    %% the callee will not receive any other messages.
+    %% However, notice that if the callee has another connection with the
+    %% router, then it might receive an invocation through that connection
+    %% before we reply here.
+    %% At the moment this relies on Erlang's guaranteed causal delivery of
+    %% messages between two processes even when in different nodes.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
+
+forward(
+    #call{procedure_uri = <<"wamp.", _/binary>>} = M, #{session := _} = Ctxt) ->
+    async_forward(M, Ctxt);
+
+forward(
+    #call{procedure_uri = <<"bondy.", _/binary>>} = M,
+    #{session := _} = Ctxt) ->
+    async_forward(M, Ctxt);
+
+forward(#call{} = M, #{session := _} = Ctxt0) ->
+    %% This is a sync call as it is an easy way to guarantee ordering of
+    %% invocations between any given pair of Caller and Callee as
+    %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
+    %% between two processes even when in different nodes (when using
+    %% distributed Erlang).
+    %% RFC:
+    %% If Callee A has registered endpoints for both Procedure 1 and Procedure
+    %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
+    %% to Procedure 2, and both calls are routed to Callee A, then Callee A
+    %% will first receive an invocation corresponding to Call 1 and then Call
+    %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
+    ok = sync_forward({M, Ctxt0}),
+    %% The invocation is always async and the result or error will be delivered
+    %% asynchronously by the dealer.
+    {ok, Ctxt0};
+
+forward(M, #{session := _} = Ctxt) ->
+    async_forward(M, Ctxt).
+
 
 
 %% -----------------------------------------------------------------------------
@@ -279,65 +332,6 @@ acknowledge_message(_) ->
 
 
 %% @private
-do_forward(#subscribe{} = M, Ctxt) ->
-    %% This is a sync call as clients can call subscribe multiple times
-    %% concurrently. This is becuase matching and adding to the registry is not
-    %% done atomically: bondy_registry:add uses art_server:match/2 to
-    %% determine if a subscription already exists and then adds to the registry
-    %% (and trie). If we allow this request to be concurrent 2 or more request
-    %% could get no matches from match and thus create 3 subscriptions when
-    %% according to the protocol the subscriber should always get the same
-    %% subscription as result.
-    %% REVIEW An alternative approach would be for this to be handled async and
-    %% a pool of register servers to block.
-    ok = sync_forward({M, Ctxt}),
-    {ok, Ctxt};
-
-do_forward(#register{} = M, Ctxt) ->
-    %% This is a sync call as it is an easy way to preserve RPC ordering as
-    %% defined by RFC 11.2:
-    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
-    %% message will be sent by _Dealer_ to _Callee A_ before any
-    %% "INVOCATION" message for *Procedure 1*.
-    %% Because we block the callee until we get the response,
-    %% the callee will not receive any other messages.
-    %% However, notice that if the callee has another connection with the
-    %% router, then it might receive an invocation through that connection
-    %% before we reply here.
-    %% At the moment this relies on Erlang's guaranteed causal delivery of
-    %% messages between two processes even when in different nodes.
-    ok = sync_forward({M, Ctxt}),
-    {ok, Ctxt};
-
-do_forward(#call{procedure_uri = <<"wamp.", _/binary>>} = M, Ctxt) ->
-    async_forward(M, Ctxt);
-
-do_forward(
-    #call{procedure_uri = <<"bondy.", _/binary>>} = M, Ctxt) ->
-    async_forward(M, Ctxt);
-
-do_forward(#call{} = M, Ctxt0) ->
-    %% This is a sync call as it is an easy way to guarantee ordering of
-    %% invocations between any given pair of Caller and Callee as
-    %% defined by RFC 11.2, as Erlang guarantees causal delivery of messages
-    %% between two processes even when in different nodes (when using
-    %% distributed Erlang).
-    %% RFC:
-    %% If Callee A has registered endpoints for both Procedure 1 and Procedure
-    %% 2, and Caller B first issues a Call 1 to Procedure 1 and then a Call 2
-    %% to Procedure 2, and both calls are routed to Callee A, then Callee A
-    %% will first receive an invocation corresponding to Call 1 and then Call
-    %% 2. This also holds if Procedure 1 and Procedure 2 are identical.
-    ok = sync_forward({M, Ctxt0}),
-    %% The invocation is always async and the result or error will be delivered
-    %% asynchronously by the dealer.
-    {ok, Ctxt0};
-
-do_forward(M, Ctxt) ->
-    async_forward(M, Ctxt).
-
-
-%% @private
 async_forward(M, Ctxt0) ->
     %% Client already has a session.
     %% RFC: By default, publications are unacknowledged, and the _Broker_ will
@@ -377,11 +371,14 @@ async_forward(M, Ctxt0) ->
         Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
+            ExtId = bondy_session_id:to_external(SessionId),
+
             ?LOG_ERROR(#{
                 description => "Error while routing message",
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
+                session_external_id => ExtId,
                 session_id => SessionId,
                 context => Ctxt,
                 message => M

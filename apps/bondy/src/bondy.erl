@@ -596,9 +596,9 @@ do_send(To, M, Opts) ->
             Pid ! request(Pid, RealmUri, M),
             ok;
         false ->
-            SessionId = bondy_ref:session_id(To),
+            SessionKey = bondy_ref:session_id(To),
 
-            case maybe_enqueue(SessionId, M, Opts) of
+            case maybe_enqueue(SessionKey, M, Opts) of
                 true ->
                     ok;
                 false ->

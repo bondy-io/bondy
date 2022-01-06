@@ -796,9 +796,14 @@ log(Level, Msg0, St) ->
         message_max_length => St#state.max_len,
         socket => St#state.socket
     },
+
+    SessionId = bondy_wamp_protocol:session_id(ProtocolState),
+    ExtId = bondy_session_id:to_external(SessionId),
+
     Meta = #{
         realm => bondy_wamp_protocol:realm_uri(ProtocolState),
-        session_id => bondy_wamp_protocol:session_id(ProtocolState),
+        session_id => SessionId,
+        session_external_id => ExtId,
         peername => St#state.peername
     },
     logger:log(Level, Msg, Meta).

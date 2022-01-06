@@ -44,14 +44,14 @@
 -define(SESSION_SPACE, ?MODULE).
 
 -record(session, {
-    %% ets key
-    id                              ::  id(),
+    id                              ::  bondy_session_id:t(),
+    %% WAMP ID
+    external_id                     ::  id(),
     %% TODO The session ID should definitively be a UUID and not a random
     %% integer, this is something we need to change on the WAMP SPEC and adopt
     %% in all clients
-    % uuid                            ::  ksuid:t(),
+    % uuid                            ::  bondy_session_id:t(),
     type = client                   ::  bondy_ref:type(),
-    tab                             ::  maybe(ets:tid()),
     realm_uri                       ::  uri(),
     ref                             ::  bondy_ref:t(),
     %% The {IP, Port} of the client
@@ -77,8 +77,9 @@
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
 -type t()                       ::  #session{}.
+-type t_or_id()                 ::  t() | bondy_session_id:t().
 
--type details()                 ::  #{
+-type external()                ::  #{
                                         session => id(),
                                         authid => id(),
                                         authrole => binary(),
@@ -108,7 +109,7 @@
 -export_type([id/0]).
 -export_type([peer/0]).
 -export_type([properties/0]).
--export_type([details/0]).
+-export_type([external/0]).
 
 
 %% BONDY_SENSITIVE CALLBACKS
@@ -124,6 +125,7 @@
 -export([created/1]).
 -export([fetch/1]).
 -export([id/1]).
+-export([external_id/1]).
 -export([incr_seq/1]).
 -export([info/1]).
 -export([is_security_enabled/1]).
@@ -192,24 +194,23 @@ format_status(_Opt, #session{} = S) ->
     t() | no_return().
 
 new(RealmUri, Opts) when is_binary(RealmUri) ->
-    new(get_id(RealmUri), bondy_realm:fetch(RealmUri), Opts);
+    new(bondy_session_id:new(), bondy_realm:fetch(RealmUri), Opts);
 
 new(Realm, Opts) when is_map(Opts) ->
-    RealmUri = bondy_realm:uri(Realm),
-    new(get_id(RealmUri), Realm, Opts).
+    new(bondy_session_id:new(), Realm, Opts).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(id(), uri() | bondy_realm:t(), properties()) ->
+-spec new(bondy_session_id:t(), uri() | bondy_realm:t(), properties()) ->
     t() | no_return().
 
 new(Id, RealmUri, Opts) when is_binary(RealmUri) ->
     new(Id, bondy_realm:fetch(RealmUri), Opts);
 
-new(Id, Realm, Opts) when is_map(Opts) ->
+new(Id, Realm, Opts) when is_binary(Id) andalso is_map(Opts) ->
     RealmUri = bondy_realm:uri(Realm),
     IsSecurityEnabled = bondy_realm:is_security_enabled(RealmUri),
 
@@ -223,14 +224,15 @@ new(Id, Realm, Opts) when is_map(Opts) ->
     ),
 
     S1#session{
+        %% We choose seconds as we are not interested in the accuracy of time
+        %% but rather in the uniquenes and URL friendliness of the ID
         id = Id,
-        %% We added for convenience as it is also in ref
+        external_id = bondy_session_id:to_external(Id),
         realm_uri = RealmUri,
         ref = Ref,
         security_enabled = IsSecurityEnabled,
         created = erlang:system_time(seconds)
     }.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -250,19 +252,36 @@ type(#session{type = Val}) ->
 %% It calls {@link bondy_utils:get_realm/1} which will fail with an exception
 %% if the realm does not exist or cannot be created
 %% -----------------------------------------------------------------------------
--spec store(t()) -> ok | no_return().
+-spec store(t()) -> {ok, t()} | no_return().
 
 store(#session{} = S0) ->
     Id = S0#session.id,
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-    S = S0#session{tab = Tab},
 
-    true == ets:insert_new(Tab, S)
-        orelse error({integrity_constraint_violation, Id}),
+    try
+        %% We obtain a WAMP session id by trying to store the index, which
+        %% will retry in case we have a collision and finally fail
+        ExtId = bondy_session_id:to_external(Id),
 
-    ok = bondy_event_manager:notify({session_opened, S}),
+        NewId = store_index(ExtId, Id),
 
-    ok.
+        S = S0#session{
+            id = NewId,
+            external_id = bondy_session_id:to_external(NewId)
+        },
+
+        %% Finally we store the updated session
+        true == ets:insert_new(Tab, S)
+            orelse error({integrity_constraint_violation, Id}),
+
+        ok = bondy_event_manager:notify({session_opened, S}),
+
+        {ok, S}
+
+    catch
+        throw:session_id_collision ->
+            error(session_id_collision)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -285,42 +304,71 @@ update(#session{id = Id} = S) ->
 
 close(#session{} = S) ->
     Id = S#session.id,
+    ExtId = S#session.external_id,
     RealmUri = S#session.realm_uri,
     Secs = erlang:system_time(seconds) - S#session.created,
     ok = bondy_event_manager:notify({session_closed, S, Secs}),
 
-    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-    true = ets:delete(Tab, Id),
+    %% Delete session
+    Tab1 = tuplespace:locate_table(?SESSION_SPACE, Id),
+    true = ets:delete(Tab1, Id),
+
+    %% Delete index
+    Tab2 = tuplespace:locate_table(?SESSION_SPACE, ExtId),
+    true = ets:delete(Tab2, ExtId),
 
     ?LOG_DEBUG(#{
         description => "Session closed",
         realm => RealmUri,
-        session_id => Id
+        session_id => Id,
+        session_external_id => ExtId
     }),
 
     ok.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Returns the value used on session storage. The keys is a Id-sortable
+%% unique ID (globally unique, collision free without coordination) across a
+%% Bondy cluster. This differs from the session's `id' property which is a
+%% random integer as defined by the WAMP protocol.
+%%
+%% Whereas the chances of collision using the WAMP `id' are minimal, there is
+%% still is a possibility that a collision can occur in a big cluster with
+%% millions of connections.
 %% @end
 %% -----------------------------------------------------------------------------
--spec id(t()) -> id().
+-spec id(t()) -> bondy_session_id:t().
 
 id(#session{id = Id}) ->
     Id.
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the WAMP session identifier.
+%% This is the id exposed to WAMP clients via the protocol interactions.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec external_id(t_or_id()) -> id().
+
+external_id(#session{external_id = Id}) ->
+    Id;
+
+external_id(Id) when is_binary(Id) ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+    ets:lookup_element(Tab, Id, #session.id).
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec realm_uri(id() | t()) -> uri().
+-spec realm_uri(t_or_id()) -> uri().
 
 realm_uri(#session{realm_uri = Val}) ->
     Val;
 
-realm_uri(Id) when is_integer(Id) ->
+realm_uri(Id) when is_binary(Id) ->
     realm_uri(fetch(Id)).
 
 
@@ -328,12 +376,12 @@ realm_uri(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec roles(id() | t()) -> map().
+-spec roles(t_or_id()) -> map().
 
 roles(#session{roles = Val}) ->
     Val;
 
-roles(Id) ->
+roles(Id) when is_binary(Id) ->
     roles(fetch(Id)).
 
 
@@ -346,7 +394,7 @@ roles(Id) ->
 ref(#session{ref = Ref}) ->
     Ref;
 
-ref(Id) when is_integer(Id) ->
+ref(Id) when is_binary(Id) ->
     ref(fetch(Id)).
 
 
@@ -356,12 +404,12 @@ ref(Id) when is_integer(Id) ->
 %% identified by Id runs on.
 %% @end
 %% -----------------------------------------------------------------------------
--spec pid(id() | t()) -> pid().
+-spec pid(t_or_id()) -> maybe(pid()).
 
 pid(#session{ref = Ref}) ->
     bondy_ref:pid(Ref);
 
-pid(Id) when is_integer(Id) ->
+pid(Id) when is_binary(Id) ->
     pid(fetch(Id)).
 
 
@@ -376,7 +424,7 @@ pid(Id) when is_integer(Id) ->
 node(#session{ref = Ref}) ->
     bondy_ref:node(Ref);
 
-node(Id) when is_integer(Id) ->
+node(Id) when is_binary(Id) ->
     bondy_session:node(fetch(Id)).
 
 
@@ -391,7 +439,7 @@ node(Id) when is_integer(Id) ->
 nodestring(#session{ref = Ref}) ->
     bondy_ref:nodestring(Ref);
 
-nodestring(Id) when is_integer(Id) ->
+nodestring(Id) when is_binary(Id) ->
     bondy_session:nodestring(fetch(Id)).
 
 
@@ -405,7 +453,7 @@ nodestring(Id) when is_integer(Id) ->
 created(#session{created = Val}) ->
     Val;
 
-created(Id) when is_integer(Id) ->
+created(Id) when is_binary(Id) ->
     created(fetch(Id)).
 
 
@@ -418,7 +466,7 @@ created(Id) when is_integer(Id) ->
 agent(#session{agent = Val}) ->
     Val;
 
-agent(Id) when is_integer(Id) ->
+agent(Id) when is_binary(Id) ->
     agent(fetch(Id)).
 
 
@@ -431,7 +479,7 @@ agent(Id) when is_integer(Id) ->
 peer(#session{peer = Val}) ->
     Val;
 
-peer(Id) when is_integer(Id) ->
+peer(Id) when is_binary(Id) ->
     peer(fetch(Id)).
 
 
@@ -444,7 +492,7 @@ peer(Id) when is_integer(Id) ->
 authid(#session{authid = Val}) ->
     Val;
 
-authid(Id) when is_integer(Id) ->
+authid(Id) when is_binary(Id) ->
     authid(fetch(Id)).
 
 
@@ -466,7 +514,7 @@ authrole(#session{authrole = undefined}) ->
 authrole(#session{authrole = Val}) ->
     Val;
 
-authrole(Id) when is_integer(Id) ->
+authrole(Id) when is_binary(Id) ->
     authrole(fetch(Id)).
 
 
@@ -479,7 +527,7 @@ authrole(Id) when is_integer(Id) ->
 authroles(#session{authroles = Val}) ->
     Val;
 
-authroles(Id) when is_integer(Id) ->
+authroles(Id) when is_binary(Id) ->
     authroles(fetch(Id)).
 
 
@@ -492,7 +540,7 @@ authroles(Id) when is_integer(Id) ->
 authmethod(#session{authmethod = Val}) ->
     Val;
 
-authmethod(Id) when is_integer(Id) ->
+authmethod(Id) when is_binary(Id) ->
     authmethod(fetch(Id)).
 
 
@@ -505,7 +553,7 @@ authmethod(Id) when is_integer(Id) ->
 user(#session{realm_uri = Uri, authid = Id}) ->
     bondy_rbac_user:fetch(Uri, Id);
 
-user(Id) when is_integer(Id) ->
+user(Id) when is_binary(Id) ->
     user(fetch(Id)).
 
 
@@ -513,7 +561,7 @@ user(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec rbac_context(id() | t()) -> bondy_rbac:context().
+-spec rbac_context(t_or_id()) -> bondy_rbac:context().
 
 rbac_context(#session{id = Id} = Session) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
@@ -531,7 +579,7 @@ rbac_context(#session{id = Id} = Session) ->
             get_context(Session)
     end;
 
-rbac_context(Id) when is_integer(Id) ->
+rbac_context(Id) when is_binary(Id) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
 
     case ets:lookup_element(Tab, Id, #session.rbac_context) of
@@ -546,12 +594,12 @@ rbac_context(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec refresh_rbac_context(id() | t()) -> bondy_rbac:context().
+-spec refresh_rbac_context(t_or_id()) -> bondy_rbac:context().
 
 refresh_rbac_context(#session{id = Id} = Session) ->
     update_context(Id, get_context(Session));
 
-refresh_rbac_context(Id) when is_integer(Id) ->
+refresh_rbac_context(Id) when is_binary(Id) ->
     refresh_rbac_context(fetch(Id)).
 
 
@@ -559,16 +607,14 @@ refresh_rbac_context(Id) when is_integer(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec incr_seq(id() | t()) -> map().
-
-incr_seq(#session{tab = undefined}) ->
-    bondy_utils:get_id(global);
+-spec incr_seq(t_or_id()) -> map().
 
 incr_seq(#session{id = Id}) ->
     incr_seq(Id);
 
-incr_seq(Id) when is_integer(Id), Id >= 0 ->
+incr_seq(Id) when is_binary(Id) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+
     try
         ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0})
     catch
@@ -611,13 +657,10 @@ is_security_enabled(Id) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(id() | bondy_ref:t()) -> {ok, t()} | {error, not_found}.
+-spec lookup(bondy_session_id:t()) -> {ok, t()} | {error, not_found}.
 
-lookup(Id) when is_integer(Id) ->
-    do_lookup(Id);
-
-lookup(Ref) ->
-    lookup(bondy_ref:realm_uri(Ref), bondy_ref:session_id(Ref)).
+lookup(Id) when is_binary(Id) ->
+    do_lookup(Id).
 
 
 %% -----------------------------------------------------------------------------
@@ -626,10 +669,11 @@ lookup(Ref) ->
 %% if it doesn't exist.
 %% @end
 %% -----------------------------------------------------------------------------
--spec lookup(RealmUri :: uri(), Id :: id()) -> {ok, t()} | {error, not_found}.
+-spec lookup(RealmUri :: uri(), ExtId :: id()) ->
+    {ok, t()} | {error, not_found}.
 
-lookup(RealmUri, Id) ->
-    case do_lookup(Id) of
+lookup(RealmUri, ExtId) ->
+    case do_lookup(ExtId) of
         {ok, #session{realm_uri = Val} = Session} when Val == RealmUri ->
             {ok, Session};
         _ ->
@@ -643,7 +687,7 @@ lookup(RealmUri, Id) ->
 %% does not exist it fails with reason '{badarg, Id}'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec fetch(id()) -> t() | no_return().
+-spec fetch(bondy_session_id:t()) -> t() | no_return().
 
 fetch(Id) ->
     case lookup(Id) of
@@ -705,16 +749,17 @@ list_refs(RealmUri, N) when is_integer(N), N >= 1 ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_external(t()) -> details().
+-spec to_external(t()) -> external().
 
 to_external(#session{} = S) ->
     #{
-        session => S#session.id,
+        session => S#session.external_id,
+        'x_session_id' => S#session.id,
         authid => S#session.authid,
         authrole => authrole(S),
+        'x_authroles' => S#session.authroles,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
-        'x_authroles' => S#session.authroles,
         transport => #{
             agent => S#session.agent,
             peername => inet_utils:peername_to_binary(S#session.peer)
@@ -727,7 +772,7 @@ to_external(#session{} = S) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec info(t()) -> details().
+-spec info(t()) -> external().
 
 info(#session{is_anonymous = true} = S) ->
     to_external(S);
@@ -745,22 +790,25 @@ info(#session{is_anonymous = false} = S) ->
 
 
 %% @private
-get_id(RealmUri) ->
-    get_id(RealmUri, 20).
+store_index(ExtId, Id) ->
+    store_index(ExtId, Id, 20).
 
 
 %% @private
-get_id(RealmUri, N) when N > 0 ->
-    Id = bondy_utils:get_id(global),
-    case lookup(RealmUri, Id) of
-        {error, not_found} ->
+store_index(ExtId, Id, N) when N > 0 ->
+    Tab = tuplespace:locate_table(?SESSION_SPACE, ExtId),
+
+    case ets:insert_new(Tab, {index, ExtId, Id}) of
+        true ->
             Id;
-        _ ->
-            get_id(RealmUri, N - 1)
+        false ->
+            NewId = bondy_session_id:new(),
+            NewExtId = bondy_session_id:to_external(NewId),
+            store_index(NewExtId, NewId, N - 1)
     end;
 
-get_id(_, 0) ->
-    error(session_id_collision).
+store_index(_, _, 0) ->
+    throw(session_id_collision).
 
 
 %% @private
@@ -870,11 +918,23 @@ parse_roles([_|T], Roles) ->
 %% @private
 -spec do_lookup(id()) -> {ok, t()} | {error, not_found}.
 
-do_lookup(Id) ->
+do_lookup(Id) when is_binary(Id) ->
     Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
+
     case ets:lookup(Tab, Id)  of
         [#session{} = Session] ->
             {ok, Session};
+        [] ->
+            {error, not_found}
+    end;
+
+do_lookup(ExtId) when is_integer(ExtId) ->
+    %% We search by WAMP session id using an index
+    Tab = tuplespace:locate_table(?SESSION_SPACE, ExtId),
+
+    case ets:lookup(Tab, ExtId)  of
+        [{index, ExtId, Id}] ->
+            do_lookup(Id);
         [] ->
             {error, not_found}
     end.
@@ -950,8 +1010,8 @@ get_context(#session{authid = Authid, realm_uri = Uri}) ->
 
 -ifdef(TEST).
 
-table(Id) ->
-    tuplespace:locate_table(?SESSION_SPACE, Id).
+table(Term) ->
+    tuplespace:locate_table(?SESSION_SPACE, Term).
 
 -else.
 -endif.

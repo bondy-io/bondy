@@ -44,9 +44,9 @@ test(Config) ->
     RealmUri = ?config(realm_uri, Config),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
+    SessionId = bondy_session_id:new(),
 
-
-    {ok, Ctxt} = bondy_auth:init(1, RealmUri, anonymous, Roles, Peer),
+    {ok, Ctxt} = bondy_auth:init(SessionId, RealmUri, anonymous, Roles, Peer),
 
     ?assertMatch(
         {ok, _},
@@ -77,7 +77,7 @@ test(Config) ->
 
 
 authenticate(Method, Uri, Roles, Peer) ->
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     {ok, Ctxt} = bondy_auth:init(SessionId, Uri, anonymous, Roles, Peer),
     bondy_auth:authenticate(Method, undefined, undefined, Ctxt).

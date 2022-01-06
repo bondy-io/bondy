@@ -3,9 +3,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 
--define(NAME(RealmUri, Id), {bondy_session, RealmUri, Id}).
 
 -record(state, {
     name                :: atom(),
@@ -77,15 +75,15 @@ pool_size() ->
 %% should not be retained.
 %% -----------------------------------------------------------------------------
 -spec open(
-    bondy_session:id(),
+    bondy_session_id:t(),
     uri() | bondy_realm:t(),
     bondy_session:properties()) ->
     bondy_session:t() | no_return().
 
 open(Id, RealmOrUri, Opts) ->
     %% We store the session
-    Session = bondy_session:new(Id, RealmOrUri, Opts),
-    ok = bondy_session:store(Session),
+    Session0 = bondy_session:new(Id, RealmOrUri, Opts),
+    {ok, Session} = bondy_session:store(Session0),
 
     %% We register the session
     RealmUri = bondy_session:realm_uri(Session),
@@ -126,12 +124,10 @@ init([Pool, Name]) ->
 
 handle_call({open, Session}, _From, State0) ->
     Id = bondy_session:id(Session),
-    RealmUri = bondy_session:realm_uri(Session),
     Pid = bondy_session:pid(Session),
-    Name = ?NAME(RealmUri, Id),
 
-    %% We register the session owner (pid) under the realm and session id.
-    true = bondy:register(Name, Pid),
+    %% We register the session owner (pid) under the session key
+    true = bondy:register({bondy_session, Id}, Pid),
 
     %% We monitor the session owner (pid) so that we can cleanup when the
     %% process terminates
@@ -161,12 +157,14 @@ handle_call(Event, From, State) ->
 
 handle_cast({close, Session}, State0) ->
     Id = bondy_session:id(Session),
+    ExtId = bondy_session:external_id(Session),
     Uri = bondy_session:realm_uri(Session),
 
     ?LOG_DEBUG(#{
         description => "Session closing, demonitoring session connection",
         realm => Uri,
-        session_id => Id
+        session_id => Id,
+        session_external_id => ExtId
     }),
     Refs = State0#state.monitor_refs,
 
@@ -199,19 +197,20 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
     Refs = State0#state.monitor_refs,
 
     State = case maps:find(Ref, Refs) of
-        {ok, SessionId} ->
-            case bondy_session:lookup(SessionId) of
+        {ok, Id} ->
+            case bondy_session:lookup(Id) of
                 {ok, Session} ->
                     ?LOG_DEBUG(#{
                         description => "Connection process for session terminated, cleaning up",
-                        session_id => SessionId
+                        session_external_id => bondy_session:external_id(Session),
+                        session_id => Id
                     }),
                     cleanup(Session);
                 {error, not_found} ->
                     ok
             end,
             State0#state{
-                monitor_refs = maps:without([Ref, SessionId], Refs)
+                monitor_refs = maps:without([Ref, Id], Refs)
             };
         error ->
             State0#state{
@@ -246,9 +245,6 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% @private
 register_procedures(Session) ->
-    RealmUri = bondy_session:realm_uri(Session),
-    SessionId = bondy_session:id(Session),
-    Part = bondy_utils:session_id_to_uri_part(SessionId),
 
     %% wamp.session.{ID}.get
     %% -------------------------------------------------------------------------
@@ -257,6 +253,10 @@ register_procedures(Session) ->
     %% way to located the node where the session lives to route the call to it.
     %% If we have more session methods then we should implement prefix
     %% registration i.e. wamp.session.{ID}.*
+    SessionId = bondy_session:id(Session),
+    Extid = bondy_session_id:to_external(SessionId),
+    Part = bondy_utils:session_id_to_uri_part(Extid),
+
     ProcUri = <<"wamp.session.", Part/binary, ".get">>,
 
     %% Notice we are implementing this as callback reference,
@@ -264,10 +264,11 @@ register_procedures(Session) ->
     %% support many more callbacks we would be better of using the session
     %% manager process as target, having a single reference for all procedures,
     %% reducing memory consumption.
+    RealmUri = bondy_session:realm_uri(Session),
     MF = {bondy_session_api, get},
     Ref = bondy_ref:new(internal, RealmUri, MF, SessionId),
 
-    Args = [RealmUri],
+    Args = [SessionId],
     Opts = #{match => ?PREFIX_MATCH, callback_args => Args},
     {ok, _} = bondy_dealer:register(ProcUri, Opts, Ref),
 
@@ -280,11 +281,10 @@ cleanup(Session) ->
     %% bondy_context:close/1. In the meantime we create a fakce context,
     %% knowing what it should contain for the close/2 call to work.
     FakeCtxt = #{
-        id => bondy_session:id(Session),
+        session => Session,
         realm_uri => bondy_session:realm_uri(Session),
         node => bondy_session:node(Session),
-        ref => bondy_session:ref(Session),
-        session => Session
+        ref => bondy_session:ref(Session)
     },
     %% We close the session too
     bondy_context:close(FakeCtxt, crash),

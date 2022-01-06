@@ -179,8 +179,8 @@
 -export([match_registrations/2]).
 -export([register/3]).
 -export([registrations/1]).
+-export([registrations/2]).
 -export([registrations/3]).
--export([registrations/4]).
 -export([unregister/1]).
 -export([unregister/2]).
 
@@ -334,16 +334,18 @@ unregister(RegId, Ctxt) ->
 -spec callees(RealmUri :: uri()) -> [map()] | no_return().
 
 callees(RealmUri) ->
-    case bondy_registry:entries(registration, RealmUri, '_', '_') of
+    case bondy_registry:entries(registration, RealmUri, '_') of
         [] ->
             [];
         List ->
             Set = lists:foldl(
                 fun(E, Acc) ->
                     Ref = bondy_registry_entry:ref(E),
+                    SessionId = bondy_registry_entry:session_id(E),
+                    ExtId = bondy_session_id:to_external(SessionId),
                     M = #{
                         node => bondy_ref:nodestring(Ref),
-                        session_id => bondy_ref:session_id(E)
+                        session_id => ExtId
                     },
                     sets:add_element(M, Acc)
                 end,
@@ -380,9 +382,11 @@ callees(RealmUri, ProcedureUri, Opts) ->
             Set = lists:foldl(
                 fun(E, Acc) ->
                     Ref = bondy_registry_entry:ref(E),
+                    SessionId = bondy_registry_entry:session_id(E),
+                    ExtId = bondy_session_id:to_external(SessionId),
                     M = #{
                         node => bondy_ref:nodestring(Ref),
-                        session_id => bondy_ref:session_id(E)
+                        session_id => ExtId
                     },
                     sets:add_element(M, Acc)
                 end,
@@ -961,7 +965,7 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
             ?LOG_WARNING(#{
                 description => <<"Error while handling WAMP call">>,
                 procedure => M0#call.procedure_uri,
-                caller => bondy_context:session_id(Ctxt),
+                caller => Caller,
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace
@@ -1289,13 +1293,11 @@ registrations({registration, _} = Cont) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec registrations(
-    RealmUri :: uri(),
-    Node :: atom() | '_',
-    SessionId :: id() | '_') ->
+    RealmUri :: uri(), SessionId :: bondy_session_id:t() | '_') ->
     [bondy_registry_entry:t()].
 
-registrations(RealmUri, Node, SessionId) ->
-    bondy_registry:entries(registration, RealmUri, Node, SessionId).
+registrations(RealmUri, SessionId) ->
+    bondy_registry:entries(registration, RealmUri, SessionId).
 
 
 %% -----------------------------------------------------------------------------
@@ -1308,14 +1310,13 @@ registrations(RealmUri, Node, SessionId) ->
 %% -----------------------------------------------------------------------------
 -spec registrations(
     RealmUri :: uri(),
-    Node :: atom() | '_',
-    SessionId :: id() | '_',
+    SessionId :: bondy_session_id:t() | '_',
     Limit :: non_neg_integer()) ->
     {[bondy_registry_entry:t()], bondy_registry_entry:continuation_or_eot()}
     | bondy_registry_entry:eot().
 
-registrations(RealmUri, Node, SessionId, Limit) ->
-    bondy_registry:entries(registration, RealmUri, Node, SessionId, Limit).
+registrations(RealmUri, SessionId, Limit) ->
+    bondy_registry:entries(registration, RealmUri, SessionId, Limit).
 
 
 %% -----------------------------------------------------------------------------

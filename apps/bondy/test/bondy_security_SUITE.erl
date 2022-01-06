@@ -572,7 +572,7 @@ authenticate(Uri, Username, Secret) ->
 
 
 do_authenticate(Uri, Username, Secret) ->
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     Peer = {{127,0,0,1}, 1111},
     {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),

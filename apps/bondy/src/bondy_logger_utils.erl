@@ -79,9 +79,12 @@ message_and_meta(WAMPMsg, Ctxt) ->
         message_type => element(1, WAMPMsg),
         message_id => element(2, WAMPMsg)
     },
+    SessionId = bondy_context:session_id(Ctxt),
+    ExtId = bondy_session_id:to_external(SessionId),
     Meta = #{
         realm_uri => bondy_context:realm_uri(Ctxt),
-        session_id => bondy_context:session_id(Ctxt),
+        session_external_id => ExtId,
+        session_id => SessionId,
         encoding => bondy_context:encoding(Ctxt)
     },
 

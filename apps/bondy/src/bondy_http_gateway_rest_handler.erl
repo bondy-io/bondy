@@ -275,7 +275,7 @@ is_authorized(
     RealmUri = maps:get(realm_uri, St0),
     Peer = cowboy_req:peer(Req0),
     %% This is ID will bot be used as the ID is already defined in the JWT
-    SessionId = bondy_utils:get_id(global),
+    SessionId = bondy_session_id:new(),
 
     try
         Token = parse_token(Req0),

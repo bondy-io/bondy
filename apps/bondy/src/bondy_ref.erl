@@ -24,29 +24,10 @@
 
 -define(TYPES, [relay, bridge_relay, internal, client]).
 
-%% The order of the record fields is defined so that the ref can be used as a
-%% key in an ordered_set store supporting prefix mapping, so do not change it
-%% unless you know exactly what you are doing.
-%% Changing this order might affect the following modules:
-%% - bondy_registry_entry
-%% - bondy_registry
-%% - bondy_rpc_promise
-%% - bondy_session
-%% TODO consider reeimplementing this as
-% -record(bondy_ref, {
-%     %% <<"bondy:ref:{type}:{realm}:{node}:{random}:{target_type}:{target_handle}">>
-%     id                  ::  binary(),
-%     %% WAMP session id integer
-%     session_id          ::  wildcard(maybe(id())),
-%     target_type         ::  wildcard(target_type()),
-%     target_handle       ::  binary() | term | mf()
-% }).
-
 -record(bondy_ref, {
     realm_uri           ::  uri(),
     nodestring          ::  wildcard(nodestring()),
-    session_id          ::  wildcard(maybe(id())),
-    %% TODO split target into target_type and target_handle
+    session_id          ::  wildcard(maybe(bondy_session_id:t())),
     target              ::  wildcard(target()),
     type                ::  wildcard(ref_type())
 }).
@@ -143,7 +124,7 @@ new(Type, RealmUri, Target) ->
     Type :: ref_type(),
     RealmUri :: uri(),
     Target :: pid() | mf() | name(),
-    SessionId :: maybe(bondy_session:id())) -> t().
+    SessionId :: maybe(bondy_session_id:t())) -> t().
 
 new(Type, RealmUri, Target, SessionId) ->
     Node = bondy_config:nodestring(),
@@ -158,7 +139,7 @@ new(Type, RealmUri, Target, SessionId) ->
     Type :: ref_type(),
     RealmUri :: uri(),
     Target :: pid() | mf() | name(),
-    SessionId :: maybe(bondy_session:id()),
+    SessionId :: maybe(bondy_session_id:t()),
     Node :: node() | nodestring()) -> t().
 
 new(Type, RealmUri, Target, SessionId, Node) when is_atom(Node) ->
@@ -167,7 +148,7 @@ new(Type, RealmUri, Target, SessionId, Node) when is_atom(Node) ->
 new(Type, RealmUri, Target0, SessionId, Nodestring)
 when is_binary(RealmUri), is_binary(Nodestring) ->
 
-    is_integer(SessionId)
+    is_binary(SessionId)
         orelse SessionId == undefined
         orelse error({badarg, {session_id, SessionId}}),
 
@@ -194,7 +175,7 @@ when is_binary(RealmUri), is_binary(Nodestring) ->
     Type :: wildcard(ref_type()),
     RealmUri :: uri(),
     Target :: wildcard(pid() | mf() | name()),
-    SessionId :: wildcard(maybe(bondy_session:id())),
+    SessionId :: wildcard(maybe(bondy_session_id:t())),
     Node :: wildcard(node() | nodestring())) -> t().
 
 
@@ -217,7 +198,7 @@ when is_binary(RealmUri) ->
 
     Target = validate_target(Target0, _AllowPattern = true),
 
-    is_integer(SessionId)
+    is_binary(SessionId)
         orelse SessionId == '_'
         orelse error({badarg, {session_id, SessionId}}),
 
@@ -292,7 +273,7 @@ node(#bondy_ref{nodestring = Val}) ->
 %% @doc Returns the session identifier of the reference or the atom `undefined'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t()) -> maybe(id()).
+-spec session_id(t()) -> maybe(bondy_session_id:t()).
 
 session_id(#bondy_ref{session_id = Val}) ->
     Val.
@@ -485,7 +466,7 @@ callback(#bondy_ref{}) ->
 to_uri(#bondy_ref{} = Ref) ->
     RealmUri = Ref#bondy_ref.realm_uri,
     Nodestring = Ref#bondy_ref.nodestring,
-    SessionKey = integer_to_binary(Ref#bondy_ref.session_id),
+    SessionId = Ref#bondy_ref.session_id,
     Type = atom_to_binary(Ref#bondy_ref.type),
 
     Target =
@@ -505,7 +486,7 @@ to_uri(#bondy_ref{} = Ref) ->
         "bondy:", Nodestring/binary, $:,
         RealmUri/binary, $:,
         Type/binary, $:,
-        SessionKey/binary, $:,
+        SessionId/binary, $:,
         Target/binary
     >>.
 
@@ -519,7 +500,7 @@ to_uri(#bondy_ref{} = Ref) ->
 to_key(#bondy_ref{} = Ref) ->
     RealmUri = Ref#bondy_ref.realm_uri,
     Nodestring = Ref#bondy_ref.nodestring,
-    SessionKey = integer_to_binary(Ref#bondy_ref.session_id),
+    SessionId = Ref#bondy_ref.session_id,
     Type = atom_to_binary(Ref#bondy_ref.type),
 
     Target = encode_target(Ref#bondy_ref.target),
@@ -528,7 +509,7 @@ to_key(#bondy_ref{} = Ref) ->
         RealmUri/binary, $\31,
         Nodestring/binary, $\31,
         Target/binary, $\31,
-        SessionKey/binary, $\31,
+        SessionId/binary, $\31,
         Type/binary
     >>.
 
@@ -545,7 +526,7 @@ from_uri(Uri) ->
                 realm_uri = RealmUri,
                 nodestring = Nodestring,
                 type = binary_to_existing_atom(Type),
-                session_id = binary_to_integer(SessionId),
+                session_id = SessionId,
                 target = decode_target(Target)
             };
         _ ->

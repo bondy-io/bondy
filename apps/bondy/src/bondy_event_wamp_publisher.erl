@@ -114,7 +114,7 @@ handle_event({session_opened, Session}, State) ->
 
 handle_event({session_closed, Session, _DurationSecs}, State) ->
     Uri = bondy_session:realm_uri(Session),
-    Id = bondy_session:id(Session),
+    Id = bondy_session:external_id(Session),
     Authid = bondy_session:authid(Session),
     Authrole = bondy_session:authrole(Session),
 
@@ -273,7 +273,9 @@ handle_event({backup_restore_failed, Args}, State) ->
 
 handle_event({registration_created, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
+    SessionId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     RegId = bondy_registry_entry:id(Entry),
     Map = bondy_registry_entry:to_details_map(Entry),
     Uri = ?WAMP_REG_ON_CREATE,
@@ -288,7 +290,9 @@ handle_event({registration_created, Entry}, State) ->
 
 handle_event({registration_added, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
+    SessionId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     RegId = bondy_registry_entry:id(Entry),
     Map = bondy_registry_entry:to_details_map(Entry),
     Uri = ?WAMP_REG_ON_REGISTER,
@@ -303,7 +307,9 @@ handle_event({registration_added, Entry}, State) ->
 
 handle_event({registration_deleted, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
+    SessionId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     RegId = bondy_registry_entry:id(Entry),
     Map = bondy_registry_entry:to_details_map(Entry),
     Uri = ?WAMP_REG_ON_DELETE,
@@ -318,7 +324,9 @@ handle_event({registration_deleted, Entry}, State) ->
 
 handle_event({registration_removed, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_registry_entry:session_id(Entry),
+    SessionId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     RegId = bondy_registry_entry:id(Entry),
     Map = bondy_registry_entry:to_details_map(Entry),
     Uri = ?WAMP_REG_ON_UNREGISTER,
@@ -335,10 +343,13 @@ handle_event({registration_removed, Entry}, State) ->
 
 handle_event({subscription_created, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
+    ExtId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
     Opts = #{},
     Args = [
-        bondy_registry_entry:session_id(Entry),
+        ExtId,
         bondy_registry_entry:to_details_map(Entry)
     ],
 
@@ -351,10 +362,13 @@ handle_event({subscription_created, Entry}, State) ->
 
 handle_event({subscription_added, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
+    ExtId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
     Opts = #{},
     Args = [
-        bondy_registry_entry:session_id(Entry),
+        ExtId,
         bondy_registry_entry:to_details_map(Entry)
     ],
 
@@ -367,10 +381,13 @@ handle_event({subscription_added, Entry}, State) ->
 
 handle_event({subscription_removed, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
+    ExtId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
     Opts = #{},
     Args = [
-        bondy_registry_entry:session_id(Entry),
+        ExtId,
         bondy_registry_entry:id(Entry)
     ],
 
@@ -386,10 +403,13 @@ handle_event({subscription_removed, Entry}, State) ->
 
 handle_event({subscription_deleted, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
+    ExtId = bondy_session_id:to_external(
+        bondy_registry_entry:session_id(Entry)
+    ),
     Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
     Opts = #{},
     Args = [
-        bondy_registry_entry:session_id(Entry),
+        ExtId,
         bondy_registry_entry:id(Entry)
     ],
 

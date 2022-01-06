@@ -347,7 +347,7 @@ do_is_authorized(Req0, St0) ->
         end,
 
         RealmUri = St0#state.realm_uri,
-        SessionId = bondy_utils:get_id(global),
+        SessionId = bondy_session_id:new(),
 
         case bondy_auth:init(SessionId, RealmUri, ClientId, all, Peer) of
             {ok, AuthCtxt} ->
@@ -438,7 +438,8 @@ token_flow(#{?GRANT_TYPE := <<"password">>} = Map, Req0, St0) ->
     {IP, _Port} = Peer = cowboy_req:peer(Req0),
 
     %% This is ID will bot be used as the ID is already defined in the JWT
-    SessionId = bondy_utils:get_id(global),
+    SessionId = bondy_session_id:new(),
+
     try
         case bondy_auth:init(SessionId, RealmUri, Username, all, Peer) of
             {ok, Ctxt} ->

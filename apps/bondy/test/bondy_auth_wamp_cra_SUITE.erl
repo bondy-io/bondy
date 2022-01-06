@@ -103,7 +103,7 @@ add_realm(RealmUri) ->
 
 test_1(Config) ->
     RealmUri = ?config(realm_uri, Config),
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 

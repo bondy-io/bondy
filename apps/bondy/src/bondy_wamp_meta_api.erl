@@ -356,7 +356,7 @@ list(Type, RealmUri) ->
 
 list(Type, RealmUri, Fun) ->
     try
-        case bondy_registry:entries(Type, RealmUri, '_', '_') of
+        case bondy_registry:entries(Type, RealmUri, '_') of
             [] ->
                 {ok, []};
             Entries ->
@@ -391,7 +391,7 @@ summary(Type, RealmUri) ->
         ?WILDCARD_MATCH => []
     },
     try
-        case bondy_registry:entries(Type, RealmUri, '_', '_') of
+        case bondy_registry:entries(Type, RealmUri, '_') of
             [] ->
                 {ok, Default};
             Entries ->
@@ -528,11 +528,11 @@ list_callees([RealmUri, ProcedureUri]) ->
 %% @private
 list_registration_callees(_RealmUri, _RegId) ->
     %% try
-    %%     case bondy_registry:entries(registration, RealmUri, '_', '_') of
+    %%     case bondy_registry:entries(registration, RealmUri, '_') of
     %%         {[], '$end_of_table'} ->
     %% {error, bondy_wamp_utils:no_such_registration_error(RegId)};
     %%         {[Entries], '$end_of_table'} ->
-    %%             Sessions = [bondy_registry_entry:session_id(E) || E <- Entries],
+    %%             Sessions = [bondy_registry_entry:session_external_id(E) || E <- Entries],
     %%             {ok, Sessions}
     %%     end
     %% catch

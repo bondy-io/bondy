@@ -555,9 +555,13 @@ log(Level, Msg0, #state{} = St) ->
         serializer => bondy_context:encoding(Ctxt),
         frame_type => St#state.frame_type
     },
+    SessionId = bondy_wamp_protocol:session_id(ProtocolState),
+    ExtId = bondy_session_id:to_external(SessionId),
+
     Meta = #{
         realm => bondy_wamp_protocol:realm_uri(ProtocolState),
-        session_id => bondy_wamp_protocol:session_id(ProtocolState),
+        session_id => SessionId,
+        session_external_id => ExtId,
         peername => bondy_context:peername(Ctxt)
     },
     logger:log(Level, Msg, Meta);

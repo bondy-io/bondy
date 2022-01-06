@@ -84,8 +84,8 @@
 -export([subscribe/3]).
 -export([subscribe/4]).
 -export([subscriptions/1]).
+-export([subscriptions/2]).
 -export([subscriptions/3]).
--export([subscriptions/4]).
 -export([unsubscribe/1]).
 -export([unsubscribe/2]).
 
@@ -183,10 +183,13 @@ when is_map(Ctxt) ->
         _:{not_authorized, _Reason} ->
             {error, not_authorized};
         _:Reason:Stacktrace->
+            SessionId = bondy_context:session_id(Ctxt),
+
             ?LOG_WARNING(#{
                 description => "Error while publishing",
                 reason => Reason,
-                session_id => bondy_context:session_id(Ctxt),
+                session_external_id => bondy_session_id:to_external(SessionId),
+                session_id => SessionId,
                 topic => TopicUri,
                 stacktrace => Stacktrace
             }),
@@ -526,14 +529,11 @@ subscriptions({subscription, _} = Cont) ->
 %% of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(
-    RealmUri :: uri(),
-    Node :: atom(),
-    SessionId :: id()) ->
+-spec subscriptions(RealmUri :: uri(), SessionId :: id()) ->
     [bondy_registry_entry:t()].
 
-subscriptions(RealmUri, Node, SessionId) ->
-    bondy_registry:entries(subscription, RealmUri, Node, SessionId).
+subscriptions(RealmUri, SessionId) ->
+    bondy_registry:entries(subscription, RealmUri, SessionId).
 
 
 %% -----------------------------------------------------------------------------
@@ -545,16 +545,14 @@ subscriptions(RealmUri, Node, SessionId) ->
 %% Use {@link subscriptions/3} to limit the number of subscriptions returned.
 %% @end
 %% -----------------------------------------------------------------------------
--spec subscriptions(
-    RealmUri :: uri(), Node :: atom(), SessionId :: id(), non_neg_integer()) ->
+-spec subscriptions(RealmUri :: uri(), SessionId :: id(), non_neg_integer()) ->
     {
         [bondy_registry_entry:t()],
         bondy_registry:continuation() | bondy_registry:eot()
     }.
 
-subscriptions(RealmUri, Node, SessionId, Limit) ->
-    bondy_registry:entries(
-        subscription, RealmUri, Node, SessionId, Limit).
+subscriptions(RealmUri, SessionId, Limit) ->
+    bondy_registry:entries(subscription, RealmUri, SessionId, Limit).
 
 
 %% -----------------------------------------------------------------------------
@@ -664,8 +662,11 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
     %% Publisher exclusion: enabled by default
     Exclusions = case maps:get(exclude_me, Opts, true) of
         true ->
+            ExtId = bondy_session_id:to_external(
+                bondy_context:session_id(Ctxt)
+            ),
             lists:append(
-                [S || S <- [bondy_context:session_id(Ctxt)], S =/= undefined], Exclusions0
+                [S || S <- [ExtId], S =/= undefined], Exclusions0
             );
         false ->
             Exclusions0
@@ -707,7 +708,7 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
                 SubsId = bondy_registry_entry:id(Entry),
                 Pid = bondy_ref:pid(SubscriberRef),
 
-                case bondy_ref:session_id(SubscriberRef) of
+                case bondy_registry_entry:session_id(Entry) of
                     undefined ->
                         %% An internal bondy_subscriber
                         %% TODO make subscriber have same interface as client
@@ -865,10 +866,9 @@ maybe_retain(_, _, _, _, _) ->
 
 %% @private
 send_retained(Entry) ->
-    Ref = bondy_registry_entry:ref(Entry),
-    SessionId = bondy_ref:session_id(Ref),
-
     RealmUri = bondy_registry_entry:realm_uri(Entry),
+    SessionId = bondy_registry_entry:session_id(Entry),
+    Ref = bondy_registry_entry:ref(Entry),
     SubsId = bondy_registry_entry:id(Entry),
     Topic = bondy_registry_entry:uri(Entry),
     Policy = bondy_registry_entry:match_policy(Entry),

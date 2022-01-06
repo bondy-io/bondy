@@ -38,21 +38,16 @@
 
 
 -type t()       ::  #{
-    id => id(),
-    %% Realm and Session
     realm_uri => uri(),
-    node => atom(),
+    session_id => maybe(ksuid:t()),
+    session => maybe(bondy_session:t()),
     security_enabled => boolean(),
-    session => bondy_session:t() | undefined,
     %% Peer Info
     peer => bondy_session:peer(),
     authmethod => binary(),
     authid => binary(),
     is_anonymous => boolean(),
     roles => map(),
-    request_id => id(),
-    request_timestamp => integer(),
-    request_timeout => non_neg_integer(),
     request_details => map(),
     %% Metadata
     user_info => map()
@@ -75,14 +70,12 @@
 -export([encoding/1]).
 -export([get_id/2]).
 -export([has_session/1]).
--export([id/1]).
 -export([is_anonymous/1]).
 -export([is_feature_enabled/3]).
 -export([is_security_enabled/1]).
 -export([local_context/1]).
 -export([new/0]).
 -export([new/2]).
--export([node/1]).
 -export([peer/1]).
 -export([ref/1]).
 -export([peername/1]).
@@ -90,9 +83,6 @@
 -export([rbac_context/1]).
 -export([realm_uri/1]).
 -export([request_details/1]).
--export([request_id/1]).
--export([request_timeout/1]).
--export([request_timestamp/1]).
 -export([reset/1]).
 -export([roles/1]).
 -export([session/1]).
@@ -103,9 +93,6 @@
 -export([set_peer/2]).
 -export([set_realm_uri/2]).
 -export([set_request_details/2]).
--export([set_request_id/2]).
--export([set_request_timeout/2]).
--export([set_request_timestamp/2]).
 -export([set_session/2]).
 -export([set_subprotocol/2]).
 -export([subprotocol/1]).
@@ -150,8 +137,7 @@ format_status(Opt, Ctxt0) ->
 -spec new() -> t().
 new() ->
     #{
-        id => bondy_utils:get_id(global),
-        node => bondy_config:node(),
+        session_id => bondy_session_id:new(),
         request_id => undefined,
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
         request_timeout => bondy_config:get(request_timeout, undefined)
@@ -177,6 +163,7 @@ local_context(RealmUri) when is_binary(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec new(bondy_session:peer(), subprotocol_2()) -> t().
+
 new(Peer, Subprotocol) ->
     set_subprotocol(set_peer(new(), Peer), Subprotocol).
 
@@ -184,17 +171,12 @@ new(Peer, Subprotocol) ->
 %% -----------------------------------------------------------------------------
 %% @doc
 %% Resets the context. Returns a copy of Ctxt where the following attributes
-%% have been reset: request_id, request_timeout, request_timestamp
+%% have been reset: request_details.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec reset(t()) -> t().
 reset(Ctxt) ->
-    Ctxt#{
-        request_timestamp => undefined,
-        request_id => undefined,
-        request_details => undefined,
-        request_timeout => 0
-    }.
+    Ctxt#{request_details => undefined}.
 
 
 %% -----------------------------------------------------------------------------
@@ -222,12 +204,21 @@ close(Ctxt, _Reason) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns the context identifier.
+%% @doc
+%% Returns the sessionId of the provided context or 'undefined'
+%% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
--spec id(t()) -> id().
+-spec session_id(t()) -> maybe(id()).
 
-id(#{id := Val}) -> Val.
+session_id(#{session := S}) ->
+    bondy_session:id(S);
+
+session_id(#{session_id := Val}) ->
+    Val;
+
+session_id(#{}) ->
+    undefined.
 
 
 %% -----------------------------------------------------------------------------
@@ -248,21 +239,6 @@ peer(#{peer := Val}) -> Val.
 
 peername(#{peer := Val}) ->
     inet_utils:peername_to_binary(Val).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the peer of the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec node(t()) -> atom().
-
-node(#{session := Session}) ->
-    bondy_session:node(Session);
-
-node(#{node := Val}) -> Val.
-
-
 
 %% -----------------------------------------------------------------------------
 %% @doc
@@ -437,24 +413,6 @@ when is_map(Ctxt) andalso (is_binary(Val) orelse Val == anonymous) ->
 %% if there is none.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t()) -> id() | undefined.
-session_id(#{session := S}) ->
-    bondy_session:id(S);
-
-session_id(#{session_id := Val}) ->
-    %% TODO remove this once we force everyone to have sessions
-    Val;
-
-session_id(#{}) ->
-    undefined.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the sessionId of the provided context or 'undefined'
-%% if there is none.
-%% @end
-%% -----------------------------------------------------------------------------
 -spec rbac_context(t()) -> bondy_rbac:context() | undefined.
 
 rbac_context(#{session := S}) ->
@@ -479,8 +437,7 @@ get_id(#{realm_uri := Uri}, router) ->
     bondy_utils:get_id({router, Uri});
 
 get_id(#{session := Session}, session) ->
-    Id = bondy_session:id(Session),
-    bondy_utils:get_id({session, Id});
+    bondy_utils:get_id({session, bondy_session:id(Session)});
 
 get_id(_, session) ->
     bondy_utils:get_id(global).
@@ -507,8 +464,7 @@ has_session(#{}) -> false.
 %% -----------------------------------------------------------------------------
 -spec set_session(t(), bondy_session:t()) -> t().
 set_session(Ctxt, S) ->
-    Ctxt#{session => S}.
-
+    maps:remove(session_id, Ctxt#{session => S}).
 
 
 %% -----------------------------------------------------------------------------
@@ -534,23 +490,15 @@ session(#{session := S}) ->
     S.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current request id.
-%% @end
-%% -----------------------------------------------------------------------------
--spec request_id(t()) -> id().
-request_id(#{request_id := Val}) ->
-    Val.
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Sets the current request id to the provided context.
+%% Returns the current request details
 %% @end
 %% -----------------------------------------------------------------------------
--spec set_request_id(t(), id()) -> t().
-set_request_id(Ctxt, ReqId) ->
-    Ctxt#{set_request_id => ReqId}.
+-spec request_details(t()) -> map().
+request_details(#{request_details := Val}) ->
+    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -563,35 +511,6 @@ set_request_id(Ctxt, ReqId) ->
 set_request_details(Ctxt, Details) when is_map(Details) ->
     Ctxt#{request_details => Details}.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current request timeout.
-%% @end
-%% -----------------------------------------------------------------------------
--spec request_timeout(t()) -> non_neg_integer().
-request_timeout(#{request_timeout := Val}) ->
-    Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the current request timeout to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec set_request_timeout(t(), non_neg_integer()) -> t().
-set_request_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
-    Ctxt#{request_timeout => Timeout}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current request details
-%% @end
-%% -----------------------------------------------------------------------------
--spec request_details(t()) -> map().
-request_details(#{request_details := Val}) ->
-    Val.
 
 
 %% -----------------------------------------------------------------------------
@@ -626,9 +545,10 @@ set_call_timeout(Ctxt, Timeout) when is_integer(Timeout), Timeout >= 0 ->
 caller_details(#{authid := '$internal'}, Details) ->
     Details;
 
-caller_details(Ctxt, Details) ->
+caller_details(#{session := Session} = Ctxt, Details) ->
+
     Details#{
-        caller => session_id(Ctxt),
+        caller => bondy_session:external_id(Session),
         caller_authid => authid(Ctxt),
         caller_authrole => name_to_binary(authrole(Ctxt))
     }.
@@ -644,32 +564,12 @@ caller_details(Ctxt, Details) ->
 publisher_details(#{authid := '$internal'}, Details) ->
     Details;
 
-publisher_details(Ctxt, Details) ->
+publisher_details(#{session := Session} = Ctxt, Details) ->
     Details#{
-        publisher => session_id(Ctxt),
+        publisher => bondy_session:external_id(Session),
         publisher_authid => name_to_binary(authid(Ctxt)),
         publisher_authrole => name_to_binary(authrole(Ctxt))
     }.
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the current request timestamp.
-%% @end
-%% -----------------------------------------------------------------------------
--spec request_timestamp(t()) -> integer().
-
-request_timestamp(#{request_timestamp := Val}) ->
-    Val.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Sets the current request timeout to the provided context.
-%% @end
-%% -----------------------------------------------------------------------------
--spec set_request_timestamp(t(), integer()) -> t().
-set_request_timestamp(Ctxt, Timestamp) when is_integer(Timestamp) ->
-    Ctxt#{request_timestamp => Timestamp}.
 
 
 %% -----------------------------------------------------------------------------

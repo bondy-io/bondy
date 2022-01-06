@@ -261,7 +261,7 @@ get_id(global) ->
 get_id({router, _}) ->
     get_id(global);
 
-get_id({session, SessionId}) when is_integer(SessionId) ->
+get_id({session, SessionId}) when is_binary(SessionId) ->
     %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)
