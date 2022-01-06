@@ -486,21 +486,20 @@ init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
         Fun = fun
-            (Mod, #{config := Config}, Acc) ->
-                case lists:keyfind(enabled, 1, Config) of
-                    {enabled, false} ->
-                        Acc;
-                    {enabled, true} ->
-                        case Mod:init(Config) of
+            (Bridge, #{config := Config}, Acc) ->
+                case key_value:get(enabled, Config, false) of
+                    true ->
+                        case Bridge:init(Config) of
                             {ok, Ctxt} when is_map(Ctxt) ->
-                                maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
-                                %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                                key_value:put([Bridge, ctxt], Ctxt, Acc);
                             {error, Reason} ->
                                 error(Reason)
-                        end
+                        end;
+                    false ->
+                        Acc
                 end
         end,
-        Bridges1 = maps:fold(Fun, #{}, Bridges0),
+        Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
         {ok, State#state{bridges = Bridges1}}
     catch
         Class:Reason:Stacktrace->
@@ -543,9 +542,16 @@ load_config(Map, State) when is_map(Map) ->
             %% We make sure all subscriptions are unique
             Subscriptions = sets:to_list(sets:from_list(L)),
             %% We instantiate the subscribers
-            Folder = fun(Subs, Acc) ->
-                {ok, _, _} = do_subscribe(Subs, Acc),
-                Acc
+            Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
+                Bridges = State#state.bridges,
+
+                case key_value:get([Bridge, enabled], Bridges, false) of
+                    true ->
+                        {ok, _, _} = do_subscribe(Subs, Acc),
+                        Acc;
+                    false ->
+                        Acc
+                end
             end,
             NewState = lists:foldl(Folder, State, Subscriptions),
             %% We store the specification, see add/2 for an explanation
@@ -626,8 +632,9 @@ do_subscribe(Subscription, State) ->
         <<"action">> := Action
     } = Subscription,
 
+
     case get_bridge(Bridge, State) of
-        undefined ->
+        undefined  ->
             error({unknown_bridge, Bridge});
 
         #{id := Bridge} ->
