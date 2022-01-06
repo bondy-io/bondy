@@ -273,7 +273,7 @@ handle_event({backup_restore_failed, Args}, State) ->
 
 handle_event({registration_created, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_session_id:to_external(
+    SessionId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     RegId = bondy_registry_entry:id(Entry),
@@ -290,7 +290,7 @@ handle_event({registration_created, Entry}, State) ->
 
 handle_event({registration_added, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_session_id:to_external(
+    SessionId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     RegId = bondy_registry_entry:id(Entry),
@@ -307,7 +307,7 @@ handle_event({registration_added, Entry}, State) ->
 
 handle_event({registration_deleted, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_session_id:to_external(
+    SessionId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     RegId = bondy_registry_entry:id(Entry),
@@ -324,7 +324,7 @@ handle_event({registration_deleted, Entry}, State) ->
 
 handle_event({registration_removed, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    SessionId = bondy_session_id:to_external(
+    SessionId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     RegId = bondy_registry_entry:id(Entry),
@@ -343,7 +343,7 @@ handle_event({registration_removed, Entry}, State) ->
 
 handle_event({subscription_created, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_session_id:to_external(
+    ExtId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     Uri = ?WAMP_SUBSCRIPTION_ON_CREATE,
@@ -362,7 +362,7 @@ handle_event({subscription_created, Entry}, State) ->
 
 handle_event({subscription_added, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_session_id:to_external(
+    ExtId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     Uri = ?WAMP_SUBSCRIPTION_ON_SUBSCRIBE,
@@ -381,7 +381,7 @@ handle_event({subscription_added, Entry}, State) ->
 
 handle_event({subscription_removed, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_session_id:to_external(
+    ExtId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     Uri = ?WAMP_SUBSCRIPTION_ON_UNSUBSCRIBE,
@@ -403,7 +403,7 @@ handle_event({subscription_removed, Entry}, State) ->
 
 handle_event({subscription_deleted, Entry}, State) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    ExtId = bondy_session_id:to_external(
+    ExtId = bondy_utils:external_session_id(
         bondy_registry_entry:session_id(Entry)
     ),
     Uri = ?WAMP_SUBSCRIPTION_ON_DELETE,
@@ -445,3 +445,14 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+
+
+
+
+%% =============================================================================
+%% API
+%% =============================================================================
+
+
+

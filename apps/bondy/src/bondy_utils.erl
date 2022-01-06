@@ -49,6 +49,7 @@
 -export([to_existing_atom_keys/1]).
 -export([uuid/0]).
 -export([uuid/1]).
+-export([external_session_id/1]).
 
 
 
@@ -278,6 +279,18 @@ get_id({session, SessionId}) when is_binary(SessionId) ->
 session_id_to_uri_part(SessionId) ->
     list_to_binary(io_lib:format("~16..0B", [SessionId])).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec external_session_id(maybe(bondy_session_id:t())) -> maybe(id()).
+
+external_session_id(Term) when is_binary(Term) ->
+    bondy_session_id:to_external(Term);
+
+external_session_id(undefined) ->
+    undefined.
 
 %% -----------------------------------------------------------------------------
 %% @doc

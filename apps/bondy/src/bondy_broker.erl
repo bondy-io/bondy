@@ -191,11 +191,11 @@ when is_map(Ctxt) ->
             {error, not_authorized};
         _:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),
-
+            ExtId = bondy_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
                 description => "Error while publishing",
                 reason => Reason,
-                session_external_id => bondy_session_id:to_external(SessionId),
+                session_external_id => ExtId,
                 session_id => SessionId,
                 topic => TopicUri,
                 stacktrace => Stacktrace
