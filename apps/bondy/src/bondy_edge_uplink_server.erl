@@ -620,7 +620,7 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 remove_all_registry_entries(State) ->
     maps:foreach(
-        fun(Session) ->
+        fun(_SessionId, Session) ->
             FakeCtxt = maps:with([id, ref, realm_uri], Session),
             bondy_router:close_context(FakeCtxt)
         end,
