@@ -723,27 +723,9 @@ do_publish(ReqId, Opts, {RealmUri, TopicUri}, Args, ArgsKw, Ctxt) ->
             true ->
                 %% A local subscriber
                 SubsId = bondy_registry_entry:id(Entry),
-                Pid = bondy_ref:pid(SubscriberRef),
-
-                case bondy_registry_entry:session_id(Entry) of
-                    undefined ->
-                        %% An internal bondy_subscriber
-                        %% TODO make subscriber have same interface as client
-                        Event = MakeEvent(SubsId),
-                        Pid ! Event,
-                        NodeAcc;
-
-                    ESessionId ->
-                        %% A WAMP session
-                        case bondy_session:lookup(RealmUri, ESessionId) of
-                            {ok, _ESession} ->
-                                Event = MakeEvent(SubsId),
-                                ok = bondy:send(RealmUri, SubscriberRef, Event),
-                                NodeAcc;
-                            {error, not_found} ->
-                                NodeAcc
-                        end
-                end;
+                Event = MakeEvent(SubsId),
+                ok = bondy:send(RealmUri, SubscriberRef, Event),
+                NodeAcc;
 
             false ->
                 %% A remote subscriber.

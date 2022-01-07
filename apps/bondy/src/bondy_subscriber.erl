@@ -28,6 +28,7 @@
 -behaviour(gen_server).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
+-include("bondy.hrl").
 
 -record(state, {
     realm_uri           ::  uri(),
@@ -222,7 +223,8 @@ handle_cast(Event, State) ->
     {noreply, State}.
 
 
-handle_info(#event{} = WAMPEvent, State) ->
+handle_info(
+    {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #event{} = WAMPEvent}, State) ->
     case do_handle_event(WAMPEvent, State) of
         {ok, NewState} ->
             {noreply, NewState};
