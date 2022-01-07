@@ -306,7 +306,7 @@ challenge(Realm, Details, State0) ->
                     Session = #{
                         id => SessionId,
                         authid => Authid,
-                        realm => bondy_realm:uri(Realm),
+                        realm_uri => bondy_realm:uri(Realm),
                         auth_context => AuthCtxt
                     },
 
@@ -620,9 +620,8 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
 
 remove_all_registry_entries(State) ->
     maps:foreach(
-        fun(_SessionId, Session) ->
-            FakeCtxt = maps:with([id, ref, realm_uri], Session),
-            bondy_router:close_context(FakeCtxt)
+        fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
+            bondy_router:flush(RealmUri, Ref)
         end,
         State#state.sessions
     ).
@@ -728,7 +727,7 @@ pdb_objects(It, Acc0) ->
 
 %% @private
 session_realm(SessionId, #state{sessions = Map}) ->
-    maps:get(realm, maps:get(SessionId, Map)).
+    maps:get(realm_uri, maps:get(SessionId, Map)).
 
 
 %% @private

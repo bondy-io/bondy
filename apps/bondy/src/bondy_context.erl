@@ -199,8 +199,14 @@ close(Ctxt0) ->
 -spec close(t(), Reason :: normal | crash | shutdown) -> ok.
 
 close(Ctxt, _Reason) ->
-    _ = bondy_router:close_context(Ctxt),
-    ok.
+    try bondy_context:ref(Ctxt) of
+        Ref ->
+            RealmUri = bondy_context:realm_uri(Ctxt),
+            ok = bondy_router:flush(RealmUri, Ref)
+    catch
+        _:_ ->
+            ok
+    end.
 
 
 %% -----------------------------------------------------------------------------

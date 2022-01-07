@@ -80,8 +80,8 @@
 ).
 
 %% API
--export([close_context/1]).
 -export([features/0]).
+-export([flush/2]).
 -export([forward/2]).
 -export([forward/3]).
 -export([is_feature_enabled/1]).
@@ -125,25 +125,32 @@ is_feature_enabled(F) when is_binary(F) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes all subscriptions that are associated for reference `Ref' in
+%% realm `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_context(bondy_context:t()) -> bondy_context:t().
+-spec flush(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
-close_context(Ctxt) ->
+flush(RealmUri, Ref) ->
     try
-        %% Cleanup subscriptions for context's session
-        ok = unsubscribe_all(Ctxt),
-        Ctxt
+        %% TODO If subscription is deleted we need to also call on_delete/1
+        %% Cleanup all registrations for the ref's session
+        SessionId = bondy_ref:session_id(Ref),
+        bondy_registry:remove_all(
+            subscription, RealmUri, SessionId, fun on_unsubscribe/1
+        )
+
     catch
         Class:Reason:Stacktrace ->
         ?LOG_DEBUG(#{
-            description => "Error while closing context",
+            description => "Error while flushin subscriptions",
             class => Class,
             reason => Reason,
-            stacktrace => Stacktrace
+            stacktrace => Stacktrace,
+            realm_uri => RealmUri,
+            ref => Ref
         }),
-        Ctxt
+        ok
     end.
 
 
@@ -254,6 +261,10 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
 subscribe(RealmUri, Opts, Topic, Pid) when is_pid(Pid) ->
     %% Add a local subscription
     Ref = bondy_ref:new(internal, Pid),
+    subscribe(RealmUri, Opts, Topic, Ref);
+
+subscribe(RealmUri, Opts, Topic, Ref)  ->
+    bondy_ref:is_type(Ref) orelse error({badarg, Ref}),
 
     case bondy_registry:add(subscription, Topic, Opts, RealmUri, Ref) of
         {ok, Entry, true} ->
@@ -500,19 +511,6 @@ not_authorized_error(M, Reason) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-%% TODO Rename to flush()
--spec unsubscribe_all(bondy_context:t()) -> ok.
-
-unsubscribe_all(Ctxt) ->
-    %% TODO If subscription is deleted we need to also call on_delete/1
-    bondy_registry:remove_all(subscription, Ctxt, fun on_unsubscribe/1).
 
 
 %% -----------------------------------------------------------------------------

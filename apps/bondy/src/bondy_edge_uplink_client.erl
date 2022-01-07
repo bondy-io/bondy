@@ -689,7 +689,7 @@ open_sessions(State0) ->
             ok = send_message({hello, Uri, Details}, State0),
 
             Session = #{
-                realm => Uri,
+                realm_uri => Uri,
                 authid => AuthId,
                 pubkey => PubKey,
                 signer => signer(PubKey, H),
@@ -714,8 +714,11 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
+    % dbg:tracer(), dbg:p(self(), c),
+    % dbg:tpl(bondy_registry, '_', x),
+    % dbg:tpl(bondy_registry_entry, '_', x),
+
     State3 = subscribe(Session, State2),
-    State3 = State2,
 
     %% Get the already registered registrations and subscriptions and proxy them
     State4 = proxy_existing(Session, State3),
@@ -728,7 +731,7 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 %% @private
 leave_session(Id, #state{} = State) ->
     Sessions0 = State#state.sessions,
-    {#{realm := Uri}, Sessions} = maps:take(Id, Sessions0),
+    {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
     State#state{
         sessions = Sessions,
         sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
@@ -741,7 +744,7 @@ has_session(SessionId, #state{sessions = Sessions}) ->
 
 
 %% @private
-add_session(#{id := Id, realm := Uri} = Session, #state{} = State) ->
+add_session(#{id := Id, realm_uri := Uri} = Session, #state{} = State) ->
     State#state{
         sessions = maps:put(Id, Session, State#state.sessions),
         sessions_by_uri = maps:put(Uri, Id, State#state.sessions_by_uri)
@@ -803,7 +806,8 @@ handle_aae_data({PKey, RemoteObj}, _State) ->
 %% @private
 subscribe(Session0, State) ->
     SessionId = maps:get(id, Session0),
-    RealmUri = maps:get(realm, Session0),
+    RealmUri = maps:get(realm_uri, Session0),
+    MyRef = maps:get(ref, Session0),
     Me = self(),
 
     %% We subscribe to registration and subscription meta events
@@ -814,12 +818,11 @@ subscribe(Session0, State) ->
         {bondy_edge_event_handler, SessionId}, [RealmUri, SessionId, Me]
     ),
 
-    % SubscriptionId = bondy_utils:get_id(global),
     Topic = <<"">>,
     Opts = #{
         match => ?PREFIX_MATCH
     },
-    {ok, SubsId} = bondy_broker:subscribe(RealmUri, Opts, Topic, Me),
+    {ok, SubsId} = bondy_broker:subscribe(RealmUri, Opts, Topic, MyRef),
 
     Session = key_value:set([subscriptions, SubsId], Topic, Session0),
 
@@ -828,7 +831,7 @@ subscribe(Session0, State) ->
 
 %% @private
 proxy_existing(Session, State0) ->
-    RealmUri = maps:get(realm, Session),
+    RealmUri = maps:get(realm_uri, Session),
 
     %% We want all sessions, callback modules or processes
     SessionId = '_',
@@ -909,7 +912,7 @@ send_session_message(SessionId, Msg, State) ->
 %     ets:update_counter(Tab, RealmUri, {Pos, 1}).
 
 handle_session_message(Msg, To, Opts, SessionId, State) ->
-    #{realm := RealmUri, ref := MyRef} = session(SessionId, State),
+    #{realm_uri := RealmUri, ref := MyRef} = session(SessionId, State),
 
     SendOpts = bondy:add_via(MyRef, Opts),
     bondy_router:forward(Msg, To, SendOpts#{realm_uri => RealmUri}).

@@ -351,7 +351,7 @@ peek(Key) ->
 %% @doc Removes all pending promises from the queue for the reference
 %% @end
 %% -----------------------------------------------------------------------------
--spec flush(uri(), bondy_ref:t()) -> ok.
+-spec flush(RealmUri :: uri(), bondy_ref:t()) -> ok.
 
 flush(RealmUri, Ref) ->
     %% Ref can be caller and callee

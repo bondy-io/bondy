@@ -107,7 +107,7 @@
 
 %% API
 -export([agent/0]).
--export([close_context/1]).
+-export([flush/2]).
 -export([forward/2]).
 -export([forward/3]).
 -export([roles/0]).
@@ -288,19 +288,16 @@ stop() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes all subscriptions, registrations and all the pending items in
+%% the RPC promise queue that are associated for reference `Ref' in realm
+%% `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_context(bondy_context:t()) -> bondy_context:t().
+-spec flush(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
-close_context(Ctxt) ->
-    try bondy_context:ref(Ctxt) of
-        _Ref ->
-            bondy_dealer:close_context(bondy_broker:close_context(Ctxt))
-    catch
-        _:_ ->
-            ok
-    end.
+flush(RealmUri, Ref) ->
+    ok = bondy_dealer:flush(RealmUri, Ref),
+    bondy_broker:flush(RealmUri, Ref).
 
 
 

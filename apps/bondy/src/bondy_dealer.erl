@@ -178,8 +178,8 @@
 -export([callees/1]).
 -export([callees/2]).
 -export([callees/3]).
--export([close_context/1]).
 -export([features/0]).
+-export([flush/2]).
 -export([forward/2]).
 -export([forward/3]).
 -export([is_feature_enabled/1]).
@@ -223,31 +223,35 @@ is_feature_enabled(F) when is_binary(F) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Removes all registrations and all the pending items in the RPC promise
+%% queue that are associated for reference `Ref' in realm `RealmUri'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec close_context(bondy_context:t()) -> bondy_context:t().
+-spec flush(RealmUri :: uri(), Ref :: bondy_ref:t()) -> ok.
 
-close_context(Ctxt) ->
+flush(RealmUri, Ref) ->
     try
-        RealmUri = bondy_context:realm_uri(Ctxt),
+        %% TODO If registration is deleted we need to also call on_delete/1
+        %% Cleanup all registrations for the ref's session
+        SessionId = bondy_ref:session_id(Ref),
+        bondy_registry:remove_all(
+            registration, RealmUri, SessionId, fun on_unregister/1
+        ),
 
-        %% Cleanup registrations
-        ok = unregister_all(Ctxt),
-
-        %% Cleanup invocations queue
-        ok = bondy_rpc_promise:flush(RealmUri, bondy_context:ref(Ctxt)),
-        Ctxt
+        %% Cleanup all RPC queued invocations for Ref
+        ok = bondy_rpc_promise:flush(RealmUri, Ref)
 
     catch
         Class:Reason:Stacktrace ->
             ?LOG_WARNING(#{
-                description => "Error while closing context",
+                description => "Error while flushing registration and RPC promise queue items",
                 class => Class,
                 reason => Reason,
-                trace => Stacktrace
+                trace => Stacktrace,
+                realm_uri => RealmUri,
+                ref => Ref
             }),
-            Ctxt
+            ok
     end.
 
 %% -----------------------------------------------------------------------------
@@ -1303,17 +1307,6 @@ unregister(Uri, M, Ctxt) ->
     Reply = wamp_message:unregistered(RegId),
 
     bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply).
-
-
-%% -----------------------------------------------------------------------------
-%% @private
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec unregister_all(bondy_context:t()) -> ok.
-
-unregister_all(Ctxt) ->
-    bondy_registry:remove_all(registration, Ctxt, fun on_unregister/1).
 
 
 %% -----------------------------------------------------------------------------

@@ -491,9 +491,9 @@ when Task == undefined orelse is_function(Task, 1) ->
     task() | undefined) -> [bondy_registry_entry:t()].
 
 remove_all(Type, RealmUri, SessionId, Task) ->
-    Pattern = bondy_registry_entry:key_pattern(
-        RealmUri, #{session_id => SessionId}
-    ),
+    Extra = #{session_id => SessionId},
+    Pattern = bondy_registry_entry:key_pattern(RealmUri, Extra),
+
     MatchOpts = [
         {limit, 100},
         {remove_tombstones, true},
