@@ -1,3 +1,22 @@
+%% =============================================================================
+%%  bondy_ref.erl -
+%%
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
 %% -----------------------------------------------------------------------------
 %% @doc A `bondy_ref' (reference) acts as a fully qualified name for a
 %% process or callback function in a Bondy network. The reference is used by
@@ -25,10 +44,10 @@
 -define(TYPES, [relay, bridge_relay, internal, client]).
 
 -record(bondy_ref, {
+    type                ::  wildcard(ref_type()),
     nodestring          ::  wildcard(nodestring()),
     session_id          ::  wildcard(maybe(bondy_session_id:t())),
-    target              ::  wildcard(target()),
-    type                ::  wildcard(ref_type())
+    target              ::  wildcard(target())
 }).
 
 -type t()               ::  #bondy_ref{}.
@@ -39,7 +58,7 @@
 -type internal()        ::  #bondy_ref{type :: internal}.
 -type ref_type()        ::  relay | bridge_relay | internal | client.
 -type target()          ::  {pid, binary()}
-                            | {name, term()}
+                            | {name, binary()}
                             | {callback, mf()}.
 -type target_type()     ::  pid | name | callback.
 -type name()            ::  term().
@@ -132,7 +151,7 @@ new(Type, Target, SessionId) ->
     Type :: ref_type(),
     Target :: pid() | mf() | name(),
     SessionId :: maybe(bondy_session_id:t()),
-    Node :: node() | nodestring()) -> t().
+    Node :: node() | nodestring()) -> t() | no_return().
 
 new(Type, Target, SessionId, Node) when is_atom(Node) ->
     new(Type, Target, SessionId, atom_to_binary(Node, utf8));
@@ -140,13 +159,14 @@ new(Type, Target, SessionId, Node) when is_atom(Node) ->
 new(Type, Target0, SessionId, Nodestring) when is_binary(Nodestring) ->
 
     is_binary(SessionId)
-        orelse SessionId == undefined
-        orelse error({badarg, {session_id, SessionId}}),
+        orelse (SessionId == undefined andalso Type =/= client)
+        orelse error({badarg, [{type, Type}, {session_id, SessionId}]}),
 
     lists:member(Type, ?TYPES)
         orelse error({badarg, {type, Type}}),
 
-    Target = validate_target(Target0),
+    Target = validate_target(Type, Target0),
+
 
     #bondy_ref{
         type = Type,
@@ -165,7 +185,7 @@ new(Type, Target0, SessionId, Nodestring) when is_binary(Nodestring) ->
     Type :: wildcard(ref_type()),
     Target :: wildcard(pid() | mf() | name()),
     SessionId :: wildcard(maybe(bondy_session_id:t())),
-    Node :: wildcard(node() | nodestring())) -> t().
+    Node :: wildcard(node() | nodestring())) -> t() | no_return().
 
 
 pattern(Type, Target0, SessionId, Node) ->
@@ -184,7 +204,7 @@ pattern(Type, Target0, SessionId, Node) ->
     lists:member(Type, ?TYPES ++ ['_'])
         orelse error({badarg, {type, Type}}),
 
-    Target = validate_target(Target0, _AllowPattern = true),
+    Target = validate_target(Type, Target0, _AllowPattern = true),
 
     is_binary(SessionId)
         orelse SessionId == '_'
@@ -384,7 +404,7 @@ target_type(#bondy_ref{target = '_'}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec name(t()) -> maybe(term()).
+-spec name(t()) -> maybe(binary()).
 
 name(#bondy_ref{target = {name, Val}}) ->
     Val;
@@ -529,39 +549,58 @@ from_uri(Uri) ->
 
 
 %% @private
-validate_target(Target) ->
-    validate_target(Target, false).
+validate_target(Type, Target) ->
+    validate_target(Type, Target, false).
 
 
 %% @private
-validate_target(Target, AllowPattern) ->
+validate_target(Type, Target, AllowPattern) ->
     case Target of
-        undefined ->
-            error({badarg, {target, Target}});
+        '_'  when AllowPattern == true ->
+            '_';
 
-        {pid, Bin} = Val when is_binary(Bin) ->
+        '_' when AllowPattern == false ->
+            badtarget(Type, Target);
+
+        undefined ->
+            badtarget(Type, Target);
+
+        {pid, Bin} = Val ->
+            is_binary(Bin) orelse badtarget(Type, Target),
             Val;
 
         {name, _} = Val ->
             Val;
 
-        {callback, {M, F}} = Val when is_atom(M), is_atom(F) ->
+        {callback, {M, F}} = Val ->
+            Type == internal
+                andalso is_atom(M)
+                andalso is_atom(F)
+                orelse badtarget(Type, Target),
+
             Val;
 
-        {M, F} when is_atom(M), is_atom(F) ->
+        {M, F} ->
+            Type == internal
+                andalso is_atom(M)
+                andalso is_atom(F)
+                orelse badtarget(Type, Target),
+
             {callback, Target};
 
         Pid when is_pid(Pid) ->
             {pid, list_to_binary(pid_to_list(Pid))};
 
-        '_'  ->
-            AllowPattern == true
-                orelse error({badarg, {target, Target}}),
-            '_';
+        Term when is_binary(Term) ->
+            {name, Term};
 
-        Term when is_binary(Term)->
-            {name, Term}
+        _ ->
+            badtarget(Type, Target)
     end.
+
+
+badtarget(Type, Target) ->
+    error({badarg, [{type, Type}, {target, Target}]}).
 
 
 uri_pattern() ->
