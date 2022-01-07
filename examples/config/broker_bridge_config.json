@@ -31,6 +31,59 @@
                     "encoding": "json"
                 }
             }
+        },
+        {
+            "bridge": "bondy_aws_sns_bridge",
+            "meta": {
+                "description": "Subscribe to com.leapsight.test.notification.sms and publish to phone using Amazon SNS."
+            },
+            "match": {
+                "realm": "com.leapsight.test.notification",
+                "topic" : "com.leapsight.test.notification.sms",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "phone_number": "{{event.args |> nth(1)}}",
+                "text_message": "{{event.args |> nth(2)}}"
+            }
+        },
+        {
+            "comment": "Enable Sendgrid or mailgun but not both simultaneously",
+            "bridge": "bondy_mailgun_bridge",
+            "meta": {
+                "description": "Subscribe to com.leapsight.test.notification.email and publish to address using Mailgun."
+            },
+            "match": {
+                "realm": "com.leapsight.test.notification",
+                "topic" : "com.leapsight.test.notification.email.deprecated",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "sender": "{{email_sender}}",
+                "email_address": "{{event.args |> nth(1)}}",
+                "subject": "{{event.args |> nth(2)}}",
+                "body": "{{event.args |> nth(3)}}",
+                "options": "{{event.kwargs}}"
+            }
+        },
+        {
+            "comment": "Enable Sendgrid or mailgun but not both simultaneously",
+            "bridge": "bondy_sendgrid_bridge",
+            "meta": {
+                "description": "Subscribe to com.leapsight.test.notification.email and publish to address using Sendgrid."
+            },
+            "match": {
+                "realm": "com.leapsight.test.notification",
+                "topic" : "com.leapsight.test.notification.email",
+                "options": {"match": "exact"}
+            },
+            "action": {
+                "sender": "{{email_sender}}",
+                "email_address": "{{event.args |> nth(1)}}",
+                "subject": "{{event.args |> nth(2)}}",
+                "body": "{{event.args |> nth(3)}}",
+                "options": "{{event.kwargs}}"
+            }
         }
     ]
 }

@@ -300,6 +300,12 @@
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config) ->
+
+    ?LOG_DEBUG(#{
+        description => "Configuration",
+        config => Config
+    }),
+    
     _ = [application:set_env(brod, K, V) || {K, V} <- Config, K =:= clients],
 
     try application:ensure_all_started(brod) of

@@ -553,5 +553,44 @@
                 "comment": "for testing the corresponding priv key is '4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd'"
             }
         ]
+    },
+    {
+        "uri" : "com.leapsight.test.notification",
+        "description" : "The Leapsight test notifications realm.",
+        "authmethods" : [
+            "anonymous"
+        ],
+        "security_enabled" : true,
+        "allow_connections": true,
+        "users" : [
+        ],
+        "groups" : [
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.publish"
+                ],
+                "resources" : [
+                    {"uri" : "com.leapsight.test.notification.", "match": "prefix"}
+                ],
+                "roles" : [
+                    "anonymous"
+                ],
+                "meta" : {
+                    "description" : "Temporarily enabling anonymous."
+                }
+            }
+        ],
+        "sources" : [
+            {
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                    "description" : "Allows an anonymous authentication."
+                }
+            }
+        ]
     }
 ]

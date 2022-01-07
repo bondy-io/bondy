@@ -31,13 +31,6 @@ tar:
 
 devrun:
 	${REBAR} as dev release
-
-	cp examples/config/security_config.json _build/dev/rel/bondy/etc/security_config.json
-
-	cp examples/config/api_spec.json _build/dev/rel/bondy/etc/api_spec.json
-
-	cp examples/config/broker_bridge_config.json _build/dev/rel/bondy/etc/broker_bridge_config.json
-
 	_build/dev/rel/bondy/bin/bondy console
 
 prodrun:
@@ -77,3 +70,18 @@ run-node3:
 
 run-edge1:
 	_build/edge1/rel/bondy/bin/bondy console
+
+# Allows to run bridge release with an example of configuration for bondy notification brigdes
+# Are required as env environment variables the following:
+# - AWS_REGION
+# - AWS_SNS_HOST
+# - AWS_ACCESS_KEY_ID
+# - AWS_SECRET_ACCESS_KEY
+# - MAILGUN_DOMAIN (optional - disabled by default in conf)
+# - MAILGUN_APIKEY (optional - disabled by default in conf)
+# - MAILGUN_SENDER (optional - disabled by default in conf)
+# - SENDGRID_APIKEY
+# - SENDGRID_SENDER
+bridgerun:
+	${REBAR} as bridge release
+	_build/bridge/rel/bondy/bin/bondy console
