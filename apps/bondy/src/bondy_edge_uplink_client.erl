@@ -714,9 +714,6 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-    % dbg:tracer(), dbg:p(self(), c),
-    % dbg:tpl(bondy_registry, '_', x),
-    % dbg:tpl(bondy_registry_entry, '_', x),
 
     State3 = subscribe(Session, State2),
 
