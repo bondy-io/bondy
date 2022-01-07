@@ -38,10 +38,10 @@
 
 -include_lib("wamp/include/wamp.hrl").
 
+-define(ENCODED_LEN, 27).
 -define(LEN, 160).
 -define(EXT_LEN, 56).
--define(ENCODED_LEN, 27).
--define(MAX_EXT_ID, 9007199254740992).
+-define(MAX_EXT_ID, 2 bsl 53).
 
 -type t()           ::  binary().
 
