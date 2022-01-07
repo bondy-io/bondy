@@ -596,6 +596,7 @@ add_registry_entry(SessionId, ExtEntry, State) ->
 remove_registry_entry(SessionId, ExtEntry, State) ->
     Index0 = State#state.registrations,
     OriginId = maps:get(entry_id, ExtEntry),
+    Type = maps:get(type, ExtEntry),
 
     try key_value:get([SessionId, OriginId], Index0) of
         ProxyId ->
@@ -608,7 +609,7 @@ remove_registry_entry(SessionId, ExtEntry, State) ->
                 session_id => SessionId
             },
 
-            ok = bondy_registry:remove(registration, ProxyId, Ctxt),
+            ok = bondy_registry:remove(Type, ProxyId, Ctxt),
 
             Index = key_value:remove([SessionId, OriginId], Index0),
             State#state{registrations = Index}
