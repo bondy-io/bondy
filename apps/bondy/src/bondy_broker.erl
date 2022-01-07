@@ -886,7 +886,7 @@ maybe_retain(_, _, _, _, _) ->
 
 %% @private
 maybe_send_retained(Entry) ->
-    case maps:get(get_retained, bondy_registry_entry:options(Entry), true) of
+    case maps:get(get_retained, bondy_registry_entry:options(Entry), false) of
         true ->
             send_retained(Entry);
         false ->

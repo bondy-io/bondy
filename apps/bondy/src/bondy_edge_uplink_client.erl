@@ -256,7 +256,7 @@ connected(enter, connecting, #state{} = State0) ->
     {keep_state, State};
 
 connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got challenge",
         extra => ChallengeExtra
     }),
@@ -265,7 +265,7 @@ connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
     {keep_state_and_data, idle_timeout(State)};
 
 connected(internal, {welcome, SessionId, Details}, State0) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got welcome",
         session_id => SessionId,
         details => Details
@@ -276,6 +276,11 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
+connected(internal, {abort, #{}, server_error}, State) ->
+    ?LOG_NOTICE(#{
+        description => "Got abort message from server, closing connection."
+    }),
+    {stop, server_error, State};
 
 connected(internal, {aae_sync, SessionId, finished}, State0) ->
     ?LOG_INFO(#{
@@ -301,7 +306,7 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
 connected(
     internal, {receive_message, SessionId, {forward, To, Msg, Opts}}, State) ->
     ?LOG_INFO(#{
-        description => "Got session message from core",
+        description => "Got session message from core router",
         session_id => SessionId,
         message => Msg
     }),
