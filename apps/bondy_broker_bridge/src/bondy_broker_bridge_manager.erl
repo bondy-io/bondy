@@ -545,7 +545,7 @@ load_config(Map, State) when is_map(Map) ->
             Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
                 Bridges = Acc#state.bridges,
 
-                case key_value:get([Bridge, enabled], Bridges, false) of
+                case key_value:get([Bridge, config, enabled], Bridges, false) of
                     true ->
                         {ok, _, _} = do_subscribe(Subs, Acc),
                         Acc;
