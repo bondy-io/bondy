@@ -41,14 +41,14 @@ all() ->
 
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     KeyPairs = [enacl:crypto_sign_ed25519_keypair() || _ <- lists:seq(1, 3)],
     RealmUri = <<"com.example.test.auth_ticket">>,
     ok = add_realm(RealmUri, KeyPairs),
     [{realm_uri, RealmUri}, {keypairs, KeyPairs} | Config].
 
 end_per_suite(Config) ->
-    % common:stop_bondy(),
+    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 
@@ -151,7 +151,8 @@ anon_auth_not_allowed(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => <<"foo">>,
         authmethod => ?WAMP_ANON_AUTH,
         is_anonymous => true,
@@ -161,7 +162,7 @@ anon_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {
@@ -182,7 +183,8 @@ ticket_auth_not_allowed(Config) ->
     ]),
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_TICKET_AUTH,
         security_enabled => true,
@@ -191,7 +193,7 @@ ticket_auth_not_allowed(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {error, {not_authorized, _}},
@@ -209,7 +211,8 @@ local_scope(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    Session = bondy_session:new(Peer, RealmUri, #{
+    Session = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -218,7 +221,7 @@ local_scope(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     ?assertMatch(
         {error, {not_authorized, _}},
@@ -239,13 +242,13 @@ local_scope(Config) ->
     ),
 
     %% Re-insert session so that we cleanup the rbac_ctxt
-    ets:insert(bondy_session:table(bondy_session:id(Session)), Session),
+    ets:insert(bondy_session:table(bondy_session:external_id(Session)), Session),
 
     %% We issue a local scope ticket
     {ok, Ticket, _} = bondy_ticket:issue(Session, #{}),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(
@@ -272,7 +275,8 @@ client_scope_with_ticket(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate APP has logged in using cryptosign
-    AppSession = bondy_session:new(Peer, RealmUri, #{
+    AppSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?APP,
         authmethod => ?WAMP_CRYPTOSIGN_AUTH,
         security_enabled => true,
@@ -281,7 +285,7 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(AppSession)), AppSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(AppSession)), AppSession),
 
     %% We issue a self-issued ticket
     {ok, AppTicket, _} = bondy_ticket:issue(AppSession, #{
@@ -289,7 +293,8 @@ client_scope_with_ticket(Config) ->
     }),
 
     %% We simulate U1 has logged in using wampcra
-    UserSession = bondy_session:new(Peer, RealmUri, #{
+    UserSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -298,7 +303,7 @@ client_scope_with_ticket(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, _} = bondy_ticket:issue(UserSession, #{
@@ -307,7 +312,7 @@ client_scope_with_ticket(Config) ->
     }),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(
@@ -326,7 +331,8 @@ client_scope_with_id(Config) ->
     Peer = {{127, 0, 0, 1}, 10000},
 
     %% We simulate U1 has logged in using wampcra
-    UserSession = bondy_session:new(Peer, RealmUri, #{
+    UserSession = bondy_session:new(RealmUri, #{
+        peer => Peer,
         authid => ?U1,
         authmethod => ?WAMP_CRA_AUTH,
         security_enabled => true,
@@ -335,7 +341,7 @@ client_scope_with_id(Config) ->
             caller => #{}
         }
     }),
-    ets:insert(bondy_session:table(bondy_session:id(UserSession)), UserSession),
+    ets:insert(bondy_session:table(bondy_session:external_id(UserSession)), UserSession),
 
     %% We issue a self-issued ticket
     {ok, UserTicket, Details} = bondy_ticket:issue(
@@ -352,7 +358,7 @@ client_scope_with_id(Config) ->
     ),
 
     %% We simulate a new session
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     {ok, Ctxt1} = bondy_auth:init(SessionId, RealmUri, ?U1, Roles, Peer),
 
     ?assertEqual(

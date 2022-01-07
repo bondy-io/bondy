@@ -31,6 +31,7 @@
 
 -record(state, {
     realm_uri           ::  uri(),
+    session_id          ::  bondy_session_id:t(),
     opts                ::  map(),
     meta                ::  map(),
     topic               ::  binary(),
@@ -61,6 +62,12 @@
 %% CALLBACK API
 %% =============================================================================
 
+
+% -callback init(Args :: any()) ->
+%     {ok, NewState :: any()} | {error, Reason :: any()}.
+
+% -callback handle_event(Event :: wamp_event(), State :: any()) ->
+%     {ok, NewState :: any()}.
 
 
 %% =============================================================================
@@ -96,7 +103,7 @@ name(Id) ->
 %% @end
 %% -----------------------------------------------------------------------------
 pid(Id) ->
-    gproc:lookup_pid({n, l, {?MODULE, Id}}).
+    bondy:lookup_pid({?MODULE, Id}).
 
 
 %% -----------------------------------------------------------------------------
@@ -134,7 +141,11 @@ handle_event_sync(Subscriber, Event) ->
 init([Id, RealmUri, Opts0, Topic, Fun]) when is_function(Fun, 2) ->
     Opts = maps:put(subscription_id, Id, Opts0),
     Meta = maps:get(meta, Opts0, #{}),
-    case bondy_broker:subscribe(RealmUri, Opts, Topic, self()) of
+    SessionId = bondy_session_id:new(),
+
+    Ref = bondy_ref:new(internal, self(), SessionId),
+
+    case bondy_broker:subscribe(RealmUri, Opts, Topic, Ref) of
         {ok, Id} ->
             State = #state{
                 realm_uri = RealmUri,
@@ -179,7 +190,7 @@ handle_call(#event{} = Event, _From, State) ->
     end;
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From

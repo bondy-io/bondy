@@ -60,13 +60,13 @@
 -define(GRANT_REQ_VALIDATOR_V1, ?GRANT_RESOURCE_VALIDATOR#{
     <<"roles">> => #{
         alias => roles,
-		key => roles,
+        key => roles,
         required => true,
         validator => fun bondy_data_validators:rolenames/1
     },
     <<"permissions">> => #{
         alias => permissions,
-		key => permissions,
+        key => permissions,
         required => true,
         datatype => list,
         validator => {list, fun permission_validator/1}
@@ -76,20 +76,20 @@
 -define(GRANT_REQ_VALIDATOR_V2, #{
     <<"roles">> => #{
         alias => roles,
-		key => roles,
+        key => roles,
         required => true,
         validator => fun bondy_data_validators:rolenames/1
     },
     <<"permissions">> => #{
         alias => permissions,
-		key => permissions,
+        key => permissions,
         required => true,
         datatype => list,
         validator => {list, fun permission_validator/1}
     },
     <<"resources">> => #{
         alias => resources,
-		key => resources,
+        key => resources,
         required => true,
         datatype => list,
         validator => {list, ?GRANT_RESOURCE_VALIDATOR}
@@ -99,14 +99,14 @@
 -define(GRANT_RESOURCE_VALIDATOR, #{
     <<"uri">> => #{
         alias => uri,
-		key => uri,
+        key => uri,
         required => true,
         datatype => [binary, {in, [any]}],
         validator => fun resource_validator/1
     },
     <<"match">> => #{
         alias => match,
-		key => match,
+        key => match,
         required => true,
         allow_undefined => true,
         default => undefined,
@@ -129,7 +129,7 @@
 
 -else.
 
--define(CTXT_REFRESH_SECS, 3600). % 1h
+-define(CTXT_REFRESH_SECS, timer:minutes(5)).
 
 -endif.
 
@@ -219,6 +219,9 @@ authorize(Permission, Ctxt) ->
 
 authorize(Permission, Resource, #bondy_rbac_context{} = Ctxt) ->
     do_authorize(Permission, Resource, Ctxt);
+
+authorize(_, _, #{authid := '$internal'}) ->
+    ok;
 
 authorize(Permission, Resource, Ctxt) ->
     case bondy_context:is_security_enabled(Ctxt) of

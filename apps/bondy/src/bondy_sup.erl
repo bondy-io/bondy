@@ -79,20 +79,18 @@ start_link() ->
 
 init([]) ->
     Children = [
-        %% bondy_config_manager should be first process to be started
-        ?WORKER(bondy_config_manager, [], permanent, 30000),
         %% We start the included applications
-        ?SUPERVISOR(tuplespace_sup, [], permanent, infinity),
-        ?SUPERVISOR(plum_db_sup, [], permanent, infinity),
+        % ?SUPERVISOR(tuplespace_sup, [], permanent, infinity),
+        % ?SUPERVISOR(plum_db_sup, [], permanent, infinity),
         %% We start bondy processes
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
-        ?SUPERVISOR(bondy_session_manager_sup, [], permanent, 5000),
+        ?SUPERVISOR(bondy_session_manager_sup, [], permanent, infinity),
         ?WORKER(bondy_registry, [], permanent, 5000),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
-        ?WORKER(bondy_peer_wamp_forwarder, [], permanent, 5000),
+        ?WORKER(bondy_router_relay, [], permanent, 5000),
         ?WORKER(bondy_backup, [], permanent, 5000),
         ?WORKER(bondy_http_gateway, [], permanent, 5000),
         ?WORKER(bondy_peer_discovery_agent, [], permanent, 5000)

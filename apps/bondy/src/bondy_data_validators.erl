@@ -24,7 +24,10 @@
 -export([existing_atom/1]).
 -export([groupname/1]).
 -export([groupnames/1]).
+-export([ip_address/1]).
 -export([password/1]).
+-export([peer/1]).
+-export([port_number/1]).
 -export([realm_uri/1]).
 -export([rolename/1]).
 -export([rolenames/1]).
@@ -348,9 +351,40 @@ realm_uri(Term) ->
             false
     end.
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec ip_address(inet:ip_address()) -> boolean().
+
+ip_address(Term) ->
+    case inet:ntoa(Term) of
+        {error, einval} -> false;
+        _ -> true
+    end.
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec port_number(N :: 1024..65535) -> boolean().
 
+port_number(N) ->
+    N >= 1024 andalso N =< 65535.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peer({inet:ip_address(), inet:port_number()}) -> boolean().
+
+peer({A, B}) ->
+    ip_address(A) andalso port_number(B);
+
+peer(_) ->
+    false.
 
 %% =============================================================================
 %% PRIVATE

@@ -17,79 +17,112 @@
 %% =============================================================================
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc An entry is a record of a RPC registration or PubSub subscription. It
+%% is stored in-memory in the Registry {@link bondy_registry} and replicated
+%% globally and is immutable.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
+
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
-
+%% The WAMP spec defines that the id MUST be drawn randomly from a uniform
+%% distribution over the complete range [1, 2^53], but in a distributed
+%% setting we might have 2 or more nodes generating the same ID.
+%% However, we never use the RegId alone, it is always part of a key that
+%% acts as a context that should help minimise the chances of a collision.
+%% It would be much better is this IDs where 128-bit strings e.g. UUID or
+%% KSUID.
 -record(entry_key, {
-    realm_uri               ::  wildcard(uri()),
-    node                    ::  node(),
-    owner                   ::  owner(),
-    entry_id                ::  wildcard(id()),
-    type                    ::  entry_type()
+    realm_uri           ::  uri(),
+    target              ::  wildcard(bondy_ref:target()),
+    session_id          ::  wildcard(maybe(id())),
+    entry_id            ::  wildcard(id()),
+    is_proxy = false    ::  wildcard(boolean())
 }).
 
-%% An entry denotes a registration or a subscription.
-%% Entries are immutable.
 -record(entry, {
-    key                     ::  key(),
-    pid                     ::  wildcard(maybe(pid())),
-    uri                     ::  uri() | atom(),
-    match_policy            ::  binary(),
-    created                 ::  pos_integer() | atom(),
-    options                 ::  map()
+    key                 ::  key(),
+    type                ::  wildcard(entry_type()),
+    uri                 ::  uri() | atom(),
+    match_policy        ::  binary(),
+    ref                 ::  bondy_ref:t(),
+    callback_args       ::  maybe(list(term())),
+    created             ::  pos_integer() | atom(),
+    options             ::  map(),
+    origin_id           ::  wildcard(id()),
+    origin_ref          ::  wildcard(maybe(bondy_ref:t()))
 }).
 
 
--opaque t()                 ::  #entry{}.
--type key()                 ::  #entry_key{}.
--type t_or_key()            ::  t_or_key().
--type entry_type()          ::  registration | subscription.
+-opaque t()             ::  #entry{}.
+-type key()             ::  #entry_key{}.
+-type t_or_key()        ::  t() | key().
+-type entry_type()      ::  registration | subscription.
+-type wildcard(T)       ::  T | '_'.
+-type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
 
--type owner()               ::  wildcard(id() | pid() | module()).
--type wildcard(T)           ::  T | '_'.
--type details_map()         ::  #{
+-type details_map()     ::  #{
     id => id(),
     created => calendar:date(),
     uri => uri(),
     match => binary()
 }.
 
+-type external()         ::  #{
+    type             :=  entry_type(),
+    realm_uri        :=  uri(),
+    entry_id         :=  id(),
+    uri              :=  uri(),
+    match_policy     :=  binary(),
+    ref              :=  bondy_ref:t(),
+    callback_args    :=  list(term()),
+    created          :=  calendar:date(),
+    options          :=  map(),
+    origin_id        :=  maybe(id()),
+    origin_ref       :=  maybe(bondy_ref:t())
+}.
+
 -export_type([t/0]).
 -export_type([key/0]).
 -export_type([t_or_key/0]).
 -export_type([entry_type/0]).
--export_type([owner/0]).
 -export_type([details_map/0]).
 
 
--export([callback_mod/1]).
+-export([callback/1]).
+-export([callback_args/1]).
 -export([created/1]).
 -export([get_option/3]).
 -export([id/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
+-export([is_key/1]).
 -export([is_local/1]).
+-export([is_local/2]).
+-export([is_proxy/1]).
 -export([key/1]).
--export([key_pattern/5]).
+-export([key_field/1]).
+-export([key_pattern/2]).
 -export([match_policy/1]).
--export([new/4]).
 -export([new/5]).
--export([node/1]).
+-export([new/6]).
+-export([nodestring/1]).
 -export([options/1]).
--export([owner/1]).
+-export([origin_id/1]).
+-export([origin_ref/1]).
 -export([pattern/4]).
 -export([pattern/5]).
--export([peer_id/1]).
 -export([pid/1]).
+-export([proxy/2]).
+-export([proxy_details/1]).
 -export([realm_uri/1]).
+-export([ref/1]).
 -export([session_id/1]).
+-export([target/1]).
 -export([to_details_map/1]).
--export([to_map/1]).
+-export([to_external/1]).
 -export([type/1]).
 -export([uri/1]).
 
@@ -105,43 +138,44 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, {_, _, _, _} = PeerId, Uri, Options) ->
-    RegId = bondy_utils:get_id(global),
-    new(Type, RegId, PeerId, Uri, Options).
+new(Type, RealmUri, Ref, Uri, Options) ->
+    RegId = bondy_utils:get_id({router, RealmUri}),
+    new(Type, RegId, RealmUri, Ref, Uri, Options).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec new(entry_type(), id(), peer_id(), uri(), map()) -> t().
+-spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
-new(Type, RegId, {RealmUri, Node, SessionId, Term}, Uri, Options) when
-(is_integer(SessionId) andalso is_pid(Term)) orelse
-(SessionId == undefined andalso is_pid(Term)) orelse
-(SessionId == undefined andalso is_atom(Term)) ->
-    %% Term could be undefined for remote?
-    %% For registrations we support Term being a pid, callback module or
-    %% undefined
-    {Owner, Pid} = owner_pid(SessionId, Term),
+new(Type, RegId, RealmUri, Ref, Uri, Opts0)
+when Type == registration orelse Type == subscription ->
+    Target = bondy_ref:target(Ref),
+    SessionId = bondy_ref:session_id(Ref),
 
     Key = #entry_key{
         realm_uri = RealmUri,
-        node = Node,
-        owner = Owner,
-        entry_id = RegId,
-        type = Type
+        target = Target,
+        session_id = SessionId,
+        entry_id = RegId
     },
+
+    MatchPolicy = validate_match_policy(Opts0),
+    CBArgs = maps:get(callback_args, Opts0, undefined),
+    Opts = maps:without([match, callback_args], Opts0),
 
     #entry{
         key = Key,
-        pid = Pid, % maybe undefined
+        type = Type,
         uri = Uri,
-        match_policy = validate_match_policy(Options),
+        match_policy = MatchPolicy,
+        ref = Ref,
+        callback_args = CBArgs,
         created = erlang:system_time(seconds),
-        options = parse_options(Type, Options)
+        options = Opts
     }.
 
 
@@ -170,23 +204,28 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options) ->
     Options :: map(),
     Extra :: map()) -> t().
 
-pattern(Type, RealmUri, ProcedureOrTopic, Options, Extra) ->
-    Node = maps:get(node, Extra, '_'),
-    EntryId = maps:get(entry_id, Extra, '_'),
-    Owner = maps:get(owner, Extra, '_'),
-    Pid = maps:get(pid, Extra, '_'),
+pattern(Type, RealmUri, RegUri, Options, Extra) ->
+    SessionId = maps:get(session_id, Extra, '_'),
+    Target0 = maps:get(target, Extra, '_'),
 
-    KeyPattern = key_pattern(Type, RealmUri, Node, Owner, EntryId),
+    PatternRef = bondy_ref:pattern('_', Target0, SessionId, '_'),
+    Target = bondy_ref:target(PatternRef),
+
+    KeyPattern = key_pattern(RealmUri, Extra#{target => Target}),
 
     MatchPolicy = validate_match_policy(pattern, Options),
 
     #entry{
         key = KeyPattern,
-        pid = Pid,
-        uri = ProcedureOrTopic,
+        type = Type,
+        uri = RegUri,
         match_policy = MatchPolicy,
+        ref = '_',
+        callback_args = '_',
         created = '_',
-        options = '_'
+        options = '_',
+        origin_id = '_',
+        origin_ref = '_'
     }.
 
 
@@ -194,37 +233,63 @@ pattern(Type, RealmUri, ProcedureOrTopic, Options, Extra) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-key_pattern(Type, RealmUri, Node, Owner, EntryId) ->
-    Type =:= subscription
-        orelse Type =:= registration
-        orelse error({badarg, {type, Type}}),
+-spec key_pattern(RealmUri :: uri(), Ref :: bondy_ref:t()) -> key().
+
+key_pattern(RealmUri, Extra) when is_map(Extra) ->
+    SessionId = maps:get(session_id, Extra, '_'),
+    Target = maps:get(target, Extra, '_'),
+    EntryId = maps:get(entry_id, Extra, '_'),
+    IsProxy = maps:get(is_proxy, Extra, '_'),
 
     is_binary(RealmUri)
         orelse RealmUri == '_'
         orelse error({badarg, {realm_uri, RealmUri}}),
 
-    is_atom(Node)
-        orelse error({badarg, {node, Node}}),
-
-    Owner =/= undefined
-        andalso (
-            %% SessionId | Pid | Mod | '_'
-            is_integer(Owner) orelse is_pid(Owner) orelse is_atom(Owner)
-        )
-        orelse error({badarg, {owner, Owner}}),
-
     is_integer(EntryId)
         orelse EntryId == '_'
         orelse error({badarg, {entry_id, EntryId}}),
 
-
     #entry_key{
         realm_uri = RealmUri,
-        node = Node,
-        owner = Owner,
+        target = Target,
+        session_id = SessionId,
         entry_id = EntryId,
-        type = Type
-    }.
+        is_proxy = IsProxy
+    };
+
+key_pattern(RealmUri, Ref) ->
+    bondy_ref:is_type(Ref)
+        orelse error({badarg, {ref, Ref}}),
+
+    SessionId = bondy_ref:session_id(Ref),
+    Target = bondy_ref:target(Ref),
+
+    Extra = #{
+        target => Target,
+        session_id => SessionId
+    },
+
+    key_pattern(RealmUri, Extra).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+key_field(realm_uri) ->
+    #entry_key.realm_uri;
+
+key_field(target) ->
+    #entry_key.target;
+
+key_field(session_id) ->
+    #entry_key.session_id;
+
+key_field(entry_id) ->
+    #entry_key.entry_id;
+
+key_field(is_proxy) ->
+    #entry_key.is_proxy.
 
 
 %% -----------------------------------------------------------------------------
@@ -235,6 +300,17 @@ is_entry(#entry{}) ->
     true;
 
 is_entry(_) ->
+    false.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+is_key(#entry_key{}) ->
+    true;
+
+is_key(_) ->
     false.
 
 
@@ -258,12 +334,9 @@ id(#entry_key{entry_id = Val}) ->
 %% Returns the type of the entry, the atom 'registration' or 'subscription'.
 %% @end
 %% -----------------------------------------------------------------------------
--spec type(t_or_key()) -> entry_type().
+-spec type(t()) -> entry_type().
 
-type(#entry{key = Key}) ->
-    Key#entry_key.type;
-
-type(#entry_key{type = Val}) ->
+type(#entry{type = Val}) ->
     Val.
 
 
@@ -280,21 +353,22 @@ key(#entry{key = Key}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns either a session identifier, a pid() or a callback module
-%% depending on the type of entry.
+%% depending on the type of entry. I can also return the wilcard '_' when the
+%% entry is used as a pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec owner(t()) -> wildcard(owner()).
+-spec target(t()) -> wildcard(bondy_ref:target()).
 
-owner(#entry{key = Key}) ->
-    Key#entry_key.owner;
+target(#entry{ref = Ref}) ->
+    bondy_ref:target(Ref);
 
-owner(#entry_key{owner = Val}) ->
+target(#entry_key{target = Val}) ->
     Val.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's realm_uri property.
+%% @doc Returns the value of the subscription's or registration's realm_uri
+%% property.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec realm_uri(t_or_key()) -> uri().
@@ -308,119 +382,156 @@ realm_uri(#entry_key{realm_uri = Val}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Returns the value of the subscription's or registration's session_id
-%% property.
+%% Returns the value of the subscription's or registration's node property.
+%% This is always the Bondy cluster peer node where the handler exists.
 %% @end
 %% -----------------------------------------------------------------------------
--spec node(t_or_key()) -> atom().
+-spec nodestring(t()) -> wildcard(nodestring()).
 
-node(#entry{key = Key}) ->
-    Key#entry_key.node;
+nodestring(#entry{ref = '_'}) ->
+    '_';
 
-node(#entry_key{node = Val}) ->
-    Val.
+nodestring(#entry{ref = Ref}) ->
+    bondy_ref:nodestring(Ref).
+
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry represents a local peer
+%% @doc Returns true if the entry represents a handler local to the caller's
+%% node and false when the target is located in a cluster peer.
 %% @end
 %% -----------------------------------------------------------------------------
--spec is_local(t_or_key()) -> boolean().
+-spec is_local(t()) -> boolean().
 
-is_local(#entry{key = Key}) ->
-    is_local(Key);
-
-is_local(#entry_key{node = Val}) ->
-    bondy_peer_service:mynode() =:= Val.
+is_local(#entry{ref = Ref}) ->
+    bondy_ref:is_local(Ref).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry represents a local callback registration
+%% @doc Returns `true' if the entry represents a handler local to the node
+%% represented by `Nodestring'. Otherwise returns `false'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_local(t(), nodestring()) -> boolean().
+
+is_local(#entry{ref = Ref}, Nodestring) ->
+    bondy_ref:is_local(Ref, Nodestring).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns true if the entry target is a callback registration.
+%% Callback registrations are only used by Bondy itself to provide some of the
+%% admin and meta APIs.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec is_callback(t()) -> boolean().
 
-is_callback(#entry{key = Key}) ->
-    is_callback(Key);
+is_callback(#entry_key{target = {callback, _}}) ->
+    true;
 
-is_callback(#entry_key{owner = Val}) ->
-    Val =/= '_' andalso Val =/= undefined andalso is_atom(Val).
+is_callback(#entry_key{}) ->
+    false;
+
+is_callback(#entry{key = Key}) ->
+    is_callback(Key).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns true if the entry represents a local callback registration
+%% @doc Returns the callback arguments when target is a callback, otherwise
+%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
--spec callback_mod(t()) -> wildcard(maybe(module())).
+-spec callback_args(t()) -> maybe(list(term())).
 
-callback_mod(#entry{key = Key}) ->
-    callback_mod(Key);
+callback_args(#entry{callback_args = Val}) ->
+    Val.
 
-callback_mod(#entry_key{owner = Val}) when is_atom(Val) ->
-    %% Either a module or '_'
-    Val;
 
-callback_mod(#entry_key{}) ->
+%% -----------------------------------------------------------------------------
+%% @doc Returns the callback module when target is a callback, otherwise
+%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% pattern (See {@link pattern/5}).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec callback(t()) -> wildcard(maybe(mfargs())).
+
+callback(#entry{key = #entry_key{target = {callback, MF}}} = E) ->
+    erlang:append_element(MF, E#entry.callback_args);
+
+callback(#entry{key = #entry_key{target = '_'}}) ->
+    '_';
+
+callback(#entry{}) ->
     undefined.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's session_id
-%% property.
+%% @doc Returns the value of the subscription's or registration's pid
+%% property when target is a pid() or a session identifier. Otherwise
+%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
 -spec pid(t_or_key()) -> wildcard(maybe(pid())).
 
-pid(#entry{pid = Val}) ->
-    Val;
+pid(#entry{ref = Ref}) ->
+    bondy_ref:pid(Ref);
 
-pid(#entry_key{owner = Val}) when is_pid(Val) orelse Val == '_' ->
-    Val;
+pid(#entry_key{target = {pid, Bin}}) ->
+    bondy_utils:bin_to_pid(Bin);
+
+pid(#entry_key{target = '_'}) ->
+    '_';
 
 pid(#entry_key{}) ->
     undefined.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the value of the subscription's or registration's session_id
+%% @doc Returns the value of the subscription's or registration's session `key'
 %% property.
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(t_or_key()) -> wildcard(maybe(id())).
+-spec session_id(t_or_key()) -> wildcard(maybe(bondy_session_id:t())).
 
 session_id(#entry{key = Key}) ->
     session_id(Key);
 
-session_id(#entry_key{owner = Val}) when is_integer(Val) orelse Val == '_' ->
-    Val;
-
-session_id(#entry_key{}) ->
-    undefined.
-
+session_id(#entry_key{session_id = Val}) ->
+    Val.
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Returns the peer_id() of the subscription or registration
+%% @doc Returns the ref() of the subscription or registration
 %% @end
 %% -----------------------------------------------------------------------------
--spec peer_id(t_or_key()) -> peer_id().
+-spec ref(t()) -> bondy_ref:t().
 
-peer_id(#entry{key = Key} = Entry) ->
-    PidOrMod = case is_callback(Key) of
-        true ->
-            Key#entry_key.owner;
-        false ->
-            Entry#entry.pid
-    end,
+ref(#entry{ref = Val}) ->
+    Val.
 
-    {
-        Key#entry_key.realm_uri,
-        Key#entry_key.node,
-        session_id(Key),
-        PidOrMod
-    }.
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the origin ref() of the subscription or registration
+%% This value is only present when the entry is a proxy.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec origin_ref(t()) -> maybe(bondy_ref:t()).
+
+origin_ref(#entry{origin_ref = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the origin ref() of the subscription or registration.
+%% This value is only present when the entry is a proxy.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec origin_id(t()) -> maybe(id()).
+
+origin_id(#entry{origin_id = Val}) ->
+    Val.
+
 
 
 %% -----------------------------------------------------------------------------
@@ -500,23 +611,100 @@ to_details_map(#entry{key = Key} = E) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Converts the entry into a map
+%% @doc Converts the entry into a map. Certain values of type atom such as
+%% `node' are turned into binaries. This is to avoid exhausting a remote node
+%% atoms table for use cases where the entries are replicated e.g. edge-remote
+%% connections.
 %% @end
 %% -----------------------------------------------------------------------------
--spec to_map(t()) -> details_map().
+-spec to_external(t()) -> external().
 
-to_map(#entry{key = Key} = E) ->
+to_external(#entry{key = Key} = E) ->
     #{
-        id =>  Key#entry_key.entry_id,
-        node => Key#entry_key.node,
-        session_id => session_id(Key),
-        pid => pid_to_binary(E#entry.pid),
-        mod => mod_to_binary(callback_mod(Key)),
+        type => E#entry.type,
+        realm_uri => Key#entry_key.realm_uri,
+        entry_id => Key#entry_key.entry_id,
         uri => E#entry.uri,
-        match => E#entry.match_policy,
+        match_policy => E#entry.match_policy,
+        ref => E#entry.ref,
+        callback_args => E#entry.callback_args,
+        created => created_format(E#entry.created),
         options => E#entry.options,
-        created => created_format(E#entry.created)
+        origin_ref => E#entry.origin_ref
+    }.
+
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns a copy of the entry where the node component of the ref has
+%% been replaced with the node of the calling process, the session identifier
+%% replaced with `SessionId' and the pid with `Pid'.
+%%
+%% The entry is used by a router node to create a proxy of an entry originated
+%% in an edge router.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec proxy(Ref :: bondy_ref:bridge_relay(), Entry :: external()) -> t().
+
+proxy(Ref, External) ->
+    #{
+        type := Type,
+        realm_uri := RealmUri,
+        entry_id := OriginId,
+        ref := OriginRef,
+        uri := Uri,
+        match_policy := MatchPolicy,
+        created := Created,
+        options := Options
+    } = External,
+
+    Target = bondy_ref:target(Ref),
+    SessionId = bondy_ref:session_id(Ref),
+
+    Id = bondy_utils:get_id({router, RealmUri}),
+
+    #entry{
+        key = #entry_key{
+            realm_uri = RealmUri,
+            target = Target,
+            session_id = SessionId,
+            entry_id = Id,
+            is_proxy = true
+        },
+        type = Type,
+        ref = Ref,
+        uri = Uri,
+        match_policy = MatchPolicy,
+        created = Created,
+        options = Options,
+        origin_ref = OriginRef,
+        origin_id = OriginId
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_proxy(Entry :: t_or_key()) -> boolean().
+
+is_proxy(#entry{key = Key}) ->
+    is_proxy(Key);
+
+is_proxy(#entry_key{is_proxy = Val}) ->
+    Val.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec proxy_details(t()) -> map().
+
+proxy_details(#entry{} = E) ->
+    #{
+        origin_id => E#entry.origin_id,
+        origin_ref => E#entry.origin_ref
     }.
 
 
@@ -525,36 +713,6 @@ to_map(#entry{key = Key} = E) ->
 %% PRIVATE
 %% =============================================================================
 
-
-
-%% @private
--spec owner_pid(SessionId :: maybe(id()), Term :: maybe(pid() | module())) ->
-    {owner(), maybe(pid())} | no_return().
-
-owner_pid(SessionId, Pid) when is_integer(SessionId), is_pid(Pid) ->
-    {SessionId, Pid};
-
-owner_pid(undefined, Mod) when is_atom(Mod) ->
-    {Mod, undefined};
-
-owner_pid(undefined, Pid) when is_pid(Pid) ->
-    {Pid, Pid};
-
-owner_pid(_, _) ->
-    error(badarg).
-
-
-%% @private
-pid_to_binary(undefined) ->
-    <<"undefined">>;
-
-pid_to_binary(Pid) ->
-    list_to_binary(pid_to_list(Pid)).
-
-
-%% @private
-mod_to_binary(Mod)->
-    atom_to_binary(Mod, utf8).
 
 
 %% @private
@@ -577,24 +735,6 @@ validate_match_policy(_, Options) when is_map(Options) ->
         P ->
             error({invalid_match_policy, P})
     end.
-
-
-%% @private
-parse_options(subscription, Opts) ->
-    parse_subscription_options(Opts);
-
-parse_options(registration, Opts) ->
-    parse_registration_options(Opts).
-
-
-%% @private
-parse_subscription_options(Opts) ->
-    maps:without([match], Opts).
-
-
-%% @private
-parse_registration_options(Opts) ->
-    maps:without([match], Opts).
 
 
 %% @private

@@ -130,7 +130,7 @@ handle_info(
 
 handle_info(
     {gen_event_EXIT, Handler, Reason}, #state{handler = Handler} = State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Event handler exited, re-installing",
         reason => Reason,
         handler => Handler
@@ -139,7 +139,7 @@ handle_info(
     {noreply, State};
 
 handle_info(Info, State) ->
-    ?LOG_DEBUG(#{
+    ?LOG_WARNING(#{
         description => "Unexpected event",
         event => Info
     }),
@@ -176,7 +176,7 @@ add_sup_handler(Manager, Handler, Args) ->
             ok;
         {error, Reason} ->
             Timeout = 5000,
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Failed to install event handler, retrying later",
                 reason => Reason,
                 handler => Handler,

@@ -27,7 +27,13 @@
 -include("bondy.hrl").
 -include("bondy_uris.hrl").
 
--type wamp_error_map() :: #{
+-type send_opts()       ::  #{
+    from := bondy_ref:t(),
+    realm_uri := uri(),
+    via => maybe(queue:queue())
+}.
+
+-type wamp_error_map() ::  #{
     error_uri => uri(),
     details => map(),
     args => list(),
@@ -36,20 +42,29 @@
 }.
 
 -export_type([wamp_error_map/0]).
+-export_type([send_opts/0]).
 
 -export([aae_exchanges/0]).
 -export([ack/2]).
+-export([add_via/2]).
 -export([call/5]).
 -export([cast/5]).
 -export([check_response/4]).
--export([is_remote_peer/1]).
--export([publish/5]).
--export([send/2]).
+-export([lookup_pid/1]).
+-export([peek_via/1]).
+-export([prepare_send/2]).
+-export([prepare_send/3]).
+-export([register/1]).
+-export([register/2]).
+-export([register/4]).
+-export([request/3]).
+-export([select/1]).
 -export([send/3]).
 -export([send/4]).
--export([start/0]).
--export([subscribe/3]).
--export([subscribe/4]).
+-export([take_via/1]).
+-export([unregister/1]).
+-export([unregister/2]).
+
 
 
 %% =============================================================================
@@ -60,19 +75,21 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc
-%% Starts bondy
 %% @end
 %% -----------------------------------------------------------------------------
-start() ->
-    application:ensure_all_started(bondy).
+aae_exchanges() ->
+    partisan_plumtree_broadcast:exchanges().
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-aae_exchanges() ->
-    plumtree_broadcast:exchanges().
+-spec request(Pid :: pid(), RealmUri :: uri(), M :: wamp_message:t()) ->
+    tuple().
+
+request(Pid, RealmUri, M) ->
+    {?BONDY_PEER_REQUEST, Pid, RealmUri, M}.
 
 
 %% -----------------------------------------------------------------------------
@@ -81,10 +98,10 @@ aae_exchanges() ->
 %% It calls `send/3' with a an empty map for Options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message()) -> ok.
+-spec send(RealmUri :: uri(), bondy_ref:t(), wamp_message()) -> ok.
 
-send(PeerId, M) ->
-    send(PeerId, M, #{}).
+send(RealmUri, Ref, M) ->
+    send(RealmUri, Ref, M, #{}).
 
 
 %% -----------------------------------------------------------------------------
@@ -102,37 +119,257 @@ send(PeerId, M) ->
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(peer_id(), wamp_message(), map()) -> ok | no_return().
+-spec send(
+    RealmUri :: uri(),
+    Ref :: bondy_ref:t(),
+    Msg :: wamp_message(),
+    Opts :: send_opts()) ->
+    ok | no_return().
 
-send({RealmUri, Node, SessionId, Pid} = PeerId, M, Opts0)
-when is_binary(RealmUri)
-andalso is_integer(SessionId)
-andalso is_pid(Pid) ->
-    %% Send a message to a local peer
-    Node =:= bondy_peer_service:mynode() orelse error(not_my_node),
+send(RealmUri, To, Msg, Opts) ->
+    %% We validate the message
+    wamp_message:is_message(Msg)
+        orelse error(invalid_wamp_message),
 
-    %% We validate the message and the opts
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-    Opts = validate_send_opts(Opts0),
-
-    do_send(PeerId, M, Opts).
-
-
--spec send(peer_id(), peer_id(), wamp_message(), map()) -> ok | no_return().
-
-send({RealmUri, _, _, _} = From, {RealmUri, Node, _, _} = To, M, Opts0)
-when is_binary(RealmUri) ->
-    %% Send a message to a remote peer
-    %% We validate the message and the opts
-    wamp_message:is_message(M) orelse error(invalid_wamp_message),
-    Opts = validate_send_opts(Opts0),
-
-    case Node =:= bondy_peer_service:mynode() of
+    case bondy_ref:is_local(To) of
         true ->
-            do_send(To, M, Opts);
+            do_send(To, Msg, Opts#{realm_uri => RealmUri});
+
         false ->
-            bondy_peer_wamp_forwarder:forward(From, To, M, Opts)
+
+            case peek_via(Opts) of
+                Relay when Relay == undefined ->
+                    %% Here we could validate if destination is a cluster peer
+                    %% node, but that would penalise performance and also if we
+                    %% are using Hyparview we only have a partial view of the
+                    %% cluster. SO we trust the prepase_send or caller is doing
+                    %% the correct thing.
+                    Node = bondy_ref:node(To),
+                    relay_message(RealmUri, Node, To, Msg, Opts);
+
+                Relay ->
+                    Type = bondy_ref:type(Relay),
+                    IsLocalRelay = bondy_ref:is_local(Relay),
+
+                    case {Type, IsLocalRelay} of
+                        {bridge_relay, true} ->
+                            %% We consume the relay from via stack
+                            {Relay, Opts1} = take_via(Opts),
+                            Opts2 = Opts1#{realm_uri => RealmUri},
+                            RelayMsg = {forward, To, Msg, Opts2},
+                            do_send(Relay, RelayMsg, Opts2);
+
+                        {bridge_relay, false} ->
+                            %% We cannot send directly to Bridge Relay
+                            %% we need to go through a router relay, this
+                            %% means we do not consume from via stack.
+                            Node = bondy_ref:node(Relay),
+                            relay_message(RealmUri, Node, To, Msg, Opts);
+
+                        {_, _} ->
+                            error({badarg, [{ref, To}, {via, Relay}]})
+                    end
+            end
     end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prepare_send(To :: bondy_ref:t(), Opts :: map()) ->
+    {bondy_ref:t(), map()}.
+
+prepare_send(Ref, #{via := undefined} = Opts) ->
+    prepare_send(Ref, maps:without([via], Opts));
+
+prepare_send(Ref, Opts) ->
+    prepare_send(Ref, undefined, Opts).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec prepare_send(
+    To :: bondy_ref:t(),
+    Origin :: maybe(bondy_ref:client() | bondy_ref:internal()),
+    Opts :: map()) -> {bondy_ref:t(), map()}.
+
+prepare_send(undefined, Ref, Opts) ->
+    prepare_send(Ref, undefined, Opts);
+
+prepare_send(Ref, undefined, Opts) ->
+    %% We keep 'via' as it has the route back to the origin
+    {Ref, Opts};
+
+prepare_send(Ref, Origin, Opts) ->
+    %% We do not check if ref is relay or bridge_relay here, that will happen
+    %% in send/3
+    {Origin, add_via(Ref, Opts)}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+add_via(Relay, #{via := undefined} = Opts) ->
+    add_via(Relay, Opts#{via => queue:new()});
+
+add_via(Relay, #{via := Term} = Opts) when is_map(Opts) ->
+    Q0 = case queue:is_queue(Term) of
+        true ->
+            Term;
+        false ->
+            queue:from_list([Term])
+    end,
+
+    Q1 = queue:in(Relay, Q0),
+    Opts#{via => Q1};
+
+add_via(Relay, Opts) ->
+    add_via(Relay, Opts#{via => queue:new()}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Removes and returns the first relay reference of the 'via' option stack.
+%% @end
+%% -----------------------------------------------------------------------------
+take_via(#{via := Term} = Opts) ->
+    case queue:is_queue(Term) of
+        true ->
+            case queue:out_r(Term) of
+                {empty, Q} ->
+                    {undefined, Opts#{via => Q}};
+                {{value, Relay}, Q} ->
+                    {Relay, Opts#{via => Q}}
+            end;
+        false ->
+            {Term, maps:without([via], Opts)}
+    end;
+
+take_via(Opts) ->
+    {undefined, Opts}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the last relay reference of the 'via' option stack. This
+%% reference represents the final relay the message will need to go through to
+%% be send using {@link send/3}.
+%% @end
+%% -----------------------------------------------------------------------------
+peek_via(#{via := undefined}) ->
+    undefined;
+
+peek_via(#{via := Term}) ->
+    case queue:is_queue(Term) of
+        true ->
+            case queue:peek_r(Term) of
+                empty ->
+                    undefined;
+                {value, Relay} ->
+                    Relay
+            end;
+        false ->
+            Term
+    end;
+
+peek_via(_) ->
+    undefined.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register(Name :: any()) -> true.
+
+register(Name) ->
+    gproc:reg({n, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register(Name :: any(), Pid :: pid()) -> true.
+
+register(Name, Pid) ->
+    gproc:reg_other({n, l, Name}, Pid).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec register(Name :: any(), Pid :: pid(), Type :: atom(), Attr :: any()) ->
+    true.
+
+register(Name, Pid, Type, Attr) ->
+    GType = case Type of
+        aggregated_counter -> a;
+        counter -> c;
+        name -> n;
+        property -> p;
+        resource_counter -> rc;
+        resource_property -> r
+    end,
+    gproc:reg_other({GType, l, Name}, Pid, Attr).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(Name :: any()) -> true.
+
+unregister(Name) ->
+    gproc:unreg({n, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec unregister(Name :: any(), Type :: atom()) -> true.
+
+unregister(Name, Type) ->
+    GType = case Type of
+        aggregated_counter -> a;
+        counter -> c;
+        name -> n;
+        property -> p;
+        resource_counter -> rc;
+        resource_property -> r
+    end,
+    gproc:unreg({GType, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lookup_pid(Name :: any()) -> true.
+
+lookup_pid(Name) ->
+    gproc:lookup_pid({n, l, Name}).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec select(MatchSpec :: ets:match_spec()) -> [any()].
+
+select(MatchSpec) ->
+    gproc:select({l, resources}, MatchSpec).
+
+
+
+%% =============================================================================
+%% API - DEPRECATED
+%% =============================================================================
+
 
 
 %% -----------------------------------------------------------------------------
@@ -153,54 +390,6 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     ok.
 
 
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-is_remote_peer({_, Node, _, _}) ->
-    Node =/= bondy_peer_service:mynode().
-
-
-%% =============================================================================
-%% API - SESSION
-%% =============================================================================
-
-
-
-
-%% =============================================================================
-%% API - SUBSCRIBER ROLE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Calls bondy_broker:subscribe/3.
-%% @end
-%% -----------------------------------------------------------------------------
-subscribe(RealmUri, Opts, TopicUri) ->
-    bondy_broker:subscribe(RealmUri, Opts, TopicUri).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Calls bondy_broker:subscribe/4.
-%% @end
-%% -----------------------------------------------------------------------------
-subscribe(RealmUri, Opts, TopicUri, Fun) ->
-    bondy_broker:subscribe(RealmUri, Opts, TopicUri, Fun).
-
-
-
-%% =============================================================================
-%% API - PUBLISHER ROLE
-%% =============================================================================
-
-
-
-publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
-    bondy_broker:publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm).
-
-
-
 %% =============================================================================
 %% API - CALLER ROLE
 %% =============================================================================
@@ -216,8 +405,7 @@ publish(Opts, TopicUri, Args, KWArgs, CtxtOrRealm) ->
     list() | undefined,
     map() | undefined,
     bondy_context:t()) ->
-    {ok, map(), bondy_context:t()}
-    | {error, wamp_error_map(), bondy_context:t()}.
+    {ok, map()} | {error, wamp_error_map()}.
 
 call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     Timeout = case maps:find(timeout, Opts) of
@@ -227,23 +415,23 @@ call(Uri, Opts, Args, KWArgs, Ctxt0) ->
     end,
 
     case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
-        {ok, ReqId, Ctxt1} ->
-            check_response(Uri, ReqId, Timeout, Ctxt1);
-        {error, _, _} = Error ->
+        {ok, ReqId} ->
+            check_response(Uri, ReqId, Timeout, Ctxt0);
+        {error, _} = Error ->
             Error
     end.
 
 
 check_response(Uri, ReqId, Timeout, Ctxt) ->
     receive
-        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #result{} = R}
-        when Ref == ReqId ->
+        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #result{} = R}
+        when R#result.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {ok, message_to_map(R), Ctxt};
-        {?BONDY_PEER_REQUEST, {_Pid, Ref}, #error{} = R}
-        when Ref == ReqId ->
+            {ok, message_to_map(R)};
+        {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #error{} = R}
+        when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {error, message_to_map(R), Ctxt}
+            {error, message_to_map(R)}
     after
         Timeout ->
             Mssg = iolist_to_binary(
@@ -268,7 +456,7 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
                 ErrorKWArgs
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt}),
-            {error, message_to_map(Error), Ctxt}
+            {error, message_to_map(Error)}
     end.
 
 
@@ -283,24 +471,25 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
     list() | undefined,
     map() | undefined,
     bondy_context:t()) ->
-    {ok, bondy_context:t()}
-    | {error, wamp_error_map(), bondy_context:t()}.
+    ok | {error, wamp_error_map()}.
 
 cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% @TODO ID should be session scoped and not global
     %% FIXME we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    ReqId = bondy_utils:get_id(global),
+    ReqId = bondy_context:get_id(Ctxt0, session),
 
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 
     case bondy_router:forward(M, Ctxt0) of
-        {ok, Ctxt1} ->
-            {ok, ReqId, Ctxt1};
-        {reply, #error{} = Error, Ctxt1} ->
+        {ok, _} ->
+            {ok, ReqId};
+
+        {reply, #error{} = Error, _} ->
             %% A sync reply (should not ever happen with calls)
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {reply, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = wamp_message:error(
@@ -308,11 +497,13 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 [<<"Inconsistency error">>]
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {stop, #error{} = Error, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1};
+            {error, message_to_map(Error)};
+
         {stop, _, Ctxt1} ->
             %% A sync reply (should not ever happen with calls)
             Error = wamp_message:error(
@@ -320,7 +511,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
                 [<<"Inconsistency error">>]
             ),
             ok = bondy_event_manager:notify({wamp, Error, Ctxt1}),
-            {error, message_to_map(Error), Ctxt1}
+            {error, message_to_map(Error)}
     end.
 
 
@@ -339,19 +530,21 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 
 
 
-validate_send_opts(Opts) ->
-    maps_utils:validate(Opts, #{
-        timeout => #{
-            required => true,
-            datatype => timeout,
-            default => ?SEND_TIMEOUT
-        },
-        enqueue => #{
-            required => true,
-            datatype => boolean,
-            default => false
-        }
-    }).
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+relay_message(RealmUri, Node, To, Msg, Opts) ->
+    RelayMsg = {forward, To, Msg, Opts#{realm_uri => RealmUri}},
+
+    RelayOpts = #{
+        ack => true,
+        retransmission => true,
+        partition_key => erlang:phash2(RealmUri)
+    },
+
+    bondy_router_relay:forward(Node, RelayMsg, RelayOpts).
 
 
 %% -----------------------------------------------------------------------------
@@ -359,46 +552,42 @@ validate_send_opts(Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_send({_, _, _SessionId, Pid}, M, _Opts) when Pid =:= self() ->
-    Pid ! {?BONDY_PEER_REQUEST, {Pid, erlang:make_ref()}, M},
-    %% This is a sync message so we resolve this sequentially
-    %% so we will not get an ack, the ack is implicit
-    ok;
+do_send(To, M, #{realm_uri := RealmUri} = Opts) ->
+    Pid = bondy_ref:pid(To),
 
-do_send({_, _, SessionId, Pid}, M, Opts) when is_pid(Pid) ->
-    case maybe_enqueue(SessionId, M, Opts) of
+    case bondy_ref:is_self(To) of
         true ->
+            Pid ! request(Pid, RealmUri, M),
             ok;
         false ->
-            case erlang:is_process_alive(Pid) of
+            SessionKey = bondy_ref:session_id(To),
+
+            case maybe_enqueue(SessionKey, M, Opts) of
                 true ->
-                    Ref = ref(M),
-                    Pid ! {?BONDY_PEER_REQUEST, {self(), Ref}, M},
                     ok;
                 false ->
-                    ?LOG_DEBUG(#{
-                        description => "Cannot deliver message",
-                        reason => noproc,
-                        message_type => element(1, M)
-                    }),
-                    ok
+                    case erlang:is_process_alive(Pid) of
+                        true ->
+                            Pid ! request(self(), RealmUri, M),
+                            ok;
+                        false ->
+                            ?LOG_DEBUG(#{
+                                description => "Cannot deliver message",
+                                reason => noproc,
+                                message_type => element(1, M)
+                            }),
+                            ok
+                    end
             end
     end.
 
 
-ref(M) ->
-    try
-        wamp_message:request_id(M)
-    catch
-        error:badarg ->
-            erlang:make_ref()
-    end.
-
-
-
 %% @private
+maybe_enqueue(undefined, _, _) ->
+    false;
+
 maybe_enqueue(_SessionId, _M, _Opts) ->
-    % case maps:get(enqueue, Opts),
+    % case maps:get(enqueue, Opts, false),
     %     true ->
     %         %% TODO Enqueue events only for session resumption
     %         true;
@@ -452,3 +641,4 @@ args(L) -> L.
 %% @private
 kwargs(undefined) -> #{};
 kwargs(M) -> M.
+

@@ -77,8 +77,13 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Ref, Socket, Transport, Opts) ->
-    {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Socket, Transport, Opts}])}.
+-spec start_link(
+    Ref :: ranch:ref(), _, Transport :: module(), ProtoOpts :: any()) ->
+    {ok, ConnPid :: pid()}
+    | {ok, SupPid :: pid(), ConnPid :: pid()}.
+
+start_link(Ref, _, Transport, Opts) ->
+    {ok, proc_lib:spawn_link(?MODULE, init, [{Ref, Transport, Opts}])}.
 
 
 
@@ -88,29 +93,25 @@ start_link(Ref, Socket, Transport, Opts) ->
 
 
 
-init({Ref, Socket, Transport, _Opts0}) ->
+init({Ref, Transport, _Opts0}) ->
     St0 = #state{
         start_time = erlang:monotonic_time(second),
         transport = Transport
     },
 
-    %% We must call ranch:accept_ack/1 before doing any socket operation.
-    %% This will ensure the connection process is the owner of the socket.
-    %% It expects the listener’s name as argument.
-    ok = ranch:accept_ack(Ref),
+    Opts = [
+        {active, active_n(St0)},
+        {packet, 0}
+        | bondy_config:get([Ref, socket_opts], [])
+    ],
 
-    Opts = bondy_config:get([Ref, socket_opts], []),
-    Res = Transport:setopts(
-        Socket, [{active, active_n(St0)}, {packet, 0} | Opts]
-    ),
+    {ok, Socket} = ranch:handshake(Ref),
+
+    Res = Transport:setopts(Socket, Opts),
+
     ok = maybe_error(Res),
 
     {ok, Peername} = inet:peername(Socket),
-    ok = bondy_logger_utils:set_process_metadata(#{
-        transport => Transport,
-        socket => Socket,
-        peername => inet_utils:peername_to_binary(Peername)
-    }),
 
     St1 = St0#state{socket = Socket},
 
@@ -126,7 +127,7 @@ init({Ref, Socket, Transport, _Opts0}) ->
 
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -135,7 +136,7 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -166,7 +167,7 @@ handle_info(
     %% RawSocket request. Unless the _Router_ also supports other
     %% transports on the connecting port (such as WebSocket), the
     %% _Router_ MUST *fail the connection*.
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Received data before WAMP protocol handshake",
         reason => invalid_handshake,
         peername => St#state.peername,
@@ -205,13 +206,13 @@ handle_info({tcp_closed, _Socket}, State) ->
 handle_info({tcp_error, _, _} = Reason, State) ->
     {stop, Reason, State};
 
-handle_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
+handle_info({?BONDY_PEER_REQUEST, Pid, _RealmUri, M}, St) when Pid =:= self() ->
     %% Here we receive a message from the bondy_router in those cases
     %% in which the router is embodied by our process i.e. the sync part
     %% of a routing process e.g. wamp calls
     handle_outbound(M, St);
 
-handle_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
+handle_info({?BONDY_PEER_REQUEST, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% have sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),
@@ -269,7 +270,7 @@ handle_info({'DOWN', Ref, process, Pid, Reason}, State) ->
     {noreply, State};
 
 handle_info(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -687,44 +688,59 @@ close_socket(Reason, St) ->
         )
     end,
 
-    LogMsg = case Reason of
+    {Level, LogMsg} = case Reason of
         normal ->
-            #{
-                description => <<"Connection closed by peer">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by peer">>,
+                    reason => Reason
+                }
             };
 
         closed ->
-            #{
-                description => <<"Connection closed by peer">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by peer">>,
+                    reason => Reason
+                }
             };
 
         shutdown ->
-            #{
-                description => <<"Connection closed by router">>,
-                reason => Reason
+            {
+                info,
+                #{
+                    description => <<"Connection closed by router">>,
+                    reason => Reason
+                }
             };
 
         {tcp_error, Socket, Reason} ->
             %% We increase the socker error counter
             ok = IncrSockerErrorCnt(),
-            #{
-                description => <<"Connection closing due to tcp_error">>,
-                reason => Reason
+            {
+                error,
+                #{
+                    description => <<"Connection closing due to tcp_error">>,
+                    reason => Reason
+                }
             };
 
 
         _ ->
             %% We increase the socket error counter
             ok = IncrSockerErrorCnt(),
-            #{
-                description => <<"Connection closing due to system error">>,
-                reason => Reason
+            {
+                error,
+                #{
+                    description => <<"Connection closing due to system error">>,
+                    reason => Reason
+                }
             }
     end,
 
-    _ = log(error, LogMsg, St),
+    _ = log(Level, LogMsg, St),
     ok.
 
 
@@ -780,9 +796,14 @@ log(Level, Msg0, St) ->
         message_max_length => St#state.max_len,
         socket => St#state.socket
     },
+
+    SessionId = bondy_wamp_protocol:session_id(ProtocolState),
+    ExtId = bondy_session_id:to_external(SessionId),
+
     Meta = #{
         realm => bondy_wamp_protocol:realm_uri(ProtocolState),
-        session_id => bondy_wamp_protocol:session_id(ProtocolState),
+        session_id => SessionId,
+        session_external_id => ExtId,
         peername => St#state.peername
     },
     logger:log(Level, Msg, Meta).

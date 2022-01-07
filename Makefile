@@ -11,8 +11,8 @@ genvars:
 compile:
 	${REBAR} compile
 
-docs:
-	${REBAR} as docs edoc
+docs: xref
+	${REBAR} ex_doc
 
 test: xref
 	${REBAR} as test ct
@@ -42,22 +42,38 @@ devrun:
 
 prodrun:
 	${REBAR} as prod release
-	ERL_DIST_PORT=11972 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
+	ERL_DIST_PORT=27788 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/prod/rel/bondy/bin/bondy console
 
 prodtarrun: tar
-	ERL_DIST_PORT=11972 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
+	ERL_DIST_PORT=27788 BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME} BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE} _build/tar/bin/bondy console
 
 
 node1:
 	${REBAR} as node1 release
-	_build/node1/rel/bondy/bin/bondy console
+	ERL_DIST_PORT=27781 _build/node1/rel/bondy/bin/bondy console
 
 node2:
 	${REBAR} as node2 release
-	_build/node2/rel/bondy/bin/bondy console
+	ERL_DIST_PORT=27782 _build/node2/rel/bondy/bin/bondy console
 
 node3:
 	${REBAR} as node3 release
+	ERL_DIST_PORT=27783 _build/node3/rel/bondy/bin/bondy console
+
+
+edge1:
+	${REBAR} as edge1 release
+	ERL_DIST_PORT=27784 _build/edge1/rel/bondy/bin/bondy console
+
+
+run-node1:
+	_build/node1/rel/bondy/bin/bondy console
+
+run-node2:
+	_build/node2/rel/bondy/bin/bondy console
+
+run-node3:
 	_build/node3/rel/bondy/bin/bondy console
 
-
+run-edge1:
+	_build/edge1/rel/bondy/bin/bondy console

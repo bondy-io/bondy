@@ -21,7 +21,7 @@
 
 set_primary_metadata(Map0) ->
     Map = Map0#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     },
     logger:update_primary_config(#{metadata => Map}).
@@ -34,7 +34,7 @@ set_primary_metadata(Map0) ->
 
 update_primary_metadata(Map) ->
     NewMeta = Map#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     },
     Config = logger:get_primary_config(),
@@ -54,7 +54,7 @@ update_primary_metadata(Map) ->
 
 set_process_metadata(Map) ->
     logger:set_process_metadata(Map#{
-        node => bondy_peer_service:mynode(),
+        node => bondy_config:node(),
         router_vsn => bondy_app:vsn()
     }).
 
@@ -79,9 +79,12 @@ message_and_meta(WAMPMsg, Ctxt) ->
         message_type => element(1, WAMPMsg),
         message_id => element(2, WAMPMsg)
     },
+    SessionId = bondy_context:session_id(Ctxt),
+    ExtId = bondy_session_id:to_external(SessionId),
     Meta = #{
         realm_uri => bondy_context:realm_uri(Ctxt),
-        session_id => bondy_context:session_id(Ctxt),
+        session_external_id => ExtId,
+        session_id => SessionId,
         encoding => bondy_context:encoding(Ctxt)
     },
 

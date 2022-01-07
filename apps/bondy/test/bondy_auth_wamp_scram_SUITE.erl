@@ -38,14 +38,14 @@ all() ->
 
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.auth_wamp_scram">>,
     ok = add_realm(RealmUri),
 
     [{realm_uri, RealmUri} | Config].
 
 end_per_suite(Config) ->
-    % common:stop_bondy(),
+    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 
@@ -120,7 +120,7 @@ add_realm(RealmUri) ->
 
 missing_client_nonce(Config) ->
     RealmUri = ?config(realm_uri, Config),
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 
@@ -139,7 +139,7 @@ missing_client_nonce(Config) ->
 test_1(Config) ->
 
     RealmUri = ?config(realm_uri, Config),
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     Peer = {{127, 0, 0, 1}, 10000},
 

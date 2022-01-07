@@ -105,15 +105,20 @@ add_handler(Manager, Handler, Args) ->
 %% @doc Adds a supervised event handler, but also supervises the connection
 %% between the event handler and the calling process.
 %% Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)'.
+%% %% Use this call if you want the event manager to remove the handler when the
+%% calling process terminates.
 %% @end
 %% -----------------------------------------------------------------------------
 add_sup_handler(Handler, Args) ->
     add_sup_handler(?MODULE, Handler, Args).
 
+
 %% -----------------------------------------------------------------------------
 %% @doc Adds a supervised event handler, but also supervises the connection
 %% between the event handler and the calling process.
 %% Calls `gen_event:add_sup_handler(?MODULE, Handler, Args)'.
+%% Use this call if you want the event manager to remove the handler when the
+%% calling process terminates.
 %% @end
 %% -----------------------------------------------------------------------------
 add_sup_handler(Manager, Handler, Args) ->
@@ -122,8 +127,9 @@ add_sup_handler(Manager, Handler, Args) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Adds a watched event handler.
-%% As opposed to `add_sup_handler/2' which supervises the caller, this function
-%% calls `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
+%% As opposed to `add_sup_handler/2' which supervises the calling process,
+%% this function calls
+%% `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
 %% spawns a supervised process (`bondy_event_handler_watcher') which calls
 %% `add_sup_handler/2'. If the handler crashes, `bondy_event_handler_watcher'
 %% will re-install it in the event manager.
@@ -135,8 +141,9 @@ add_watched_handler(Handler, Args) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Adds a supervised event handler.
-%% As opposed to `add_sup_handler/2' which monitors the caller, this function
-%% calls `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
+%% As opposed to `add_sup_handler/2' which monitors the calling process,
+%% this function calls
+%% `bondy_event_handler_watcher_sup:start_watcher(Handler, Args)' which
 %% spawns a supervised process (`bondy_event_handler_watcher') which calls
 %% `add_sup_handler/2'. If the handler crashes, `bondy_event_handler_watcher'
 %% will re-install it in the event manager.

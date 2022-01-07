@@ -73,13 +73,13 @@ groups() ->
     ].
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.security">>,
     Realm = add_realm(RealmUri),
     [{realm_uri, RealmUri}, {realm, Realm} |Config].
 
 end_per_suite(Config) ->
-    common:stop_bondy(),
+    bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 
@@ -572,7 +572,7 @@ authenticate(Uri, Username, Secret) ->
 
 
 do_authenticate(Uri, Username, Secret) ->
-    SessionId = 1,
+    SessionId = bondy_session_id:new(),
     Roles = [],
     Peer = {{127,0,0,1}, 1111},
     {ok, Ctxt} = bondy_auth:init(SessionId, Uri, Username, Roles, Peer),

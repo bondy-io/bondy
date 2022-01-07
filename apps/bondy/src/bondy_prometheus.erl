@@ -30,7 +30,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("prometheus/include/prometheus.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include_lib("bondy.hrl").
+-include("bondy.hrl").
 
 -record(state, {}).
 
@@ -312,7 +312,7 @@ handle_event(_Event, State) ->
 
 
 handle_call(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
@@ -687,7 +687,7 @@ declare_wamp_metrics() ->
 
 
 node_name() ->
-    bondy_peer_service:mynode().
+    bondy_config:node().
 
 
 bytes_bucket() ->

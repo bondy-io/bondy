@@ -36,7 +36,7 @@
 -define(VALIDATOR, ?UPDATE_VALIDATOR#{
     <<"name">> => #{
         alias => name,
-		key => name,
+        key => name,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -45,7 +45,7 @@
     },
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -55,7 +55,7 @@
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -67,7 +67,7 @@
 -define(UPDATE_VALIDATOR, #{
     <<"groups">> => #{
         alias => groups,
-		key => groups,
+        key => groups,
         allow_null => false,
         allow_undefined => false,
         required => false,
@@ -76,7 +76,7 @@
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         allow_null => false,
         allow_undefined => false,
         required => false,
@@ -238,6 +238,8 @@ add_or_update(RealmUri, #{type := ?TYPE, name := Name} = Group) ->
     {ok, NewUser :: t()} | {error, any()}.
 
 update(RealmUri, Name, Data0) when is_binary(Name) ->
+     %% TODO validate that we are not updating a prototype group, if so raise a
+     %% {operation_not_allowed}
     try
         Data = maps_utils:validate(Data0, ?UPDATE_VALIDATOR),
 
@@ -438,6 +440,8 @@ list(RealmUri) ->
 -spec list(RealmUri :: uri(), Opts :: list_opts()) -> list(t()).
 
 list(RealmUri, Opts) ->
+    %% TODO We SHOULD list the realm's prototype roups as well (amd potentially
+    %% marking them with a flag)
     Prefix = ?PLUMDB_PREFIX(RealmUri),
 
     FoldOpts = case maps_utils:get_any([limit, <<"limit">>], Opts, undefined) of

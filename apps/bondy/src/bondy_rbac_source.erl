@@ -36,13 +36,13 @@
 -define(ASSIGNMENT_VALIDATOR, #{
     % <<"roles">> => #{
     %     alias => roles,
-	% 	key => roles,
+    % 	key => roles,
     %     required => true,
     %     validator => fun bondy_data_validators:rolenames/1
     % },
     <<"usernames">> => #{
         alias => usernames,
-		key => usernames,
+        key => usernames,
         required => true,
         allow_null => false,
         allow_undefined => false,
@@ -50,7 +50,7 @@
     },
     <<"cidr">> => #{
         alias => cidr,
-		key => cidr,
+        key => cidr,
         allow_null => false,
         allow_undefined => false,
         required => true,
@@ -60,14 +60,14 @@
     },
     <<"authmethod">> => #{
         alias => authmethod,
-		key => authmethod,
+        key => authmethod,
         required => true,
         allow_null => false,
         datatype => {in, ?BONDY_AUTH_METHOD_NAMES}
     },
     <<"meta">> => #{
         alias => meta,
-		key => meta,
+        key => meta,
         allow_null => false,
         allow_undefined => false,
         required => true,

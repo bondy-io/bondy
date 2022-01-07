@@ -39,14 +39,14 @@ all() ->
 
 
 init_per_suite(Config) ->
-    common:start_bondy(),
+    bondy_ct:start_bondy(),
     RealmUri = <<"com.example.test.rbac">>,
     ok = add_realm(RealmUri),
 
     [{realm_uri, RealmUri}| Config].
 
 end_per_suite(Config) ->
-    % common:stop_bondy(),
+    % bondy_ct:stop_bondy(),
     {save_config, Config}.
 
 
@@ -167,7 +167,7 @@ test_1(Config) ->
         security_enabled => true,
         authid => ?U1,
         session => bondy_session:new(
-            Peer, RealmUri, SessionOpts#{authid => ?U1}
+            RealmUri, SessionOpts#{authid => ?U1, peer => Peer}
         )
     },
     U2Ctxt = #{
@@ -175,7 +175,7 @@ test_1(Config) ->
         security_enabled => true,
         authid => ?U2,
         session => bondy_session:new(
-            Peer, RealmUri, SessionOpts#{authid => ?U2}
+            RealmUri, SessionOpts#{authid => ?U2, peer => Peer}
         )
     },
     U3Ctxt = #{
@@ -183,7 +183,7 @@ test_1(Config) ->
         security_enabled => true,
         authid => ?U3,
         session => bondy_session:new(
-            Peer, RealmUri, SessionOpts#{authid => ?U3}
+            RealmUri, SessionOpts#{authid => ?U3, peer => Peer}
         )
     },
 

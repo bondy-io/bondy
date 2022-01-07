@@ -303,18 +303,19 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
     case binary_to_integer(Part) == SessionId of
         true ->
             case bondy_session:lookup(RealmUri, SessionId) of
-                {error, not_found} ->
-                    E = no_such_session_error(
-                        ?INVOCATION, M#invocation.request_id
-                    ),
-                    {reply, E};
-                Session ->
+                {ok, Session} ->
                     R = wamp_message:yield(
                         M#invocation.request_id,
                         #{},
                         [bondy_session:info(Session)]
                     ),
-                    {reply, R}
+                    {reply, R};
+
+                {error, not_found} ->
+                    E = no_such_session_error(
+                        ?INVOCATION, M#invocation.request_id
+                    ),
+                    {reply, E}
             end;
         false ->
             E = wamp_message:error_from(
@@ -350,12 +351,12 @@ no_such_session_error(Type, ReqId) when Type == ?CALL; Type == ?INVOCATION ->
 
 
 list(Type, RealmUri) ->
-    list(Type, RealmUri, fun bondy_registry_entry:to_map/1).
+    list(Type, RealmUri, fun bondy_registry_entry:to_external/1).
 
 
 list(Type, RealmUri, Fun) ->
     try
-        case bondy_registry:entries(Type, RealmUri, '_', '_') of
+        case bondy_registry:entries(Type, RealmUri, '_') of
             [] ->
                 {ok, []};
             Entries ->
@@ -390,7 +391,7 @@ summary(Type, RealmUri) ->
         ?WILDCARD_MATCH => []
     },
     try
-        case bondy_registry:entries(Type, RealmUri, '_', '_') of
+        case bondy_registry:entries(Type, RealmUri, '_') of
             [] ->
                 {ok, Default};
             Entries ->
@@ -527,11 +528,11 @@ list_callees([RealmUri, ProcedureUri]) ->
 %% @private
 list_registration_callees(_RealmUri, _RegId) ->
     %% try
-    %%     case bondy_registry:entries(registration, RealmUri, '_', '_') of
+    %%     case bondy_registry:entries(registration, RealmUri, '_') of
     %%         {[], '$end_of_table'} ->
     %% {error, bondy_wamp_utils:no_such_registration_error(RegId)};
     %%         {[Entries], '$end_of_table'} ->
-    %%             Sessions = [bondy_registry_entry:session_id(E) || E <- Entries],
+    %%             Sessions = [bondy_registry_entry:session_external_id(E) || E <- Entries],
     %%             {ok, Sessions}
     %%     end
     %% catch

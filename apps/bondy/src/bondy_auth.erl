@@ -33,7 +33,7 @@
 -include("bondy_security.hrl").
 
 -type context()         ::  #{
-    session_id := id() | undefined,
+    session_id := bondy_session_id:t() | undefined,
     realm_uri := uri(),
     user := bondy_rbac_user:t() | undefined,
     user_id := binary() | undefined,
@@ -150,7 +150,7 @@ format_status(_Opt, Ctxt) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec init(
-    SessionId :: id(),
+    SessionId :: bondy_session_id:t(),
     Realm :: bondy_realm:t() | uri(),
     UserId :: binary() | anonymous,
     Roles :: all | binary() | [binary()] | undefined,
@@ -159,7 +159,8 @@ format_status(_Opt, Ctxt) ->
     | {error, {no_such_user, binary()} | no_such_realm | no_such_group}
     | no_return().
 
-init(SessionId, Uri, UserId, Roles, Peer) when is_binary(Uri) ->
+init(SessionId, Uri, UserId, Roles, Peer)
+when is_binary(SessionId), is_binary(Uri) ->
     case bondy_realm:lookup(string:casefold(Uri)) of
         {error, not_found} ->
             {error, no_such_realm};
@@ -167,7 +168,8 @@ init(SessionId, Uri, UserId, Roles, Peer) when is_binary(Uri) ->
             init(SessionId, Realm, UserId, Roles, Peer)
     end;
 
-init(SessionId, Realm, UserId0, Roles0, {IPAddress, _}) ->
+init(SessionId, Realm, UserId0, Roles0, {IPAddress, _})
+when is_binary(SessionId) ->
     try
         RealmUri = bondy_realm:uri(Realm),
         UserId = casefold(UserId0),
@@ -226,7 +228,7 @@ method_info(Method) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec session_id(context()) -> id().
+-spec session_id(context()) -> bondy_session_id:t().
 
 session_id(#{session_id := Value}) ->
     Value.

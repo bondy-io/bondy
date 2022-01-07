@@ -112,30 +112,9 @@
 %% GENERAL
 %% =============================================================================
 
--type callback_peer_id()  ::  {
-    Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  undefined,
-    Mod         ::  module()
-}.
--type local_peer_id()   ::  {
-    Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  maybe(integer()),
-    Pid         ::  pid()
-}.
--type remote_peer_id()  ::  {
-    Realm       ::  binary(),
-    Node        ::  atom(),
-    SessionId   ::  maybe(integer()),
-    Pid         ::  maybe(pid() | binary())
-}.
--type peer_id()         ::  callback_peer_id()
-                            | local_peer_id()
-                            | remote_peer_id().
 
 -type maybe(T)          ::  T | undefined.
-
+-type nodestring()      ::  binary().
 
 
 %% =============================================================================

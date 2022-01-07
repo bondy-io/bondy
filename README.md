@@ -1,13 +1,13 @@
 # Bondy
-#### The Distributed WAMP Router and API Gateway
 
+### The distributed application networking platform
 Bondy is an open source, distributed, scaleable and robust networking platform for microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns.
 
-Bondy is Apache2 licensed.
+<img src="figures/bondy_cluster.png" alt="drawing" width="600"/>
 
-|:warning: **Notice for Contributors**|
-|:---|
-|Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy). <br><br>If you are reading this file at Bondy's Github repository, notice this is a mirror that is unidirectionally synced to Gitlab's i.e. _no commits or PRs done in Github will be synced to the main Gitlab repository_.|
+> ### :warning: Notice for Contributors
+> Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
+>If you are reading this file at Bondy's Github repository, notice this is a mirror that is unidirectionally synced to Gitlab's i.e. _no commits or PRs done in Github will be synced to the main Gitlab repository_.
 
 ## Documentation
 
@@ -112,4 +112,5 @@ One minute after joining the cluster, the Active Anti-entropy service will trigg
 
 ---
 
-Copyright (c) 2016-2021 Leapsight. All rights reserved.
+Copyright by Leapsight, material licensed under the CC-BY-SA 4.0,
+provided as-is without any warranties, Bondy documentation (http://docs.getbondy.io).

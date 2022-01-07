@@ -121,6 +121,9 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
 
         %% The CHALLENGE.Details.challenge|string is a string
         %% the client needs to create a signature for.
+        ExtSessionId = bondy_session_id:to_external(
+            bondy_auth:session_id(Ctxt)
+        ),
         Microsecs = erlang:system_time(microsecond),
         Challenge = jsone:encode(#{
             authid => UserId,
@@ -131,7 +134,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             timestamp => bondy_utils:system_time_to_rfc3339(
                 Microsecs, [{offset, "Z"}, {unit, microsecond}]
             ),
-            session => bondy_auth:session_id(Ctxt)
+            session => ExtSessionId
         }),
         ExpectedSignature = base64:encode(
             crypto:mac(hmac, sha256, SPassword, Challenge)

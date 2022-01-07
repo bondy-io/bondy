@@ -150,7 +150,7 @@
 -spec get(entries(), opts()) -> bondy_registry_entry:t() | {error, noproc}.
 
 get(Entries, Opts) when is_list(Entries) ->
-    Node = bondy_peer_service:mynode(),
+    Node = bondy_config:nodestring(),
     do_get(iterate(Entries, Opts), Node).
 
 
@@ -252,11 +252,13 @@ prepare_entries(Entries, _) ->
 
 %% @private
 maybe_sort_by_locality(true, L) ->
-    Node = bondy_peer_service:mynode(),
+    Nodestring = bondy_config:nodestring(),
     Fun = fun(A, B) ->
-        case {bondy_registry_entry:node(A), bondy_registry_entry:node(B)} of
-            {Node, _} -> true;
-            {_, Node} -> false;
+        NSA = bondy_registry_entry:nodestring(A),
+        NSB = bondy_registry_entry:nodestring(B),
+        case {NSA, NSB} of
+            {Nodestring, _} -> true;
+            {_, Nodestring} -> false;
             _ -> A =< B % to keep order of remaining elements
         end
     end,
@@ -274,7 +276,7 @@ do_get({error, _} = Error, _) ->
     Error;
 
 do_get({Entry, Iter}, Node) ->
-    case bondy_registry_entry:node(Entry) =:= Node of
+    case bondy_registry_entry:nodestring(Entry) =:= Node of
         true ->
             %% The wamp peer is local, so we should have a peer
             %% Callback peers are not allowed to be used on shared registration
@@ -335,10 +337,11 @@ next_round_robin(#iterator{entries = [H|T]} = Iter, undefined) ->
     %% We never invoked this procedure before or we reordered the round
     NewIter = Iter#iterator{entries = T},
 
-    case bondy_peer_service:mynode() =:= bondy_registry_entry:node(H) of
+    case bondy_config:nodestring() =:= bondy_registry_entry:nodestring(H) of
         true ->
             %% The pid of the connection process
-            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
+            Pid = bondy_registry_entry:pid(H),
+
             case erlang:is_process_alive(Pid) of
                 true ->
                     %% We update the invocation state
@@ -373,7 +376,6 @@ next_round_robin(Iter, #last_invocation{value = LastId}) ->
 
 next_round_robin(#iterator{entries = []}, undefined) ->
     '$end_of_table'.
-
 
 
 %% -----------------------------------------------------------------------------
@@ -428,7 +430,8 @@ next_queue_least_loaded(
     case bondy_registry_entry:is_local(H) of
         true ->
             %% The pid of the connection process
-            Pid = bondy_session:pid(bondy_registry_entry:session_id(H)),
+            Pid = bondy_registry_entry:pid(H),
+
             case erlang:process_info(Pid, [message_queue_len]) of
                 undefined ->
                     %% Process died, we continue iterating

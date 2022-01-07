@@ -18,8 +18,10 @@
 
 -module(bondy_wamp_tcp).
 
--define(WAMP_TCP, wamp_tcp).
--define(WAMP_TLS, wamp_tls).
+
+-define(TCP, wamp_tcp).
+-define(TLS, wamp_tls).
+
 
 -export([connections/0]).
 -export([resume_listeners/0]).
@@ -45,8 +47,9 @@
 -spec start_listeners() -> ok.
 
 start_listeners() ->
-    ok = maybe_start_listener(?WAMP_TCP),
-    maybe_start_listener(?WAMP_TLS).
+    Protocol = bondy_wamp_tcp_connection_handler,
+    ok = bondy_ranch_listener:start(?TCP, Protocol, []),
+    bondy_ranch_listener:start(?TLS, Protocol, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -56,9 +59,8 @@ start_listeners() ->
 -spec stop_listeners() -> ok.
 
 stop_listeners() ->
-    catch ranch:stop_listener(?WAMP_TCP),
-    catch ranch:stop_listener(?WAMP_TLS),
-    ok.
+    ok = bondy_ranch_listener:stop(?TCP),
+    bondy_ranch_listener:stop(?TLS).
 
 
 %% -----------------------------------------------------------------------------
@@ -68,9 +70,8 @@ stop_listeners() ->
 -spec suspend_listeners() -> ok.
 
 suspend_listeners() ->
-    catch ranch:suspend_listener(?WAMP_TCP),
-    catch ranch:suspend_listener(?WAMP_TLS),
-    ok.
+    ok = bondy_ranch_listener:suspend(?TCP),
+    bondy_ranch_listener:suspend(?TLS).
 
 
 %% -----------------------------------------------------------------------------
@@ -80,10 +81,8 @@ suspend_listeners() ->
 -spec resume_listeners() -> ok.
 
 resume_listeners() ->
-    catch ranch:resume_listener(?WAMP_TCP),
-    catch ranch:resume_listener(?WAMP_TLS),
-    ok.
-
+    bondy_ranch_listener:resume(?TCP),
+    bondy_ranch_listener:resume(?TLS).
 
 
 %% -----------------------------------------------------------------------------
@@ -91,7 +90,8 @@ resume_listeners() ->
 %% @end
 %% -----------------------------------------------------------------------------
 connections() ->
-    tls_connections() ++ tcp_connections().
+    bondy_ranch_listener:connections(?TCP)
+        ++ bondy_ranch_listener:connections(?TLS).
 
 
 %% -----------------------------------------------------------------------------
@@ -99,7 +99,7 @@ connections() ->
 %% @end
 %% -----------------------------------------------------------------------------
 tls_connections() ->
-    ranch:procs(?WAMP_TLS, connections).
+    bondy_ranch_listener:connections(?TLS).
 
 
 %% -----------------------------------------------------------------------------
@@ -107,69 +107,4 @@ tls_connections() ->
 %% @end
 %% -----------------------------------------------------------------------------
 tcp_connections() ->
-    ranch:procs(?WAMP_TCP, connections).
-
-
-
-
-%% =============================================================================
-%% PRIVATE
-%% =============================================================================
-
-
-
-%% @private
-maybe_start_listener(Name) ->
-    case bondy_config:get([Name, enabled], true) of
-        true ->
-            {ok, _} = ranch:start_listener(
-                Name,
-                listener_to_transport(Name),
-                transport_opts(Name),
-                bondy_wamp_tcp_connection_handler,
-                []
-            ),
-            %% _ = ranch:set_max_connections(H, MaxConns),
-            ok;
-        false ->
-            ok
-    end.
-
-
-%% @private
-listener_to_transport(?WAMP_TCP) -> ranch_tcp;
-listener_to_transport(?WAMP_TLS) -> ranch_ssl.
-
-
-%% @private
-transport_opts(Name) ->
-    Opts = bondy_config:get(Name),
-    {_, Port} = lists:keyfind(port, 1, Opts),
-    {_, PoolSize} = lists:keyfind(acceptors_pool_size, 1, Opts),
-    {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
-
-    %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
-        {socket_opts, L} -> normalise(L);
-        false -> []
-    end,
-
-    #{
-        num_acceptors => PoolSize,
-        max_connections => MaxConnections,
-        socket_opts => [{port, Port} | SocketOpts]
-    }.
-
-
-%% @private
-normalise(Opts) ->
-    Sndbuf = lists:keyfind(sndbuf, 1, Opts),
-    Recbuf = lists:keyfind(recbuf, 1, Opts),
-    case Sndbuf =/= false andalso Recbuf =/= false of
-        true ->
-            Buffer0 = lists:keyfind(buffer, 1, Opts),
-            Buffer1 = max(Buffer0, max(Sndbuf, Recbuf)),
-            lists:keystore(buffer, 1, Opts, {buffer, Buffer1});
-        false ->
-            Opts
-    end.
+    bondy_ranch_listener:connections(?TCP).

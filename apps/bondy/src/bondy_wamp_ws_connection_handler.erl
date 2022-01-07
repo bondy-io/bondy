@@ -91,6 +91,9 @@
     | {module(), cowboy_req:req(), state(), timeout(), hibernate}.
 
 init(Req0, _) ->
+    %% This callback is called from the temporary (HTTP) request process and
+    %% the websocket_ callbacks from the connection process.
+
     %% From Cowboy's
     %% [Users Guide](http://ninenines.eu/docs/en/cowboy/1.0/guide/ws_handlers/)
     %% If the sec-websocket-protocol header was sent with the request for
@@ -105,7 +108,6 @@ init(Req0, _) ->
         transport => ws,
         client_ip => ClientIP
     }),
-
 
     try
 
@@ -193,7 +195,7 @@ websocket_handle(Data, #state{protocol_state = undefined} = St) ->
     %% At the moment we only support WAMP, so we stop immediately.
     %% TODO This should be handled by the websocket_init callback above,
     %% review and eliminate.
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         description => "Connection closing",
         reason => unsupported_message,
         data => Data
@@ -247,10 +249,11 @@ websocket_handle(Data, St) ->
 %% client. See {@link bondy:send/2}.
 %% @end
 %% -----------------------------------------------------------------------------
-websocket_info({?BONDY_PEER_REQUEST, Pid, M}, St) when Pid =:= self() ->
+websocket_info({?BONDY_PEER_REQUEST, Pid, _RealmUri, M}, St)
+when Pid =:= self() ->
     handle_outbound(St#state.frame_type, M, St);
 
-websocket_info({?BONDY_PEER_REQUEST, {_Pid, _Ref}, M}, St) ->
+websocket_info({?BONDY_PEER_REQUEST, _Pid, _RealmUri, M}, St) ->
     %% Here we receive the messages that either the router or another peer
     %% sent to us using bondy:send/2,3
     %% ok = bondy:ack(Pid, Ref),
@@ -470,7 +473,10 @@ do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
                 ping_max_attempts = maps:get(max_attempts, PingOpts)
             },
             Req1 = cowboy_req:set_resp_header(?SUBPROTO_HEADER, BinProto, Req0),
+
+            %% We upgrade the HTTP connection to Websockets
             {cowboy_websocket, Req1, St, Opts};
+
         {error, _Reason} ->
             %% Returning ok will cause the handler to
             %% stop in websocket_handle
@@ -549,9 +555,13 @@ log(Level, Msg0, #state{} = St) ->
         serializer => bondy_context:encoding(Ctxt),
         frame_type => St#state.frame_type
     },
+    SessionId = bondy_wamp_protocol:session_id(ProtocolState),
+    ExtId = bondy_session_id:to_external(SessionId),
+
     Meta = #{
         realm => bondy_wamp_protocol:realm_uri(ProtocolState),
-        session_id => bondy_wamp_protocol:session_id(ProtocolState),
+        session_id => SessionId,
+        session_external_id => ExtId,
         peername => bondy_context:peername(Ctxt)
     },
     logger:log(Level, Msg, Meta);

@@ -994,7 +994,7 @@ from_file(Filename) ->
         {ok, _} ->
             {error, invalid_specification_format};
         {error, Reason} ->
-            ?LOG_ERROR(#{
+            ?LOG_WARNING(#{
                 description => "Error while parsing API Gateway Specification file",
                 filename => Filename,
                 reason => Reason

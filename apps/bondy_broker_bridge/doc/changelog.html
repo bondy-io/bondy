@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="ExDoc v0.26.0">
+    <meta name="project" content="bondy_broker_bridge v0.1.0">
+
+    <title>CHANGELOG — bondy_broker_bridge v0.1.0</title>
+    <link rel="stylesheet" href="dist/erlang-e2fc4c0a4f7951ab3ca5.css" />
+
+    <script src="dist/sidebar_items-5e056b4dcb.js"></script>
+
+      <script src="docs_config.js"></script>
+
+    <script async src="dist/app-68b26e75fcd91b8a764c.js"></script>
+
+
+  </head>
+  <body data-type="extras">
+    <script>
+
+      try {
+        if (localStorage.getItem('night-mode') === 'true') {
+          document.body.classList.add('night-mode');
+        }
+      } catch (error) { }
+    </script>
+
+<div class="main">
+
+<button class="sidebar-button sidebar-toggle">
+  <span class="icon-menu" title="Collapse/expand sidebar"></span>
+</button>
+
+<section class="sidebar">
+  <form class="sidebar-search" action="search.html">
+    <button type="submit" class="search-button" aria-label="Submit Search">
+      <span class="icon-search" aria-hidden="true" title="Submit search"></span>
+    </button>
+    <button type="button" tabindex="-1" class="search-close-button" aria-label="Cancel Search">
+      <span class="icon-cross" aria-hidden="true" title="Cancel search"></span>
+    </button>
+    <label class="search-label">
+      <input name="q" type="text" class="search-input" placeholder="Search..." aria-label="Input your search terms" autocomplete="off" />
+    </label>
+  </form>
+
+  <div class="autocomplete">
+    <div class="autocomplete-results">
+    </div>
+  </div>
+
+  <div class="sidebar-header">
+    <div class="sidebar-projectDetails">
+      <a href="http://bondy" class="sidebar-projectName" translate="no">
+bondy_broker_bridge
+      </a>
+      <strong class="sidebar-projectVersion" translate="no">
+        v0.1.0
+      </strong>
+    </div>
+
+  </div>
+
+  <ul class="sidebar-listNav">
+    <li><a id="extras-list-link" href="#full-list">Pages</a></li>
+
+      <li><a id="modules-list-link" href="#full-list">Modules</a></li>
+
+
+  </ul>
+  <div class="gradient"></div>
+  <ul id="full-list" class="sidebar-fullList"></ul>
+</section>
+
+<section class="content">
+  <div class="content-outer">
+    <div id="content" class="content-inner">
+
+<h1 id="content">
+CHANGELOG
+
+    <a href="https://gitlab.com/leapsight/bondy/blob/v0.1.0/CHANGELOG.md#L1" title="View Source" class="view-source" rel="help">
+      <span class="icon-code" aria-hidden="true"></span>
+      <span class="sr-only">View Source</span>
+    </a>
+
+</h1>
+
+<h2 id="1-0-0-beta" class="section-heading">
+  <a href="#1-0-0-beta" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  1.0.0-beta
+</h2>
+<h3 id="added" class="section-heading">
+  <a href="#added" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Added
+</h3>
+<h4>General</h4><ul><li>Upgraded to OTP 24</li></ul><h4>Security</h4><ul><li>WAMP Cryptosign authentication</li><li>WAMP Ticket-based authentication</li><li>Same Sign-on and Single Sign-on (SSO Realms)</li><li>Realm Prototypes</li><li>Added libsodium (enacl lib)</li></ul><h4>Bondy Edge</h4><h3 id="fixed" class="section-heading">
+  <a href="#fixed" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Fixed
+</h3>
+<ul><li>Fixes group ordering issue in processing of security (realm) configuration files.<ul><li>bondy_realm topological ordering of groups within each realm according to their group membership relationship. If any cycles are found amongst groups, an error is raised.</li><li>Existing groups referred by name in the group's 'group' property are not fetched, so cycles might still be created once the new groups are stored on the database.</li></ul></li><li>Fixes a concurrency issue with busy clients, in particular when they end up calling themselves. This was produced by an unnecesary used of internal acknowledgments which have been removed</li></ul><h3 id="wamp" class="section-heading">
+  <a href="#wamp" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  WAMP
+</h3>
+<ul><li>Erlang encoding now enforces WAMP-compatible data structures and tries to convert certain types e.g. pids while it fails with others.</li></ul><h3 id="changed" class="section-heading">
+  <a href="#changed" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Changed
+</h3>
+<ul><li>Realm database representation</li><li>User database representation</li><li>Error types and description improvements</li><li>Logging improvements</li><li>Removed high cardinality labels in promethues metrics (before we would tag each WAMP message stats with realm, session, message type etc. this is not good for stats databases like Promethues).</li><li>Added RBAC context caching to avoid computing the user grants on every request.</li></ul><h2 id="known-issues" class="section-heading">
+  <a href="#known-issues" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Known Issues
+</h2>
+<h4>Security</h4><ul><li>The RBAC context cache is not evicted or refreshed when a user is assigned to new realms or granted new permissions.</li></ul><h2 id="0-9-0" class="section-heading">
+  <a href="#0-9-0" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.9.0
+</h2>
+<h3 id="added-1" class="section-heading">
+  <a href="#added-1" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Added
+</h3>
+<ul><li><code class="inline">bondy.subscription.list</code> procedure</li><li>First verstion of Retained messages</li><li>Added a non-standard WAMP Authentication method <code class="inline">oauth2</code> based on OAuth2 JWT Tokens<ul><li>Is equivalent to WAMP-Ticket authentication method but expects the secret to be a JWT produced by Bondy OAuth2</li><li><code class="inline">authid</code> property value needs to be present and needs to match the JWT’s <code class="inline">sub</code> property value</li></ul></li><li>Added Bondy specific load balancing strategies through the standard  <code class="inline">REGISTER.Options.invoke</code> option:<ul><li>queue_least_loaded</li><li>quede_least_loaded_sample</li><li>jump_consistent_hash (MUST not be used as this is experimental and the implementation will change with upcoming definitions from WAMP Specification)</li></ul></li><li>Aded support for WS compression<ul><li>now supports permessage-deflate websocket extension and enabled by default</li><li>added configuration option <code class="inline">wamp.websocket.compression_enabled</code></li><li>added configuration option <code class="inline">wamp.websocket.deflate.level</code></li><li>added configuration option <code class="inline">wamp.websocket.deflate.mem_level</code></li><li>added configuration option <code class="inline">wamp.websocket.deflate.strategy</code></li><li>added configuration option <code class="inline">wamp.websocket.deflate.server_context_takeover</code></li><li>added configuration option <code class="inline">wamp.websocket.deflate.client_max_window_bits</code></li><li>added configuration option <code class="inline">wamp.websocket.idle_timeout</code></li><li>added configuration option <code class="inline">bondy.wamp_websocket.max_frame_size</code></li><li>Not working with Mozilla as it seems to be sending a corrupted PING message</li></ul></li></ul><h3 id="fixed-1" class="section-heading">
+  <a href="#fixed-1" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Fixed
+</h3>
+<ul><li>Minor WAMP protocol fixes</li><li>Several bug fixes during removal of an API Specification<ul><li>Removal did not rebuilt the web server dispatch tables and thus the API removed was still active until reboot.</li></ul></li><li>Cleanup of session data when web server processes crash abnormally</li></ul><h3 id="changed-1" class="section-heading">
+  <a href="#changed-1" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Changed
+</h3>
+<ul><li>Upgraded to Erlang 23</li><li>Security data structures</li><li>Security methods (more methods added and a clear distinction between 'anontmous' and 'trust')</li></ul><h2 id="0-8-8" class="section-heading">
+  <a href="#0-8-8" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.8
+</h2>
+<h3 id="added-2" class="section-heading">
+  <a href="#added-2" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Added
+</h3>
+<ul><li>API Gateway<ul><li>The API specification body object now supports any external-friendly data type e.g. erlang tuples, pids, references excluded.</li><li>Fixes a bug in the validation of the response body which failed in case the body was not a MOPS expression, a binary or map. Now all external-friendly types are allows e.g. numbers, booleans, strings, binaries, maps, lists and MOPS expressions. This allows to return static content i.e. not a result of evaluating a MOPS expression in any given type of action.</li><li>Upgraded MOPS which has better error reporting and support for a new function <code class="inline">random(N)</code> which returns N random members from a list. If the value random is applied is static, this will yield the same results on every request.</li></ul></li></ul><h3 id="fixed-2" class="section-heading">
+  <a href="#fixed-2" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Fixed
+</h3>
+<ul><li>API Gateway<ul><li>Minor fixes to enhance error handling and logging</li><li>Fixed a case where an invalid API Specification can crash the gateway process during startup</li></ul></li><li>Configuration<ul><li>Fixed an error in which private/default lager configuration would override user configuration (bondy.conf)</li><li>OAuth2<ul><li>Fixed a bug on the removal of refresh token indices during refresh token revocation.</li></ul></li></ul></li><li>Clustering<ul><li>Fixed missing handler for WAMP ERROR(CALL) messages forwarded by a peer node</li></ul></li></ul><h3 id="changed-2" class="section-heading">
+  <a href="#changed-2" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Changed
+</h3>
+<ul><li>Configuration<ul><li>The WAMP raw socket serialiser slot assignment is now configurable. Bondy provides Erlang (erl) and BERT serialisers in addition to JSON and Messagepack. This change allows the user to configure to which of the 13 available slots (3..15) are those serialisers mapped to.</li></ul></li></ul><h2 id="0-8-7" class="section-heading">
+  <a href="#0-8-7" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.7
+</h2>
+<h3 id="added-3" class="section-heading">
+  <a href="#added-3" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Added
+</h3>
+<ul><li>Added a controlled phased startup process<ul><li>Bondy now starts in phases allowing to block on several steps using configuration parameters. The main benefit is to avoid starting up the WAMP client socket listeners before serveral subsystems have finish initialisation and/or some processes have been completed.<ul><li><code class="inline">startup.wait_for_store_partitions</code> - controls whether to block further stages until all db partitions have been initialised, this includes loading all data into those entities stored in ram and disk. Default is <code class="inline">on</code>.</li><li><code class="inline">startup.wait_for_store_hashtrees</code> - defines whether Bondy will wait for the db hashtrees to be built before continuing with initialisation. Default is <code class="inline">on</code>.</li><li><code class="inline">startup.wait_for_store_aae_exchange</code> - Defines whether Bondy will wait for the first active anti-entropy exchange to be finished before continuing with initialisation. These only works if Bondy is part of a cluster i.e. when Peer Discovery and Automatic Cluster join is enabled.</li></ul></li><li>The Bondy Admin HTTP API listeners are started as soon as the store partitions and other subsystems are initilised. This allows for liveness probes to be able to check on Bondy and/or admin users to inspect and/or operate while the other phases are running.</li></ul></li></ul><h3 id="fixed-3" class="section-heading">
+  <a href="#fixed-3" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Fixed
+</h3>
+<ul><li>Several fixes to Security Configuration file format<ul><li><code class="inline">sources.usernames</code> now takes a string &quot;any&quot; of a list of usernames, including &quot;anonymous&quot;</li><li><code class="inline">grants.roles</code> now takes a string &quot;any&quot; of a list of rolenames, including &quot;anonymous&quot;</li></ul></li></ul><h2 id="0-8-6" class="section-heading">
+  <a href="#0-8-6" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.6
+</h2>
+<ul><li>First implementation of Peer Discovery and Automatic Cluster join.<ul><li>Implementation of DNS srv based discovery tested to work with Kubernetes DNS</li></ul></li><li>Finished Bondy Broker schema specification</li><li>Added authorization controls for all WAMP verbs (register, unregister, call, cancel, publish, subscribe and unsubscribe). Authorization is managed by the existing Security subsystem which now can be configured using JSON files defined in the bondy.conf file (in addition to the WAMP and HTTP/REST APIs).</li><li>Fixed WAMPRA (with salted password) authentication method.<ul><li>This requires a rehash of the existing passwords. If you are migrating from an existing Bondy installation, the migration occurs lazily on the new user login (as we need the user to provide the password for Bondy to be able to rehash, as Bondy never stores clear text passwords).</li></ul></li><li>Refactoring of configuration via bondy.conf<ul><li>Removed legacy config options,</li><li>Renamed a few a config options and introduced new ones to support static configuration via JSON files and new features like Peer Discovery and Automatic Cluster join.</li></ul></li></ul><h2 id="0-8-2" class="section-heading">
+  <a href="#0-8-2" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.2
+</h2>
+<ul><li>Migration to OTP 21.3 or higher.</li><li>Upgraded all dependencies to support OTP 21</li></ul><h2 id="0-8-1" class="section-heading">
+  <a href="#0-8-1" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.1
+</h2>
+<p>This version includes a complete redesign of event management and instrumentation.
+The new <code class="inline">bondy_event_manager</code> is now the way for the different subsystems to asynchronously publish events (notifications) and offload all instrumentation to event handlers:</p><ul><li><code class="inline">bondy_promethues</code> is an event handler that implements all promethues instrumentation</li><li><code class="inline">bondy_wamp_meta_events</code> is an event handler that selectively re-published bondy events to WAMP Meta events.</li></ul><h3 id="new-modules" class="section-heading">
+  <a href="#new-modules" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  New Modules
+</h3>
+<ul><li><p><code class="inline">bondy_event_manager</code> implements a form of supervised handlers similar to lager (logging library), by spawning a &quot;watcher&quot; processes per handler (module) under a supervision tree and restarting it when it crashes.</p></li><li><p><code class="inline">bondy_alarm_handler</code> replaces sasl’s default alarm_handler.</p></li></ul><h3 id="deprecated-modules" class="section-heading">
+  <a href="#deprecated-modules" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  Deprecated Modules
+</h3>
+<p><code class="inline">bondy_stats</code> containing legacy exometer instrumentation was removed.</p><h2 id="0-8-0" class="section-heading">
+  <a href="#0-8-0" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.8.0
+</h2>
+<p>This version introduces an incompatibility with previous versions data storage. If you want to upgrade an existing installation you will need to use the bondy_backup module's functions or the Admin Backup API.</p><ul><li>Upgrade to plum_db 0.2.0 which introduces prefix types to determine which storage type to use with the following types supported: ram (ets-based storage), disk (leveledb) and ram_disk(ets and leveldb).<ul><li>Registry uses <code class="inline">ram</code> storage type</li><li>All security resources use <code class="inline">ram_disk</code> storage type</li><li>Api Gateway (specs) and OAuth2 tokens use <code class="inline">disk</code> storage type</li></ul></li><li>Handling of migration in bondy_backup. To migrate from v0.7.1 perform a backup on Bondy v0.7.1 and then restore it on Bondy v0.7.2.</li></ul><h2 id="0-7-1" class="section-heading">
+  <a href="#0-7-1" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.7.1
+</h2>
+<ul><li>New Trie data structure for bondy_registry<ul><li>Bondy now uses Leapsight's <code class="inline">art</code> library to implement the registry index structure use to match RPC calls and PubSub subscriptions. <code class="inline">art</code>  provides a single-writter, multi-reader Radix Trie following the Adaptive Radix Tree algorithm. The implementation uses one gen_server and one ets table per trie and currently supports WAMP <code class="inline">exact</code> and <code class="inline">prefix</code> matching strategies. <code class="inline">wildcard</code> matching support is on its way.</li></ul></li><li>Internal wamp subscriptions<ul><li>We have implemented a first version of an internal WAMP subscription so that Bondy internally can subscribe to WAMP events. This is done through new functions in bondy_broker and the new module bondy_broker_events</li></ul></li><li>OAuth 2 Security<ul><li>Major changes to security subsytem including harmonisation of APIs, deduplication and bug fixes.</li><li>Use new internal wamp subscriptions to avoid coupling Bondy Security with Bondy API Gateway &amp; OAuth.<ul><li>Bondy Security modules publishe wamp events on entity actions e.g. user creation, deletion, etc.</li><li>Bondy API Gateway modules and bondy_api_gateway_client subscribe to the user delete events to cleanup OAuth tokens</li></ul></li><li>Fixed a bug where internal security operations will not trigger token revocation.<ul><li>Bondy API Gateway modules, i.e. are now implemented by calling Bondy Security modules e.g. bondy_security_user instead of calling bondy_security (former Basho Riak Core Security) directly. This will help in the refactoring of bondy_security and in addition all event publishing is centralised in bondy_security_user.</li><li>Implemented additional index for tokens to enable deletion of all users’ tokens</li><li>Added two db maintenance functions to (i) remove dangling tokens and (ii) rebuild the indices on an existing db</li></ul></li><li>Added additional Internal wamp events to subsystems e.g. bondy_realm and bondy_backup</li></ul></li></ul><h2 id="0-7-0" class="section-heading">
+  <a href="#0-7-0" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.7.0
+</h2>
+<ul><li>Clustering<ul><li>Completion of clustering implementation using partisan library (at the moment supporting the default peer service only, hyparview to be considered in the future)</li><li>bondy_router can now route WAMP messages across nodes. The internal load balancer prefers local callees by default, only when a local callee is not found for a procedure the invocation is routed to another node. Load balancer state is local and not replicated. Future global load balancing strategies based on ant-colony optimisation to be considered in the future.</li><li><code class="inline">bondy-admin</code> (bondy_cli) implementation of cluster management commands (join, leave, kick-out and members)</li></ul></li><li>Storage and Replication<ul><li>new storage based on plum_db which<ul><li>uses lasp-lang/plumtree and lasp-lang/partisan to support data replication</li><li>provides more concurrency than plumtree and removes the capacity limitation imposed by the use of dets</li></ul></li></ul></li><li>API Gateway<ul><li>API Specs are replicated using plum_db. A single bondy_api_gateway gen_server process rebuilds the Cowboy dispatch table when API Spec updates are received from other nodes in the cluster (using plum_db pubsub capabilities)</li></ul></li><li>Registry<ul><li>The registry entries are replicated using plum_db. This is not ideal as we are using disk for transient data but it is a temporary solution for replication and AAE, as we are planning to change the registry by a new implementation of a trie data structure at which point we might use plumtree and partisan directly avoiding storing to disk.</li><li>A single bondy_registry gen_server process rebuilds the in-memory indices when entry updates are received from other nodes in the cluster (using plum_db pubsub capabilities)</li></ul></li><li>bondy_backup<ul><li>A new module that allows to backup the contents of the database to a file, and restore it.</li><li>Allows to migrate from previous versions that use plumtree (dets) to plum_db</li></ul></li></ul><h2 id="0-6-6" class="section-heading">
+  <a href="#0-6-6" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.6.6
+</h2>
+<ul><li>General<ul><li>Removed unused modules</li><li>Minor error description fixes</li><li>Code tidy up</li></ul></li><li>Depencies<ul><li>cowboy, hackney, jsx, sidejob, promethus, lager and other dependencies upgraded</li></ul></li><li>Oauth2<ul><li>Revoke refresh_token</li><li>Added client_device_id optional parameter for token request which will generate an inde mapping a Username/ClientDeviceId to a refresh_token to enabled revoking token by Username/ClientDeviceId.</li><li>JWT.iat property using unix erlang:system_time/1 instead of erlang:monotonic_time/1 (as users might want to use this property)</li><li>Token expiration is now configured via cuttlefish</li></ul></li><li>API Gateway<ul><li>JSON errors no longer include the status_code property (this was redundant with HTTP Status Code and were sometimes inconsistent)</li><li>Added http_method in forward actions to enable transforming the upstream HTTP request method e.g. a GET can be transformed to a POST</li><li>API Gateway Spec now allows to use a mop expression for WAMP procedure URIs</li><li>New mops functions: min, max and nth on lists (equivalent to the lists module functions)</li></ul></li><li>Testing<ul><li>Fixed mops suite bugs</li><li>Added oauth2 refresh_token CRUD test case, covering creation, refresh and revoke by token and by user/client_device_id</li></ul></li></ul><h2 id="0-6-3" class="section-heading">
+  <a href="#0-6-3" class="hover-link"><span class="icon-link" aria-hidden="true"></span></a>
+  0.6.3
+</h2>
+<ul><li>Upgraded Cowboy dependency to 2.1.0</li><li>Upgraded promethues_cowboy to latest and added cowboy metrics to prometheus endpoint</li><li>Minor changes in function naming for enhanced understanding</li><li>Minor fixes in options and defaults</li></ul>
+<div class="bottom-actions">
+  <div class="bottom-actions-item">
+
+      <a href="readme.html" class="bottom-actions-button" rel="prev">
+        <span class="subheader">
+          ← Previous Page
+        </span>
+        <span class="title">
+Bondy
+        </span>
+      </a>
+
+  </div>
+  <div class="bottom-actions-item">
+
+      <a href="wamp.html" class="bottom-actions-button" rel="next">
+        <span class="subheader">
+          Next Page →
+        </span>
+        <span class="title">
+Web Application Messaging Protocol
+        </span>
+      </a>
+
+  </div>
+</div>
+
+      <footer class="footer">
+
+        <p>
+          <span class="line">
+            Built using
+            <a href="https://github.com/elixir-lang/ex_doc" title="ExDoc" target="_blank" rel="help noopener" translate="no">ExDoc</a> (v0.26.0) for the
+            <a href="https://elixir-lang.org" title="Elixir" target="_blank" translate="no">Elixir programming language</a>.
+          </span>
+          <span class="line">
+            Designed by
+            <a href="https://twitter.com/dignifiedquire" target="_blank" rel="noopener" title="@dignifiedquire" translate="no">Friedel Ziegelmayer</a>.
+          </span>
+        </p>
+        <p>
+
+            <a href="api-reference.html" title="API reference" class="line footer-button">API Reference</a>
+
+          <button class="line footer-button display-shortcuts-help">
+            Display keyboard shortcuts
+          </button>
+          <button class="line footer-button display-quick-switch">
+            Go to a HexDocs package
+          </button>
+          <button class="line footer-button display-settings">
+            Settings
+          </button>
+        </p>
+      </footer>
+    </div>
+  </div>
+</section>
+</div>
+
+
+  </body>
+</html>

@@ -364,7 +364,7 @@ init([]) ->
         [{Mod, #{id => Mod, config => Config}} || {Mod, Config} <- Bridges]
     ),
     State0 = #state{
-        nodename = list_to_binary(atom_to_list(bondy_peer_service:mynode())),
+        nodename = list_to_binary(atom_to_list(bondy_config:node())),
         broker_agent = bondy_router:agent(),
         bridges = BridgesMap
     },
@@ -423,7 +423,7 @@ handle_call({load, Term}, _From, State) ->
     {reply, Res, NewState};
 
 handle_call(Event, From, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event,
         from => From
@@ -432,19 +432,20 @@ handle_call(Event, From, State) ->
 
 
 handle_cast(Event, State) ->
-    ?LOG_ERROR(#{
+    ?LOG_WARNING(#{
         reason => unsupported_event,
         event => Event
     }),
     {noreply, State}.
-
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     ?LOG_DEBUG(#{
         description => "Subscriber down",
         pid => Pid
     }),
-    %% TODO
+
+    %% bondy_subscriber is responsible for the cleanup
+
     {noreply, State};
 
 
@@ -485,18 +486,17 @@ init_bridges(State) ->
     try
         Bridges0 = State#state.bridges,
         Fun = fun
-            (Mod, #{config := Config}, Acc) ->
-                case lists:keyfind(enabled, 1, Config) of
-                    {enabled, false} ->
-                        Acc;
-                    {enabled, true} ->
-                        case Mod:init(Config) of
+            (Bridge, #{config := Config}, Acc) ->
+                case key_value:get(enabled, Config, false) of
+                    true ->
+                        case Bridge:init(Config) of
                             {ok, Ctxt} when is_map(Ctxt) ->
-                                maps_utils:put_path([Mod, ctxt], Ctxt, Acc);
-                                %% maps:put(Mod, maps:put(ctxt, Ctxt, Bridge), Acc);
+                                key_value:put([Bridge, ctxt], Ctxt, Acc);
                             {error, Reason} ->
                                 error(Reason)
-                        end
+                        end;
+                    false ->
+                        Acc
                 end
         end,
         Bridges1 = maps:fold(Fun, Bridges0, Bridges0),
@@ -542,9 +542,16 @@ load_config(Map, State) when is_map(Map) ->
             %% We make sure all subscriptions are unique
             Subscriptions = sets:to_list(sets:from_list(L)),
             %% We instantiate the subscribers
-            Folder = fun(Subs, Acc) ->
-                {ok, _, _} = do_subscribe(Subs, Acc),
-                Acc
+            Folder = fun(#{<<"bridge">> := Bridge} = Subs, Acc) ->
+                Bridges = Acc#state.bridges,
+
+                case key_value:get([Bridge, enabled], Bridges, false) of
+                    true ->
+                        {ok, _, _} = do_subscribe(Subs, Acc),
+                        Acc;
+                    false ->
+                        Acc
+                end
             end,
             NewState = lists:foldl(Folder, State, Subscriptions),
             %% We store the specification, see add/2 for an explanation
@@ -555,6 +562,7 @@ load_config(Map, State) when is_map(Map) ->
             %% %% We rebuild the dispatch table
             %% rebuild_dispatch_tables();
             {ok, NewState};
+
         {error, _} = Error ->
             {Error, State}
     end;
@@ -624,9 +632,11 @@ do_subscribe(Subscription, State) ->
         <<"action">> := Action
     } = Subscription,
 
+
     case get_bridge(Bridge, State) of
-        undefined ->
+        undefined  ->
             error({unknown_bridge, Bridge});
+
         #{id := Bridge} ->
             Opts1 = maps:put(meta, Meta, Opts0),
             do_subscribe(RealmUri, Opts1, Topic, Bridge, Action, State)
@@ -657,12 +667,18 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
         %% We use bondy_broker subscribers, this is an intance of a
         %% bondy_subscriber gen_server supervised by bondy_subscribers_sup
         {ok, Id, Pid} = Res = bondy_broker:subscribe(
-            RealmUri, Opts, Topic, Fun),
-        %% Add to registry and set properties
-        true = gproc:reg_other({n, l, {subscriber, Id}}, Pid),
-        true = gproc:reg_other({r, l, subscription_id}, Pid, Id),
-        true = gproc:reg_other({r, l, bondy_broker_bridge}, Pid, Bridge),
+            RealmUri, Opts, Topic, Fun
+        ),
+
+        %% Add to registry and set properties so that we can perform queries
+        true = bondy:register({subscriber, Id}, Pid),
+        true = bondy:register(subscription_id, Pid, resource_property, Id),
+        true = bondy:register(
+            bondy_broker_bridge, Pid, resource_property, Bridge
+        ),
+
         Res
+
     catch
         Class:Reason:Stacktrace->
             ?LOG_ERROR(#{
@@ -701,7 +717,7 @@ subscribers(Bridge) ->
         [],
         ['$1']
     }],
-    gproc:select({l, resources}, MatchSpec).
+    bondy:select(MatchSpec).
 
 
 %% @private

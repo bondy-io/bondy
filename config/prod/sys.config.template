@@ -1,6 +1,16 @@
 [
     {sasl, [{sasl_error_logger, false}]},
 
+    {partisan, [
+        {connect_disterl, false},
+        {channels, [data, rpc, membership]},
+        {pid_encoding, false},
+        {ref_encoding, false},
+        {exchange_tick_period, 60000},
+        {lazy_tick_period, 1000},
+        {partisan_peer_service_manager,
+          partisan_pluggable_peer_service_manager}
+    ]},
     {os_mon, [
         {system_memory_high_watermark, 0.60}
     ]},
