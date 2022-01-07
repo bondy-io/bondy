@@ -276,6 +276,11 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
+connected(internal, {abort, #{}, server_error}, State0) ->
+    ?LOG_INFO(#{
+        description => "Got abort message from server, closing connection.",
+    }),
+    {stop, server_error, State};
 
 connected(internal, {aae_sync, SessionId, finished}, State0) ->
     ?LOG_INFO(#{
