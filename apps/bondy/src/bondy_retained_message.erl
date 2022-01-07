@@ -1,5 +1,28 @@
+%% =============================================================================
+%%  bondy_retained_message.erl -
+%%
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
+
 %% -----------------------------------------------------------------------------
-%% @doc This is experimental and does not scale with high traffic at the moment.
+%% @doc When publishing an event a topic the Publisher can ask the Broker to
+%% retain the event being published as the most-recent event on this topic.
+%%
+%% <strong>This is experimental and does not scale with high traffic at the
+%% moment.</strong>
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_retained_message).
@@ -177,7 +200,12 @@ match(Realm, Topic, SessionId, <<"prefix">> = Strategy, Opts0) ->
         (_, {List, _}) ->
             throw({break, {List, ?EOT}})
     end,
-    plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts);
+    case plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts) of
+        {L, N} when is_integer(N) ->
+            {L, ?EOT};
+        Other ->
+            Other
+    end;
 
 match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
     {First, MatchFun} = wildcard_opts(Topic),
@@ -207,7 +235,13 @@ match(Realm, Topic, SessionId, <<"wildcard">> = Strategy, Opts0) ->
             },
             throw({break, {List, Cont}})
     end,
-    plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts).
+
+    case plum_db:fold_elements(Fun, {[], 0}, ?DB_PREFIX(Realm), Opts) of
+        {L, N} when is_integer(N) ->
+            {L, ?EOT};
+        Other ->
+            Other
+    end.
 
 
 %% -----------------------------------------------------------------------------

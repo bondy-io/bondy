@@ -840,7 +840,7 @@ publish_fold([], Fun, Acc) when is_function(Fun, 2) ->
 -spec on_create(bondy_registry_entry:t()) -> ok.
 
 on_create(Entry) ->
-    ok = send_retained(Entry),
+    ok = maybe_send_retained(Entry),
     bondy_event_manager:notify({subscription_created, Entry}).
 
 
@@ -848,7 +848,7 @@ on_create(Entry) ->
 -spec on_subscribe(bondy_registry_entry:t()) -> ok.
 
 on_subscribe(Entry) ->
-    ok = send_retained(Entry),
+    ok = maybe_send_retained(Entry),
     bondy_event_manager:notify({subscription_added, Entry}).
 
 
@@ -884,6 +884,16 @@ maybe_retain(#{retain := true} = Opts, Realm, Topic, MatchOpts, MakeEvent) ->
 
 maybe_retain(_, _, _, _, _) ->
     ok.
+
+
+%% @private
+maybe_send_retained(Entry) ->
+    case maps:get(get_retained, bondy_registry_entry:options(Entry), true) of
+        true ->
+            send_retained(Entry);
+        false ->
+            ok
+    end.
 
 
 %% @private
