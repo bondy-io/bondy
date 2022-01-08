@@ -42,7 +42,7 @@
         required => false,
         datatype => map,
         allow_null => false,
-        allow_undefined => false
+        allow_undefined => true
     }
 }).
 
