@@ -16,6 +16,7 @@
 .rebar3
 /.erl_workspace.json
 /.vscode/launch.json
+/erlang_ls.config
 _*
 _build
 _rel
@@ -31,4 +32,3 @@ log/index
 logs
 rebar3.crashdump
 relx
-/erlang_ls.config
