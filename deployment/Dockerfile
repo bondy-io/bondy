@@ -6,8 +6,6 @@
 
 FROM erlang:24 AS builder
 
-ARG BONDY_TAG=1.0.0-beta.19
-ENV BONDY_REPO=https://gitlab.com/leapsight/bondy.git
 ENV BUILD_DIR /bondy-build
 ENV REBAR_BASE_DIR /bondy-build/_build
 
