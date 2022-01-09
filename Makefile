@@ -77,3 +77,34 @@ run-node3:
 
 run-edge1:
 	_build/edge1/rel/bondy/bin/bondy console
+
+
+# DOCKER
+
+build-prod:
+	docker stop bondy-prod || true
+	docker rm bondy-prod || true
+	docker rmi bondy-prod || true
+	docker build \
+		--pull \
+		-t "bondy-prod" \
+		-f deployment/Dockerfile .
+
+run-prod:
+	docker stop bondy-prod || true
+	docker rm bondy-prod || true
+	docker run \
+		--rm \
+		-e BONDY_ERL_NODENAME=bondy1@127.0.0.1 \
+		-e BONDY_ERL_DISTRIBUTED_COOKIE=bondy \
+		-e ERL_DIST_PORT=27784 \
+		-p 18080:18080 \
+		-p 18081:18081 \
+		-p 18082:18082 \
+		-p 18086:18086 \
+		-v "$(PWD)/examples/custom_config/etc:/bondy/etc" \
+		--name bondy-prod \
+		-d bondy-prod
+
+scan-prod:
+	docker scan bondy-prod
