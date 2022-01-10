@@ -63,6 +63,7 @@ ENV PATH="/bondy/bin:/bondy/erts-12.2/bin:$PATH"
 ENV BONDY_LOG_CONSOLE=console
 ENV BONDY_LOG_LEVEL=info
 ENV ERL_CRASH_DUMP=/dev/null
+ENV ERL_DIST_PORT=27784
 ENV HOME "/bondy"
 
 # Define which ports are intended to be published
