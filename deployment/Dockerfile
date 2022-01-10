@@ -6,52 +6,66 @@
 
 FROM erlang:24 AS builder
 
-ENV BUILD_DIR /bondy-build
-ENV REBAR_BASE_DIR /bondy-build/_build
-
-WORKDIR $BUILD_DIR
-
-# Install build deps
+# Install build dependencies
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apt apt-get update && \
     apt-get -y install --no-install-recommends build-essential git libssl-dev libsodium-dev libsnappy-dev curl && \
 	rm -rf /var/lib/apt/lists/*
 
-# Copy bondy sourc root to working dir
+# Create and cd to the directory where we do the build
+WORKDIR /bondy/build
+
+# Copy Bondy project source to working dir
 COPY ../ .
 
-# create the directory to unpack the release to
-RUN mkdir -p /opt/rel
-
-# Generates tar in REBAR_BASE_DIR and untars in /opt/rel
-RUN rebar3 as prod tar && \
-    tar -zxvf $REBAR_BASE_DIR/prod/rel/*/*.tar.gz -C /opt/rel
+# Generates tar in /bondy/build/_build and untars in /bondy/tmp/rel
+RUN mkdir -p /bondy/rel && \
+    rebar3 as prod tar && \
+    tar -zxvf /bondy/build/_build/prod/rel/*/*.tar.gz -C /bondy/rel
 
 
 # ===========================================================================
 # Build stage 2
 # ===========================================================================
 
-FROM debian:bullseye as runner
+FROM debian:bullseye-slim as runner
 
+# We install the following utils:
+# - bash
+# - procps: which includes the commands free, kill, pkill, pgrep, pmap, ps,
+#   pwdx, skill, slabtop, snice, sysctl, tload, top, uptime, vmstat, w, and
+#   watch
+# - iproute2: a collection of utilities for networking and traffic control.
+# - net-tools: which includes the commands arp, ifconfig, netstat, rarp, nameif
+#   and route
+# - curl, jq: for devops to use the REST Admin API
+# - nano: for devops
+#
+# We install the following required packages:
+# - openssl: required by Erlang crypto application
+# - libsodium: required by enacl application
+RUN apt-get update \
+    && apt-get -y install \
+    bash procps iproute2 net-tools curl jq nano \
+    openssl libsodium-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -g 1000 -r bondy \
+    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "Bondy user" bondy
+
+
+WORKDIR /bondy
+USER bondy:bondy
+
+# Copy the release to workdir
+COPY --chown=bondy:bondy --from=builder /bondy/rel .
+
+# We add Bondy and Erlang executables to PATH
+ENV PATH="/bondy/bin:/bondy/erts-12.2/bin:$PATH"
 ENV BONDY_LOG_CONSOLE=console
 ENV BONDY_LOG_LEVEL=info
 ENV ERL_CRASH_DUMP=/dev/null
+ENV HOME "/bondy"
 
-WORKDIR /opt/bondy
-
-# Erlang crypto needs openssl
-# enacl dep needs libsodium
-# we add curl and jq for HTTP/REST api operations
-RUN apt-get update \
-    && apt-get -y install openssl libsodium-dev iproute2 curl jq \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /opt/rel .
-
-# We add Bondy and Erlang execultables to PATH
-ENV PATH="/opt/bondy/bin:/opt/bondy/erts-12.2/bin:$PATH"
-
-# Ports
+# Define which ports are intended to be published
 # 18080 API GATEWAY HTTP and WS
 EXPOSE 18080/tcp
 # 18081 ADMIN API HTTP
@@ -68,4 +82,5 @@ EXPOSE 18085/tcp
 EXPOSE 18086/tcp
 
 VOLUME ["/bondy/data", "/bondy/etc", "/bondy/tmp", "/bondy/log"]
+
 ENTRYPOINT ["bondy", "foreground"]

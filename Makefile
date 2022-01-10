@@ -87,12 +87,14 @@ build-prod:
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
+		--platform linux/amd64 \
+		--load \
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
 
 run-prod:
-	docker stop bondy-prod || true
-	docker rm bondy-prod || true
+	# docker stop bondy-prod || true
+	# docker rm bondy-prod || true
 	docker run \
 		--rm \
 		-e BONDY_ERL_NODENAME=bondy1@127.0.0.1 \
@@ -104,7 +106,7 @@ run-prod:
 		-p 18086:18086 \
 		-v "$(PWD)/examples/custom_config/etc:/bondy/etc" \
 		--name bondy-prod \
-		-d bondy-prod
+		bondy-prod:latest
 
 scan-prod:
 	docker scan bondy-prod

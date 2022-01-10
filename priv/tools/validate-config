@@ -27,7 +27,7 @@
 
 -define(LOG_ERROR(Reason, Args),
     io:format(
-        "~s===> [error] validate-config" ++ Reason ++ "~s~n",
+        "~s===> [error] validate-config " ++ Reason ++ "~s~n",
         [?RED | Args] ++ [?RESET]
     )
 ).

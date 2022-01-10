@@ -567,21 +567,21 @@ end}.
 %% with the edge.tls config variable, for example:
 {mapping, "edge.listener.tls.certfile", "bondy.edge_tls.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%edge.tls config variable, for example:
 {mapping, "edge.listener.tls.keyfile", "bondy.edge_tls.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the edge.tls config variable, for example:
 {mapping, "edge.listener.tls.cacertfile", "bondy.edge_tls.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
