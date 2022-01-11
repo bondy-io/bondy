@@ -14,7 +14,7 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apt apt-get updat
 WORKDIR /bondy/src
 
 # Copy Bondy project source to working dir
-COPY ../ .
+COPY ../ /bondy/src
 
 # Create dir we will unpack release tar into
 RUN mkdir -p /bondy/rel
