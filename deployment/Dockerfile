@@ -21,7 +21,7 @@ RUN mkdir -p /bondy/rel
 
 # Generates tar in /bondy/src/_build and untars in /bondy/rel
 RUN rebar3 as prod tar && \
-    tar -zxvf _build/prod/rel/*/*.tar.gz -C /bondy/rel/
+    tar -zxvf /bondy/src/_build/prod/rel/*/*.tar.gz -C /bondy/rel/
 
 
 # ===========================================================================
