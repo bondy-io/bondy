@@ -85,6 +85,7 @@ build-prod:
 	docker stop bondy-prod || true
 	docker rm bondy-prod || true
 	docker rmi bondy-prod || true
+	docker buildx install
 	docker build \
 		--pull \
 		--platform linux/amd64 \

@@ -11,16 +11,17 @@ RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apt apt-get updat
     apt-get -y install --no-install-recommends build-essential git libssl-dev libsodium-dev libsnappy-dev curl && \
 	rm -rf /var/lib/apt/lists/*
 
-# Create and cd to the directory where we do the build
-WORKDIR /bondy/build
+WORKDIR /bondy/src
 
 # Copy Bondy project source to working dir
 COPY ../ .
 
-# Generates tar in /bondy/build/_build and untars in /bondy/tmp/rel
-RUN mkdir -p /bondy/rel && \
-    rebar3 as prod tar && \
-    tar -zxvf /bondy/build/_build/prod/rel/*/*.tar.gz -C /bondy/rel
+# Create dir we will unpack release tar into
+RUN mkdir -p /bondy/rel
+
+# Generates tar in /bondy/src/_build and untars in /bondy/rel
+RUN rebar3 as prod tar && \
+    tar -zxvf _build/prod/rel/*/*.tar.gz -C /bondy/rel/
 
 
 # ===========================================================================
