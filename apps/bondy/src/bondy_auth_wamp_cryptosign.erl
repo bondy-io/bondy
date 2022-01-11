@@ -144,8 +144,9 @@ challenge(Details, Ctxt, State) ->
 authenticate(EncSignature, _, _, #{pubkey := PK} = State)
 when is_binary(EncSignature) ->
     try
-        Signature = decode_hex(EncSignature),
         Challenge = maps:get(challenge, State),
+        Signature0 = decode_hex(EncSignature),
+        Signature = normalise_signature(Signature0, Challenge),
 
         %% Verify that the Challenge was signed using the Ed25519 key
         case enacl:sign_verify_detached(Signature, Challenge, PK) of
@@ -159,6 +160,9 @@ when is_binary(EncSignature) ->
     catch
         error:badarg ->
             %% enacl failed
+            {error, invalid_signature, State};
+        error:invalid_signature ->
+            %% normalise failed
             {error, invalid_signature, State};
         throw:invalid_hex_encoding ->
             {error, invalid_signature, State}
@@ -195,4 +199,21 @@ encode_hex(Bin) when is_binary(Bin) ->
     list_to_binary(hex_utils:bin_to_hexstr(Bin)).
 
 
+%% @private
+%% @doc As the cryptosign spec is not formal some clients e.g. Python
+%% return Signature(64) ++ Challenge(32) while others e.g. JS return just the
+%% Signature(64).
+%% @end
+normalise_signature(Signature, _) when byte_size(Signature) == 64->
+    Signature;
 
+normalise_signature(Signature, Challenge) when byte_size(Signature) == 96 ->
+    case binary:match(Signature, Challenge) of
+        {64, 32} ->
+            binary:part(Signature, {0, 64});
+        _ ->
+            throw(invalid_signature)
+    end;
+
+normalise_signature(_, _) ->
+    throw(invalid_signature).
