@@ -182,7 +182,7 @@
 -export([grants/3]).
 -export([group_grants/2]).
 -export([is_reserved_name/1]).
--export([normalize_name/1]).
+-export([normalise_name/1]).
 -export([refresh_context/1]).
 -export([request/1]).
 -export([revoke/2]).
@@ -372,15 +372,15 @@ is_reserved_name(_) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Normalizes the utf8 binary `Bin' into a Normalized Form of compatibly
+%% @doc Normalises the utf8 binary `Bin' into a Normalised Form of compatibly
 %% equivalent Decomposed characters according to the Unicode standard and
 %% converts it to a case-agnostic comparable string.
 %%
 %% @end
 %% -----------------------------------------------------------------------------
--spec normalize_name(Term :: binary() | atom()) -> boolean() | no_return().
+-spec normalise_name(Term :: binary() | atom()) -> boolean() | no_return().
 
-normalize_name(Bin) when is_binary(Bin) ->
+normalise_name(Bin) when is_binary(Bin) ->
     string:casefold(unicode:characters_to_nfkd_binary(Bin)).
 
 
