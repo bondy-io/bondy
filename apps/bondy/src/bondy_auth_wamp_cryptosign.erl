@@ -204,7 +204,7 @@ encode_hex(Bin) when is_binary(Bin) ->
 %% return Signature(64) ++ Challenge(32) while others e.g. JS return just the
 %% Signature(64).
 %% @end
-normalise_signature(Signature, _) when byte_size(Signature) == 64->
+normalise_signature(Signature, _) when byte_size(Signature) == 64 ->
     Signature;
 
 normalise_signature(Signature, Challenge) when byte_size(Signature) == 96 ->
