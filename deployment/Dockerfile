@@ -47,7 +47,7 @@ FROM debian:bullseye-slim as runner
 RUN apt-get update \
     && apt-get -y install \
     bash procps iproute2 net-tools curl jq nano \
-    openssl libsodium-dev \
+    openssl libsodium-dev libsnappy-dev \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 1000 -r bondy \
     && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "Bondy user" bondy

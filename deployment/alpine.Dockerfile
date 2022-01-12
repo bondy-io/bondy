@@ -47,8 +47,9 @@ FROM alpine:3.15 as runner
 RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
     ln -s /var/cache/apk /etc/apk/cache \
     && apk add --no-cache \
+        libstdc++  \
         bash procps iproute2 net-tools curl jq nano \
-        ncurses openssl libsodium \
+        ncurses openssl libsodium-dev snappy-dev \
     && addgroup --gid 1000 bondy \
     && adduser \
         --uid 1000 \
