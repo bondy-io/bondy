@@ -18,5 +18,5 @@ BONDY_RELEASE_DIR=./releases/{{release_version}}/
 
 echo "${GREEN}===> Running Bondy Rebar3 pre_start hook"
 relx_escript ./bin/validate-config ${platform_etc_dir} ${BONDY_RELEASE_DIR}
-relx_escript ./bin/replace-env-vars ${BONDY_PLATFORM_ETC_DIR}
+relx_escript ./bin/replace-env-vars ${platform_etc_dir}
 relx_escript ./bin/replace-env-vars ${BONDY_RELEASE_DIR}
