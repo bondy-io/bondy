@@ -29,6 +29,12 @@ tar:
 	mkdir -p _build/tar
 	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
 
+prod-xcomp:
+	REBAR3_PROFILE=prod \
+	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
+	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
+	${REBAR} as prod release
+
 devrun:
 	${REBAR} as dev release
 
