@@ -29,11 +29,23 @@ tar:
 	mkdir -p _build/tar
 	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
 
-prod-xcomp:
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# handled by rebar.conf.script which does not know we have used the 'as prod'
+# higher level command
+prod-xcomp-rel:
 	REBAR3_PROFILE=prod \
 	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
 	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
 	${REBAR} as prod release
+
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# handled by rebar.conf.script which does not know we have used the 'as prod'
+# higher level command
+prod-xcomp-tar:
+	REBAR3_PROFILE=prod \
+	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
+	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
+	${REBAR} as prod tar
 
 devrun:
 	${REBAR} as dev release
