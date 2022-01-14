@@ -96,10 +96,6 @@
         {membership_strategy, partisan_full_membership_strategy},
         {partisan_peer_service_manager,
             partisan_pluggable_peer_service_manager},
-        %% TODO remove this and use config >>>>>>>>>>>>>>>>>>>>>>>
-        {peer_ip, {127,0,0,1}},
-        {peer_port, 18086},
-        %% >>>>>>>>>>>>>>>>>>>>>>>
         {pid_encoding, false},
         {ref_encoding, false},
         {binary_padding, false},
