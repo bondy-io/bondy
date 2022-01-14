@@ -766,7 +766,7 @@ perform_action(
         <<"options">> := Opts,
         %% TODO use retries
         <<"retries">> := _R,
-        <<"timeout">> := CallTimeout
+        <<"timeout">> := _
     } = mops_eval(Act, ApiCtxt0, MopsOpts),
 
     RSpec = maps:get(<<"response">>, Spec),
@@ -774,10 +774,7 @@ perform_action(
     %% TODO We need to recreate ctxt and session from JWT
     Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
-    WampCtxt0 = wamp_context(RealmUri, Peer, St1),
-
-
-    WampCtxt = bondy_context:set_call_timeout(WampCtxt0, CallTimeout),
+    WampCtxt = wamp_context(RealmUri, Peer, St1),
 
     case bondy:call(P, Opts, A, Akw, WampCtxt) of
         {ok, Result0} ->
