@@ -86,10 +86,6 @@
 ]).
 
 -define(CONFIG, [
-    %% Distributed globally replicated storage
-    {plum_db, [
-        {prefixes, ?PLUM_DB_PREFIXES}
-    ]},
     {partisan, [
         {broadcast_mods, [plum_db, partisan_plumtree_backend]},
         {channels, [wamp_peer_relay, data, rpc, membership]},
@@ -100,8 +96,6 @@
         {membership_strategy, partisan_full_membership_strategy},
         {partisan_peer_service_manager,
             partisan_pluggable_peer_service_manager},
-        {peer_ip, {127,0,0,1}},
-        {peer_port, 18086},
         {pid_encoding, false},
         {ref_encoding, false},
         {binary_padding, false},
@@ -333,7 +327,17 @@ setup_wamp() ->
 
 %% @private
 prepare_private_config() ->
-    maybe_configure_message_retention(?CONFIG).
+    Config = configure_plum_db(?CONFIG),
+    maybe_configure_message_retention(Config).
+
+
+%% @private
+configure_plum_db(Config) ->
+    PDBConfig = [
+        {prefixes, ?PLUM_DB_PREFIXES},
+        {data_dir, get(platform_data_dir)}
+    ],
+    key_value:set(plum_db, PDBConfig, Config).
 
 
 %% @private

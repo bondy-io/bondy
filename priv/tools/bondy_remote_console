@@ -3,13 +3,13 @@
 set -e
 BONDY_ERL_DISTRIBUTED_COOKIE="${BONDY_ERL_DISTRIBUTED_COOKIE:-bondy}"
 COOKIE="${COOKIE:-$BONDY_ERL_DISTRIBUTED_COOKIE}"
-REL_DIR=/opt/bondy/releases/1.0.0-beta.19
-SYSTEM_LIB_DIR=/opt/bondy/lib
+REL_DIR=bondy/releases/{{release_version}}
+SYSTEM_LIB_DIR=bondy/lib
 TICKTIME=60
 
 erl -name undefined@127.0.0.1 \
     -remsh "$BONDY_ERL_NODENAME" \
-    -boot /opt/bondy/releases/1.0.0-beta.19/start_clean \
+    -boot "$RELDIR/start_clean" \
     -mode interactive \
     -setcookie "$COOKIE" \
     -dist_listen false \

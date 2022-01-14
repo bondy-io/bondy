@@ -192,17 +192,17 @@ server_nonce(ClientNonce) ->
     Params :: params()) -> SaltedPassword :: binary().
 
 salted_password(Password, Salt, #{kdf := argon2id13} = Params) ->
-    Normalized = stringprep:resourceprep(Password),
+    Normalised = stringprep:resourceprep(Password),
     #{
         kdf := KDF,
         iterations := Iterations,
         memory := Memory
     } = Params,
     %% REVIEW encode SALT with base64?
-    enacl:pwhash(Normalized, Salt, Iterations, Memory, KDF);
+    enacl:pwhash(Normalised, Salt, Iterations, Memory, KDF);
 
 salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
-    Normalized = stringprep:resourceprep(Password),
+    Normalised = stringprep:resourceprep(Password),
     #{
         iterations := Iterations,
         hash_function := HashFun,
@@ -210,7 +210,7 @@ salted_password(Password, Salt, #{kdf := pbkdf2} = Params) ->
     } = Params,
 
     {ok, SaltedPassword} = pbkdf2:pbkdf2(
-        HashFun, Normalized, Salt, Iterations, HashLen
+        HashFun, Normalised, Salt, Iterations, HashLen
     ),
     SaltedPassword.
 

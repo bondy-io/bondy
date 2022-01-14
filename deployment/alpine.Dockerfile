@@ -4,12 +4,12 @@
 # Build stage 1
 # ===========================================================================
 
-FROM erlang:24 AS builder
+FROM erlang:24-alpine AS builder
 
 # Install build dependencies
-RUN --mount=type=cache,id=apt,sharing=locked,target=/var/cache/apt apt-get update && \
-    apt-get -y install --no-install-recommends build-essential git libssl-dev libsodium-dev libsnappy-dev curl && \
-	rm -rf /var/lib/apt/lists/*
+RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
+    ln -s /var/cache/apk /etc/apk/cache && \
+    apk add --no-cache build-base libstdc++ git tar patch ncurses openssl snappy-dev libsodium-dev jq curl bash nano
 
 WORKDIR /bondy/src
 
@@ -28,7 +28,7 @@ RUN rebar3 as prod tar && \
 # Build stage 2
 # ===========================================================================
 
-FROM debian:bullseye-slim as runner
+FROM alpine:3.15 as runner
 
 # We install the following utils:
 # - bash
@@ -44,13 +44,19 @@ FROM debian:bullseye-slim as runner
 # We install the following required packages:
 # - openssl: required by Erlang crypto application
 # - libsodium: required by enacl application
-RUN apt-get update \
-    && apt-get -y install \
-    bash procps iproute2 net-tools curl jq nano \
-    openssl libsodium-dev libsnappy-dev \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -g 1000 -r bondy \
-    && useradd -u 1000 -r -g bondy -d /bondy -s /bin/bash -c "Bondy user" bondy
+RUN --mount=type=cache,id=apk,sharing=locked,target=/var/cache/apk \
+    ln -s /var/cache/apk /etc/apk/cache \
+    && apk add --no-cache \
+        libstdc++  \
+        bash procps iproute2 net-tools curl jq nano \
+        ncurses openssl libsodium-dev snappy-dev \
+    && addgroup --gid 1000 bondy \
+    && adduser \
+        --uid 1000 \
+        --disabled-password \
+        --ingroup bondy \
+        --home /bondy \
+        --shell /bin/bash bondy
 
 
 WORKDIR /bondy

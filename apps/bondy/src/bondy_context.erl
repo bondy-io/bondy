@@ -555,7 +555,7 @@ caller_details(#{session := Session} = Ctxt, Details) ->
 
     Details#{
         caller => bondy_session:external_id(Session),
-        caller_authid => authid(Ctxt),
+        caller_authid => name_to_binary(authid(Ctxt)),
         caller_authrole => name_to_binary(authrole(Ctxt))
     }.
 

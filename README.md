@@ -1,9 +1,13 @@
+![bondy logo](https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_bg.png?raw=true)
+
 # Bondy
 
 ### The distributed application networking platform
 Bondy is an open source, distributed, scaleable and robust networking platform for microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns.
 
-<img src="figures/bondy_cluster.png" alt="drawing" width="600"/>
+<p align="center">
+     <img src="https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_cluster.png?raw=true" alt="drawing" width="600"/>
+</p>
 
 > ### :warning: Notice for Contributors
 > Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
@@ -17,10 +21,11 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 
 ### Requirements
 
-* [Erlang](https://www.erlang.org/) 23.3.4.7 or later
+* [Erlang](https://www.erlang.org/) 24 or later
 * [Rebar3](https://rebar3.readme.io/) 3.17.0 or later
 * openssl
 * libssl
+* libsnappy
 * [Libsodium](https://github.com/jedisct1/libsodium)
 
 #### On Linux

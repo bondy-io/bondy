@@ -591,7 +591,7 @@ hidden
 
 %% -----------------------------------------------------------------------------
 %% @doc The capacity of the router process pool, i.e. the maximum number of
-%% active erlang processes handling router events (default = 10000).
+%% active erlang processes handling router events (default = 100000).
 %% Once the maximum has been reached, Bondy will respond with an overload error.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -779,21 +779,21 @@ hidden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.certfile", "bondy.admin_api_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.keyfile", "bondy.admin_api_https.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.cacertfile", "bondy.admin_api_https.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
@@ -1012,21 +1012,21 @@ hidden
 %% with the api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.certfile", "bondy.api_gateway_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.keyfile", "bondy.api_gateway_https.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "api_gateway.https.cacertfile", "bondy.api_gateway_https.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
@@ -1474,21 +1474,21 @@ hidden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.certfile", "bondy.wamp_tls.socket_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%wamp.tls config variable, for example:
 {mapping, "wamp.tls.keyfile", "bondy.wamp_tls.socket_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.cacertfile", "bondy.wamp_tls.socket_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
@@ -1679,19 +1679,19 @@ end}.
 %% @doc Default cert location for cluster TLS connection
 {mapping, "cluster.tls.certfile", "partisan.tls_options.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
 {mapping, "cluster.tls.keyfile", "partisan.tls_options.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
 {mapping, "cluster.tls.cacertfile", "partisan.tls_options.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
@@ -1739,7 +1739,7 @@ end}.
 %% @doc Platform-specific installation paths (substituted by rebar)
 {mapping, "platform_bin_dir", "bondy.platform_bin_dir", [
   {datatype, directory},
-  {default, "./bin"},
+  {default, "{{platform_bin_dir}}"},
   hidden
 ]}.
 
@@ -1747,7 +1747,7 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_lib_dir", "bondy.platform_lib_dir", [
   {datatype, directory},
-  {default, "./lib"},
+  {default, "{{platform_lib_dir}}"},
   hidden
 ]}.
 
@@ -1755,25 +1755,25 @@ end}.
 %% @see platform_bin_dir
 {mapping, "platform_data_dir", "bondy.platform_data_dir", [
   {datatype, directory},
-  {default, "./data"}
+  {default, "{{platform_data_dir}}"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_tmp_dir", "bondy.platform_tmp_dir", [
   {datatype, directory},
-  {default, "./tmp"}
+  {default, "{{platform_tmp_dir}}"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_etc_dir", "bondy.platform_etc_dir", [
   {datatype, directory},
-  {default, "./etc"}
+  {default, "{{platform_etc_dir}}"}
 ]}.
 
 %% @see platform_bin_dir
 {mapping, "platform_log_dir", "bondy.platform_log_dir", [
   {datatype, directory},
-  {default, "./log"}
+  {default, "{{platform_log_dir}}"}
 ]}.
 
 
@@ -1831,7 +1831,7 @@ end}.
 
 {mapping, "store.data_dir", "plum_db.data_dir", [
   {datatype, directory},
-  {default, "$(platform_data_dir)"},
+  {default, "{{platform_data_dir}}"},
   hidden
 ]}.
 

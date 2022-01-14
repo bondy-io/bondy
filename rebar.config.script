@@ -1,0 +1,57 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+%% ex: ts=4 sw=4 ft=erlang et
+%%
+ErtsPath = os:getenv("REBAR3_TARGET_INCLUDE_ERTS"),
+SystemLibsPath = os:getenv("REBAR3_TARGET_SYSTEM_LIBS"),
+Profile = case os:getenv("REBAR3_PROFILE") of
+    false ->
+        prod;
+    Str ->
+        list_to_atom(Str)
+end,
+% exit(CONFIG),
+Replace =
+    fun
+        Replace([Key], Value, Config0) ->
+            Replace(Key, Value, Config0);
+
+        Replace([H|T], Value, Config0) ->
+            case lists:keyfind(H, 1, Config0) of
+                false ->
+                    error({key_not_found, [H, Config0]});
+                {H, Config1} ->
+                    NewValue = {H, Replace(T, Value, Config1)},
+                    lists:keyreplace(H, 1, Config0, NewValue)
+            end;
+
+        Replace(Key, Value, Config) ->
+            case lists:keyfind(Key, 1, Config) of
+                false ->
+                    Config;
+                {Key, true} ->
+                    NewValue = {Key, Value},
+                    lists:keyreplace(Key, 1, Config, NewValue);
+                {Key, _} ->
+                    %% false or harcoded Path, so we respect that
+                    Config
+            end
+    end,
+
+case {ErtsPath, SystemLibsPath} of
+    {false, false} ->
+        CONFIG;
+    {Path, false} ->
+        Replace([profiles, Profile, relx, include_erts], Path, CONFIG);
+    {false, Path} ->
+        Replace(profiles, [Profile, relx, system_libs], Path, CONFIG);
+    {ErtsPath, SystemLibsPath} ->
+        Replace(
+            [profiles, Profile, relx, include_erts],
+            ErtsPath,
+            Replace(
+                [profiles, Profile, relx, system_libs],
+                SystemLibsPath,
+                CONFIG
+            )
+        )
+end.

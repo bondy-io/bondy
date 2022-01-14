@@ -6,7 +6,7 @@ BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
 .PHONY: genvars compile test xref dialyzer tar
 
 genvars:
-	@cp config/prod/legacy_vars.config config/prod/vars.generated
+	@cp config/prod/default_vars.config config/prod/vars.generated
 
 compile:
 	${REBAR} compile
@@ -28,6 +28,24 @@ tar:
 	${REBAR} as prod tar
 	mkdir -p _build/tar
 	tar -zxvf _build/prod/rel/*/*.tar.gz -C _build/tar
+
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# handled by rebar.conf.script which does not know we have used the 'as prod'
+# higher level command
+prod-xcomp-rel:
+	REBAR3_PROFILE=prod \
+	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
+	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
+	${REBAR} as prod release
+
+# Notice we need REBAR3_PROFILE en var even if we use 'as prod' becuase this is
+# handled by rebar.conf.script which does not know we have used the 'as prod'
+# higher level command
+prod-xcomp-tar:
+	REBAR3_PROFILE=prod \
+	REBAR3_TARGET_INCLUDE_ERTS=/Users/aramallo/otp/24.2/ \
+	REBAR3_TARGET_SYSTEM_LIBS=/Users/aramallo/otp/24.2/lib \
+	${REBAR} as prod tar
 
 devrun:
 	${REBAR} as dev release
@@ -81,18 +99,33 @@ run-edge1:
 
 # DOCKER
 
-build-prod:
+docker-build-prod:
+	docker buildx install
 	docker stop bondy-prod || true
 	docker rm bondy-prod || true
 	docker rmi bondy-prod || true
 	docker build \
 		--pull \
+		--platform linux/amd64 \
+		--load \
 		-t "bondy-prod" \
 		-f deployment/Dockerfile .
 
-run-prod:
+docker-build-prod-alpine:
+	docker buildx install
 	docker stop bondy-prod || true
 	docker rm bondy-prod || true
+	docker rmi bondy-prod || true
+	docker build \
+		--pull \
+		--platform linux/amd64 \
+		--load \
+		-t "bondy-prod" \
+		-f deployment/alpine.Dockerfile .
+
+docker-run-prod:
+	# docker stop bondy-prod || true
+	# docker rm bondy-prod || true
 	docker run \
 		--rm \
 		-e BONDY_ERL_NODENAME=bondy1@127.0.0.1 \
@@ -104,7 +137,8 @@ run-prod:
 		-p 18086:18086 \
 		-v "$(PWD)/examples/custom_config/etc:/bondy/etc" \
 		--name bondy-prod \
-		-d bondy-prod
+		bondy-prod:latest
 
-scan-prod:
+docker-scan-prod:
 	docker scan bondy-prod
+
