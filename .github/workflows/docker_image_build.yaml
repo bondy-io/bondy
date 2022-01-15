@@ -46,13 +46,23 @@ jobs:
             prefix=
             suffix=
        -
-        name: Build and push
+        name: Build and push standard image
         uses: docker/build-push-action@v2
         with:
-          context: .
+          context: /deployment
+          file: /deployment/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: docker.io/${{ steps.meta.outputs.tags }}
+      -
+        name: Build and push alpine image
+        uses: docker/build-push-action@v2
+        with:
+          context: /deployment
+          file: /deployment/alpine.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: docker.io/${{ steps.meta.outputs.tags }}-alpine
       -
         # Copy multiplatform image from dockerhub to multiple registries
         # without changing the image SHA
@@ -62,3 +72,12 @@ jobs:
           src: docker.io/${{ steps.meta.outputs.tags }}
           dst: |
             ghcr.io/${{ steps.meta.outputs.tags }}
+      -
+        # Copy multiplatform image from dockerhub to multiple registries
+        # without changing the image SHA
+        name: Copy Image to multiple registries
+        uses: akhilerm/tag-push-action@v1.0.0
+        with:
+          src: docker.io/${{ steps.meta.outputs.tags }}-alpine
+          dst: |
+            ghcr.io/${{ steps.meta.outputs.tags }}-alpine
