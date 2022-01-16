@@ -42,6 +42,7 @@ jobs:
         with:
           images: ${{ github.repository }}/bondy
           tags: |
+            type=ref,event=branch
             type=semver,pattern={{version}}
           flavor: |
             latest=false
