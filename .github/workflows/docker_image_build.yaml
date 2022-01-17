@@ -44,7 +44,6 @@ jobs:
         with:
           images: |
             leapsight/bondy
-            ghcr.io/leapsight/bondy
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
