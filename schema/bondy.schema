@@ -779,7 +779,7 @@ hidden
 %% with the admin_api.ssl config variable, for example:
 {mapping, "admin_api.https.certfile", "bondy.admin_api_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cert.pem"}
+  {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
@@ -1012,7 +1012,7 @@ hidden
 %% with the api_gateway.ssl config variable, for example:
 {mapping, "api_gateway.https.certfile", "bondy.api_gateway_https.socket_opts.certfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cert.pem"}
+  {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
@@ -1474,7 +1474,7 @@ hidden
 %% with the wamp.tls config variable, for example:
 {mapping, "wamp.tls.certfile", "bondy.wamp_tls.socket_opts.certfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cert.pem"}
+  {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
@@ -1675,36 +1675,97 @@ end}.
   {datatype, flag}
 ]}.
 
-
 %% @doc Default cert location for cluster TLS connection
-{mapping, "cluster.tls.certfile", "partisan.tls_options.certfile", [
+{mapping, "cluster.tls.server.certfile", "partisan.tls_server_options.certfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cert.pem"}
+  {commented, "{{platform_etc_dir}}/server/keycert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
-{mapping, "cluster.tls.keyfile", "partisan.tls_options.keyfile", [
+{mapping, "cluster.tls.server.keyfile", "partisan.tls_server_options.keyfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/key.pem"}
+  {commented, "{{platform_etc_dir}}/server/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
-{mapping, "cluster.tls.cacertfile", "partisan.tls_options.cacertfile", [
+{mapping, "cluster.tls.server.cacertfile", "partisan.tls_server_options.cacertfile", [
   {datatype, file},
-  {default, "{{platform_etc_dir}}/cacert.pem"}
+  {commented, "{{platform_etc_dir}}/server/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "cluster.tls.versions", "partisan.tls_options.versions", [
+{mapping, "cluster.tls.server.versions", "partisan.tls_server_options.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
+{mapping, "cluster.tls.server.verify", "partisan.tls_server_options.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
 
-{translation, "partisan.tls_options.versions",
+
+%% @doc Default cert location for cluster TLS connection
+{mapping, "cluster.tls.client.certfile", "partisan.tls_client_options.certfile", [
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/keycert.pem"}
+]}.
+
+%% @doc Default key location for cluster TLS connection
+{mapping, "cluster.tls.client.keyfile", "partisan.tls_client_options.keyfile", [
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/key.pem"}
+]}.
+
+%% @doc Default signing authority location for cluster TLS connection
+{mapping, "cluster.tls.client.cacertfile", "partisan.tls_client_options.cacertfile", [
+  {datatype, file},
+  {commented, "{{platform_etc_dir}}/client/cacert.pem"}
+]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "cluster.tls.client.versions", "partisan.tls_client_options.versions", [
+  {datatype, string},
+  {default, "1.3"}
+]}.
+
+{mapping, "cluster.tls.client.verify", "partisan.tls_client_options.verify", [
+  {datatype, {enum, [verify_peer, verify_none]}},
+  {default, verify_none}
+]}.
+
+
+{translation, "partisan.tls_server_options.versions",
   fun(Conf) ->
-    case cuttlefish:conf_get("cluster.tls.versions", Conf) of
+    case cuttlefish:conf_get("cluster.tls.server.versions", Conf) of
+        Value when is_list(Value) ->
+          try
+            [
+              begin
+                case string:strip(Version) of
+                  "1.2" -> 'tlsv1.2';
+                  "1.3" -> 'tlsv1.3';
+                  _ -> throw({invalid_version, Version})
+                end
+              end || Version <- string:split(Value, ",")
+            ]
+          catch
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+          end;
+        _ ->
+            cuttlefish:invalid(
+              "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+            )
+    end
+  end
+}.
+
+{translation, "partisan.tls_client_options.versions",
+  fun(Conf) ->
+    case cuttlefish:conf_get("cluster.tls.client.versions", Conf) of
         Value when is_list(Value) ->
           try
             [
