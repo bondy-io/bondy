@@ -19,7 +19,7 @@
 %%
 
 main([]) ->
-    all("./ssl/data", "./ssl").
+    all("./_ssl/", "./_ssl").
 
 
 dn(CName) ->
@@ -33,25 +33,26 @@ dn(CName) ->
     }.
 
 
-all(DataDir, PrivDir) ->
+all(DataDir, Output) ->
+    cmd("mkdir -p " ++ Output, []),
     OpenSSLCmd = "openssl",
-    create_rnd(DataDir, PrivDir),			% For all requests
-    rootCA(PrivDir, OpenSSLCmd, "erlangCA"),
-    intermediateCA(PrivDir, OpenSSLCmd, "otpCA", "erlangCA"),
-    endusers(PrivDir, OpenSSLCmd, "otpCA", ["client", "server"]),
-    collect_certs(PrivDir, ["erlangCA", "otpCA"], ["client", "server"]),
+    create_rnd(DataDir, Output),			% For all requests
+    rootCA(Output, OpenSSLCmd, "erlangCA"),
+    intermediateCA(Output, OpenSSLCmd, "otpCA", "erlangCA"),
+    endusers(Output, OpenSSLCmd, "otpCA", ["client", "server"]),
+    collect_certs(Output, ["erlangCA", "otpCA"], ["client", "server"]),
     %% Create keycert files
-    SDir = filename:join([PrivDir, "server"]),
+    SDir = filename:join([Output, "server"]),
     SC = filename:join([SDir, "cert.pem"]),
     SK = filename:join([SDir, "key.pem"]),
     SKC = filename:join([SDir, "keycert.pem"]),
     append_files([SK, SC], SKC),
-    CDir = filename:join([PrivDir, "client"]),
+    CDir = filename:join([Output, "client"]),
     CC = filename:join([CDir, "cert.pem"]),
     CK = filename:join([CDir, "key.pem"]),
     CKC = filename:join([CDir, "keycert.pem"]),
     append_files([CK, CC], CKC),
-    remove_rnd(PrivDir).
+    remove_rnd(Output).
 
 append_files(FileNames, ResultFileName) ->
     {ok, ResultFile} = file:open(ResultFileName, [write]),
