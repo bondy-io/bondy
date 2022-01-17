@@ -246,7 +246,7 @@
   "bondy.security.password.argon2id13.iterations", [
   {default, moderate},
   {datatype, [
-    integer, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+    {enum, [interactive, moderate, sensitive]}, integer
   ]}
 ]}.
 
@@ -283,7 +283,7 @@
   "bondy.security.password.argon2id13.memory", [
   {default, interactive},
   {datatype, [
-    bytesize, {atom, interactive}, {atom, moderate}, {atom, sensitive}
+    {enum, [interactive, moderate, sensitive]}, bytesize
   ]}
 ]}.
 
