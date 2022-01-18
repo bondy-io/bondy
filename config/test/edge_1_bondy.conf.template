@@ -1,8 +1,5 @@
-log.handlers.default.level = debug
-
-
 aae.data_exchange_timeout = 1m
-aae.enabled = on
+aae.enabled = off
 aae.exchange_timer = 1m
 aae.hashtree_timer = 10s
 aae.hashtree_ttl = 1w
@@ -13,31 +10,31 @@ admin_api.http.enabled = on
 admin_api.http.keepalive = off
 admin_api.http.max_connections = 250000
 admin_api.http.nodelay = on
-admin_api.http.port = 18081
+admin_api.http.port = 19081
 
 admin_api.https.acceptors_pool_size = 200
 admin_api.http.backlog = 1024
 admin_api.https.enabled = off
 admin_api.https.keepalive = off
 admin_api.https.max_connections = 250000
-admin_api.https.backlog = 18084
+admin_api.https.backlog = 19084
 
-api_gateway.config_file = $(platform_etc_dir)/api_gateway_config.json
+api_gateway.config_file = ${BONDY_ETC_DIR}/api_gateway_config.json
 api_gateway.http.acceptors_pool_size = 200
 api_gateway.http.backlog = 4096
 api_gateway.http.keepalive = off
 api_gateway.http.max_connections = 500000
 api_gateway.http.nodelay = on
-api_gateway.http.port = 18080
+api_gateway.http.port = 19080
 
 api_gateway.https.acceptors_pool_size = 200
 api_gateway.https.backlog = 4096
 api_gateway.https.keepalive = off
 api_gateway.https.max_connections = 500000
 api_gateway.https.nodelay = on
-api_gateway.https.port = 18083
+api_gateway.https.port = 19083
 
-broker_bridge.config_file = $(platform_etc_dir)/broker_bridge_config.json
+broker_bridge.config_file = ${BONDY_ETC_DIR}/broker_bridge_config.json
 broker_bridge.kafka.clients.default.allow_topic_auto_creation = on
 broker_bridge.kafka.clients.default.auto_start_producers = on
 broker_bridge.kafka.clients.default.endpoints = [{"127.0.0.1", 9092}]
@@ -51,13 +48,14 @@ broker_bridge.kafka.enabled = off
 broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
 
 cluster.parallelism = 1
-cluster.peer_port = 18086
+cluster.peer_port = 19086
 cluster.peer_discovery.enabled = off
 cluster.peer_discovery.automatic_join = on
 cluster.peer_discovery.polling_interval = 10s
 cluster.peer_discovery.timeout = 5s
 # cluster.peer_discovery.type = bondy_peer_discovery_static_agent
-# cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18086
+# cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1
+# cluster.peer_discovery.config.nodes.2 = bondy2@127.0.0.1
 cluster.tls.enabled = off
 erlang.async_threads = 64
 erlang.max_ports = 65536
@@ -66,21 +64,21 @@ load_regulation.router.pool.capacity = 10000
 
 oauth2.client_credentials_grant.duration = 15m
 oauth2.code_grant.duration = 10m
-oauth2.config_file = $(platform_etc_dir)/oauth2_config.json
+oauth2.config_file = ${BONDY_ETC_DIR}/oauth2_config.json
 oauth2.password_grant.duration = 15m
 oauth2.refresh_token.duration = 30d
 oauth2.refresh_token.length = 40
-# platform_data_dir = ./data
-# platform_etc_dir = ./etc
-# platform_log_dir = ./log
-# platform_tmp_dir = ./tmp
+platform_data_dir = ./data
+platform_etc_dir = ./etc
+platform_log_dir = ./log
+platform_tmp_dir = ./tmp
 security.allow_anonymous_user = on
 security.automatically_create_realms = off
-security.config_file = $(platform_etc_dir)/security_config.json
+security.config_file = ${BONDY_ETC_DIR}/security_config.json
 shutdown.grace_period = 5s
 store.open_retries_delay = 2s
 store.open_retry_Limit = 30
-store.partitions = 16
+store.partitions = 4
 store.shard_by = prefix
 startup.wait_for_store_partitions = on
 startup.wait_for_store_hashtrees = on
@@ -91,22 +89,35 @@ wamp.tcp.enabled = on
 wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
-wamp.tcp.port = 18082
-wamp.tls.acceptors_pool_size = 200
-wamp.tls.backlog = 1024
-wamp.tls.cacertfile = $(platform_etc_dir)/cacert.pem
-wamp.tls.certfile = $(platform_etc_dir)/cert.pem
+wamp.tcp.port = 19082
+
 wamp.tls.enabled = off
-wamp.tls.keepalive = on
-wamp.tls.keyfile = $(platform_etc_dir)/key.pem
-wamp.tls.max_connections = 100000
-wamp.tls.nodelay = on
-wamp.tls.port = 18085
-wamp.tls.versions= 1.2,1.3
-wamp.websocket.compression_enabled=on
+# wamp.tls.acceptors_pool_size = 200
+# wamp.tls.backlog = 1024
+# wamp.tls.cacertfile = ${BONDY_ETC_DIR}/cacert.pem
+# wamp.tls.certfile = ${BONDY_ETC_DIR}/cert.pem
+# wamp.tls.keepalive = on
+# wamp.tls.keyfile = ${BONDY_ETC_DIR}/key.pem
+# wamp.tls.max_connections = 100000
+# wamp.tls.nodelay = on
+# wamp.tls.port = 19085
+# wamp.tls.versions= 1.2,1.3
+
+wamp.websocket.compression_enabled = on
 
 
-edge.uplink = off
+edge.uplink = on
+edge.uplink.endpoint = 127.0.0.1:18092
+edge.uplink.transport = tcp
+edge.uplink.timeout = 3s
+edge.uplink.reconnect = on
+edge.uplink.reconnect.max_retries = 10
 
-edge.listener.tcp = on
-edge.listener.tcp.port = 18092
+
+edge.uplink.realm.1.uri = com.leapsight.test
+edge.uplink.realm.1.authid = device1
+edge.uplink.realm.1.cryptosign.pubkey = 1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd
+
+edge.uplink.realm.1.cryptosign.privkey_env_var = EDGE1_DEVICE1_PRIVKEY
+# edge.uplink.realm.1.cryptosign.procedure = com.myapp.sign
+# edge.uplink.realm.1.cryptosign.exec = "/opt/st/sign"

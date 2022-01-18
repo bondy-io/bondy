@@ -5,6 +5,9 @@ BONDY_ERL_DISTRIBUTED_COOKIE ?= bondy
 
 .PHONY: genvars compile test xref dialyzer tar
 
+certs:
+	cd config && ./make_certs
+
 genvars:
 	@cp config/prod/default_vars.config config/prod/vars.generated
 

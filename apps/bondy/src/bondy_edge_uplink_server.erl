@@ -435,7 +435,7 @@ handle_message({hello, Uri, Details}, State0) ->
     }),
     try
 
-        Realm = bondy_realm:get(Uri),
+        Realm = bondy_realm:fetch(Uri),
 
         bondy_realm:allow_connections(Realm)
             orelse throw(connections_not_allowed),
