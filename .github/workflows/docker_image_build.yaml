@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Release Tag'
   push:
     branches : [develop, master]
     tags:
