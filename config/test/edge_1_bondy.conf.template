@@ -90,17 +90,19 @@ wamp.tcp.keepalive = on
 wamp.tcp.max_connections = 100000
 wamp.tcp.nodelay = on
 wamp.tcp.port = 19082
-wamp.tls.acceptors_pool_size = 200
-wamp.tls.backlog = 1024
-wamp.tls.cacertfile = ${BONDY_ETC_DIR}/cacert.pem
-wamp.tls.certfile = ${BONDY_ETC_DIR}/cert.pem
+
 wamp.tls.enabled = off
-wamp.tls.keepalive = on
-wamp.tls.keyfile = ${BONDY_ETC_DIR}/key.pem
-wamp.tls.max_connections = 100000
-wamp.tls.nodelay = on
-wamp.tls.port = 19085
-wamp.tls.versions= 1.2,1.3
+# wamp.tls.acceptors_pool_size = 200
+# wamp.tls.backlog = 1024
+# wamp.tls.cacertfile = ${BONDY_ETC_DIR}/cacert.pem
+# wamp.tls.certfile = ${BONDY_ETC_DIR}/cert.pem
+# wamp.tls.keepalive = on
+# wamp.tls.keyfile = ${BONDY_ETC_DIR}/key.pem
+# wamp.tls.max_connections = 100000
+# wamp.tls.nodelay = on
+# wamp.tls.port = 19085
+# wamp.tls.versions= 1.2,1.3
+
 wamp.websocket.compression_enabled = on
 
 
