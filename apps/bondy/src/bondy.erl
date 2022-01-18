@@ -408,10 +408,9 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     {ok, map()} | {error, wamp_error_map()}.
 
 call(Uri, Opts, Args, KWArgs, Ctxt0) ->
-    Timeout = case maps:find(timeout, Opts) of
-        {ok, 0} -> bondy_config:get(wamp_call_timeout);
-        {ok, Val} -> Val;
-        error -> bondy_config:get(wamp_call_timeout)
+    Timeout = case maps_utils:get_any([<<"timeout">>, timeout], Opts, 0) of
+        0 -> bondy_config:get(wamp_call_timeout);
+        Val -> Val
     end,
 
     case cast(Uri, Opts, Args, KWArgs, Ctxt0) of

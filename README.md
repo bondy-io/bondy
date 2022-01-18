@@ -9,10 +9,6 @@ Bondy is an open source, distributed, scaleable and robust networking platform f
      <img src="https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_cluster.png?raw=true" alt="drawing" width="600"/>
 </p>
 
-> ### :warning: Notice for Contributors
-> Active development is done at Bondy's Gitlab repository (https://gitlab.com/leapsight/bondy).
->If you are reading this file at Bondy's Github repository, notice this is a mirror that is unidirectionally synced to Gitlab's i.e. _no commits or PRs done in Github will be synced to the main Gitlab repository_.
-
 ## Documentation
 
 For our work-in-progress documentation go to [http://docs.getbondy.io](http://docs.getbondy.io).
@@ -110,7 +106,6 @@ One minute after joining the cluster, the Active Anti-entropy service will trigg
 
 * [http://docs.getbondy.io](http://docs.getbondy.io).
 * [WAMP Specification](wamp-proto.org)
-* #bondy on slack (coming soon!)
 * [Follow us on twitter @leapsight](https://twitter.com/leapsight)
 * Recorded webinars
      * [Implementing a polyglot microservices architecture](https://www.youtube.com/watch?v=XxJ1IS8mo84)<br>Date: 10 July 2019

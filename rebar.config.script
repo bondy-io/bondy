@@ -9,7 +9,7 @@ Profile = case os:getenv("REBAR3_PROFILE") of
     Str ->
         list_to_atom(Str)
 end,
-% exit(CONFIG),
+
 Replace =
     fun
         Replace([Key], Value, Config0) ->
@@ -37,7 +37,7 @@ Replace =
             end
     end,
 
-case {ErtsPath, SystemLibsPath} of
+    case {ErtsPath, SystemLibsPath} of
     {false, false} ->
         CONFIG;
     {Path, false} ->
@@ -54,4 +54,4 @@ case {ErtsPath, SystemLibsPath} of
                 CONFIG
             )
         )
-end.
+    end.

@@ -336,7 +336,7 @@ terminate(remote, _Req, St) ->
         info,
         #{
             description => "Connection closed by peer",
-            reason => unknown
+            reason => remote
         },
         St
     ),
@@ -358,7 +358,7 @@ terminate({remote, Code, Payload}, _Req, St) ->
 terminate({error, closed = Reason}, _Req, St) ->
     %% The socket has been closed brutally without a close frame being received
     %% first.
-    _ = log(error,
+    _ = log(info,
         #{
             description => "Connection closed brutally",
             reason => Reason
