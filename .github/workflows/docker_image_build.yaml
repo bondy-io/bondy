@@ -8,8 +8,6 @@ on:
   workflow_dispatch:
 
 jobs:
-
-jobs:
   docker:
     runs-on: ubuntu-latest
     name: Build an publish docker images to multiple registries
