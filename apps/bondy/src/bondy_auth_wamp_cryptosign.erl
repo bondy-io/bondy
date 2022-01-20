@@ -92,7 +92,7 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
-    {ok, Extra :: map(), NewState :: state()}
+    {true, Extra :: map(), NewState :: state()}
     | {error, challenge_error(), NewState :: state()}.
 
 challenge(Details, Ctxt, State) ->
@@ -119,7 +119,7 @@ challenge(Details, Ctxt, State) ->
                     challenge => encode_hex(Challenge),
                     channel_binding => undefined %% TODO
                 },
-                {ok, Extra, NewState};
+                {true, Extra, NewState};
             false ->
                 {error, no_matching_pubkey, State}
         end

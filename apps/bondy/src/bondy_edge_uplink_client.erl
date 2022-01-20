@@ -434,7 +434,7 @@ connected(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-    {stop, normal}.
+    keep_state_and_data.
 
 
 

@@ -138,7 +138,6 @@ format_status(Opt, Ctxt0) ->
 new() ->
     #{
         session_id => bondy_session_id:new(),
-        request_id => undefined,
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
         request_timeout => bondy_config:get(request_timeout, undefined)
     }.

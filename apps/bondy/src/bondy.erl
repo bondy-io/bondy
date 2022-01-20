@@ -430,7 +430,9 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
         {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #error{} = R}
         when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {error, message_to_map(R)}
+            {error, message_to_map(R)};
+        Other ->
+            {error, Other}
     after
         Timeout ->
             Mssg = iolist_to_binary(

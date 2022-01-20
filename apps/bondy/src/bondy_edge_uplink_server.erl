@@ -339,11 +339,11 @@ do_challenge(SessionId, Details, Method, State0) ->
 
     {AuthCtxt, Reply} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-            {ok, AuthCtxt1} ->
+            {false, AuthCtxt1} ->
                 M = {welcome, SessionId, #{}},
                 {AuthCtxt1, M};
 
-            {ok, ChallengeExtra, AuthCtxt1} ->
+            {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
                 {AuthCtxt1, M};
 

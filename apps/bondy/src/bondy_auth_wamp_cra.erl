@@ -99,8 +99,7 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, NewState :: state()}
-    | {ok, Extra :: map(), NewState :: state()}
+    {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: challenge_error(), NewState :: state()}.
 
 challenge(_, Ctxt, #{password := PWD} = State) ->
@@ -153,7 +152,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             signature => ExpectedSignature
         },
 
-        {ok, ChallengeExtra, NewState}
+        {true, ChallengeExtra, NewState}
 
     catch
         throw:Reason ->
