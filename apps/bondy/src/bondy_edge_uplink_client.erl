@@ -720,7 +720,6 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-
     State3 = subscribe(Session, State2),
 
     %% Get the already registered registrations and subscriptions and proxy them
