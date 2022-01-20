@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/github/license/leapsight/bondy?style=for-the-badge)
 ![Architecture](https://img.shields.io/badge/architecture-linux%2Famd64%20%7C%20linux%2Farm64%20%7C%20macOS%2Fintel%20%7C%20macOS%2FM1-lightgrey?style=for-the-badge)
-![Version](https://img.shields.io/badge/version-1.0.0--beta.24-blue?style=for-the-badge)<br>
+![Version](https://img.shields.io/badge/version-1.0.0--beta.25-blue?style=for-the-badge)<br>
 ![Docker Pulls](https://img.shields.io/docker/pulls/leapsight/bondy?style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/master?label=docker%3Amaster&style=for-the-badge)
 ![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/leapsight/bondy/CI/develop?label=docker%3Adevelop&style=for-the-badge)
@@ -71,7 +71,7 @@ rebar3 as prod tar
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
 
 ```shell
-tar -zxvf _build/prod/rel/bondy-1.0.0-beta.24.tar.qz -C ~/tmp/bondy
+tar -zxvf _build/prod/rel/bondy-1.0.0-beta.25.tar.qz -C ~/tmp/bondy
 ```
 
 #### Running
