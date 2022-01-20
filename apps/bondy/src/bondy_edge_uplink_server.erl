@@ -575,6 +575,14 @@ handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
             error(overload)
     end,
 
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message(Other, SessionId, State) ->
+    ?LOG_INFO(#{
+        description => "Unhandled message",
+        session => SessionId,
+        message => Other
+    }),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
