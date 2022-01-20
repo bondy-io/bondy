@@ -34,7 +34,7 @@
 
 
 -record(state, {
-    socket                  ::  gen_tcp:socket(),
+    socket                  ::  gen_tcp:socket() | ssl:socket(),
     peername                ::  binary(),
     transport               ::  module(),
     frame_type              ::  frame_type(),
@@ -99,19 +99,23 @@ init({Ref, Transport, _Opts0}) ->
         transport = Transport
     },
 
-    Opts = [
+    %% Setup and configure socket
+    TLSOpts = bondy_config:get([Ref, tls_opts], []),
+    {ok, Socket} = ranch:handshake(Ref, TLSOpts),
+
+    SocketOpts = [
         {active, active_n(St0)},
         {packet, 0}
         | bondy_config:get([Ref, socket_opts], [])
     ],
-
-    {ok, Socket} = ranch:handshake(Ref),
-
-    Res = Transport:setopts(Socket, Opts),
+    %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
+    %% socket by performing the TLS server-side handshake, returning a TLS
+    %% socket.
+    Res = Transport:setopts(Socket, SocketOpts),
 
     ok = maybe_error(Res),
 
-    {ok, Peername} = inet:peername(Socket),
+    {ok, Peername} = bondy_utils:peername(Transport, Socket),
 
     St1 = St0#state{socket = Socket},
 
@@ -120,6 +124,8 @@ init({Ref, Transport, _Opts0}) ->
         socket => Socket,
         peername => inet_utils:peername_to_binary(Peername)
     }),
+
+    ?LOG_INFO(#{metadata => logger:get_process_metadata()}),
 
     ok = socket_opened(St1),
 
@@ -497,7 +503,7 @@ init_wamp(Len, Enc, St0) ->
     MaxLen = validate_max_len(Len),
     {FrameType, EncName} = validate_encoding(Enc),
 
-    case inet:peername(St0#state.socket) of
+    case bondy_utils:peername(St0#state.transport, St0#state.socket) of
         {ok, {_, _} = Peer} ->
             Proto = {raw, FrameType, EncName},
 

@@ -126,7 +126,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 lookup() ->
-    gen_statem:call(?MODULE, lookup).
+    gen_statem:call(?MODULE, lookup, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -136,7 +136,7 @@ lookup() ->
 -spec enable() -> boolean().
 
 enable() ->
-    gen_statem:call(?MODULE, enable).
+    gen_statem:call(?MODULE, enable, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -146,7 +146,7 @@ enable() ->
 -spec disable() -> boolean().
 
 disable() ->
-    gen_statem:call(?MODULE, disable).
+    gen_statem:call(?MODULE, disable, 5000).
 
 
 

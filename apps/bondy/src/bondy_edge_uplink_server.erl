@@ -173,18 +173,22 @@ connected(enter, connected, State) ->
     Ref = State#state.ranch_ref,
     Transport = State#state.transport,
 
-    Opts = [
+    %% Setup and configure socket
+    TLSOpts = bondy_config:get([Ref, tls_opts], []),
+    {ok, Socket} = ranch:handshake(Ref, TLSOpts),
+
+    SocketOpts = [
         binary,
         {packet, 4},
         {active, once}
         | bondy_config:get([Ref, socket_opts], [])
     ],
+    %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
+    %% socket by performing the TLS server-side handshake, returning a TLS
+    %% socket.
+    ok = Transport:setopts(Socket, SocketOpts),
 
-    %% Setup and configure socket
-    {ok, Socket} = ranch:handshake(Ref),
-    ok = Transport:setopts(Socket, Opts),
-
-    {ok, Peername} = inet:peername(Socket),
+    {ok, Peername} = bondy_utils:peername(Transport, Socket),
     PeernameBin = inet_utils:peername_to_binary(Peername),
 
     ok = bondy_logger_utils:set_process_metadata(#{
@@ -285,7 +289,9 @@ connected(_EventType, _Msg, _) ->
 
 %% @private
 challenge(Realm, Details, State0) ->
-    {ok, Peer} = inet:peername(State0#state.socket),
+    {ok, Peer} = bondy_utils:peername(
+        State0#state.transport, State0#state.socket
+    ),
     Sessions0 = State0#state.sessions,
     SessionsByUri0 = State0#state.sessions_by_uri,
 

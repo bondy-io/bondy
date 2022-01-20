@@ -151,15 +151,14 @@ transport_opts(Ref) ->
     {_, MaxConnections} = lists:keyfind(max_connections, 1, Opts),
 
     %% In ranch 2.0 we will need to use socket_opts directly
-    SocketOpts = case lists:keyfind(socket_opts, 1, Opts) of
-        {socket_opts, L} -> normalise(L);
-        false -> []
-    end,
+    SocketOpts = normalise(key_value:get(socket_opts, Opts, [])),
+
+    TLSOpts = key_value:get(tls_opts, Opts, []),
 
     #{
         num_acceptors => PoolSize,
         max_connections => MaxConnections,
-        socket_opts => [{port, Port} | SocketOpts]
+        socket_opts => [{port, Port} | SocketOpts ++ TLSOpts]
     }.
 
 %% =============================================================================
@@ -177,9 +176,13 @@ ref_to_transport(wamp_tls) -> ranch_ssl.
 
 
 %% @private
+normalise([]) ->
+    [];
+
 normalise(Opts) ->
     Sndbuf = lists:keyfind(sndbuf, 1, Opts),
     Recbuf = lists:keyfind(recbuf, 1, Opts),
+
     case Sndbuf =/= false andalso Recbuf =/= false of
         true ->
             Buffer0 = lists:keyfind(buffer, 1, Opts),

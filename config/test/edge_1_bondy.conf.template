@@ -107,8 +107,8 @@ wamp.websocket.compression_enabled = on
 
 
 edge.uplink = on
-edge.uplink.endpoint = 127.0.0.1:18092
-edge.uplink.transport = tcp
+edge.uplink.endpoint = 127.0.0.1:18093 # bondy node1
+edge.uplink.transport = tls
 edge.uplink.timeout = 3s
 edge.uplink.reconnect = on
 edge.uplink.reconnect.max_retries = 10
