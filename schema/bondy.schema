@@ -482,16 +482,17 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc The maximum timeout value for WAMP (RPC) Calls when the CALL.Options.
-%% timeout. According to the protocol a missing value or a value
-%% of 0 diabels the timeout feature, but we disagree, set it to 24 hours if you
-%% want but not infinite.
+%% @doc The maximum timeout value for WAMP (RPC) Calls for the CALL.Options.
+%% timeout or the wamp.call_timeout default.
+%% According to the protocol a missing value or a value
+%% of 0 disables the timeout feature, but we disagree, there should be no such
+%% thing as "infinite timeout". Set it to 24 hours, a week or even a year if
+%% you want.
 %% @end
 %% -----------------------------------------------------------------------------
 {mapping, "wamp.max_call_timeout", "bondy.wamp_max_call_timeout", [
 {default, "10m"}, % Long enough but not infinity
-{datatype, {duration, ms}},
-hidden
+{datatype, {duration, ms}}
 ]}.
 
 {mapping, "wamp.message_retention.enabled", "bondy.wamp_message_retention.enabled", [
@@ -1472,34 +1473,34 @@ hidden
 
 %% @doc Default cert location for https can be overridden
 %% with the wamp.tls config variable, for example:
-{mapping, "wamp.tls.certfile", "bondy.wamp_tls.socket_opts.certfile", [
+{mapping, "wamp.tls.certfile", "bondy.wamp_tls.tls_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/keycert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%wamp.tls config variable, for example:
-{mapping, "wamp.tls.keyfile", "bondy.wamp_tls.socket_opts.keyfile", [
+{mapping, "wamp.tls.keyfile", "bondy.wamp_tls.tls_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the wamp.tls config variable, for example:
-{mapping, "wamp.tls.cacertfile", "bondy.wamp_tls.socket_opts.cacertfile", [
+{mapping, "wamp.tls.cacertfile", "bondy.wamp_tls.tls_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "wamp.tls.versions", "bondy.wamp_tls.socket_opts.versions", [
+{mapping, "wamp.tls.versions", "bondy.wamp_tls.tls_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
-{translation, "bondy.wamp_tls.socket_opts.versions",
+{translation, "bondy.wamp_tls.tls_opts.versions",
   fun(Conf) ->
     case cuttlefish:conf_get("wamp.tls.versions", Conf) of
         Value when is_list(Value) ->

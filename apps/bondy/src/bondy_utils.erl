@@ -50,6 +50,7 @@
 -export([uuid/0]).
 -export([uuid/1]).
 -export([external_session_id/1]).
+-export([peername/2]).
 
 
 
@@ -349,6 +350,22 @@ is_alphanum(C) when C >= 16#41 andalso C =< 16#5A -> true;
 is_alphanum(C) when C >= 16#61 andalso C =< 16#7A -> true;
 is_alphanum(_)                                    -> false.
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec peername(
+    Transport :: atom(), Socket :: gen_tcp:socket() | ssl:socket()) ->
+    {ok, {inet:ip_address(), inet:port_number()}} | {error, any()}.
+
+%% @private
+peername(Transport, Socket) when Transport == ranch_tcp; Transport == tcp ->
+    inet:peername(Socket);
+
+peername(Transport, Socket) when Transport == ranch_ssl; Transport == ssl ->
+    ssl:peername(Socket).
 
 
 

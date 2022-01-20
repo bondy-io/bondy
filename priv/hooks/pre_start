@@ -20,6 +20,7 @@ export BONDY_LOG_DIR={{platform_log_dir}}
 export BONDY_TMP_DIR={{platform_tmp_dir}}
 
 echo "${GREEN}===> Running Bondy Rebar3 pre_start hook"
+echo "${GREEN}===> Exporting the following default values:"
 echo "${NC}===> BONDY_ERL_NODENAME=${BONDY_ERL_NODENAME}"
 echo "${NC}===> BONDY_ERL_DISTRIBUTED_COOKIE=${BONDY_ERL_DISTRIBUTED_COOKIE}"
 echo "${NC}===> BONDY_DATA_DIR=${BONDY_DATA_DIR}"

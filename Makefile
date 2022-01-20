@@ -133,11 +133,11 @@ docker-run-prod:
 		--rm \
 		-e BONDY_ERL_NODENAME=bondy1@127.0.0.1 \
 		-e BONDY_ERL_DISTRIBUTED_COOKIE=bondy \
-		-e ERL_DIST_PORT=27784 \
 		-p 18080:18080 \
 		-p 18081:18081 \
 		-p 18082:18082 \
 		-p 18086:18086 \
+		-u 0:1000 \
 		-v "$(PWD)/examples/custom_config/etc:/bondy/etc" \
 		--name bondy-prod \
 		bondy-prod:latest
