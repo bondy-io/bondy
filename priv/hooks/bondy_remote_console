@@ -3,8 +3,8 @@
 set -e
 BONDY_ERL_DISTRIBUTED_COOKIE="${BONDY_ERL_DISTRIBUTED_COOKIE:-bondy}"
 COOKIE="${COOKIE:-$BONDY_ERL_DISTRIBUTED_COOKIE}"
-REL_DIR=/bondy/releases/{{release_version}}
-SYSTEM_LIB_DIR=/bondy/lib
+REL_DIR=./releases/{{release_version}}
+SYSTEM_LIB_DIR=./lib
 TICKTIME=60
 
 erl -name undefined@127.0.0.1 \

@@ -72,7 +72,7 @@ start_link(Transport, Endpoint, Opts) ->
     % dbg:tracer(), dbg:p(all,c),
     % dbg:tpl(?MODULE, '_', x),
     % dbg:tpl(gen_tcp, 'connect', x),
-    gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
+    gen_statem:start_link({local, ?MODULE}, {Transport, Endpoint, Opts}, []).
 
 
 
@@ -276,9 +276,10 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {abort, #{}, server_error}, State) ->
+connected(internal, {abort, #{}, Reason}, State) ->
     ?LOG_NOTICE(#{
-        description => "Got abort message from server, closing connection."
+        description => "Got abort message from server, closing connection.",
+        reason => Reason
     }),
     {stop, server_error, State};
 
@@ -544,7 +545,7 @@ send_message(Message, State) ->
 
 %% @private
 on_connect(_State) ->
-    ?LOG_NOTICE(#{description => "Uplink connection established"}),
+    ?LOG_NOTICE(#{description => "Established connection with remote router"}),
     ok.
 
 

@@ -70,7 +70,13 @@ orelse Tag =:= subscription_added
 orelse Tag =:= subscription_removed
 orelse Tag =:= subscription_deleted ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
-    case RealmUri == State#state.realm_uri of
+    SessionId = bondy_registry_entry:session_id(Entry),
+    %% We avoid forwaring our own teh edge client own subscriptions
+    Forward =
+        RealmUri =:= State#state.realm_uri
+        andalso SessionId =/= State#state.session_id,
+
+    case Forward of
         true ->
             ok = forward({Tag, bondy_registry_entry:to_external(Entry)}, State),
             {ok, State};

@@ -205,6 +205,7 @@ connected(enter, connected, State) ->
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
+
     case binary_to_term(Data) of
         {receive_message, SessionId, Msg} ->
             ?LOG_INFO(#{
@@ -236,8 +237,10 @@ connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
+
     SessionId = session_id(RealmUri, State),
     ok = send_message({receive_message, SessionId, M}, State),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, State) ->
@@ -246,6 +249,7 @@ connected(info, Msg, State) ->
         type => info,
         event => Msg
     }),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected({call, From}, Request, State) ->
@@ -254,7 +258,9 @@ connected({call, From}, Request, State) ->
         type => call,
         event => Request
     }),
+
     gen_statem:reply(From, {error, badcall}),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected(cast, {forward, Msg}, State) ->
@@ -304,11 +310,13 @@ challenge(Realm, Details, State0) ->
         {ok, AuthCtxt} ->
             %% TODO take it from conf
             ReqMethods = [<<"cryptosign">>],
+
             case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
                 [] ->
                     throw({no_authmethod, ReqMethods});
 
                 [Method|_] ->
+
                     Session = #{
                         id => SessionId,
                         authid => Authid,
