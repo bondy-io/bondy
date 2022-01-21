@@ -545,7 +545,7 @@ send_message(Message, State) ->
 
 %% @private
 on_connect(_State) ->
-    ?LOG_NOTICE(#{description => "Uplink connection established"}),
+    ?LOG_NOTICE(#{description => "Established connection with remote router"}),
     ok.
 
 
