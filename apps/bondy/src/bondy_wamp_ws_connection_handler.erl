@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_ws_connection_handler.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -336,7 +336,7 @@ terminate(remote, _Req, St) ->
         info,
         #{
             description => "Connection closed by peer",
-            reason => unknown
+            reason => remote
         },
         St
     ),
@@ -358,7 +358,7 @@ terminate({remote, Code, Payload}, _Req, St) ->
 terminate({error, closed = Reason}, _Req, St) ->
     %% The socket has been closed brutally without a close frame being received
     %% first.
-    _ = log(error,
+    _ = log(info,
         #{
             description => "Connection closed brutally",
             reason => Reason

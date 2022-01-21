@@ -27,7 +27,7 @@
 
 -define(LOG_ERROR(Reason, Args),
     io:format(
-        "~s===> [error] validate-config" ++ Reason ++ "~s~n",
+        "~s===> [error] validate-config " ++ Reason ++ "~s~n",
         [?RED | Args] ++ [?RESET]
     )
 ).
@@ -58,7 +58,7 @@ main([EtcDir, _ReleaseDir]) ->
     BondyCheck = case sets:to_list(sets:intersection(Bondy, Etc)) of
         [] ->
             ?LOG_INFO(
-                "The Bondy configuration file was not found. Bondy will use the default configuration. Otherwise please make sure a \"bondy.conf\" file (or \"bondy.conf.template\" in case environment variables replacement is required) is present in the ~p directory",
+                "No Bondy configuration file found at ~p. Bondy will use the default configuration. Otherwise please make sure a 'bondy.conf' file (or 'bondy.conf.template' in case environment variables replacement is required) is present in the ~p directory.",
                 [EtcDir]
             ),
             true;
@@ -70,11 +70,11 @@ main([EtcDir, _ReleaseDir]) ->
             true;
         [B1, B2] ->
             ?LOG_INFO(
-                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Using \"bondy.conf.template\" and moving \"bondy.conf\" to \"disabled/bondy.conf\".",
+                "Both Bondy configuration file variants (~p and ~p) were found in the ~p directory. Using 'bondy.conf.template' and moving 'bondy.conf' to 'disabled/bondy.conf'.",
                 [B1, B2, EtcDir]
             ),
             DisabledDir = filename:join(EtcDir, "disabled"),
-            ok = file:make_dir(DisabledDir),
+            _ = catch file:make_dir(DisabledDir),
             ok = file:rename(
                 filename:join(EtcDir, "bondy.conf"),
                 filename:join(DisabledDir, "bondy.conf")

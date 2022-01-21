@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_scram.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -88,8 +88,7 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
-    {ok, NewState :: state()}
-    | {ok, Extra :: map(), NewState :: state()}
+    {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(Details, Ctxt, State0) ->
@@ -236,7 +235,7 @@ do_challenge(#{channel_binding := undefined} = State) ->
 
     NewState = State#{server_nonce => ServerNonce},
 
-    {ok, ChallengeExtra, NewState};
+    {true, ChallengeExtra, NewState};
 
 do_challenge(#{channel_binding := _} = State) ->
     {error, unsupported_channel_binding_type, State}.

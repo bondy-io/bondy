@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_cra_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -116,7 +116,7 @@ test_1(Config) ->
         lists:member(?WAMP_CRA_AUTH, bondy_auth:available_methods(U1Ctxt1))
     ),
 
-    {ok, U1Extra, U1Ctxt2} = bondy_auth:challenge(
+    {true, U1Extra, U1Ctxt2} = bondy_auth:challenge(
         ?WAMP_CRA_AUTH, #{}, U1Ctxt1
     ),
     #{

@@ -1,0 +1,292 @@
+[
+    {
+        "uri" : "com.leapsight.bondy",
+        "authmethods" : ["wampcra", "anonymous", "password", "trust"],
+        "security_enabled" : true,
+        "users" : [
+            {
+                "username" : "urn:user:1",
+                "password": "123456"
+            }
+        ],
+        "groups" : [
+            {
+                "name" : "administrators",
+                "groups" : [],
+                "meta" : {
+                    "description": "The administrators of Bondy."
+                }
+            }
+        ],
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate using password credentials."
+                }
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate using password credentials."
+                }
+            },
+            {
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {
+                "description" : "Allows all users from any network authenticate as anonymous."
+                }
+            }
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : "all"
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match" : "prefix",
+                "roles" : ["anonymous"]
+            }
+        ]
+    },
+    {
+        "uri" : "com.leapsight.test",
+        "description" : "A test realm",
+        "authmethods" : ["cryptosign", "wampcra", "anonymous", "oauth2", "password", "trust", "ticket"],
+        "security_enabled" : true,
+        "users" : [
+            {
+                "username" : "app1",
+                "password" : "changethispassword",
+                "groups" : ["api_clients"],
+                "meta" : {}
+            },
+            {
+                "username" : "test@example.com",
+                "password" : "changethispassword",
+                "groups" : ["applications"],
+                "meta" : {}
+            },
+            {
+                "username" : "peer1",
+                "password" : "changethispassword",
+                "groups" : ["microservices"],
+                "meta" : {}
+            },
+            {
+                "username" : "peer2",
+                "password" : "changethispassword",
+                "groups" : ["microservices"],
+                "meta" : {}
+            },
+            {
+                "username": "device1",
+                "authorized_keys": ["1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd"],
+                "groups" : ["devices"],
+                "comment": "for testing the corresponding priv key is '4ffddd896a530ce5ee8c86b83b0d31835490a97a9cd718cb2f09c9fd31c4a7d71766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd'"
+            }
+        ],
+        "groups" : [
+            {
+                "name" : "api_clients",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "resource_owners",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "microservices",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "applications",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "devices",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "account_admin",
+                "groups" : [],
+                "meta" : {}
+            },
+            {
+                "name" : "account_user",
+                "groups" : [],
+                "meta" : {}
+            }
+        ],
+        "sources" : [
+            {
+                "usernames" : "all",
+                "authmethod" : "password",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "wampcra",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["anonymous"],
+                "authmethod" : "anonymous",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["peer2"],
+                "authmethod" : "trust",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : ["device1"],
+                "authmethod" : "cryptosign",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "ticket",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            },
+            {
+                "usernames" : "all",
+                "authmethod" : "oauth2",
+                "cidr" : "0.0.0.0/0",
+                "meta" : {}
+            }
+        ],
+        "grants" : [
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.call",
+                    "wamp.cancel",
+                    "wamp.publish"
+                ],
+                "uri" : "",
+                "match": "prefix",
+                "roles" : ["anonymous", "resource_owners"]
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister"
+                ],
+                "uri" : "com.leapsight.add",
+                "roles" : ["microservices"]
+            },
+            {
+                "permissions" : [
+                    "wamp.subscribe",
+                    "wamp.unsubscribe",
+                    "wamp.publish"
+                ],
+                "uri" : "com.example.event",
+                "roles" : ["peer1", "peer2"]
+            },
+            {
+                "permissions" : [
+                    "wamp.register",
+                    "wamp.unregister",
+                    "wamp.call",
+                    "wamp.cancel"
+                ],
+                "uri" : "com.example",
+                "match": "prefix",
+                "roles" : ["peer1", "peer2"]
+            },
+            {
+                "roles" : ["applications", "microservices"],
+                "permissions" : [
+                    "wamp.call"
+                ],
+                "resources" : [
+                    {"uri" : "bondy.ticket.issue", "match": "exact"},
+                    {"uri" : "bondy.ticket.revoke", "match": "exact"}
+                ]
+            },
+            {
+                "permissions" : [
+                    "bondy.issue"
+                ],
+                "resources": [
+                    {"uri" : "bondy.ticket.scope.", "match": "prefix"}
+                ],
+                "roles" : ["microservices"]
+            },
+            {
+                "roles" : ["peer1", "peer2"],
+                "permissions" : [
+                    "wamp.call",
+                    "wamp.cancel"
+                ],
+                "resources" : [
+                    {"uri" : "wamp.", "match": "prefix"},
+                    {"uri" : "bondy.", "match": "prefix"}
+                ]
+            }
+        ],
+        "oauth2" : {
+            "clients" : [
+                {
+                    "client_id" : "webapp",
+                    "client_secret" : "secret",
+                    "description": "A test client",
+                    "groups":["admin"]
+                }
+            ],
+            "resource_owners" : [
+                {
+                    "username" : "user3@example.com",
+                    "password" : "123456",
+                    "groups" : ["account_admin"],
+                    "meta" : {
+                        "account_id" : "1",
+                        "user_id" : "1"
+                    }
+                }
+            ]
+        }
+    }
+]

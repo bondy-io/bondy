@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_scram_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -160,7 +160,7 @@ test_1(Config) ->
     HelloDetails = #{authextra => #{
         <<"nonce">> => base64:encode(ClientNonce)
     }},
-    {challenge, ChallengeExtra, NewCtxt1} = bondy_auth:challenge(
+    {true, ChallengeExtra, NewCtxt1} = bondy_auth:challenge(
         ?WAMP_SCRAM_AUTH, HelloDetails, Ctxt1
     ),
 

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -105,8 +105,8 @@
 
 
 -callback challenge(DataIn :: map(), Ctxt :: context(), CBState :: term()) ->
-    {ok, CBState :: term()}
-    | {ok, ChallengeData :: map(), CBState :: term()}
+    {false, CBState :: term()}
+    | {true, ChallengeData :: map(), CBState :: term()}
     | {error, Reason :: any(), CBState :: term()}.
 
 
@@ -347,8 +347,8 @@ conn_ip(#{conn_ip := Value}) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec challenge(Method :: binary(), DataIn :: map(), Ctxt :: context()) ->
-    {ok, AuthData :: map(), NewCtxt :: context()}
-    | {challenge, ChallengeData :: map(), NewCtxt :: context()}
+    {false, NewCtxt :: context()}
+    | {true, ChallengeData :: map(), NewCtxt :: context()}
     | {error, Reason :: any()}.
 
 challenge(Method, DataIn, #{method := Method} = Ctxt0) ->
@@ -358,12 +358,12 @@ challenge(Method, DataIn, #{method := Method} = Ctxt0) ->
     } = Ctxt0,
 
     try CBMod:challenge(DataIn, Ctxt0, CBModState0) of
-        {ok, CBModState1} ->
+        {false, CBModState1} ->
             Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-            {ok, Ctxt};
-        {ok, ChallengeData, CBModState1} ->
+            {false, Ctxt};
+        {true, ChallengeData, CBModState1} ->
             Ctxt = maps:put(callback_mod_state, CBModState1, Ctxt0),
-            {ok, ChallengeData, Ctxt};
+            {true, ChallengeData, Ctxt};
         {error, Reason, _} ->
             {error, Reason}
     catch
@@ -590,8 +590,6 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
                 %% The special case. If the client provided an auth_id /=
                 %% anonymous then the anonymous method is not allowed.
                 UserId == anonymous;
-            Match({_, false}) ->
-                true;
             Match({identification, true}) ->
                 UserId =/= anonymous;
             Match({authorized_keys, true}) ->
@@ -604,7 +602,9 @@ matches_requirements(Method, #{user_id := UserId, user := User}) ->
             Match({any, Any}) ->
                 lists:any(Match, maps:to_list(Any));
             Match({all, All}) ->
-                lists:any(Match, maps:to_list(All))
+                lists:any(Match, maps:to_list(All));
+            Match({_, false}) ->
+                true
         end,
         Requirements
     ).

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+BONDY_ERL_DISTRIBUTED_COOKIE="${BONDY_ERL_DISTRIBUTED_COOKIE:-bondy}"
+COOKIE="${COOKIE:-$BONDY_ERL_DISTRIBUTED_COOKIE}"
+REL_DIR=/bondy/releases/{{release_version}}
+SYSTEM_LIB_DIR=/bondy/lib
+TICKTIME=60
+
+erl -name undefined@127.0.0.1 \
+    -remsh "$BONDY_ERL_NODENAME" \
+    -boot "$REL_DIR/start_clean" \
+    -mode interactive \
+    -setcookie "$COOKIE" \
+    -dist_listen false \
+    -erl_epmd_port 27784 \
+    -start_epmd false

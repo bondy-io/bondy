@@ -2,7 +2,7 @@
 %% =============================================================================
 %%  bondy_context.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -138,7 +138,6 @@ format_status(Opt, Ctxt0) ->
 new() ->
     #{
         session_id => bondy_session_id:new(),
-        request_id => undefined,
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
         request_timeout => bondy_config:get(request_timeout, undefined)
     }.
@@ -555,7 +554,7 @@ caller_details(#{session := Session} = Ctxt, Details) ->
 
     Details#{
         caller => bondy_session:external_id(Session),
-        caller_authid => authid(Ctxt),
+        caller_authid => name_to_binary(authid(Ctxt)),
         caller_authrole => name_to_binary(authrole(Ctxt))
     }.
 

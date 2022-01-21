@@ -434,7 +434,7 @@ connected(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-    {stop, normal}.
+    keep_state_and_data.
 
 
 
@@ -490,6 +490,7 @@ connect(Transport, {Host, PortNumber}, Opts) ->
 
     Timeout = key_value:get(timeout, Opts, 5000),
     SocketOpts = key_value:get(socket_opts, Opts, []),
+    TLSOpts = key_value:get(tls_opts, Opts, []),
 
     %% We use Erlang packet mode i.e. {packet, 4}
     %% So erlang first reads 4 bytes to get length of our data, allocates a
@@ -500,7 +501,7 @@ connect(Transport, {Host, PortNumber}, Opts) ->
         binary,
         {packet, 4},
         {active, once}
-        | SocketOpts
+        | SocketOpts ++ TLSOpts
     ],
 
     try
@@ -532,7 +533,7 @@ transport_mod(ssl) -> ssl.
 
 %% @private
 set_socket_active(State) ->
-    inet:setopts(State#state.socket, [{active, once}]).
+    (State#state.transport):setopts(State#state.socket, [{active, once}]).
 
 
 %% @private
@@ -719,7 +720,6 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-
     State3 = subscribe(Session, State2),
 
     %% Get the already registered registrations and subscriptions and proxy them

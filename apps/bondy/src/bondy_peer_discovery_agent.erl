@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_peer_discovery_agent.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -126,7 +126,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 lookup() ->
-    gen_statem:call(?MODULE, lookup).
+    gen_statem:call(?MODULE, lookup, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -136,7 +136,7 @@ lookup() ->
 -spec enable() -> boolean().
 
 enable() ->
-    gen_statem:call(?MODULE, enable).
+    gen_statem:call(?MODULE, enable, 5000).
 
 
 %% -----------------------------------------------------------------------------
@@ -146,7 +146,7 @@ enable() ->
 -spec disable() -> boolean().
 
 disable() ->
-    gen_statem:call(?MODULE, disable).
+    gen_statem:call(?MODULE, disable, 5000).
 
 
 

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.schema - Bondy configuration schema for Cuttlefish
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -34,10 +34,85 @@
   {datatype, string}
 ]}.
 
+
+{translation,
+"bondy.edge.uplink.endpoint",
+fun(Conf) ->
+    try
+      case cuttlefish:conf_get("edge.uplink.endpoint", Conf) of
+          String when is_list(String) ->
+            case string:split(String, ":") of
+              [Host, PortStr] ->
+                Port = list_to_integer(PortStr),
+
+                Port >= 1024 andalso Port =< 65535
+                  orelse throw(invalid_port),
+
+                case inet:getaddr(Host, inet) of
+                  {ok, IP} ->
+                    {IP, Port};
+                  _ ->
+                    throw(invalid_addr)
+                end;
+              _ ->
+                throw(invalid)
+            end;
+          _ ->
+            throw(invalid)
+      end
+
+    catch
+      throw:invalid ->
+        cuttlefish:invalid(
+          "value should be string with IP or Hostname and Port Number separated by a colon e.g. \"127.0.0.1:18080\""
+        );
+      throw:invalid_port ->
+        cuttlefish:invalid(
+          "value for the Port Number should be greater than 1023 and lower than 65536"
+        );
+      throw:invalid_addr ->
+        cuttlefish:invalid(
+          "value for the Hostname referes to a non-existing domain"
+        )
+    end
+end}.
+
+
 {mapping, "edge.uplink.transport", "bondy.edge.uplink.transport", [
   {default, tcp},
   {datatype, {enum, [tcp, tls]}}
 ]}.
+
+%% @doc Default cert location for cluster TLS connection
+{mapping, "edge.uplink.tls.certfile", "bondy.edge.uplink.tls_opts.certfile", [
+{datatype, file},
+{commented, "{{platform_etc_dir}}/client/keycert.pem"}
+]}.
+
+%% @doc Default key location for cluster TLS connection
+{mapping, "edge.uplink.tls.keyfile", "bondy.edge.uplink.tls_opts.keyfile", [
+{datatype, file},
+{commented, "{{platform_etc_dir}}/client/key.pem"}
+]}.
+
+%% @doc Default signing authority location for cluster TLS connection
+{mapping, "edge.uplink.tls.cacertfile", "bondy.edge.uplink.tls_opts.cacertfile", [
+{datatype, file},
+{commented, "{{platform_etc_dir}}/client/cacert.pem"}
+]}.
+
+%% @doc A comma separate list of TLS protocol versions that will be supported
+%% At the moment Bondy only supports versions 1.2 and 1.3
+{mapping, "edge.uplink.tls.versions", "bondy.edge.uplink.tls_opts.versions", [
+{datatype, string},
+{default, "1.3"}
+]}.
+
+{mapping, "edge.uplink.tls.verify", "bondy.edge.uplink.tls_opts.verify", [
+{datatype, {enum, [verify_peer, verify_none]}},
+{default, verify_none}
+]}.
+
 
 {mapping, "edge.uplink.reconnect", "bondy.edge.uplink.reconnect.enabled", [
   {default, on},
@@ -192,47 +267,15 @@
     {datatype, string}
 ]}.
 
-{translation,
-"bondy.edge.uplink.endpoint",
-fun(Conf) ->
-    try
-      case cuttlefish:conf_get("edge.uplink.endpoint", Conf) of
-          String when is_list(String) ->
-            case string:split(String, ":") of
-              [Host, PortStr] ->
-                Port = list_to_integer(PortStr),
 
-                Port >= 1024 andalso Port =< 65535
-                  orelse throw(invalid_port),
+%% Defines a procedure URI pattern that is shared between the two routers for
+%% in the defined realm.
+{mapping,
+  "edge.uplink.realm.$name.procedure.$id",
+  "bondy.edge.uplink.realms", [
+    {datatype, string}
+]}.
 
-                case inet:getaddr(Host, inet) of
-                  {ok, IP} ->
-                    {IP, Port};
-                  _ ->
-                    throw(invalid_addr)
-                end;
-              _ ->
-                throw(invalid)
-            end;
-          _ ->
-            throw(invalid)
-      end
-
-    catch
-      throw:invalid ->
-        cuttlefish:invalid(
-          "value should be string with IP or Hostname and Port Number separated by a colon e.g. \"127.0.0.1:18080\""
-        );
-      throw:invalid_port ->
-        cuttlefish:invalid(
-          "value for the Port Number should be greater than 1023 and lower than 65536"
-        );
-      throw:invalid_addr ->
-        cuttlefish:invalid(
-          "value for the Hostname referes to a non-existing domain"
-        )
-    end
-end}.
 
 
 {translation,
@@ -565,35 +608,61 @@ end}.
 
 %% @doc Default cert location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "edge.listener.tls.certfile", "bondy.edge_tls.socket_opts.certfile", [
+{mapping, "edge.listener.tls.certfile", "bondy.edge_tls.tls_opts.certfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cert.pem"}
+  {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%edge.tls config variable, for example:
-{mapping, "edge.listener.tls.keyfile", "bondy.edge_tls.socket_opts.keyfile", [
+{mapping, "edge.listener.tls.keyfile", "bondy.edge_tls.tls_opts.keyfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/key.pem"}
+  {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "edge.listener.tls.cacertfile", "bondy.edge_tls.socket_opts.cacertfile", [
+{mapping, "edge.listener.tls.cacertfile", "bondy.edge_tls.tls_opts.cacertfile", [
   {datatype, file},
-  {default, "$(platform_etc_dir)/cacert.pem"}
+  {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "edge.listener.tls.versions", "bondy.edge_tls.socket_opts.versions", [
+{mapping, "edge.listener.tls.versions", "bondy.edge_tls.tls_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
 
-{translation, "bondy.edge_tls.socket_opts.versions",
+{translation, "bondy.edge.uplink.tls_opts.versions",
+fun(Conf) ->
+  case cuttlefish:conf_get("edge.uplink.tls.versions", Conf) of
+      Value when is_list(Value) ->
+        try
+          [
+            begin
+              case string:strip(Version) of
+                "1.2" -> 'tlsv1.2';
+                "1.3" -> 'tlsv1.3';
+                _ -> throw({invalid_version, Version})
+              end
+            end || Version <- string:split(Value, ",")
+          ]
+        catch
+          throw:{invalid_version, Version} ->
+            cuttlefish:invalid("invalid TLS version " ++ Version)
+        end;
+      _ ->
+          cuttlefish:invalid(
+            "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+          )
+  end
+end
+}.
+
+{translation, "bondy.edge_tls.tls_opts.versions",
 fun(Conf) ->
   case cuttlefish:conf_get("edge.listener.tls.versions", Conf) of
       Value when is_list(Value) ->

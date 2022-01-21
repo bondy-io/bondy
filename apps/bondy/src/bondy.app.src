@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.app.src -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
         "offering both Publish and Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC)."
     },
-    {vsn, "1.0.0-beta.18"},
+    {vsn, "1.0.0-beta.25"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {bondy_app, [{vsn, "1.0.0-beta.18"}]}},
+    {mod, {bondy_app, [{vsn, "1.0.0-beta.25"}]}},
     {applications,[
         %% Erlang/OTP
         crypto,

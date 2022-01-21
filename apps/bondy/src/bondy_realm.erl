@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_realm.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -1382,16 +1382,34 @@ apply_config() ->
 from_file(Filename) ->
     case bondy_utils:json_consult(Filename) of
         {ok, Realms} ->
-            ?LOG_INFO(#{
-                description => "Loading configuration file",
-                filename => Filename
-            }),
             %% Because realms can have the sso_realm_uri and prototype
             %% properties which point to other realms, we need to ensure all
             %% realms in the file are processed based on a precedence graph, so
             %% that SSO and prototype realms are created before the realms
             %% targeting them.
             SortedRealms = topsort(Realms),
+
+            Uris = [Uri || #{<<"uri">> := Uri} <- SortedRealms],
+            Len = length(Uris),
+
+            Details = case Len > 3 of
+                true ->
+                    [A, B, C | _] = Uris,
+                    Prefix = binary_utils:join([A, B, C], <<", ">>),
+                    <<Prefix/binary, "...">>;
+
+                false ->
+                    binary_utils:join([<<"a">>, <<"b">>], <<", ">>)
+
+            end,
+
+
+            ?LOG_INFO(#{
+                description => "Loading configuration file",
+                filename => Filename,
+                summary => Details,
+                realm_count => Len
+            }),
 
             %% We add the realm and allow an update if it
             %% already exists by setting IsStrict argument

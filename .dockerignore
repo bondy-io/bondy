@@ -1,0 +1,9 @@
+_build
+_checkouts
+__checkouts
+.vscode
+erlang_ls.config
+erlang_ls.config.template
+doc
+examples
+deployment

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_password.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -89,12 +89,11 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), State :: state()) ->
-    {ok, NewState :: state()}
-    | {ok, Extra :: map(), NewState :: state()}
+    {false, NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
-    {ok, State}.
+    {false, State}.
 
 
 %% -----------------------------------------------------------------------------

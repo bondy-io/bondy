@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_http_gateway_rest_handler.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -289,13 +289,13 @@ is_authorized(
                 throw(Reason)
         end
 
-        catch
-            throw:EReason ->
-                Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
-                Req2 = reply_auth_error(
-                    EReason, <<"Bearer">>, RealmUri, json, Req1
-                ),
-                {stop, Req2, St0}
+    catch
+        throw:EReason ->
+            Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
+            Req2 = reply_auth_error(
+                EReason, <<"Bearer">>, RealmUri, json, Req1
+            ),
+            {stop, Req2, St0}
     end;
 
 is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
@@ -766,7 +766,7 @@ perform_action(
         <<"options">> := Opts,
         %% TODO use retries
         <<"retries">> := _R,
-        <<"timeout">> := CallTimeout
+        <<"timeout">> := _
     } = mops_eval(Act, ApiCtxt0, MopsOpts),
 
     RSpec = maps:get(<<"response">>, Spec),
@@ -774,10 +774,7 @@ perform_action(
     %% TODO We need to recreate ctxt and session from JWT
     Peer = maps_utils:get_path([<<"request">>, <<"peer">>], ApiCtxt0),
     RealmUri = maps:get(realm_uri, St1),
-    WampCtxt0 = wamp_context(RealmUri, Peer, St1),
-
-
-    WampCtxt = bondy_context:set_call_timeout(WampCtxt0, CallTimeout),
+    WampCtxt = wamp_context(RealmUri, Peer, St1),
 
     case bondy:call(P, Opts, A, Akw, WampCtxt) of
         {ok, Result0} ->

@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_wamp_protocol.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -544,9 +544,9 @@ maybe_open_session({send_challenge, AuthMethod, Challenge, St0}) ->
     },
     {reply, Bin, St1};
 
-maybe_open_session({ok, St}) ->
+maybe_open_session({ok, AuthExtra, St}) ->
     %% No need for a challenge, anonymous|trust or security disabled
-    open_session(#{}, St);
+    open_session(AuthExtra, St);
 
 maybe_open_session({error, Reason, St}) ->
     stop(Reason, St).
@@ -753,18 +753,27 @@ auth_challenge(Method, St0) ->
     Details = bondy_context:request_details(Ctxt),
 
     case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-        {ok, AuthCtxt1} ->
-            St1 = St0#wamp_state{
-                auth_context = AuthCtxt1,
-                auth_timestamp = erlang:system_time(millisecond)
-            },
-            {ok, St1};
-        {ok, ChallengeExtra, AuthCtxt1} ->
+        {false, AuthCtxt1} ->
+            Result = bondy_auth:authenticate(Method, undefined, #{}, AuthCtxt0),
+
+            case Result of
+                {ok, AuthExtra, AuthCtxt1} ->
+                    St1 = St0#wamp_state{
+                        auth_context = AuthCtxt1,
+                        auth_timestamp = erlang:system_time(millisecond)
+                    },
+                    {ok, AuthExtra, St1};
+                {error, Reason} ->
+                    stop({authentication_failed, Reason}, St0)
+            end;
+
+        {true, ChallengeExtra, AuthCtxt1} ->
             St1 = St0#wamp_state{
                 auth_context = AuthCtxt1,
                 auth_timestamp = erlang:system_time(millisecond)
             },
             {send_challenge, Method, ChallengeExtra, St1};
+
         {error, Reason} ->
             {error, {authentication_failed, Reason}, St0}
     end.

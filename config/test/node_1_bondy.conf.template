@@ -1,0 +1,139 @@
+log.handlers.default.level = debug
+
+
+aae.data_exchange_timeout = 1m
+aae.enabled = on
+aae.exchange_timer = 1m
+aae.hashtree_timer = 10s
+aae.hashtree_ttl = 1w
+
+admin_api.http.acceptors_pool_size = 200
+admin_api.http.backlog = 1024
+admin_api.http.enabled = on
+admin_api.http.keepalive = off
+admin_api.http.max_connections = 250000
+admin_api.http.nodelay = on
+admin_api.http.port = 18081
+
+admin_api.https.enabled = on
+admin_api.https.port= 18084
+admin_api.https.acceptors_pool_size = 200
+admin_api.http.backlog = 1024
+admin_api.https.keepalive = off
+admin_api.https.max_connections = 250000
+admin_api.https.backlog = 18084
+admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+
+api_gateway.config_file = ${BONDY_ETC_DIR}/api_gateway_config.json
+api_gateway.http.acceptors_pool_size = 200
+api_gateway.http.backlog = 4096
+api_gateway.http.keepalive = off
+api_gateway.http.max_connections = 500000
+api_gateway.http.nodelay = on
+api_gateway.http.port = 18080
+
+api_gateway.https.enabled = on
+api_gateway.https.port = 18083
+api_gateway.https.acceptors_pool_size = 200
+api_gateway.https.backlog = 4096
+api_gateway.https.keepalive = off
+api_gateway.https.max_connections = 500000
+api_gateway.https.nodelay = on
+api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+
+broker_bridge.config_file = ${BONDY_ETC_DIR}/broker_bridge_config.json
+broker_bridge.kafka.enabled = off
+
+# broker_bridge.kafka.clients.default.allow_topic_auto_creation = on
+# broker_bridge.kafka.clients.default.auto_start_producers = on
+# broker_bridge.kafka.clients.default.endpoints = [{"127.0.0.1", 9092}]
+# broker_bridge.kafka.clients.default.max_metadata_sock_retry = 5
+# broker_bridge.kafka.clients.default.producer.partition_restart_delay_seconds = 2s
+# broker_bridge.kafka.clients.default.producer.required_acks = 1
+# broker_bridge.kafka.clients.default.producer.topic_restart_delay_seconds = 10s
+# broker_bridge.kafka.clients.default.reconnect_cool_down_seconds = 10s
+# broker_bridge.kafka.clients.default.restart_delay_seconds = 10s
+
+# broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
+
+cluster.parallelism = 1
+cluster.peer_port = 18087
+cluster.peer_discovery.enabled = off
+cluster.peer_discovery.automatic_join = on
+cluster.peer_discovery.polling_interval = 10s
+cluster.peer_discovery.timeout = 5s
+# cluster.peer_discovery.type = bondy_peer_discovery_static_agent
+# cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18086
+cluster.tls.enabled = on
+cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+cluster.tls.server.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+cluster.tls.server.versions = 1.2,1.3
+# cluster.tls.client.cacertfile = ${BONDY_ETC_DIR}/ssl/client/cacert.pem
+# cluster.tls.client.certfile = ${BONDY_ETC_DIR}/ssl/client/cert.pem
+# cluster.tls.client.keyfile = ${BONDY_ETC_DIR}/ssl/client/key.pem
+# cluster.tls.client.versions = 1.2,1.3
+
+erlang.async_threads = 64
+erlang.max_ports = 65536
+load_regulation.router.pool.capacity = 10000
+
+
+oauth2.client_credentials_grant.duration = 15m
+oauth2.code_grant.duration = 10m
+oauth2.config_file = ${BONDY_ETC_DIR}/oauth2_config.json
+oauth2.password_grant.duration = 15m
+oauth2.refresh_token.duration = 30d
+oauth2.refresh_token.length = 40
+# platform_data_dir = ./data
+# platform_etc_dir = ./etc
+# platform_log_dir = ./log
+# platform_tmp_dir = ./tmp
+security.allow_anonymous_user = on
+security.automatically_create_realms = off
+security.config_file = ${BONDY_ETC_DIR}/security_config.json
+shutdown.grace_period = 5s
+store.open_retries_delay = 2s
+store.open_retry_Limit = 30
+store.partitions = 16
+store.shard_by = prefix
+startup.wait_for_store_partitions = on
+startup.wait_for_store_hashtrees = on
+startup.wait_for_store_aae_exchange = off
+wamp.tcp.acceptors_pool_size = 200
+wamp.tcp.backlog = 1024
+wamp.tcp.enabled = on
+wamp.tcp.keepalive = on
+wamp.tcp.max_connections = 100000
+wamp.tcp.nodelay = on
+wamp.tcp.port = 18082
+
+wamp.tls.enabled = on
+wamp.tls.port = 18085
+wamp.tls.acceptors_pool_size = 200
+wamp.tls.backlog = 1024
+wamp.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+wamp.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+wamp.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+wamp.tls.keepalive = on
+wamp.tls.max_connections = 100000
+wamp.tls.nodelay = on
+wamp.tls.versions= 1.2,1.3
+
+
+wamp.websocket.compression_enabled=on
+
+edge.uplink = off
+
+edge.listener.tcp = on
+edge.listener.tcp.port = 18092
+
+edge.listener.tls = on
+edge.listener.tls.port = 18093
+edge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+edge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+edge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem

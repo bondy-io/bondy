@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_cra.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -99,8 +99,7 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     DataIn :: map(), Ctxt :: bondy_auth:context(), CBState :: state()) ->
-    {ok, NewState :: state()}
-    | {ok, Extra :: map(), NewState :: state()}
+    {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: challenge_error(), NewState :: state()}.
 
 challenge(_, Ctxt, #{password := PWD} = State) ->
@@ -153,7 +152,7 @@ challenge(_, Ctxt, #{password := PWD} = State) ->
             signature => ExpectedSignature
         },
 
-        {ok, ChallengeExtra, NewState}
+        {true, ChallengeExtra, NewState}
 
     catch
         throw:Reason ->

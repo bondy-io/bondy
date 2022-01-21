@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy_auth_wamp_cryptosign_SUITE.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -133,7 +133,7 @@ test_1(Config) ->
         }
     },
 
-    {ok, Extra, NewCtxt1} = bondy_auth:challenge(
+    {true, Extra, NewCtxt1} = bondy_auth:challenge(
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt1
     ),
 

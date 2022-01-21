@@ -1,7 +1,7 @@
 %% =============================================================================
 %%  bondy.erl -
 %%
-%%  Copyright (c) 2016-2021 Leapsight. All rights reserved.
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -408,10 +408,9 @@ ack(Pid, Ref) when is_pid(Pid), is_reference(Ref) ->
     {ok, map()} | {error, wamp_error_map()}.
 
 call(Uri, Opts, Args, KWArgs, Ctxt0) ->
-    Timeout = case maps:find(timeout, Opts) of
-        {ok, 0} -> bondy_config:get(wamp_call_timeout);
-        {ok, Val} -> Val;
-        error -> bondy_config:get(wamp_call_timeout)
+    Timeout = case maps_utils:get_any([<<"timeout">>, timeout], Opts, 0) of
+        0 -> bondy_config:get(wamp_call_timeout);
+        Val -> Val
     end,
 
     case cast(Uri, Opts, Args, KWArgs, Ctxt0) of
@@ -431,7 +430,9 @@ check_response(Uri, ReqId, Timeout, Ctxt) ->
         {?BONDY_PEER_REQUEST, _Pid, _RealmUri, #error{} = R}
         when R#error.request_id == ReqId ->
             %% ok = bondy:ack(Pid, Ref),
-            {error, message_to_map(R)}
+            {error, message_to_map(R)};
+        Other ->
+            {error, Other}
     after
         Timeout ->
             Mssg = iolist_to_binary(

@@ -173,18 +173,22 @@ connected(enter, connected, State) ->
     Ref = State#state.ranch_ref,
     Transport = State#state.transport,
 
-    Opts = [
+    %% Setup and configure socket
+    TLSOpts = bondy_config:get([Ref, tls_opts], []),
+    {ok, Socket} = ranch:handshake(Ref, TLSOpts),
+
+    SocketOpts = [
         binary,
         {packet, 4},
         {active, once}
         | bondy_config:get([Ref, socket_opts], [])
     ],
+    %% If Transport == ssl, upgrades a gen_tcp, or equivalent, socket to an SSL
+    %% socket by performing the TLS server-side handshake, returning a TLS
+    %% socket.
+    ok = Transport:setopts(Socket, SocketOpts),
 
-    %% Setup and configure socket
-    {ok, Socket} = ranch:handshake(Ref),
-    ok = Transport:setopts(Socket, Opts),
-
-    {ok, Peername} = inet:peername(Socket),
+    {ok, Peername} = bondy_utils:peername(Transport, Socket),
     PeernameBin = inet_utils:peername_to_binary(Peername),
 
     ok = bondy_logger_utils:set_process_metadata(#{
@@ -285,7 +289,9 @@ connected(_EventType, _Msg, _) ->
 
 %% @private
 challenge(Realm, Details, State0) ->
-    {ok, Peer} = inet:peername(State0#state.socket),
+    {ok, Peer} = bondy_utils:peername(
+        State0#state.transport, State0#state.socket
+    ),
     Sessions0 = State0#state.sessions,
     SessionsByUri0 = State0#state.sessions_by_uri,
 
@@ -333,11 +339,11 @@ do_challenge(SessionId, Details, Method, State0) ->
 
     {AuthCtxt, Reply} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-            {ok, AuthCtxt1} ->
+            {false, AuthCtxt1} ->
                 M = {welcome, SessionId, #{}},
                 {AuthCtxt1, M};
 
-            {ok, ChallengeExtra, AuthCtxt1} ->
+            {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
                 {AuthCtxt1, M};
 
@@ -435,7 +441,7 @@ handle_message({hello, Uri, Details}, State0) ->
     }),
     try
 
-        Realm = bondy_realm:get(Uri),
+        Realm = bondy_realm:fetch(Uri),
 
         bondy_realm:allow_connections(Realm)
             orelse throw(connections_not_allowed),
@@ -569,6 +575,14 @@ handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
             error(overload)
     end,
 
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message(Other, SessionId, State) ->
+    ?LOG_INFO(#{
+        description => "Unhandled message",
+        session => SessionId,
+        message => Other
+    }),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
