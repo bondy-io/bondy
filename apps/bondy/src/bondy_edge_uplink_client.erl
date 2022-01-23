@@ -75,7 +75,6 @@ start_link(Transport, Endpoint, Opts) ->
     gen_statem:start_link({local, ?MODULE}, {Transport, Endpoint, Opts}, []).
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
@@ -517,7 +516,7 @@ connect(Transport, {Host, PortNumber}, Opts) ->
     catch
         Class:EReason ->
             ?LOG_WARNING(#{
-                description => "Error while trying to establish uplink connection",
+                description => "Error while trying to establish connection with remote router",
                 class => Class,
                 reason => EReason
             }),
@@ -721,12 +720,16 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-    State3 = subscribe(Session, State2),
+    State3 = subscribe_meta_events(Session, State2),
 
     %% Get the already registered registrations and subscriptions and proxy them
     State4 = proxy_existing(Session, State3),
 
-    State4#state{
+    %% We finally subscribe to user events so that we can re-publish on the
+    %% remote cluster
+    State5 = subscribe_user_events(Session, State4),
+
+    State5#state{
         session = undefined
     }.
 
@@ -807,10 +810,9 @@ handle_aae_data({PKey, RemoteObj}, _State) ->
 
 
 %% @private
-subscribe(Session0, State) ->
-    SessionId = maps:get(id, Session0),
-    RealmUri = maps:get(realm_uri, Session0),
-    MyRef = maps:get(ref, Session0),
+subscribe_meta_events(Session, State) ->
+    SessionId = maps:get(id, Session),
+    RealmUri = maps:get(realm_uri, Session),
     Me = self(),
 
     %% We subscribe to registration and subscription meta events
@@ -820,6 +822,14 @@ subscribe(Session0, State) ->
     _ = bondy_event_manager:add_sup_handler(
         {bondy_edge_event_handler, SessionId}, [RealmUri, SessionId, Me]
     ),
+
+    State.
+
+
+%% @private
+subscribe_user_events(Session0, State) ->
+    RealmUri = maps:get(realm_uri, Session0),
+    MyRef = maps:get(ref, Session0),
 
     Topic = <<"">>,
     Opts = #{
