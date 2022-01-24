@@ -270,11 +270,28 @@ end}.
 
 %% Defines a procedure URI pattern that is shared between the two routers for
 %% in the defined realm.
+%% <match-spec> ::= <uri> <match-type> <direction>
+%% <uri> ::= <wamp-uri>
+%% <match-type> ::= "exact" | "prefix" | "wildcard"
+%% <direction> ::= "in" | "out" | "both"
 {mapping,
   "edge.uplink.realm.$name.procedure.$id",
   "bondy.edge.uplink.realms", [
     {datatype, string}
 ]}.
+
+%% Defines a topic URI pattern that is shared between the two routers for
+%% in the defined realm.
+%% <match-spec> ::= <uri> <match-type> <direction>
+%% <uri> ::= <wamp-uri>
+%% <match-type> ::= "exact" | "prefix" | "wildcard"
+%% <direction> ::= "in" | "out" | "both"
+{mapping,
+  "edge.uplink.realm.$name.topic.$id",
+  "bondy.edge.uplink.realms", [
+    {datatype, string}
+]}.
+
 
 
 
@@ -330,7 +347,63 @@ fun(Conf0) ->
                   Crypto1 = maps:put(Key, Value, Crypto0),
                   maps:put(Id, Old#{cryptosign => Crypto1}, Acc)
               end
-          end
+          end;
+
+        ({[_, _, _, IdStr, UriType, KeyStr], Spec}, Acc)
+        when  UriType == "procedure";
+              UriType == "topic" ->
+
+            Id = list_to_binary(IdStr),
+            Key = list_to_binary(KeyStr),
+            %% Plural key to use in map
+            Type = list_to_atom(UriType ++ "s"),
+
+            Value =
+              try
+
+                case string:split(Spec, [$\s], all) of
+                  [Uri, Match, Direction] ->
+                    lists:member(Match, ["exact", "prefix", "wilcard"])
+                      orelse throw(invalid_match_spec),
+
+                    lists:member(Direction, ["in", "out", "both"])
+                      orelse throw(invalid_match_spec),
+
+                    Map = #{
+                      uri => list_to_binary(Uri),
+                      match => list_to_binary(Match),
+                      direction => list_to_atom(Direction)
+                    };
+
+                  _ ->
+                      throw(invalid_match_spec)
+                end
+
+              catch
+                throw:invalid_match_spec ->
+                  cuttlefish:invalid(
+                    "invalid " ++ UriType ++ " match specification " ++
+                    "'" ++ Spec ++ "'" ++
+                    " for identifier " ++
+                    "'" ++ KeyStr ++ "'"
+                  )
+              end,
+
+            %% #{id => #{procedures => #{Key => Map}}}
+            case maps:get(Id, Acc, undefined) of
+              undefined ->
+                Uris = #{Type => [Value]},
+                maps:put(Id, Uris, Acc);
+
+              Old ->
+                case maps:get(Type, Old, undefined) of
+                  undefined ->
+                    Uris = Old#{Type => [Value]},
+                    maps:put(Id, Uris, Acc);
+                  Uris0 ->
+                    maps:put(Id, Old#{Type => [Value|Uris0]}, Acc)
+                end
+            end
       end,
 
       Out = lists:foldl(Fun, maps:new(), Conf),

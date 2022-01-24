@@ -15,6 +15,115 @@
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
 
+-define(REALM_SPEC, #{
+    uri => #{
+        alias => <<"uri">>,
+        required => true,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
+    authid => #{
+        alias => <<"authid">>,
+        required => true,
+        validator => fun bondy_data_validators:username/1
+    },
+    cryptosign => #{
+        alias => <<"cryptosign">>,
+        required => true,
+        validator => #{
+            pubkey => #{
+                alias => <<"pubkey">>,
+                required => true,
+                datatype => binary
+            },
+            procedure => #{
+                alias => <<"procedure">>,
+                required => false,
+                validator => fun
+                    (Mod) when is_atom(Mod) ->
+                        true;
+                    (Mod) when is_binary(Mod) ->
+                        case catch binary_to_existing_atom(Mod) of
+                            {'EXIT', _} -> false;
+                            Val -> {ok, Val}
+                        end
+                end
+            },
+            exec => #{
+                alias => <<"exec">>,
+                required => false,
+                validator => fun
+                    (Name) when is_list(Name) ->
+                        true;
+                    (Name) when is_binary(Name) ->
+                        {ok, binary_to_list(Name)}
+                end
+            },
+            privkey_env_var => #{
+                alias => <<"privkey_env_var">>,
+                required => false,
+                validator => fun
+                    (Name) when is_list(Name) ->
+                        true;
+                    (Name) when is_binary(Name) ->
+                        {ok, binary_to_list(Name)}
+                end
+            }
+        }
+    },
+    procedures => #{
+        alias => <<"procedures">>,
+        required => true,
+        default => [],
+        validator => {list, ?MATCH_SPEC}
+
+    },
+    topics => #{
+        alias => <<"topics">>,
+        required => true,
+        default => [],
+        validator => {list, ?MATCH_SPEC}
+    }
+}).
+
+-define(MATCH_SPEC, #{
+    uri => #{
+        alias => <<"uri">>,
+        required => true,
+        datatype => binary
+    },
+    match => #{
+        alias => <<"match">>,
+        required => false,
+        default => ?EXACT_MATCH,
+        datatype => {in, ?MATCH_STRATEGIES}
+    },
+    direction => #{
+        alias => <<"direction">>,
+        required => true,
+        default => out,
+        validator => fun
+            (in) ->
+                true;
+            (out) ->
+                true;
+            (both) ->
+                true;
+            ("in") ->
+                {ok, in};
+            ("out") ->
+                {ok, out};
+            ("both") ->
+                {ok, both};
+            (<<"in">>) ->
+                {ok, in};
+            (<<"out">>) ->
+                {ok, out};
+            (<<"both">>) ->
+                {ok, both}
+        end
+    }
+}).
+
 
 -record(state, {
     transport               ::  gen_tcp | ssl,
@@ -105,15 +214,22 @@ callback_mode() ->
 init({Transport0, Endpoint, Opts}) ->
 
     ?LOG_NOTICE(#{description => "Starting edge client"}),
+
     TransportMod = transport_mod(Transport0),
 
-    %% TODO Validate realms
+    Realms0 = key_value:get(realms, Opts, #{}),
+    Realms = maps:map(
+        fun(_Uri, Realm) ->
+            maps_utils:validate(Realm, ?REALM_SPEC)
+        end,
+        Realms0
+    ),
 
     State0 = #state{
         transport = TransportMod,
         endpoint = Endpoint,
         opts = Opts,
-        realms = key_value:get(realms, Opts, #{}),
+        realms = Realms,
         idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
         tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
@@ -629,8 +745,7 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
             error(Reason)
     end;
 
-signer(_, #{cryptosign := #{privkey_env_var := Bin}}) ->
-    Var = binary_to_list(Bin),
+signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
 
     case os:getenv(Var) of
         false ->
