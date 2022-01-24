@@ -439,7 +439,7 @@ handle_message({hello, _, _}, #state{session = Session} = State)
 when Session =/= undefined ->
     %% Session already being established, wrong message
     ok = send_message({abort, #{}, protocol_violation}, State),
-    {stop, State};
+    {stop, protocol_violation, State};
 
 handle_message({hello, Uri, Details}, State0) ->
     %% TODO validate Details
@@ -461,11 +461,11 @@ handle_message({hello, Uri, Details}, State0) ->
         error:{not_found, Uri} ->
             Reason = {no_such_realm, Uri},
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0};
+            {stop, {no_such_realm, Uri}, State0};
 
         throw:Reason ->
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
+            {stop, Reason, State0}
 
     end;
 
@@ -485,7 +485,7 @@ handle_message({authenticate, Signature, Extra}, State0) ->
     catch
         throw:Reason ->
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
+            {stop, Reason, State0}
     end;
 
 handle_message({aae_sync, SessionId, Opts}, State) ->
@@ -520,7 +520,7 @@ safe_handle_session_message(Msg, SessionId, State) ->
                 stacktrace => Stacktrace
             }),
             ok = send_message({abort, #{}, server_error}, State),
-            {stop, State}
+            {stop, Reason, State}
     end.
 
 
