@@ -74,6 +74,7 @@
 -export([is_feature_enabled/3]).
 -export([is_security_enabled/1]).
 -export([local_context/1]).
+-export([local_context/2]).
 -export([new/0]).
 -export([new/2]).
 -export([peer/1]).
@@ -161,6 +162,18 @@ local_context(RealmUri) when is_binary(RealmUri) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+local_context(RealmUri, Ref) when is_binary(RealmUri) ->
+    Ctxt = local_context(RealmUri),
+
+    Ctxt#{
+        ref => Ref
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec new(bondy_session:peer(), subprotocol_2()) -> t().
 
 new(Peer, Subprotocol) ->
@@ -222,7 +235,10 @@ session_id(#{session := S}) ->
 session_id(#{session_id := Val}) ->
     Val;
 
-session_id(#{}) ->
+session_id(#{ref := Ref}) ->
+    bondy_ref:session_id(Ref);
+
+session_id(_) ->
     undefined.
 
 
