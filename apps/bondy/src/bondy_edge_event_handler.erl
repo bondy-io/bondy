@@ -30,8 +30,8 @@
 
 -record(state, {
     realm_uri       ::  uri(),
-    session_id      ::  id(),
-    pid             ::  pid()
+    ref             ::  bondy_ref:t(),
+    session_id      ::  bondy_session_id:t()
 }).
 
 
@@ -51,11 +51,12 @@
 
 
 
-init([RealmUri, SessionId, Pid]) ->
+init([RealmUri, Ref]) ->
+    SessionId = bondy_ref:session_id(Ref),
     State = #state{
         realm_uri = RealmUri,
-        session_id = SessionId,
-        pid = Pid
+        ref = Ref,
+        session_id = SessionId
     },
     {ok, State}.
 
@@ -116,6 +117,5 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 forward(Msg, State) ->
-    Pid = State#state.pid,
-    SessionId = State#state.session_id,
-    bondy_edge_uplink_client:forward(Pid, Msg, SessionId).
+    Ref = State#state.ref,
+    bondy_edge_uplink_client:forward(Ref, Msg).

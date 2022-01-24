@@ -1,6 +1,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the client-side connection between and
 %% edge node (client) and a remote/core node (server).
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_edge_uplink_client).
@@ -153,7 +154,7 @@
 
 %% API.
 -export([start_link/3]).
--export([forward/3]).
+-export([forward/2]).
 
 %% GEN_STATEM CALLBACKS
 -export([callback_mode/0]).
@@ -185,10 +186,12 @@ start_link(Transport, Endpoint, Opts) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Pid :: pid(), Msg :: any(), SessionId :: bondy_session_id:t()) ->
+-spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
     ok.
 
-forward(Pid, Msg, SessionId) ->
+forward(Ref, Msg) ->
+    Pid = bondy_ref:pid(Ref),
+    SessionId = bondy_ref:session_id(Ref),
     gen_statem:cast(Pid, {forward_message, Msg, SessionId}).
 
 
@@ -481,7 +484,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     {keep_state, State1};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
-    ?LOG_WARNING(#{
+    ?LOG_INFO(#{
         description => "Received WAMP request we need to FWD to core",
         message => Msg
     }),
@@ -839,7 +842,7 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% We finally subscribe to user events so that we can re-publish on the
     %% remote cluster
-    State5 = subscribe_user_events(Session, State4),
+    State5 = subscribe_topics(Session, State4),
 
     State5#state{
         session = undefined
@@ -925,31 +928,49 @@ handle_aae_data({PKey, RemoteObj}, _State) ->
 subscribe_meta_events(Session, State) ->
     SessionId = maps:get(id, Session),
     RealmUri = maps:get(realm_uri, Session),
-    Me = self(),
+    MyRef = maps:get(ref, Session),
 
     %% We subscribe to registration and subscription meta events
     %% The event handler will call
     %% forward(Me, Event, SessionId)
 
     _ = bondy_event_manager:add_sup_handler(
-        {bondy_edge_event_handler, SessionId}, [RealmUri, SessionId, Me]
+        {bondy_edge_event_handler, SessionId}, [RealmUri, MyRef]
     ),
 
     State.
 
 
+%% -----------------------------------------------------------------------------
 %% @private
-subscribe_user_events(Session0, State) ->
-    RealmUri = maps:get(realm_uri, Session0),
+%% @doc We subscribe to the topics configured for this realm.
+%% But instead of receiving an EVENT we will get a PUBLISH message. This is an
+%% optimization performed by bondy_broker to avoid sending N events to N
+%% subscribers that are remote.
+%% @end
+%% -----------------------------------------------------------------------------
+subscribe_topics(Session0, State) ->
     MyRef = maps:get(ref, Session0),
+    RealmUri = maps:get(realm_uri, Session0),
+    RealmConfig = maps:get(RealmUri, State#state.realms),
+    Topics = maps:get(topics, RealmConfig),
+    Opts = #{exclude_me => true},
 
-    Topic = <<"">>,
-    Opts = #{
-        match => ?PREFIX_MATCH
-    },
-    {ok, SubsId} = bondy_broker:subscribe(RealmUri, Opts, Topic, MyRef),
+    Session = lists:foldl(
+        fun
+            (#{uri := Uri, match := Match, direction := out}, Acc) ->
+                {ok, Id} = bondy_broker:subscribe(
+                    RealmUri, Opts#{match => Match}, Uri, MyRef
+                ),
+                key_value:set([subscriptions, Id], Uri, Acc);
 
-    Session = key_value:set([subscriptions, SubsId], Topic, Session0),
+            (#{uri := _Uri, match := _Match, direction := _}, Acc) ->
+                %% Not implemented yet
+                Acc
+        end,
+        Session0,
+        Topics
+    ),
 
     add_session(Session, State).
 
@@ -1006,9 +1027,6 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
             ok = send_session_message(SessionId, Msg, State),
             State
     end.
-
-
-
 
 
 
