@@ -69,10 +69,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Transport, Endpoint, Opts) ->
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(?MODULE, '_', x),
-    % dbg:tpl(gen_tcp, 'connect', x),
-    gen_statem:start_link({local, ?MODULE}, {Transport, Endpoint, Opts}, []).
+    gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
 
 
 %% -----------------------------------------------------------------------------
