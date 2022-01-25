@@ -243,7 +243,7 @@ end}.
 %% injection attack, specifically:
 %% * The shell is usually not invoked to start the program, it is executed
 %% directly.
-%% * Only if a shell script or .bat file is executed, the appropriate command
+%% * Only if a shell script is executed, the appropriate command
 %% interpreter is invoked implicitly, but there is still no command-argument
 %% expansion or implicit PATH search.
 %% * PATH (or equivalent) is not searched.
