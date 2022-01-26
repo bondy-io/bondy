@@ -1,0 +1,2253 @@
+## =============================================================================
+## COORDINATED STARTUP
+## =============================================================================
+
+## Defines whether Bondy will wait for the db partitions to be initialised
+## before continuing with initialisation.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+startup.wait_for_store_partitions = on
+
+## Defines whether Bondy will wait for the db hashtrees to be built
+## before continuing with initialisation.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+startup.wait_for_store_hashtrees = on
+
+## Defines whether Bondy will wait for the first aae exchange to be
+## finished before continuing with initialisation.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+startup.wait_for_store_aae_exchange = on
+
+
+## The period in seconds that Bondy will waith for clients to gracefully
+## terminate their connections when the router is shutting down.
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+shutdown.grace_period = 30s
+
+
+## =============================================================================
+## ADMIN HTTP/S API
+## =============================================================================
+
+admin_api.http.enabled = on
+admin_api.http.acceptors_pool_size = 100
+admin_api.http.backlog = 1024
+admin_api.http.keepalive = off
+admin_api.http.max_connections = 10000
+admin_api.http.nodelay = on
+
+
+admin_api.https.enabled = off
+admin_api.https.acceptors_pool_size = 100
+admin_api.https.keepalive = off
+admin_api.https.max_connections = 10000
+admin_api.https.versions = 1.3
+# admin_api.https.cacertfile = ${BONDY_ETC_DIR}/ssl/ca.crt
+# admin_api.https.certfile = ${BONDY_ETC_DIR}/ssl/tls.crt
+# admin_api.https.keyfile = ${BONDY_ETC_DIR}/ssl/tls.key
+
+## =============================================================================
+## API GATEWAY
+## =============================================================================
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+admin_api.http.enabled = on
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+# admin_api.http.acceptors_pool_size = 200
+
+##
+## Default: 250000
+##
+## Acceptable values:
+##   - an integer
+# admin_api.http.max_connections = 250000
+
+##
+## Default: 1024
+##
+## Acceptable values:
+##   - an integer
+# admin_api.http.backlog = 1024
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+# admin_api.http.keepalive = off
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# admin_api.http.nodelay = on
+
+# api_gateway.config_file = ${BONDY_ETC_DIR}/api_gateway_config.json
+
+
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+api_gateway.http.enabled = on
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+api_gateway.http.acceptors_pool_size = 50
+
+##
+## Default: 500000
+##
+## Acceptable values:
+##   - an integer
+api_gateway.http.max_connections = 10000
+
+##
+## Default: 4096
+##
+## Acceptable values:
+##   - an integer
+api_gateway.http.backlog = 4096
+
+## Enables/disables periodic transmission on a connected socket when no
+## other data is exchanged. If the other end does not respond, the connection is
+## considered broken and an error message is sent to the controlling process.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+api_gateway.http.keepalive = off
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+api_gateway.http.nodelay = on
+
+
+api_gateway.https.enabled = on
+api_gateway.https.acceptors_pool_size = 50
+api_gateway.https.backlog = 4096
+api_gateway.https.keepalive = off
+api_gateway.https.max_connections = 10000
+api_gateway.https.nodelay = off
+api_gateway.https.versions = 1.3
+# api_gateway.https.cacertfile = ${BONDY_ETC_DIR}/ssl/ca.crt
+# api_gateway.https.certfile = ${BONDY_ETC_DIR}/ssl/tls.crt
+# api_gateway.https.keyfile = ${BONDY_ETC_DIR}/ssl/tls.key
+
+
+## =============================================================================
+## SECURITY
+## =============================================================================
+
+## Defines whether Bondy allows the "anonymous" user
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+security.allow_anonymous_user = on
+
+## Defines whether Bondy create's a new realm or not when a session wants
+## to connect a non existing realm.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+security.automatically_create_realms = off
+
+## The filename of a security JSON configuration file, which allows you to
+## statically configure realms and its users, groups, sources and permissions.
+security.config_file = ${BONDY_ETC_DIR}/security_config.json
+
+## Defines the default password protocol to be used for new user password
+## creation. Notice the user API allows a caller to define the protocol to be
+## used. This default is used when the caller does not specify a protocol.
+##
+## Default: cra
+##
+## Acceptable values:
+##   - one of: cra, scram
+security.password.protocol = cra
+
+## Controls whether a password protocol upgrade is performed during
+## password migrations. A password migration occurs when Bondy changes the
+## internal representation of the password object to accommodate new protocols,
+## features or bug fixes. Normally some of this changes can be done without
+## user input, but when these changes include a re-calculation of the salted
+## hash they can only happend during authentication or when the user changes
+## the password.
+## If this option is set to 'on', then Bondy will try to upgrade the password
+## protocol of an existing password to the protocol defined by the
+## 'security.password.protocol' option using the defaul parameters defined in
+## the 'security.password.{SelectedProtocol}.{Option}' options.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+security.password.protocol.upgrade.enabled = off
+
+## Defines the minimum length for newly created passwords. The value
+## should be at least 6 and at most 254.
+##
+## Default: 6
+##
+## Acceptable values:
+##   - an integer
+security.password.min_length = 6
+
+
+## Defines the maximum length for newly created passwords. The value
+## should be at least 6 and at most 254.
+##
+## Default: 254
+##
+## Acceptable values:
+##   - an integer
+security.password.max_length = 254
+
+
+## Defines the default key derivation function (KDF) to be used with SCRAM.
+##
+## Default: pbkdf2
+##
+## Acceptable values:
+##   - one of: pbkdf2, argon2id13
+security.password.scram.kdf = pbkdf2
+
+
+
+## Defines the default number of iterations to be used with the pbkdf2 key
+## derivation function. It should be an integer in the range 4096..65536.
+##
+## Default: 10000
+##
+## Acceptable values:
+##   - an integer
+security.password.pbkdf2.iterations = 10000
+
+## Defines the default iterations to be used with the argon2id13 key
+## derivation function. It should be an integer in the range 4096..4294967295
+## or a named configuration:
+## - interactive (integer 2)
+## - moderate (integer 3)
+## - sensitive (integer 4)
+##
+## Default: moderate
+##
+## Acceptable values:
+##   - one of: interactive, moderate, sensitive
+##   - an integer
+security.password.argon2id13.iterations = moderate
+
+## Defines the default memory to be used with the argon2id13 key
+## derivation function. It should be an integer in the range 8192..1073741824
+## or a named configuration:
+## - interactive (integer 64MB)
+## - moderate (integer 256MB)
+## - sensitive (integer 1GB)
+## (Notice that the underlying library allows up to 4398046510080 (3.9 TB)
+## but we have restricted this value to avoid a configuration error to enable a
+## DoS attack).
+##
+## Default: interactive
+##
+## Acceptable values:
+##   - one of: interactive, moderate, sensitive
+##   - a byte size with units, e.g. 10GB
+security.password.argon2id13.memory = interactive
+
+
+## =============================================================================
+## SECURITY - TICKET AUTHENTICATION
+## =============================================================================
+
+
+## Defines whether Bondy will allow a valid ticket to be used for
+## authentication when a local copy of the ticket has not been found in
+## storage. This might happen if the ticket data has not yet been syncrhonised
+## to the node handling the authentication request.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+security.ticket.allow_not_found = on
+
+## The default expiration time on or after which authentication ticket
+## MUST NOT be accepted for processing.
+##
+## Default: 30d
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+security.ticket.expiry_time = 15d
+
+## The maximum expiration time on or after which authentication ticket
+## MUST NOT be accepted for processing.
+##
+## Default: 30d
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+security.ticket.max_expiry_time = 30d
+
+## Controls whether local scope tickets are persistent. If enabled the
+## ticket will be stored in Bondy's database. Otherwise the ticket is not
+## stored.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+security.ticket.scope.local.persistence = off
+
+## Controls whether SSO scope tickets are persistent. If enabled the
+## ticket will be stored in Bondy's database. Otherwise the ticket is not
+## stored.
+
+## Controls whether SSO scope tickets are persistent. If enabled the
+## ticket will be stored in Bondy's database. Otherwise the ticket is not
+## stored.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+#
+## We set it in off as we are restricting users to only be able to issue
+## client_local and client_sso scope tickets.
+security.ticket.scope.sso.persistence = off
+
+## Controls whether client-local scope tickets are persistent. If enabled
+## the ticket will be stored in Bondy's database. Otherwise the ticket is not
+## stored.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+security.ticket.scope.client_local.persistence = on
+
+
+## Controls whether client-SSO scope tickets are persistent. If enabled the
+## ticket will be stored in Bondy's database. Otherwise the ticket is not
+## stored.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+security.ticket.scope.client_sso.persistence = on
+
+## @doc Defines the a comma separated list of authentication methods that a
+## user can use to establish a session that is allowed to issue tickets to be
+## used with 'ticket' authentication.
+##
+## The possible values are the names of the authentication methods:
+## - "cryptosign"
+## - "password"
+## - "ticket"
+## - "tls"
+## - "trust"
+## - "wamp-scram"
+## - "wampcra"
+##
+## The option also allows a single value "all" in which case all the methods
+## above will be allowed.
+##
+## Notice that "anonymous" and "oauth2" methods are NOT allowed in this list as
+## they are incompatible with the idea of tickets.
+security.ticket.authmethods = all
+
+
+## =============================================================================
+## OAUTH2
+## =============================================================================
+
+## Default location for oauth2 configuration file
+##
+## Default: ./etc/oauth2_config.json
+##
+## Acceptable values:
+##   - the path to a file
+## oauth2.config_file = ${BONDY_ETC_DIR}/oauth2_config.json
+
+## Default location for oauth2 configuration file
+##
+## Default: ./etc/oauth2_config.json
+##
+## Acceptable values:
+##   - the path to a file
+# oauth2.config_file = ./etc/oauth2_config.json
+
+##
+## Default: 15m
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# oauth2.password_grant.duration = 15m
+
+##
+## Default: 15m
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# oauth2.client_credentials_grant.duration = 15m
+
+##
+## Default: 10m
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# oauth2.code_grant.duration = 10m
+
+##
+## Default: 30d
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# oauth2.refresh_token.duration = 30d
+
+##
+## Default: 40
+##
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+# oauth2.refresh_token.length = 40
+
+
+## =============================================================================
+## WAMP
+## =============================================================================
+
+
+## The default timeout for WAMP (RPC) Calls when the CALL.Options.timeout
+## property is not used. This value will be restricted by the
+## 'wamp.max_call_timeout' property
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+wamp.call_timeout = 30s
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.message_retention.enabled = off
+
+##
+## Default: ram
+##
+## Acceptable values:
+##   - one of: ram, disk, ram_disk
+wamp.message_retention.storage_type = ram
+
+##
+## Default: 1000000
+##
+## Acceptable values:
+##   - an integer
+wamp.message_retention.max_messages = 1000000
+
+##
+## Default: 1GB
+##
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+wamp.message_retention.max_memory = 1GB
+
+##
+## Default: 64KB
+##
+## Acceptable values:
+##   - a byte size with units, e.g. 10GB
+wamp.message_retention.max_message_size = 64KB
+
+##
+## Default: 0
+##
+## Acceptable values:
+##   - an integer
+##   - a time duration with units, e.g. '10s' for 10 seconds
+wamp.message_retention.default_ttl = 0
+
+##
+## Default: loose
+##
+## Acceptable values:
+##   - one of: loose, strict
+wamp.uri.strictness = loose
+
+
+##
+## Default: 15
+##
+## Acceptable values:
+##   - an integer
+wamp.serializers.erl = 15
+
+##
+## Default: 4
+##
+## Acceptable values:
+##   - an integer
+wamp.serializers.bert = 4
+
+
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.tcp.enabled = on
+
+## api_gateway.ssl.port is the TCP port that Bondy uses for
+## exposing the WAMP raw socket transport
+##
+## Default: 18082
+##
+## Acceptable values:
+##   - an integer
+wamp.tcp.port = 18082
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+wamp.tcp.acceptors_pool_size = 50
+
+##
+## Default: 100000
+##
+## Acceptable values:
+##   - an integer
+wamp.tcp.max_connections = 1000
+
+##
+## Default: 1024
+##
+## Acceptable values:
+##   - an integer
+wamp.tcp.backlog = 1024
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.tcp.keepalive = on
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.tcp.nodelay = on
+
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+wamp.tls.enabled = on
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+wamp.tls.acceptors_pool_size = 200
+
+##
+## Default: 1024
+##
+## Acceptable values:
+##   - an integer
+wamp.tls.backlog = 1024
+
+## Default signing authority location for https can be overridden
+## with the wamp.tls config variable, for example:
+##
+## Default: ./etc/cacert.pem
+##
+## Acceptable values:
+##   - the path to a file
+# wamp.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/ca.crt
+
+## Default cert location for https can be overridden
+## with the wamp.tls config variable, for example:
+##
+## Default: ./etc/keycert.pem
+##
+## Acceptable values:
+##   - the path to a file
+# wamp.tls.certfile = ${BONDY_ETC_DIR}/ssl/tls.crt
+
+## Default key location for https can be overridden with the
+## wamp.tls config variable, for example:
+##
+## Default: ./etc/key.pem
+##
+## Acceptable values:
+##   - the path to a file
+# wamp.tls.keyfile = ${BONDY_ETC_DIR}/ssl/tls.key
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.tls.keepalive = on
+
+##
+## Default: 100000
+##
+## Acceptable values:
+##   - an integer
+wamp.tls.max_connections = 100000
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.tls.nodelay = on
+
+## api_gateway.ssl.port is the TCP port that Bondy uses for
+## exposing the WAMP raw socket transport
+##
+## Default: 18085
+##
+## Acceptable values:
+##   - an integer
+wamp.tls.port = 18085
+
+
+## A comma separate list of TLS protocol versions that will be supported
+## At the moment Bondy only supports versions 1.2 and 1.3
+##
+## Default: 1.3
+##
+## Acceptable values:
+##   - text
+wamp.tls.versions = 1.3
+
+## Defines if Websockets PING control message functionality is enabled or
+## not. This option affects server (Bondy) initiated pings only. Some clients
+## might also initiate ping requests and Bondy will always respond to those
+## even if this option is turned off.
+## This feature is useful to keep a connection alive and validate the
+## connection is healthy. For example, Browsers will typically kill websocket
+## connections after 60s and will not initiate PINGs.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+wamp.websocket.ping.enabled = on
+
+## If wamp.websocket.ping.enabled is 'on', this value controls the interval
+## in which Bondy sends WebSockets PING control messages.
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+wamp.websocket.ping.interval = 30s
+
+## If wamp.websocket.ping.enabled is 'on', this value controls how many
+## missed pings are considered a timeout. Thus, after this number of attempts
+## Bondy will drop the connection.
+## If the value is 'infinity' Bondy will never timeout based on missed pings.
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+##   - the text "infinity"
+wamp.websocket.ping.max_attempts = 3
+
+## Drops the connection after a period of inactivity. This option does not
+## take effect when wamp.websocket.ping.enabled is 'on' and wamp.websocket.ping.
+## interval times wamp.websocket.ping.max_attempts results in a value higher
+## than this option.
+## Notice that for some clients using this option alone is not enough to keep
+## a connection alive as the client will drop the connection due to inactivity.
+## If the client supports Websocket PING control messages, enabled them,
+## otherwise e.g. web browsers set wamp.websocket.ping.enabled to on.
+##
+## Default: 8h
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+wamp.websocket.idle_timeout = 8h
+
+
+
+##
+## Default: infinity
+##
+## Acceptable values:
+##   - the text "infinity"
+##   - an integer
+wamp.websocket.max_frame_size = infinity
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+wamp.websocket.compression_enabled = off
+
+##
+## Default: 5
+##
+## Acceptable values:
+##   - an integer
+wamp.websocket.deflate.level = 5
+
+##
+## Default: 8
+##
+## Acceptable values:
+##   - an integer
+wamp.websocket.deflate.mem_level = 8
+
+##
+## Default: default
+##
+## Acceptable values:
+##   - one of: default, filtered, huffman_only, rle
+wamp.websocket.deflate.strategy = default
+
+##
+## Default: takeover
+##
+## Acceptable values:
+##   - one of: takeover, no_takeover
+wamp.websocket.deflate.server_context_takeover = takeover
+
+##
+## Default: takeover
+##
+## Acceptable values:
+##   - one of: takeover, no_takeover
+wamp.websocket.deflate.client_context_takeover = takeover
+
+##
+## Default: 11
+##
+## Acceptable values:
+##   - an integer
+wamp.websocket.deflate.server_max_window_bits = 11
+
+##
+## Default: 11
+##
+## Acceptable values:
+##   - an integer
+wamp.websocket.deflate.client_max_window_bits = 11
+
+
+## =============================================================================
+## BROKER BRIDGE
+## =============================================================================
+
+broker_bridge.config_file = ${BONDY_ETC_DIR}/broker_bridge_config.json
+
+##
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+broker_bridge.kafka.enabled = off
+
+
+## Notification - AWS
+broker_bridge.aws.region = $(AWS_REGION)
+broker_bridge.aws.access_key_id = $(AWS_ACCESS_KEY_ID)
+broker_bridge.aws.secret_access_key = $(AWS_SECRET_ACCESS_KEY)
+
+## Notification - Amazon SNS
+broker_bridge.aws.sns.enabled = on
+broker_bridge.aws.sns_host = $(AWS_SNS_HOST)
+## Notification - Amazon SES
+# broker_bridge.aws.ses.enabled = off
+
+## TODO: I can't have both!!!
+## Notification - Mailgun
+broker_bridge.mailgun.enabled = off
+
+## Notification - Sendgrid
+broker_bridge.sendgrid.enabled = on
+broker_bridge.sendgrid.adapter = sendgrid
+broker_bridge.sendgrid.apiurl = https://api.sendgrid.com/v3
+broker_bridge.sendgrid.apikey = $(SENDGRID_APIKEY)
+broker_bridge.sendgrid.sender = $(SENDGRID_SENDER)
+
+
+
+## =============================================================================
+## CLUSTER
+## =============================================================================
+
+
+## Defines the number of TCP connections for the cluster TCP stack
+##
+## Default: 4
+##
+## Acceptable values:
+##   - an integer
+cluster.parallelism = 1
+
+## Defines the IP to use for the cluster TCP connection
+## {mapping, "cluster.peer_ip", "partisan.peer_ip", [
+## {default, ""},
+## {datatype, integer}
+## ]}.
+##
+## Default: 18086
+##
+## Acceptable values:
+##   - an integer
+cluster.peer_port = 18086
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+cluster.tls.enabled = off
+
+
+## Default cert location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+# cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/keycert.pem
+
+## Default key location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+# cluster.tls.server.keyfile = ${BONDY_ETC_DIR}/ssl/key.pem
+
+## Default signing authority location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+# cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/cacert.pem
+
+## A comma separate list of TLS protocol versions that will be supported
+## At the moment Bondy only supports versions 1.2 and 1.3
+##
+## Default: 1.3
+##
+## Acceptable values:
+##   - text
+cluster.tls.server.versions = 1.3
+
+##
+## Default: verify_none
+##
+## Acceptable values:
+##   - one of: verify_peer, verify_none
+cluster.tls.server.verify = verify_none
+
+## Default cert location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+## cluster.tls.client.certfile = ${BONDY_ETC_DIR}/ssl/client/keycert.pem
+
+## Default key location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+## cluster.tls.client.keyfile = ${BONDY_ETC_DIR}/ssl/client/key.pem
+
+## Default signing authority location for cluster TLS connection
+##
+## Acceptable values:
+##   - the path to a file
+## cluster.tls.client.cacertfile = ${BONDY_ETC_DIR}/ssl/client/cacert.pem
+
+## A comma separate list of TLS protocol versions that will be supported
+## At the moment Bondy only supports versions 1.2 and 1.3
+##
+## Default: 1.3
+##
+## Acceptable values:
+##   - text
+# cluster.tls.client.versions = 1.2,1.3
+
+# cluster.tls.client.verify = verify_none
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+cluster.peer_discovery.enabled = off
+
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+cluster.peer_discovery.initial_delay = 30s
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+cluster.peer_discovery.automatic_join = off
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+cluster.peer_discovery.join_retry_interval = 5s
+
+##
+## Default: 10s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+cluster.peer_discovery.polling_interval = 10s
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+cluster.peer_discovery.timeout = 5s
+
+##
+## Default: bondy_peer_discovery_dns_agent
+##
+## Acceptable values:
+##   - text
+cluster.peer_discovery.type = bondy_peer_discovery_static_agent
+
+
+
+## =============================================================================
+## AAE
+## =============================================================================
+
+
+##
+## Default: 1m
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+aae.data_exchange_timeout = 1m
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+aae.enabled = off
+
+##
+## Default: 10s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+aae.hashtree_timer = 10s
+
+##
+## Default: 1w
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+aae.hashtree_ttl = 1w
+
+##
+## Default: 1m
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+aae.exchange_timer = 1m
+
+##
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+aae.exchange_on_cluster_join = off
+
+
+
+## =============================================================================
+## DIRECTORIES
+## =============================================================================
+
+##
+## Default: ./data
+##
+## Acceptable values:
+##   - the path to a directory
+platform_data_dir = ./data
+##
+## Default: ./etc
+##
+## Acceptable values:
+##   - the path to a directory
+# platform_etc_dir = ./etc
+##
+## Default: ./log
+##
+## Acceptable values:
+##   - the path to a directory
+platform_log_dir = ./log
+##
+## Default: ./tmp
+##
+## Acceptable values:
+##   - the path to a directory
+platform_tmp_dir = ./tmp
+
+
+## =============================================================================
+## STORAGE
+## =============================================================================
+
+store.shard_by = prefix
+
+## Defines the level of concurrency in plum_db (the local embedded
+## database used by Bondy).
+## Each partition has its own leveldb and ets (in-memory db) instance. Ideally
+## we can have one partition per CPU core.
+## Bondy will ignore this configuration in case data already exists i.e. this
+## parameter is considered on a fresh start.
+##
+## Default: 16
+##
+## Acceptable values:
+##   - an integer
+store.partitions = 16
+
+##
+## Default: 30
+##
+## Acceptable values:
+##   - an integer
+store.open_retry_limit = 30
+
+##
+## Default: 2s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+store.open_retries_delay = 2s
+
+
+## =============================================================================
+## LOGGING
+## =============================================================================
+
+## Specifies the primary log level, that is, log event that are equally or
+## more severe than this level, are forwarded to the primary filters. Less
+## severe log events are immediately discarded.
+##
+## Default: info
+##
+## Acceptable values:
+##   - one of: debug, info, notice, warning, error, critical, alert, emergency
+log.level = info
+
+## allows to enable or disable a comnfigured handler
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.default.enabled = on
+
+## The destination backend handler.
+##
+## Default: console
+##
+## Acceptable values:
+##   - one of: disk, console
+log.handlers.default.backend = console
+
+## Specifies the log level for the handler, that is, log events that are
+## equally or more severe than this level, are forwarded to the handler filters
+## for this handler.
+##
+## Default: info
+##
+## Acceptable values:
+##   - one of: debug, info, notice, warning, error, critical, alert, emergency
+log.handlers.default.level = info
+
+##
+## Default: standard_io
+##
+## Acceptable values:
+##   - one of: standard_io, standard_error, file
+log.handlers.default.config.type = standard_io
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## Value true enables burst control and false disables it.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.default.config.burst_limit_enable = on
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## This is the maximum number of events to handle within a
+## burst_limit_window_time time frame. After the limit is reached, successive
+## events are dropped until the end of the time frame.
+##
+## Default: 500
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.burst_limit_max_count = 500
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## See the previous description of burst_limit_max_count.
+##
+## Default: 1s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.default.config.burst_limit_window_time = 1s
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## As long as the length of the message queue is lower than this value, all log
+## events are handled asynchronously. This means that the client process
+## sending the log event, by calling a log function in the Logger API, does not
+## wait for a response from the handler but continues executing immediately
+## after the event is sent. It is not affected by the time it takes the handler
+## to print the event to the log device. If the message queue grows larger than
+## this value, the handler starts handling log events synchronously instead,
+## meaning that the client process sending the event must wait for a response.
+## When the handler reduces the message queue to a level below the
+## sync_mode_qlen threshold, asynchronous operation is resumed. The switch from
+## asynchronous to synchronous mode can slow down the logging tempo of one, or
+## a few, busy senders, but cannot protect the handler sufficiently in a
+## situation of many busy concurrent senders.
+##
+## Default: 10
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.sync_mode_qlen = 10
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## When the message queue grows larger than this threshold, the handler
+## switches to a mode in which it drops all new events that senders want to
+## log. Dropping an event in this mode means that the call to the log function
+## never results in a message being sent to the handler, but the function
+## returns without taking any action. The handler keeps logging the events that
+## are already in its message queue, and when the length of the message queue
+## is reduced to a level below the threshold, synchronous or asynchronous mode
+## is resumed. Notice that when the handler activates or deactivates drop mode,
+## information about it is printed in the log.
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.drop_mode_qlen = 200
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## If the length of the message queue grows larger than this threshold, a flush
+## (delete) operation takes place. To flush events, the handler discards the
+## messages in the message queue by receiving them in a loop without logging.
+## Client processes waiting for a response from a synchronous log request
+## receive a reply from the handler indicating that the request is dropped. The
+## handler process increases its priority during the flush loop to make sure
+## that no new events are received during the operation. Notice that after the
+## flush operation is performed, the handler prints information in the log
+## about how many events have been deleted.
+##
+## Default: 1000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.flush_qlen = 1000
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.default.config.filesync_repeat_enable = on
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.default.config.filesync_repeat_interval = 5s
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## Value true enables the feature and false disables it.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+log.handlers.default.config.overload_kill_enable = off
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## This is the maximum memory size that the handler process is allowed to use. If the handler grows larger than this, the process is terminated.
+##
+## Default: 3000000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.overload_kill_mem_size = 3000000
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## This is the maximum allowed queue length. If the message queue grows larger
+## than this, the handler process is terminated.
+##
+## Default: 20000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.config.overload_kill_qlen = 20000
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## If the handler is terminated, it restarts automatically after a delay
+## specified in milliseconds. The value infinity prevents restarts.
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.default.config.overload_kill_restart_after = 5s
+
+## Specifies what happens to a log event if all filters return ignore, or
+## if no filters exist.
+##
+## Default: stop
+##
+## Acceptable values:
+##   - one of: log, stop
+log.handlers.default.filter_default = stop
+
+## Defines which domains are logged. All log messages that do not have the
+## domain metadata key will be logged.
+## This allows for example to avoid printing bondy_audit logs in the console
+## and print them to a dedicated handler.
+## The value is a comma separated string which con contain one or more of the
+## following elements: "otp", "sasl" and "bondy_audit"
+##
+## Default: otp, bondy_audit
+##
+## Acceptable values:
+##   - text
+log.handlers.default.filter_domains = otp, bondy_audit
+
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.formatter.map_depth = 3
+
+##
+## Default: 50
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.formatter.term_depth = 50
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.default.formatter.colored = on
+
+##
+## Default: [0;38m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_debug = [0;38m
+
+##
+## Default: [1;37m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_info = [1;37m
+
+##
+## Default: [1;36m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_notice = [1;36m
+
+##
+## Default: [1;33m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_warning = [1;33m
+
+##
+## Default: [1;31m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_error = [1;31m
+
+##
+## Default: [1;35m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_critical = [1;35m
+
+##
+## Default: [1;45m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_alert = [1;45m
+
+##
+## Default: [1;41;1m
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.colored_emergency = [1;41;1m
+
+##
+## Default: 0
+##
+## Acceptable values:
+##   - an integer
+log.handlers.default.formatter.time_offset = 0
+
+##
+## Default: T
+##
+## Acceptable values:
+##   - text
+log.handlers.default.formatter.time_designator = T
+
+## allows to enable or disable a comnfigured handler
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.id.enabled = on
+
+## The destination backend handler.
+##
+## Default: console
+##
+## Acceptable values:
+##   - one of: disk, console
+log.handlers.id.backend = console
+
+## Specifies the log level for the handler, that is, log events that are
+## equally or more severe than this level, are forwarded to the handler filters
+## for this handler.
+##
+## Default: info
+##
+## Acceptable values:
+##   - one of: debug, info, notice, warning, error, critical, alert, emergency
+log.handlers.id.level = info
+
+##
+## Default: standard_io
+##
+## Acceptable values:
+##   - one of: standard_io, standard_error, file
+log.handlers.id.config.type = standard_io
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## Value true enables burst control and false disables it.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.id.config.burst_limit_enable = on
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## This is the maximum number of events to handle within a
+## burst_limit_window_time time frame. After the limit is reached, successive
+## events are dropped until the end of the time frame.
+##
+## Default: 500
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.burst_limit_max_count = 500
+
+## Large bursts of log events - many events received by the handler under
+## a short period of time - can potentially cause problems, such as:
+## - Log files grow very large, very quickly.
+## - Circular logs wrap too quickly so that important data is overwritten.
+## - Write buffers grow large, which slows down file sync operations.
+## For this reason, both built-in handlers offer the possibility to specify the
+## maximum number of events to be handled within a certain time frame. With
+## this burst control feature enabled, the handler can avoid choking the log
+## with massive amounts of printouts.
+## See the previous description of burst_limit_max_count.
+##
+## Default: 1s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.id.config.burst_limit_window_time = 1s
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## As long as the length of the message queue is lower than this value, all log
+## events are handled asynchronously. This means that the client process
+## sending the log event, by calling a log function in the Logger API, does not
+## wait for a response from the handler but continues executing immediately
+## after the event is sent. It is not affected by the time it takes the handler
+## to print the event to the log device. If the message queue grows larger than
+## this value, the handler starts handling log events synchronously instead,
+## meaning that the client process sending the event must wait for a response.
+## When the handler reduces the message queue to a level below the
+## sync_mode_qlen threshold, asynchronous operation is resumed. The switch from
+## asynchronous to synchronous mode can slow down the logging tempo of one, or
+## a few, busy senders, but cannot protect the handler sufficiently in a
+## situation of many busy concurrent senders.
+##
+## Default: 10
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.sync_mode_qlen = 10
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## When the message queue grows larger than this threshold, the handler
+## switches to a mode in which it drops all new events that senders want to
+## log. Dropping an event in this mode means that the call to the log function
+## never results in a message being sent to the handler, but the function
+## returns without taking any action. The handler keeps logging the events that
+## are already in its message queue, and when the length of the message queue
+## is reduced to a level below the threshold, synchronous or asynchronous mode
+## is resumed. Notice that when the handler activates or deactivates drop mode,
+## information about it is printed in the log.
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.drop_mode_qlen = 200
+
+## The handler process keeps track of the length of its message queue and
+## takes some form of action when the current length exceeds a configurable
+## threshold. The purpose is to keep the handler in, or to as quickly as
+## possible get the handler into, a state where it can keep up with the pace of
+## incoming log events. The memory use of the handler must never grow larger
+## and larger, since that will eventually cause the handler to crash.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## If the length of the message queue grows larger than this threshold, a flush
+## (delete) operation takes place. To flush events, the handler discards the
+## messages in the message queue by receiving them in a loop without logging.
+## Client processes waiting for a response from a synchronous log request
+## receive a reply from the handler indicating that the request is dropped. The
+## handler process increases its priority during the flush loop to make sure
+## that no new events are received during the operation. Notice that after the
+## flush operation is performed, the handler prints information in the log
+## about how many events have been deleted.
+##
+## Default: 1000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.flush_qlen = 1000
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.id.config.filesync_repeat_enable = on
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.id.config.filesync_repeat_interval = 5s
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## For the overload protection algorithm to work properly, it is required that:
+## sync_mode_qlen =< drop_mode_qlen =< flush_qlen
+## and that: drop_mode_qlen > 1
+## Value true enables the feature and false disables it.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+log.handlers.id.config.overload_kill_enable = off
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## This is the maximum memory size that the handler process is allowed to use. If the handler grows larger than this, the process is terminated.
+##
+## Default: 3000000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.overload_kill_mem_size = 3000000
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## This is the maximum allowed queue length. If the message queue grows larger
+## than this, the handler process is terminated.
+##
+## Default: 20000
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.config.overload_kill_qlen = 20000
+
+## It is possible that a handler, even if it can successfully manage peaks
+## of high load without crashing, can build up a large message queue, or use a
+## large amount of memory. The overload protection mechanism includes an
+## automatic termination and restart feature for the purpose of guaranteeing
+## that a handler does not grow out of bounds.
+## If the handler is terminated, it restarts automatically after a delay
+## specified in milliseconds. The value infinity prevents restarts.
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+log.handlers.id.config.overload_kill_restart_after = 5s
+
+## Specifies what happens to a log event if all filters return ignore, or
+## if no filters exist.
+##
+## Default: stop
+##
+## Acceptable values:
+##   - one of: log, stop
+log.handlers.id.filter_default = stop
+
+## Defines which domains are logged. All log messages that do not have the
+## domain metadata key will be logged.
+## This allows for example to avoid printing bondy_audit logs in the console
+## and print them to a dedicated handler.
+## The value is a comma separated string which con contain one or more of the
+## following elements: "otp", "sasl" and "bondy_audit"
+##
+## Default: otp, bondy_audit
+##
+## Acceptable values:
+##   - text
+log.handlers.id.filter_domains = otp, bondy_audit
+
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.formatter.map_depth = 3
+
+##
+## Default: 50
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.formatter.term_depth = 50
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+log.handlers.id.formatter.colored = on
+
+##
+## Default: [0;38m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_debug = [0;38m
+
+##
+## Default: [1;37m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_info = [1;37m
+
+##
+## Default: [1;36m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_notice = [1;36m
+
+##
+## Default: [1;33m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_warning = [1;33m
+
+##
+## Default: [1;31m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_error = [1;31m
+
+##
+## Default: [1;35m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_critical = [1;35m
+
+##
+## Default: [1;45m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_alert = [1;45m
+
+##
+## Default: [1;41;1m
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.colored_emergency = [1;41;1m
+
+##
+## Default: 0
+##
+## Acceptable values:
+##   - an integer
+log.handlers.id.formatter.time_offset = 0
+
+##
+## Default: T
+##
+## Acceptable values:
+##   - text
+log.handlers.id.formatter.time_designator = T
+
+
+## =============================================================================
+## EDGE : DISABLED
+## =============================================================================
+
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+edge.uplink = off
+
+## Defines the address and port number of the remote Bondy Router this
+## edge node will connect to.
+##
+## Acceptable values:
+##   - text
+## edge.uplink.endpoint = 127.0.0.1:18092
+
+##
+## Default: tcp
+##
+## Acceptable values:
+##   - one of: tcp, tls
+# edge.uplink.transport = tcp
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# edge.uplink.reconnect = on
+
+##
+## Default: 10
+##
+## Acceptable values:
+##   - an integer
+# edge.uplink.reconnect.max_retries = 10
+
+##
+## Default: jitter
+##
+## Acceptable values:
+##   - one of: jitter, normal
+# edge.uplink.reconnect.backoff.type = jitter
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# edge.uplink.reconnect.backoff.min = 5s
+
+##
+## Default: 60s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# edge.uplink.reconnect.backoff.max = 60s
+
+## Defines the number of TCP connections for the edge-remote connection
+##
+## Default: 1
+##
+## Acceptable values:
+##   - an integer
+# edge.uplink.parallelism = 1
+
+##
+## Default: 5s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+# edge.uplink.timeout = 5s
+
+## Drops the connection after a period of inactivity. This option does not
+## take effect when edge.uplink.ping.enabled is 'off'  and
+## edge.uplink.ping.interval times edge.uplink.ping.max_retries
+## results in a value higher than this option.
+## Notice that for some clients using this option alone is not enough to keep
+## a connection alive as the client will drop the connection due to inactivity.
+##
+## Default: 1h
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+# edge.uplink.idle_timeout = 1h
+
+## Defines if PING control message functionality is enabled or
+## not. This option affects client (Bondy Edge) initiated pings only. The
+## remote Bondy router might also initiate ping requests and Bondy Edge will
+## always respond to those even if this option is turned off.
+## This feature is useful to keep a connection alive and validate the
+## connection is healthy.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# edge.uplink.ping = on
+
+## If edge.uplink.ping.enabled is 'on', this value controls the
+## interval in which Bondy Edge sends PING control messages to edge peers.
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# edge.uplink.ping.interval = 30s
+
+## If edge.uplink.ping.enabled is 'on', this value controls how many
+## missed pings are considered a timeout. Thus, after this number of attempts
+## Bondy Edge will drop the connection.
+## If the value is 'infinity' Bondy Edge will never timeout based on missed
+## pings.
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+##   - the text "infinity"
+# edge.uplink.ping.max_retries = 3
+
+##
+## Default: infinity
+##
+## Acceptable values:
+##   - the text "infinity"
+##   - an integer
+# edge.uplink.max_frame_size = infinity
+
+## =============================================================================
+## EDGE LISTENER: ENABLED
+## =============================================================================
+
+
+## Enables or disables Bondy edge nodes to connect to Bondy.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+edge.listener.tcp = off
+
+## TCP port that Bondy edge nodes will use to connect to Bondy.
+##
+## Default: 18092
+##
+## Acceptable values:
+##   - an integer
+# edge.listener.tcp.port = 18092
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+# edge.listener.tcp.acceptors_pool_size = 200
+
+##
+## Default: 100000
+##
+## Acceptable values:
+##   - an integer
+# edge.listener.tcp.max_connections = 100000
+
+##
+## Default: 1024
+##
+## Acceptable values:
+##   - an integer
+# edge.listener.tcp.backlog = 1024
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# edge.listener.tcp.keepalive = on
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# edge.listener.tcp.nodelay = on
+
+## Defines if  PING control message functionality is enabled or
+## not. This option affects server (Bondy) initiated pings only. Bondy Edge
+## might also initiate ping requests and Bondy will always respond to those
+## even if this option is turned off.
+## This feature is useful to keep a connection alive and validate the
+## connection is healthy.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+# edge.listener.tcp.ping = on
+
+## If edge.listener.tcp.ping.enabled is 'on', this value controls the interval
+## in which Bondy sends PING control messages to edge peers.
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+# edge.listener.tcp.ping.interval = 30s
+
+## If edge.listener.tcp.ping.enabled is 'on', this value controls how many
+## missed pings are considered a timeout. Thus, after this number of attempts
+## Bondy will drop the connection.
+## If the value is 'infinity' Bondy will never timeout based on missed pings.
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+##   - the text "infinity"
+# edge.listener.tcp.ping.max_retries = 3
+
+## Drops the connection after a period of inactivity. This option does not
+## take effect when edge.listener.tcp.ping.enabled is 'on'
+## and edge.listener.tcp.ping.interval times
+## edge.listener.tcp.ping.max_retries results in a value higher than this
+## option.
+## Notice that for some clients using this option alone is not enough to keep
+## a connection alive as the client will drop the connection due to inactivity.
+##
+## Default: 8h
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+# edge.listener.tcp.idle_timeout = 8h
+
+##
+## Default: infinity
+##
+## Acceptable values:
+##   - the text "infinity"
+##   - an integer
+# edge.listener.tcp.max_frame_size = infinity
+
+## Enables or disables Bondy edge nodes to connect to Bondy.
+##
+## Default: off
+##
+## Acceptable values:
+##   - on or off
+edge.listener.tls = off
+
+## TCP port that Bondy edge nodes will use to connect to Bondy.
+##
+## Default: 18093
+##
+## Acceptable values:
+##   - an integer
+edge.listener.tls.port = 18093
+
+##
+## Default: 200
+##
+## Acceptable values:
+##   - an integer
+edge.listener.tls.acceptors_pool_size = 200
+
+##
+## Default: 100000
+##
+## Acceptable values:
+##   - an integer
+edge.listener.tls.max_connections = 100000
+
+##
+## Default: 1024
+##
+## Acceptable values:
+##   - an integer
+edge.listener.tls.backlog = 1024
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+edge.listener.tls.keepalive = on
+
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+edge.listener.tls.nodelay = on
+
+## Defines if  PING control message functionality is enabled or
+## not. This option affects server (Bondy) initiated pings only. Bondy Edge
+## might also initiate ping requests and Bondy will always respond to those
+## even if this option is turned off.
+## This feature is useful to keep a connection alive and validate the
+## connection is healthy.
+##
+## Default: on
+##
+## Acceptable values:
+##   - on or off
+edge.listener.tls.ping = on
+
+## If edge.listener.tls.ping.enabled is 'on', this value controls the interval
+## in which Bondy sends PING control messages to edge peers.
+##
+## Default: 30s
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+edge.listener.tls.ping.interval = 30s
+
+## If edge.listener.tls.ping.enabled is 'on', this value controls how many
+## missed pings are considered a timeout. Thus, after this number of attempts
+## Bondy will drop the connection.
+## If the value is 'infinity' Bondy will never timeout based on missed pings.
+##
+## Default: 3
+##
+## Acceptable values:
+##   - an integer
+##   - the text "infinity"
+edge.listener.tls.ping.max_retries = 3
+
+## Drops the connection after a period of inactivity. This option does not
+## take effect when edge.listener.tls.ping.enabled is 'on' and edge.listener.tls.ping.
+## interval times edge.listener.tls.ping.max_retries results in a value higher
+## than this option.
+## Notice that for some clients using this option alone is not enough to keep
+## a connection alive as the client will drop the connection due to inactivity.
+##
+## Default: 8h
+##
+## Acceptable values:
+##   - a time duration with units, e.g. '10s' for 10 seconds
+##   - the text "infinity"
+edge.listener.tls.idle_timeout = 8h
+
+##
+## Default: infinity
+##
+## Acceptable values:
+##   - the text "infinity"
+##   - an integer
+edge.listener.tls.max_frame_size = infinity
+
+## Default cert location for https can be overridden
+## with the edge.tls config variable, for example:
+##
+## Default: ./etc/cert.pem
+##
+## Acceptable values:
+##   - the path to a file
+# edge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/tls.crt
+
+## Default key location for https can be overridden with the
+## edge.tls config variable, for example:
+##
+## Default: ./etc/key.pem
+##
+## Acceptable values:
+##   - the path to a file
+# edge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/tls.key
+
+## Default signing authority location for https can be overridden
+## with the edge.tls config variable, for example:
+##
+## Default: ./etc/cacert.pem
+##
+## Acceptable values:
+##   - the path to a file
+# edge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/ca.crt
+
+## A comma separate list of TLS protocol versions that will be supported
+## At the moment Bondy only supports versions 1.2 and 1.3
+##
+## Default: 1.3
+##
+## Acceptable values:
+##   - text
+edge.listener.tls.versions = 1.3
+
+
+## =============================================================================
+## STORE
+## =============================================================================
+
+## This parameter defines the percentage of total server memory
+## to assign to LevelDB. LevelDB will dynamically adjust its internal
+## cache sizes to stay within this size.  The memory size can
+## alternately be assigned as a byte count via leveldb.maximum_memory
+## instead.
+##
+## Default: 70
+##
+## Acceptable values:
+##   - an integer
+leveldb.maximum_memory.percent = 70
+
+
+## =============================================================================
+## LOAD REGULATION
+## =============================================================================
+
+## The capacity of the router process pool, i.e. the maximum number of
+## active erlang processes handling router events (default = 100000).
+## Once the maximum has been reached, Bondy will respond with an overload error.
+##
+## Default: 100000
+##
+## Acceptable values:
+##   - an integer
+load_regulation.router.pool.capacity = 100000
+
+## The capacity of the session manager process pool, i.e. the maximum
+## number of active erlang processes handling session events (default = 50).
+##
+## Default: 50
+##
+## Acceptable values:
+##   - an integer
+load_regulation.session_manager.pool.size = 50
+
+
+
+## =============================================================================
+## ERLANG VM
+## =============================================================================
+
+erlang.async_threads = 64
+erlang.max_ports = 500000
+erlang.process_limit = 2000000
+erlang.distribution_buffer_size = 32MB
+erlang.time_correction = on
+erlang.time_correction.warp_mode = multi_time_warp
+
+## The following is required when running in Docker / K8s
+## Refer to https://adoptingerlang.org/docs/production/kubernetes/
+erlang.sbwt = none

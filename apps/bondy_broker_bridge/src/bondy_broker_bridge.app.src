@@ -8,7 +8,9 @@
     stdlib,
     brod,
     hash,
-    mops
+    mops,
+    erlcloud,
+    email
    ]},
   {env,[]},
   {modules, []},
