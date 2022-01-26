@@ -133,7 +133,7 @@ test_1(Config) ->
         }
     },
 
-    {ok, Extra, NewCtxt1} = bondy_auth:challenge(
+    {true, Extra, NewCtxt1} = bondy_auth:challenge(
         ?WAMP_CRYPTOSIGN_AUTH, Details, Ctxt1
     ),
 

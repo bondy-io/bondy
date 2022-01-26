@@ -87,12 +87,12 @@ requirements() ->
 %% -----------------------------------------------------------------------------
 -spec challenge(
     Details :: map(), AuthCtxt :: bondy_auth:context(), State :: state()) ->
-    {ok, NewState :: state()}
-    | {ok, Extra :: map(), NewState :: state()}
+    {false, NewState :: state()}
+    | {true, Extra :: map(), NewState :: state()}
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
-    {ok, State}.
+    {true, #{}, State}.
 
 
 %% -----------------------------------------------------------------------------

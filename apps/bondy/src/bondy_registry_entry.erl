@@ -78,7 +78,7 @@
     match_policy     :=  binary(),
     ref              :=  bondy_ref:t(),
     callback_args    :=  list(term()),
-    created          :=  calendar:date(),
+    created          :=  pos_integer(),
     options          :=  map(),
     origin_id        :=  maybe(id()),
     origin_ref       :=  maybe(bondy_ref:t())
@@ -628,7 +628,7 @@ to_external(#entry{key = Key} = E) ->
         match_policy => E#entry.match_policy,
         ref => E#entry.ref,
         callback_args => E#entry.callback_args,
-        created => created_format(E#entry.created),
+        created => E#entry.created,
         options => E#entry.options,
         origin_ref => E#entry.origin_ref
     }.

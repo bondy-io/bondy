@@ -121,3 +121,5 @@ edge.uplink.realm.1.cryptosign.pubkey = 1766c9e6ec7d7b354fd7a2e4542753a23cae0b90
 edge.uplink.realm.1.cryptosign.privkey_env_var = EDGE1_DEVICE1_PRIVKEY
 # edge.uplink.realm.1.cryptosign.procedure = com.myapp.sign
 # edge.uplink.realm.1.cryptosign.exec = "/opt/st/sign"
+edge.uplink.realm.1.procedure.1 = com.example.add exact out
+edge.uplink.realm.1.topic.1 = com.example. prefix out

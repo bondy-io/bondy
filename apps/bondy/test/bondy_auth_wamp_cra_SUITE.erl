@@ -116,7 +116,7 @@ test_1(Config) ->
         lists:member(?WAMP_CRA_AUTH, bondy_auth:available_methods(U1Ctxt1))
     ),
 
-    {ok, U1Extra, U1Ctxt2} = bondy_auth:challenge(
+    {true, U1Extra, U1Ctxt2} = bondy_auth:challenge(
         ?WAMP_CRA_AUTH, #{}, U1Ctxt1
     ),
     #{

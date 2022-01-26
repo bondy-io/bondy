@@ -1,6 +1,7 @@
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the client-side connection between and
 %% edge node (client) and a remote/core node (server).
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_edge_uplink_client).
@@ -14,6 +15,115 @@
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
+
+-define(REALM_SPEC, #{
+    uri => #{
+        alias => <<"uri">>,
+        required => true,
+        validator => fun bondy_data_validators:realm_uri/1
+    },
+    authid => #{
+        alias => <<"authid">>,
+        required => true,
+        validator => fun bondy_data_validators:username/1
+    },
+    cryptosign => #{
+        alias => <<"cryptosign">>,
+        required => true,
+        validator => #{
+            pubkey => #{
+                alias => <<"pubkey">>,
+                required => true,
+                datatype => binary
+            },
+            procedure => #{
+                alias => <<"procedure">>,
+                required => false,
+                validator => fun
+                    (Mod) when is_atom(Mod) ->
+                        true;
+                    (Mod) when is_binary(Mod) ->
+                        case catch binary_to_existing_atom(Mod) of
+                            {'EXIT', _} -> false;
+                            Val -> {ok, Val}
+                        end
+                end
+            },
+            exec => #{
+                alias => <<"exec">>,
+                required => false,
+                validator => fun
+                    (Name) when is_list(Name) ->
+                        true;
+                    (Name) when is_binary(Name) ->
+                        {ok, binary_to_list(Name)}
+                end
+            },
+            privkey_env_var => #{
+                alias => <<"privkey_env_var">>,
+                required => false,
+                validator => fun
+                    (Name) when is_list(Name) ->
+                        true;
+                    (Name) when is_binary(Name) ->
+                        {ok, binary_to_list(Name)}
+                end
+            }
+        }
+    },
+    procedures => #{
+        alias => <<"procedures">>,
+        required => true,
+        default => [],
+        validator => {list, ?MATCH_SPEC}
+
+    },
+    topics => #{
+        alias => <<"topics">>,
+        required => true,
+        default => [],
+        validator => {list, ?MATCH_SPEC}
+    }
+}).
+
+-define(MATCH_SPEC, #{
+    uri => #{
+        alias => <<"uri">>,
+        required => true,
+        datatype => binary
+    },
+    match => #{
+        alias => <<"match">>,
+        required => false,
+        default => ?EXACT_MATCH,
+        datatype => {in, ?MATCH_STRATEGIES}
+    },
+    direction => #{
+        alias => <<"direction">>,
+        required => true,
+        default => out,
+        validator => fun
+            (in) ->
+                true;
+            (out) ->
+                true;
+            (both) ->
+                true;
+            ("in") ->
+                {ok, in};
+            ("out") ->
+                {ok, out};
+            ("both") ->
+                {ok, both};
+            (<<"in">>) ->
+                {ok, in};
+            (<<"out">>) ->
+                {ok, out};
+            (<<"both">>) ->
+                {ok, both}
+        end
+    }
+}).
 
 
 -record(state, {
@@ -44,7 +154,7 @@
 
 %% API.
 -export([start_link/3]).
--export([forward/3]).
+-export([forward/2]).
 
 %% GEN_STATEM CALLBACKS
 -export([callback_mode/0]).
@@ -69,21 +179,19 @@
 %% @end
 %% -----------------------------------------------------------------------------
 start_link(Transport, Endpoint, Opts) ->
-    % dbg:tracer(), dbg:p(all,c),
-    % dbg:tpl(?MODULE, '_', x),
-    % dbg:tpl(gen_tcp, 'connect', x),
     gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
-
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec forward(Pid :: pid(), Msg :: any(), SessionId :: bondy_session_id:t()) ->
+-spec forward(Ref :: bondy_ref:t(), Msg :: any()) ->
     ok.
 
-forward(Pid, Msg, SessionId) ->
+forward(Ref, Msg) ->
+    Pid = bondy_ref:pid(Ref),
+    SessionId = bondy_ref:session_id(Ref),
     gen_statem:cast(Pid, {forward_message, Msg, SessionId}).
 
 
@@ -109,15 +217,22 @@ callback_mode() ->
 init({Transport0, Endpoint, Opts}) ->
 
     ?LOG_NOTICE(#{description => "Starting edge client"}),
+
     TransportMod = transport_mod(Transport0),
 
-    %% TODO Validate realms
+    Realms0 = key_value:get(realms, Opts, #{}),
+    Realms = maps:map(
+        fun(_Uri, Realm) ->
+            maps_utils:validate(Realm, ?REALM_SPEC)
+        end,
+        Realms0
+    ),
 
     State0 = #state{
         transport = TransportMod,
         endpoint = Endpoint,
         opts = Opts,
-        realms = key_value:get(realms, Opts, #{}),
+        realms = Realms,
         idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
         tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
@@ -157,40 +272,30 @@ init({Transport0, Endpoint, Opts}) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(Reason, StateName, #state{transport = T, socket = S} = State0)
-when T =/= undefined andalso S =/= undefined ->
-    catch T:close(S),
-
-    ?LOG_WARNING(#{
-        description => "Connection terminated",
-        reason => Reason
-    }),
-
-    ok = on_close(Reason, State0),
-
-    State = State0#state{transport = undefined, socket = undefined},
-
-    terminate(Reason, StateName, State);
-
-terminate(Reason, _StateName, State0) ->
-
-    %% We unsubscribe from all
-    bondy_broker:unsubscribe(self()),
-
-    _State = maps:fold(
-        fun(Id, _, Acc) ->
-            leave_session(Id, Acc)
-        end,
-        State0,
-        State0#state.sessions
-    ),
+terminate(Reason, _StateName, #state{socket = undefined}) ->
 
     ?LOG_NOTICE(#{
         description => "Process terminated",
         reason => Reason
     }),
 
-    ok.
+    ok;
+
+terminate(Reason, StateName, #state{} = State0) ->
+
+    ?LOG_WARNING(#{
+        description => "Connection terminated",
+        reason => Reason
+    }),
+
+    Transport = State0#state.transport,
+    Socket = State0#state.socket,
+
+    catch Transport:close(Socket),
+
+    State = on_disconnect(State0),
+
+    terminate(Reason, StateName, State#state{socket = undefined}).
 
 
 %% -----------------------------------------------------------------------------
@@ -248,11 +353,7 @@ connecting(EventType, Msg, _) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connected(enter, connecting, #state{} = State0) ->
-    ok = on_connect(State0),
-
-    %% We join any realms defined by the config
-    State = open_sessions(State0),
-
+    State = on_connect(State0),
     {keep_state, State};
 
 connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
@@ -276,9 +377,10 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {abort, #{}, server_error}, State) ->
+connected(internal, {abort, #{}, Reason}, State) ->
     ?LOG_NOTICE(#{
-        description => "Got abort message from server, closing connection."
+        description => "Got abort message from server, closing connection.",
+        reason => Reason
     }),
     {stop, server_error, State};
 
@@ -293,7 +395,7 @@ connected(internal, {aae_sync, SessionId, finished}, State0) ->
     {keep_state, State, idle_timeout(State)};
 
 connected(internal, {aae_data, SessionId, Data}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got aae_sync data",
         session_id => SessionId,
         data => Data
@@ -305,7 +407,7 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
 
 connected(
     internal, {receive_message, SessionId, {forward, To, Msg, Opts}}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got session message from core router",
         session_id => SessionId,
         message => Msg
@@ -331,21 +433,21 @@ when ?SOCKET_DATA(Tag) ->
     ],
     {keep_state_and_data, Actions};
 
-connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
+connected(info, {Tag, _Socket}, State0) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
         description => "Socket closed",
         reason => closed_by_remote
     }),
-    ok = on_disconnect(State),
+    State = on_disconnect(State0),
     {next_state, connecting, State};
 
-connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
+connected(info, {Tag, _, Reason}, State0) when ?SOCKET_ERROR(Tag) ->
     ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
-    ok = on_disconnect(State),
+    State = on_disconnect(State0),
     {next_state, connecting, State};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_WARNING(#{description => "Connection timeout, sending first ping"}),
+    ?LOG_DEBUG(#{description => "Connection timeout, sending first ping"}),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {ok, State1} = send_ping(State0),
     {keep_state, State1};
@@ -368,7 +470,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     {keep_state, State1};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
-    ?LOG_WARNING(#{
+    ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to core",
         message => Msg
     }),
@@ -421,7 +523,7 @@ connected(cast, Msg, _) ->
     keep_state_and_data;
 
 connected(timeout, Msg, _) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Received timeout message",
         type => timeout,
         event => Msg
@@ -434,7 +536,7 @@ connected(EventType, Msg, _) ->
         type => EventType,
         event => Msg
     }),
-    {stop, normal}.
+    keep_state_and_data.
 
 
 
@@ -516,7 +618,7 @@ connect(Transport, {Host, PortNumber}, Opts) ->
     catch
         Class:EReason ->
             ?LOG_WARNING(#{
-                description => "Error while trying to establish uplink connection",
+                description => "Error while trying to establish connection with remote router",
                 class => Class,
                 reason => EReason
             }),
@@ -543,19 +645,30 @@ send_message(Message, State) ->
 
 
 %% @private
-on_connect(_State) ->
-    ?LOG_NOTICE(#{description => "Uplink connection established"}),
-    ok.
+on_connect(State0) ->
+    ?LOG_NOTICE(#{description => "Established connection with remote router"}),
+
+    %% We join any realms defined by the config
+    {_, R1} = bondy_retry:succeed(State0#state.reconnect_retry),
+    State = State0#state{reconnect_retry = R1},
+    open_sessions(State).
 
 
 %% @private
-on_disconnect(_State) ->
-    ok.
+on_disconnect(State) ->
+    _ = maps:foreach(
+        fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
+            bondy_router:flush(RealmUri, Ref)
+        end,
+        State#state.sessions
+    ),
 
+    State#state{
+        socket = undefined,
+        sessions = #{},
+        sessions_by_uri = #{}
+    }.
 
-%% @private
-on_close(_Reason, _State) ->
-    ok.
 
 
 %% @private
@@ -632,8 +745,7 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
             error(Reason)
     end;
 
-signer(_, #{cryptosign := #{privkey_env_var := Bin}}) ->
-    Var = binary_to_list(Bin),
+signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
 
     case os:getenv(Var) of
         false ->
@@ -692,6 +804,7 @@ open_sessions(State0) ->
                 }
             },
 
+            %% TODO HELLO should include the Bondy Edge protocol v1
             ok = send_message({hello, Uri, Details}, State0),
 
             Session = #{
@@ -720,25 +833,28 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-
-    State3 = subscribe(Session, State2),
+    State3 = subscribe_meta_events(Session, State2),
 
     %% Get the already registered registrations and subscriptions and proxy them
     State4 = proxy_existing(Session, State3),
 
-    State4#state{
+    %% We finally subscribe to user events so that we can re-publish on the
+    %% remote cluster
+    State5 = subscribe_topics(Session, State4),
+
+    State5#state{
         session = undefined
     }.
 
 
 %% @private
-leave_session(Id, #state{} = State) ->
-    Sessions0 = State#state.sessions,
-    {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
-    State#state{
-        sessions = Sessions,
-        sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
-    }.
+% leave_session(Id, #state{} = State) ->
+%     Sessions0 = State#state.sessions,
+%     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
+%     State#state{
+%         sessions = Sessions,
+%         sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
+%     }.
 
 
 %% @private
@@ -807,27 +923,55 @@ handle_aae_data({PKey, RemoteObj}, _State) ->
 
 
 %% @private
-subscribe(Session0, State) ->
-    SessionId = maps:get(id, Session0),
-    RealmUri = maps:get(realm_uri, Session0),
-    MyRef = maps:get(ref, Session0),
-    Me = self(),
+subscribe_meta_events(Session, State) ->
+    SessionId = maps:get(id, Session),
+    RealmUri = maps:get(realm_uri, Session),
+    MyRef = maps:get(ref, Session),
 
     %% We subscribe to registration and subscription meta events
     %% The event handler will call
     %% forward(Me, Event, SessionId)
 
     _ = bondy_event_manager:add_sup_handler(
-        {bondy_edge_event_handler, SessionId}, [RealmUri, SessionId, Me]
+        {bondy_edge_event_handler, SessionId}, [RealmUri, MyRef]
     ),
 
-    Topic = <<"">>,
-    Opts = #{
-        match => ?PREFIX_MATCH
-    },
-    {ok, SubsId} = bondy_broker:subscribe(RealmUri, Opts, Topic, MyRef),
+    State.
 
-    Session = key_value:set([subscriptions, SubsId], Topic, Session0),
+
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc We subscribe to the topics configured for this realm.
+%% But instead of receiving an EVENT we will get a PUBLISH message. This is an
+%% optimization performed by bondy_broker to avoid sending N events to N
+%% subscribers that are remote.
+%% @end
+%% -----------------------------------------------------------------------------
+subscribe_topics(Session0, State) ->
+    MyRef = maps:get(ref, Session0),
+    RealmUri = maps:get(realm_uri, Session0),
+    RealmConfig = maps:get(RealmUri, State#state.realms),
+    Topics = maps:get(topics, RealmConfig),
+
+    Session = lists:foldl(
+        fun
+            (#{uri := Uri, match := Match, direction := out}, Acc) ->
+                {ok, Id} = bondy_broker:subscribe(
+                    RealmUri, #{match => Match}, Uri, MyRef
+                ),
+                key_value:set([subscriptions, Id], Uri, Acc);
+
+            (#{uri := _Uri, match := _Match, direction := _} = Subs, Acc) ->
+                %% Not implemented yet
+                ?LOG_WARNING(#{
+                    description => "[Experimental] Bridge relay subscription direction type not currently supported",
+                    subscription => Subs
+                }),
+                Acc
+        end,
+        Session0,
+        Topics
+    ),
 
     add_session(Session, State).
 
@@ -884,9 +1028,6 @@ proxy_entry(#{id := SessionId}, State, Entry) ->
             ok = send_session_message(SessionId, Msg, State),
             State
     end.
-
-
-
 
 
 

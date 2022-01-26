@@ -135,19 +135,22 @@ init({RanchRef, Transport, Opts}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-terminate(Reason, StateName, #state{transport = T, socket = S} = State)
-when T =/= undefined andalso S =/= undefined ->
+
+terminate(_Reason, _StateName, #state{socket = undefined} = State) ->
+    ok = remove_all_registry_entries(State);
+
+terminate(Reason, StateName, #state{} = State) ->
     ?LOG_DEBUG(#{
         description => "Closing connection",
         reason => Reason
     }),
-    catch T:close(S),
-    ok = on_close(Reason, State),
-    NewState = State#state{transport = undefined, socket = undefined},
-    terminate(Reason, StateName, NewState);
 
-terminate(_Reason, _StateName, State) ->
-    ok = remove_all_registry_entries(State).
+    Transport = State#state.transport,
+    Socket = State#state.socket,
+
+    catch Transport:close(Socket),
+
+    terminate(Reason, StateName, State#state{socket = undefined}).
 
 
 %% -----------------------------------------------------------------------------
@@ -205,16 +208,17 @@ connected(enter, connected, State) ->
 connected(info, {Tag, Socket, Data}, #state{socket = Socket} = State)
 when ?SOCKET_DATA(Tag) ->
     ok = set_socket_active(State),
+
     case binary_to_term(Data) of
         {receive_message, SessionId, Msg} ->
-            ?LOG_INFO(#{
+            ?LOG_DEBUG(#{
                 description => "Got session message from edge",
                 reason => Msg,
                 session_id => SessionId
             }),
             safe_handle_session_message(Msg, SessionId, State);
         Msg ->
-            ?LOG_INFO(#{
+            ?LOG_DEBUG(#{
                 description => "Got message from edge",
                 reason => Msg
             }),
@@ -232,12 +236,15 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     {stop, Reason};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
-    ?LOG_WARNING(#{
+    %% A local send, we need to forward to edge client
+    ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
+
     SessionId = session_id(RealmUri, State),
     ok = send_message({receive_message, SessionId, M}, State),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected(info, Msg, State) ->
@@ -246,6 +253,7 @@ connected(info, Msg, State) ->
         type => info,
         event => Msg
     }),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected({call, From}, Request, State) ->
@@ -254,7 +262,9 @@ connected({call, From}, Request, State) ->
         type => call,
         event => Request
     }),
+
     gen_statem:reply(From, {error, badcall}),
+
     {keep_state_and_data, [idle_timeout(State)]};
 
 connected(cast, {forward, Msg}, State) ->
@@ -304,11 +314,13 @@ challenge(Realm, Details, State0) ->
         {ok, AuthCtxt} ->
             %% TODO take it from conf
             ReqMethods = [<<"cryptosign">>],
+
             case bondy_auth:available_methods(ReqMethods, AuthCtxt) of
                 [] ->
                     throw({no_authmethod, ReqMethods});
 
                 [Method|_] ->
+
                     Session = #{
                         id => SessionId,
                         authid => Authid,
@@ -339,11 +351,11 @@ do_challenge(SessionId, Details, Method, State0) ->
 
     {AuthCtxt, Reply} =
         case bondy_auth:challenge(Method, Details, AuthCtxt0) of
-            {ok, AuthCtxt1} ->
+            {false, AuthCtxt1} ->
                 M = {welcome, SessionId, #{}},
                 {AuthCtxt1, M};
 
-            {ok, ChallengeExtra, AuthCtxt1} ->
+            {true, ChallengeExtra, AuthCtxt1} ->
                 M = {challenge, Method, ChallengeExtra},
                 {AuthCtxt1, M};
 
@@ -416,10 +428,6 @@ on_connect(_State) ->
     ok.
 
 
-%% @private
-on_close(_Reason, _State) ->
-    ok.
-
 
 %% @private
 idle_timeout(State) ->
@@ -431,7 +439,7 @@ handle_message({hello, _, _}, #state{session = Session} = State)
 when Session =/= undefined ->
     %% Session already being established, wrong message
     ok = send_message({abort, #{}, protocol_violation}, State),
-    {stop, State};
+    {stop, protocol_violation, State};
 
 handle_message({hello, Uri, Details}, State0) ->
     %% TODO validate Details
@@ -453,11 +461,11 @@ handle_message({hello, Uri, Details}, State0) ->
         error:{not_found, Uri} ->
             Reason = {no_such_realm, Uri},
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0};
+            {stop, {no_such_realm, Uri}, State0};
 
         throw:Reason ->
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
+            {stop, Reason, State0}
 
     end;
 
@@ -477,7 +485,7 @@ handle_message({authenticate, Signature, Extra}, State0) ->
     catch
         throw:Reason ->
             ok = send_message({abort, #{}, Reason}, State0),
-            {stop, State0}
+            {stop, Reason, State0}
     end;
 
 handle_message({aae_sync, SessionId, Opts}, State) ->
@@ -512,7 +520,7 @@ safe_handle_session_message(Msg, SessionId, State) ->
                 stacktrace => Stacktrace
             }),
             ok = send_message({abort, #{}, server_error}, State),
-            {stop, State}
+            {stop, Reason, State}
     end.
 
 
@@ -556,6 +564,33 @@ handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
 
     {keep_state, State, [idle_timeout(State)]};
 
+handle_session_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
+    RealmUri = session_realm(SessionId, State),
+    ReqId = M#publish.request_id,
+    TopicUri = M#publish.topic_uri,
+    Args = M#publish.args,
+    KWArg = M#publish.kwargs,
+    Opts0 = M#publish.options,
+    Opts = Opts0#{exclude_me => true},
+    Ref = session_ref(SessionId, State),
+
+    %% We do a re-publish so that bondy_broker disseminates the event using its
+    %% normal optimizations
+    Job = fun() ->
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+        bondy_broker:publish(ReqId, Opts, TopicUri, Args, KWArg, Ctxt)
+    end,
+
+    case bondy_router_worker:cast(Job) of
+        ok ->
+            ok;
+        {error, overload} ->
+            %% TODO return proper return ...but we should move this to router
+            error(overload)
+    end,
+
+    {keep_state_and_data, [idle_timeout(State)]};
+
 handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
     %% We either need to implement Partisan 4 plus:
@@ -575,6 +610,14 @@ handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
             error(overload)
     end,
 
+    {keep_state_and_data, [idle_timeout(State)]};
+
+handle_session_message(Other, SessionId, State) ->
+    ?LOG_INFO(#{
+        description => "Unhandled message",
+        session => SessionId,
+        message => Other
+    }),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 

@@ -229,19 +229,29 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
         true ->
             do_forward(Msg, To, Opts);
         false ->
+            RelayOpts = #{
+                ack => true,
+                retransmission => true,
+                partition_key => erlang:phash2(RealmUri)
+            },
             case bondy:peek_via(Opts) of
                 undefined ->
                     Node = bondy_ref:node(To),
                     PeerMsg = {forward, To, Msg, Opts},
-                    bondy_router_relay:forward(Node, RealmUri, PeerMsg);
+                    bondy_router_relay:forward(Node, PeerMsg, RelayOpts);
                 Relay ->
                     case bondy_ref:is_local(Relay) of
                         true ->
-                            bondy:send(To, Msg, Opts);
+                            bondy:send(RealmUri, To, Msg, Opts);
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
-                            bondy_router_relay:forward(Node, RealmUri, PeerMsg)
+                            RelayOpts = #{
+                                ack => true,
+                                retransmission => true,
+                                partition_key => erlang:phash2(RealmUri)
+                            },
+                            bondy_router_relay:forward(Node, PeerMsg)
                     end
             end
     end.

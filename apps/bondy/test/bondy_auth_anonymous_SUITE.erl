@@ -49,7 +49,7 @@ test(Config) ->
     {ok, Ctxt} = bondy_auth:init(SessionId, RealmUri, anonymous, Roles, Peer),
 
     ?assertMatch(
-        {ok, _},
+        {false, _},
         bondy_auth:challenge(?WAMP_ANON_AUTH, undefined, Ctxt)
     ),
 

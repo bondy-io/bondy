@@ -74,6 +74,7 @@
 -export([is_feature_enabled/3]).
 -export([is_security_enabled/1]).
 -export([local_context/1]).
+-export([local_context/2]).
 -export([new/0]).
 -export([new/2]).
 -export([peer/1]).
@@ -138,7 +139,6 @@ format_status(Opt, Ctxt0) ->
 new() ->
     #{
         session_id => bondy_session_id:new(),
-        request_id => undefined,
         call_timeout => bondy_config:get(wamp_call_timeout, undefined),
         request_timeout => bondy_config:get(request_timeout, undefined)
     }.
@@ -155,6 +155,18 @@ local_context(RealmUri) when is_binary(RealmUri) ->
         realm_uri => RealmUri,
         security_enabled => bondy_realm:is_security_enabled(RealmUri),
         authid => '$internal'
+    }.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+local_context(RealmUri, Ref) when is_binary(RealmUri) ->
+    Ctxt = local_context(RealmUri),
+
+    Ctxt#{
+        ref => Ref
     }.
 
 
@@ -223,7 +235,10 @@ session_id(#{session := S}) ->
 session_id(#{session_id := Val}) ->
     Val;
 
-session_id(#{}) ->
+session_id(#{ref := Ref}) ->
+    bondy_ref:session_id(Ref);
+
+session_id(_) ->
     undefined.
 
 

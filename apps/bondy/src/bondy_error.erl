@@ -311,8 +311,10 @@ map({Code, Mssg, Desc}) ->
         <<"message">> => Mssg,
         <<"description">> => Desc
     };
+map(Code) when is_atom(Code) ->
+    map(atom_to_binary(Code, utf8));
 
-map(Code) ->
+map(Code) when is_binary(Code) ->
     #{
         <<"code">> => Code,
         <<"message">> => <<>>,

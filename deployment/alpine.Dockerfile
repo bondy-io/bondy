@@ -65,12 +65,23 @@ USER bondy:bondy
 # Copy the release to workdir
 COPY --chown=bondy:bondy --from=builder /bondy/rel .
 
-# We add Bondy and Erlang executables to PATH
-ENV PATH="/bondy/bin:/bondy/erts-12.2/bin:$PATH"
+# We add Bondy executables to PATH
+ENV PATH="/bondy/bin:$PATH"
 ENV BONDY_LOG_CONSOLE=console
 ENV BONDY_LOG_LEVEL=info
 ENV ERL_CRASH_DUMP=/dev/null
+
+# This is required so that relx replaces the vm.args
+# BONDY_ERL_NODENAME and BONDY_ERL_DISTRIBUTED_COOKIE variables
+ENV RELX_REPLACE_OS_VARS=true
+# Default value. We assume you have DNS. Erlang will take the FQDN and generate
+# a node name == ${BONDY_ERL_NODENAME}@${FQDN}
+ENV BONDY_ERL_NODENAME=bondy
+# Default value.
+ENV BONDY_ERL_DISTRIBUTED_COOKIE=bondy
+# This env var is read by the Erlang VM
 ENV ERL_DIST_PORT=27784
+
 ENV HOME "/bondy"
 
 # Define which ports are intended to be published

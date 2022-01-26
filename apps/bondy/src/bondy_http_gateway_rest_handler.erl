@@ -289,13 +289,13 @@ is_authorized(
                 throw(Reason)
         end
 
-        catch
-            throw:EReason ->
-                Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
-                Req2 = reply_auth_error(
-                    EReason, <<"Bearer">>, RealmUri, json, Req1
-                ),
-                {stop, Req2, St0}
+    catch
+        throw:EReason ->
+            Req1 = set_resp_headers(eval_headers(Req0, St0), Req0),
+            Req2 = reply_auth_error(
+                EReason, <<"Bearer">>, RealmUri, json, Req1
+            ),
+            {stop, Req2, St0}
     end;
 
 is_authorized(_, Req, #{security := #{<<"type">> := <<"api_key">>}} = St) ->
