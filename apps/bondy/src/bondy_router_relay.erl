@@ -86,6 +86,7 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -record(state, {
+    ref :: bondy_ref:t()
 }).
 
 
@@ -174,7 +175,7 @@ forward(Nodes, Msg, Opts) when is_list(Nodes) ->
 
 init([]) ->
     true = bondy:register(?MODULE),
-    {ok, #state{}}.
+    {ok, #state{ref = bondy_ref:new(relay)}}.
 
 
 handle_call(Event, From, State) ->
@@ -186,7 +187,7 @@ handle_call(Event, From, State) ->
     {reply, {error, {unsupported_call, Event}}, State}.
 
 
-handle_cast({forward, To, Msg, Opts} = M, State) ->
+handle_cast({forward, To, Msg, Opts0} = M, State) ->
     %% We are receiving a message from peer
     try
         %% This in theory breaks the CALL order guarantee!!!
@@ -194,6 +195,7 @@ handle_cast({forward, To, Msg, Opts} = M, State) ->
         %% workers by {CallerID, CalleeId}
         Job = fun() ->
             try
+                Opts = Opts0#{relayed_by => State#state.ref},
                 bondy_router:forward(Msg, To, Opts)
             catch
                 Class:Reason:Stacktrace ->

@@ -333,8 +333,9 @@ unregister(Callee) when is_pid(Callee) ->
 -spec unregister(RegId :: id(), bondy_context:t() | uri()) ->
     ok | {error, not_found}.
 
-unregister(RegId, RealmUri) when is_binary(RealmUri) ->
-    unregister(RegId, bondy_context:local_context(RealmUri));
+unregister(RegId, Ctxt) when is_map(Ctxt) ->
+    RealmUri = bondy_context:realm_uri(Ctxt),
+    unregister(RegId, RealmUri);
 
 unregister(RegId, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),

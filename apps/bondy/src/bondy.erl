@@ -129,7 +129,7 @@ send(RealmUri, Ref, M) ->
 send(RealmUri, To, Msg, Opts) ->
     %% We validate the message
     wamp_message:is_message(Msg)
-        orelse error(invalid_wamp_message),
+        orelse error({invalid_wamp_message, Msg}),
 
     case bondy_ref:is_local(To) of
         true ->

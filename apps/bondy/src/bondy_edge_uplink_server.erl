@@ -233,6 +233,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     {stop, Reason};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
+    %% A local send, we need to forward to edge client
     ?LOG_WARNING(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
@@ -563,6 +564,33 @@ handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
+
+handle_session_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
+    RealmUri = session_realm(SessionId, State),
+    ReqId = M#publish.request_id,
+    TopicUri = M#publish.topic_uri,
+    Args = M#publish.args,
+    KWArg = M#publish.kwargs,
+    Opts0 = M#publish.options,
+    Opts = Opts0#{exclude_me => true},
+    Ref = session_ref(SessionId, State),
+
+    %% We do a re-publish so that bondy_broker disseminates the event using its
+    %% normal optimizations
+    Job = fun() ->
+        Ctxt = bondy_context:local_context(RealmUri, Ref),
+        bondy_broker:publish(ReqId, Opts, TopicUri, Args, KWArg, Ctxt)
+    end,
+
+    case bondy_router_worker:cast(Job) of
+        ok ->
+            ok;
+        {error, overload} ->
+            %% TODO return proper return ...but we should move this to router
+            error(overload)
+    end,
+
+    {keep_state_and_data, [idle_timeout(State)]};
 
 handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!

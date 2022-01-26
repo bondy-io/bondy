@@ -807,6 +807,7 @@ open_sessions(State0) ->
                 }
             },
 
+            %% TODO HELLO should include the Bondy Edge protocol v1
             ok = send_message({hello, Uri, Details}, State0),
 
             Session = #{
@@ -954,18 +955,21 @@ subscribe_topics(Session0, State) ->
     RealmUri = maps:get(realm_uri, Session0),
     RealmConfig = maps:get(RealmUri, State#state.realms),
     Topics = maps:get(topics, RealmConfig),
-    Opts = #{exclude_me => true},
 
     Session = lists:foldl(
         fun
             (#{uri := Uri, match := Match, direction := out}, Acc) ->
                 {ok, Id} = bondy_broker:subscribe(
-                    RealmUri, Opts#{match => Match}, Uri, MyRef
+                    RealmUri, #{match => Match}, Uri, MyRef
                 ),
                 key_value:set([subscriptions, Id], Uri, Acc);
 
-            (#{uri := _Uri, match := _Match, direction := _}, Acc) ->
+            (#{uri := _Uri, match := _Match, direction := _} = Subs, Acc) ->
                 %% Not implemented yet
+                ?LOG_WARNING(#{
+                    description => "[Experimental] Bridge relay subscription direction type not currently supported",
+                    subscription => Subs
+                }),
                 Acc
         end,
         Session0,
