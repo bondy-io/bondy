@@ -493,9 +493,10 @@ forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% INVOCATION already has the static arguments appended
             %% to its positional args (see call_to_invocation/4).
             CBArgs = [],
-            Reply = apply_dynamic_callback(Msg, Callee, Caller, CBArgs),
-            {To, SendOpts} = bondy:prepare_send(Caller, Opts),
-            bondy:send(RealmUri, To, Reply, SendOpts);
+            Yield = apply_dynamic_callback(Msg, Callee, Caller, CBArgs),
+            {To, SendOpts0} = bondy:prepare_send(Caller, Opts),
+            SendOpts = SendOpts0#{from => Callee},
+            bondy:send(RealmUri, To, Yield, SendOpts);
 
         _ ->
             {To, SendOpts} = bondy:prepare_send(Callee, Opts),
@@ -960,10 +961,11 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                     %% enqueue a promise, we will apply the callback
                     %% and respond sequentially.
                     CBArgs = bondy_registry_entry:callback_args(Entry),
-                    Reply = apply_dynamic_callback(Msg, Callee, Ctxt, CBArgs),
-
-                    bondy:send(RealmUri, Caller, Reply, #{from => Callee}),
+                    Yield = apply_dynamic_callback(Msg, Callee, Ctxt, CBArgs),
+                    Result = yield_to_result(Msg#call.request_id, Yield),
+                    bondy:send(RealmUri, Caller, Result, #{from => Callee}),
                     {ok, Ctxt};
+
                 _ ->
                     %% All other cases, including remote callbacks,
                     %% we need to invoke normally
@@ -980,8 +982,8 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc If the callback module returns ignore we need to find the callee in the
-%% registry
+%% @doc If the callback module returns other than `ok' or `reply' we need to
+%% find the callee in the registry.
 %% @end
 %% -----------------------------------------------------------------------------
 apply_static_callback(#call{} = M0, Ctxt, Mod) ->
@@ -1044,7 +1046,7 @@ when is_map(Ctxt) ->
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
-            wamp_message:result(
+            wamp_message:yield(
                 ReqId,
                 Details,
                 Args,
@@ -1083,7 +1085,7 @@ apply_dynamic_callback(#invocation{} = Msg, Callee, Caller, CBArgs) ->
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
-            wamp_message:result(
+            wamp_message:yield(
                 ReqId,
                 Details,
                 Args,
