@@ -744,33 +744,52 @@ handle_cast(Event, State) ->
 handle_info(
     {plum_db_event, object_update, {{{_, _}, _Key}, Obj, PrevObj}}, State) ->
 
-    ?LOG_DEBUG(#{
-        description => "Object update notification.",
-        object => Obj,
-        previous => PrevObj
-    }),
-
     case maybe_resolve(Obj) of
-        '$deleted' when PrevObj =/= undefined ->
-            %% We do this since we need to know the Match Policy of the
-            %% entry in order to generate the trie key and we want to
-            %% avoid including yet another element to the entry_key
-            Reconciled = plum_db_object:resolve(PrevObj, lww),
-            OldEntry = plum_db_object:value(Reconciled),
-            %% This works because registry entries are immutable
-            _ = delete_from_trie(OldEntry);
-
         '$deleted' when PrevObj == undefined ->
             %% We got a delete for an entry we do not know anymore.
             %% This happens when the registry has just been reset
             %% as we do not persist registrations any more
             %%
             %% TODO use the future plum_db:erase instead of delete and avoid
-            %% tombstones being reseurfaced
+            %% tombstones being resurfaced
             ok;
+
+        '$deleted' when PrevObj =/= undefined ->
+            %% We do this since we need to know the Match Policy of the
+            %% previous entry in order to generate the trie key and we want to
+            %% avoid including yet another element to the entry_key
+            Reconciled = plum_db_object:resolve(PrevObj, lww),
+            OldEntry = plum_db_object:value(Reconciled),
+            %% This works because registry entries are immutable
+            _ = delete_from_trie(OldEntry);
         Entry ->
-            %% We only add to trie
-            add_to_trie(Entry)
+            case bondy_registry_entry:is_local(Entry) of
+                true when PrevObj =:= undefined ->
+                    %% Another node is telling us we are missing an entry that
+                    %% is rooted here, this is an inconsistency issue produced
+                    %% by our eventual consistency model. Most probably we
+                    %% crashed and we never had the chance to mark this entry
+                    %% as deleted or if we did it never reached the peer node.
+                    %% We need to mark it as deleted in plum_db so that the
+                    %% other nodes get the event and stop trying to re-surface
+                    %% it.
+                    RealmUri = bondy_registry_entry:realm_uri(Entry),
+                    Type = bondy_registry_entry:type(Entry),
+                    Key = bondy_registry_entry:key(Entry),
+                    Prefix = full_prefix(Type, RealmUri),
+
+                    %% This will mark it as deleted and broadcast the change to
+                    %% the cluster peers
+                    ok = plum_db:delete(Prefix, Key);
+
+                true when PrevObj =/= undefined ->
+                    %% This case should never happen as entries are immutable
+                    ok;
+
+                false ->
+                    add_to_trie(Entry)
+
+            end
     end,
 
     {noreply, State};
