@@ -135,19 +135,22 @@ init({RanchRef, Transport, Opts}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-terminate(Reason, StateName, #state{transport = T, socket = S} = State)
-when T =/= undefined andalso S =/= undefined ->
+
+terminate(_Reason, _StateName, #state{socket = undefined} = State) ->
+    ok = remove_all_registry_entries(State);
+
+terminate(Reason, StateName, #state{} = State) ->
     ?LOG_DEBUG(#{
         description => "Closing connection",
         reason => Reason
     }),
-    catch T:close(S),
-    ok = on_close(Reason, State),
-    NewState = State#state{transport = undefined, socket = undefined},
-    terminate(Reason, StateName, NewState);
 
-terminate(_Reason, _StateName, State) ->
-    ok = remove_all_registry_entries(State).
+    Transport = State#state.transport,
+    Socket = State#state.socket,
+
+    catch Transport:close(Socket),
+
+    terminate(Reason, StateName, State#state{socket = undefined}).
 
 
 %% -----------------------------------------------------------------------------
@@ -234,7 +237,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
     %% A local send, we need to forward to edge client
-    ?LOG_WARNING(#{
+    ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
     }),
@@ -424,10 +427,6 @@ on_connect(_State) ->
     }),
     ok.
 
-
-%% @private
-on_close(_Reason, _State) ->
-    ok.
 
 
 %% @private

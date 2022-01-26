@@ -272,40 +272,30 @@ init({Transport0, Endpoint, Opts}) ->
 %% -----------------------------------------------------------------------------
 -spec terminate(term(), atom(), t()) -> term().
 
-terminate(Reason, StateName, #state{transport = T, socket = S} = State0)
-when T =/= undefined andalso S =/= undefined ->
-    catch T:close(S),
-
-    ?LOG_WARNING(#{
-        description => "Connection terminated",
-        reason => Reason
-    }),
-
-    ok = on_close(Reason, State0),
-
-    State = State0#state{transport = undefined, socket = undefined},
-
-    terminate(Reason, StateName, State);
-
-terminate(Reason, _StateName, State0) ->
-
-    %% We unsubscribe from all
-    bondy_broker:unsubscribe(self()),
-
-    _State = maps:fold(
-        fun(Id, _, Acc) ->
-            leave_session(Id, Acc)
-        end,
-        State0,
-        State0#state.sessions
-    ),
+terminate(Reason, _StateName, #state{socket = undefined}) ->
 
     ?LOG_NOTICE(#{
         description => "Process terminated",
         reason => Reason
     }),
 
-    ok.
+    ok;
+
+terminate(Reason, StateName, #state{} = State0) ->
+
+    ?LOG_WARNING(#{
+        description => "Connection terminated",
+        reason => Reason
+    }),
+
+    Transport = State0#state.transport,
+    Socket = State0#state.socket,
+
+    catch Transport:close(Socket),
+
+    State = on_disconnect(State0),
+
+    terminate(Reason, StateName, State#state{socket = undefined}).
 
 
 %% -----------------------------------------------------------------------------
@@ -363,11 +353,7 @@ connecting(EventType, Msg, _) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connected(enter, connecting, #state{} = State0) ->
-    ok = on_connect(State0),
-
-    %% We join any realms defined by the config
-    State = open_sessions(State0),
-
+    State = on_connect(State0),
     {keep_state, State};
 
 connected(internal, {challenge, <<"cryptosign">>, ChallengeExtra}, State) ->
@@ -447,17 +433,17 @@ when ?SOCKET_DATA(Tag) ->
     ],
     {keep_state_and_data, Actions};
 
-connected(info, {Tag, _Socket}, State) when ?CLOSED_TAG(Tag) ->
+connected(info, {Tag, _Socket}, State0) when ?CLOSED_TAG(Tag) ->
     ?LOG_INFO(#{
         description => "Socket closed",
         reason => closed_by_remote
     }),
-    ok = on_disconnect(State),
+    State = on_disconnect(State0),
     {next_state, connecting, State};
 
-connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
+connected(info, {Tag, _, Reason}, State0) when ?SOCKET_ERROR(Tag) ->
     ?LOG_WARNING(#{description => "Socket error", reason => Reason}),
-    ok = on_disconnect(State),
+    State = on_disconnect(State0),
     {next_state, connecting, State};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
@@ -659,19 +645,28 @@ send_message(Message, State) ->
 
 
 %% @private
-on_connect(_State) ->
+on_connect(State) ->
     ?LOG_NOTICE(#{description => "Established connection with remote router"}),
-    ok.
+
+    %% We join any realms defined by the config
+    open_sessions(State).
 
 
 %% @private
-on_disconnect(_State) ->
-    ok.
+on_disconnect(State) ->
+    _ = maps:foreach(
+        fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
+            bondy_router:flush(RealmUri, Ref)
+        end,
+        State#state.sessions
+    ),
 
+    State#state{
+        socket = undefined,
+        sessions = #{},
+        sessions_by_uri = #{}
+    }.
 
-%% @private
-on_close(_Reason, _State) ->
-    ok.
 
 
 %% @private
@@ -851,13 +846,13 @@ init_session(SessionId, #state{session = Session0} = State0) ->
 
 
 %% @private
-leave_session(Id, #state{} = State) ->
-    Sessions0 = State#state.sessions,
-    {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
-    State#state{
-        sessions = Sessions,
-        sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
-    }.
+% leave_session(Id, #state{} = State) ->
+%     Sessions0 = State#state.sessions,
+%     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
+%     State#state{
+%         sessions = Sessions,
+%         sessions_by_uri = maps:remove(Uri, State#state.sessions_by_uri)
+%     }.
 
 
 %% @private
