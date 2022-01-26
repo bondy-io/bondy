@@ -478,11 +478,11 @@ forward(M, Ctxt) ->
 
 
 forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
+    %% A remote Caller is making a CALL to a local Callee via a
+    %% Relay.
+
     %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
-
-    %% A remote Caller is making a CALL to a local Callee via a Relay.
-    {To, SendOpts} = bondy:prepare_send(Callee, Opts),
 
     case bondy_ref:target_type(Callee) of
         callback ->
@@ -494,9 +494,12 @@ forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% to its positional args (see call_to_invocation/4).
             CBArgs = [],
             Reply = apply_dynamic_callback(Msg, Callee, Caller, CBArgs),
+            {To, SendOpts} = bondy:prepare_send(Caller, Opts),
             bondy:send(RealmUri, To, Reply, SendOpts);
 
         _ ->
+            {To, SendOpts} = bondy:prepare_send(Callee, Opts),
+
             try
                 Timeout = bondy_utils:timeout(Opts),
                 InvocationId = Msg#invocation.request_id,
