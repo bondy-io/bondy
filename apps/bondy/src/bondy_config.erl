@@ -255,8 +255,9 @@ node() ->
 nodestring() ->
     case get(nodestring, undefined) of
         undefined ->
-            Node = partisan_config:get(name),
-            set(nodestring, atom_to_binary(Node, utf8));
+            Nodestring = atom_to_binary(partisan_config:get(name), utf8),
+            ok = set(nodestring, Nodestring),
+            Nodestring;
         Nodestring ->
             Nodestring
     end.
