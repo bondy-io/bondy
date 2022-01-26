@@ -409,7 +409,7 @@ connected(internal, {aae_sync, SessionId, finished}, State0) ->
     {keep_state, State, idle_timeout(State)};
 
 connected(internal, {aae_data, SessionId, Data}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got aae_sync data",
         session_id => SessionId,
         data => Data
@@ -421,7 +421,7 @@ connected(internal, {aae_data, SessionId, Data}, State) ->
 
 connected(
     internal, {receive_message, SessionId, {forward, To, Msg, Opts}}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Got session message from core router",
         session_id => SessionId,
         message => Msg
@@ -461,7 +461,7 @@ connected(info, {Tag, _, Reason}, State) when ?SOCKET_ERROR(Tag) ->
     {next_state, connecting, State};
 
 connected(info, timeout, #state{ping_sent = false} = State0) ->
-    ?LOG_WARNING(#{description => "Connection timeout, sending first ping"}),
+    ?LOG_DEBUG(#{description => "Connection timeout, sending first ping"}),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
     {ok, State1} = send_ping(State0),
     {keep_state, State1};
@@ -484,7 +484,7 @@ connected(info, timeout, #state{ping_sent = false} = State0) ->
 %     {keep_state, State1};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, Msg}, State) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to core",
         message => Msg
     }),
@@ -537,7 +537,7 @@ connected(cast, Msg, _) ->
     keep_state_and_data;
 
 connected(timeout, Msg, _) ->
-    ?LOG_INFO(#{
+    ?LOG_DEBUG(#{
         description => "Received timeout message",
         type => timeout,
         event => Msg

@@ -208,14 +208,14 @@ when ?SOCKET_DATA(Tag) ->
 
     case binary_to_term(Data) of
         {receive_message, SessionId, Msg} ->
-            ?LOG_INFO(#{
+            ?LOG_DEBUG(#{
                 description => "Got session message from edge",
                 reason => Msg,
                 session_id => SessionId
             }),
             safe_handle_session_message(Msg, SessionId, State);
         Msg ->
-            ?LOG_INFO(#{
+            ?LOG_DEBUG(#{
                 description => "Got message from edge",
                 reason => Msg
             }),
