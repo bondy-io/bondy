@@ -645,10 +645,12 @@ send_message(Message, State) ->
 
 
 %% @private
-on_connect(State) ->
+on_connect(State0) ->
     ?LOG_NOTICE(#{description => "Established connection with remote router"}),
 
     %% We join any realms defined by the config
+    {_, R1} = bondy_retry:succeed(State0#state.reconnect_retry),
+    State = State0#state{reconnect_retry = R1},
     open_sessions(State).
 
 
