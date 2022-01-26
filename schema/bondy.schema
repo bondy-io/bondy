@@ -1582,7 +1582,7 @@
 
 %% The time the agent will wait to initiate the lookup.
 {mapping, "cluster.peer_discovery.initial_delay", "bondy.peer_discovery.initial_delay", [
-  {default, "30s"},
+  {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 

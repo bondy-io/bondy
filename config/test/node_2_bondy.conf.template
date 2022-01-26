@@ -52,6 +52,7 @@ cluster.peer_port = 18186
 cluster.peer_discovery.enabled = on
 cluster.peer_discovery.automatic_join = on
 cluster.peer_discovery.polling_interval = 10s
+cluster.peer_discovery.initial_delay = 1s
 cluster.peer_discovery.timeout = 5s
 cluster.peer_discovery.type = bondy_peer_discovery_static_agent
 cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18086
