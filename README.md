@@ -71,7 +71,7 @@ rebar3 as prod tar
 Untar and copy the resulting tarball to the location where you want to install Bondy e.g. `~/tmp/bondy`.
 
 ```shell
-tar -zxvf _build/prod/rel/bondy-1.0.0-beta.27.tar.qz -C ~/tmp/bondy
+tar -zxvf _build/prod/rel/bondy-1.0.0-beta.28.tar.qz -C ~/tmp/bondy
 ```
 
 #### Running
