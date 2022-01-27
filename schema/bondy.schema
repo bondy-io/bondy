@@ -1564,7 +1564,7 @@
   hidden
 ]}.
 
-{mapping, "cluster.exchange_tick_period", "partisan.partisan_peer_service_manager", [
+{mapping, "cluster.peer_service_manager", "partisan.partisan_peer_service_manager", [
   {default, partisan_pluggable_peer_service_manager},
   {datatype, {enum, [
     partisan_pluggable_peer_service_manager,
