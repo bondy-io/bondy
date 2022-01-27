@@ -114,6 +114,15 @@ end}.
 ]}.
 
 
+
+%% @doc Enables or disables the reconnect feature. Once a connection is
+%% established but fails due to an unknown error or by the connecting being
+%% aborted by the remote with an error that is recoverable, we might want to
+%% ask Bondy to retyr the connection e.g. when connecting with realm A the
+%% remote aborts the connection with reason `no_such_realm', in this case maybe
+%% the realm has not yet been provisioned, so we want the connection to retry
+%% indefinitely.
+%% @end
 {mapping, "edge.uplink.reconnect", "bondy.edge.uplink.reconnect.enabled", [
   {default, on},
   {datatype, flag}
