@@ -525,6 +525,8 @@ handle_message({authenticate, Signature, Extra}, State0) ->
 handle_message({aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
     ok = full_sync(SessionId, RealmUri, Opts, State),
+    Finish = {aae_sync, SessionId, finished},
+    ok = gen_statem:cast(self(), {forward, Finish}),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
@@ -737,10 +739,7 @@ full_sync(SessionId, RealmUri, Opts, State) ->
     %% ALSO we are currently copying the CRA passwords which we shouldn't
 
     %% Finally we sync the realm
-    ok = do_full_sync(SessionId, RealmUri, Opts, State),
-
-    Finish = {aae_sync, SessionId, finished},
-    gen_statem:cast(self(), {forward, Finish}).
+    ok = do_full_sync(SessionId, RealmUri, Opts, State).
 
 
 
