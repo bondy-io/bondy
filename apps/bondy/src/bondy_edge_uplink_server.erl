@@ -109,7 +109,7 @@ init({RanchRef, Transport, Opts}) ->
         ranch_ref = RanchRef,
         transport = Transport,
         opts = Opts,
-        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(10)),
+        idle_timeout = key_value:get(idle_timeout, Opts, infinity),
         start_ts = erlang:system_time(millisecond)
     },
 
