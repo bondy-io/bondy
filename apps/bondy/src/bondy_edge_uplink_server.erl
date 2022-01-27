@@ -140,7 +140,7 @@ terminate(_Reason, _StateName, #state{socket = undefined} = State) ->
     ok = remove_all_registry_entries(State);
 
 terminate(Reason, StateName, #state{} = State) ->
-    ?LOG_DEBUG(#{
+    ?LOG_INFO(#{
         description => "Closing connection",
         reason => Reason
     }),
@@ -438,8 +438,11 @@ idle_timeout(State) ->
 handle_message({hello, _, _}, #state{session = Session} = State)
 when Session =/= undefined ->
     %% Session already being established, wrong message
-    ok = send_message({abort, #{}, protocol_violation}, State),
-    {stop, protocol_violation, State};
+    Abort = {abort, protocol_violation, #{
+        message => <<"You've sent the HELLO message twice">>
+    }},
+    ok = send_message(Abort, State),
+    {stop, normal, State};
 
 handle_message({hello, Uri, Details}, State0) ->
     %% TODO validate Details
@@ -459,13 +462,38 @@ handle_message({hello, Uri, Details}, State0) ->
 
     catch
         error:{not_found, Uri} ->
-            Reason = {no_such_realm, Uri},
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, {no_such_realm, Uri}, State0};
+            Abort = {abort, no_such_realm, #{
+                message => <<"Realm does not exist.">>,
+                realm => Uri
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
 
-        throw:Reason ->
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, Reason, State0}
+        throw:connections_not_allowed = Reason ->
+            Abort = {abort, Reason, #{
+                message => <<"The Realm does not allow user connections ('allow_connections' setting is off). This might be a temporary measure added by the administrator or the realm is meant to be used only as a Same Sign-on (SSO) realm.">>,
+                realm => Uri
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
+
+        throw:{no_authmethod, ReqMethods} ->
+            Abort = {abort, no_authmethod, #{
+                message => <<"The requested authentication methods are not available for this user on this realm.">>,
+                realm => Uri,
+                authmethods => ReqMethods
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0};
+
+        throw:{authentication_failed, Reason} ->
+            Abort = {abort, authentication_failed, #{
+                message => <<"Authentication failed.">>,
+                realm => Uri,
+                reason => Reason
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0}
 
     end;
 
@@ -483,9 +511,15 @@ handle_message({authenticate, Signature, Extra}, State0) ->
         {keep_state, State, [idle_timeout(State)]}
 
     catch
-        throw:Reason ->
-            ok = send_message({abort, #{}, Reason}, State0),
-            {stop, Reason, State0}
+        throw:{authentication_failed, Reason} ->
+            RealmUri = maps:get(realm_uri, State0#state.session, undefined),
+            Abort = {abort, authentication_failed, #{
+                message => <<"Authentication failed.">>,
+                realm_uri => RealmUri,
+                reason => Reason
+            }},
+            ok = send_message(Abort, State0),
+            {stop, normal, State0}
     end;
 
 handle_message({aae_sync, SessionId, Opts}, State) ->
@@ -519,7 +553,10 @@ safe_handle_session_message(Msg, SessionId, State) ->
                 reason => Reason,
                 stacktrace => Stacktrace
             }),
-            ok = send_message({abort, #{}, server_error}, State),
+            Abort = {abort, server_error, #{
+                reason => Reason
+            }},
+            ok = send_message(Abort, State),
             {stop, Reason, State}
     end.
 
