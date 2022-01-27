@@ -169,7 +169,8 @@ end}.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
 {mapping, "edge.uplink.idle_timeout", "bondy.edge.uplink.idle_timeout", [
-{default, "1h"},
+{default, "24h"},
+{default, infinity},
 {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
 
