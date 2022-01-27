@@ -24,14 +24,6 @@
 
 -behaviour(supervisor).
 
--define(SUPERVISOR(Id, Args, Restart, Timeout), #{
-    id => Id,
-    start => {Id, start_link, Args},
-    restart => Restart,
-    shutdown => Timeout,
-    type => supervisor,
-    modules => [Id]
-}).
 
 -define(WORKER(Id, Args, Restart, Timeout), #{
     id => Id,
