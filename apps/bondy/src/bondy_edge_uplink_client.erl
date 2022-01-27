@@ -372,7 +372,7 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
         details => Details
     }),
 
-    State = init_session(SessionId, State0),
+    State = init_session_and_sync(SessionId, State0),
 
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
@@ -390,7 +390,7 @@ connected(internal, {aae_sync, SessionId, finished}, State0) ->
         session_id => SessionId
     }),
 
-    State = State0,
+    State = setup_proxing(SessionId, State0),
 
     {keep_state, State, idle_timeout(State)};
 
@@ -820,7 +820,7 @@ open_sessions(State0) ->
 
 
 %% @private
-init_session(SessionId, #state{session = Session0} = State0) ->
+init_session_and_sync(SessionId, #state{session = Session0} = State0) ->
     Session = Session0#{
         id => SessionId,
         ref => bondy_ref:new(bridge_relay, self(), SessionId)
@@ -831,20 +831,25 @@ init_session(SessionId, #state{session = Session0} = State0) ->
     %% Synchronise the realm configuraiton state before proxying
     State2 = aae_sync(Session, State1),
 
+    State2#state{
+        session = undefined
+    }.
+
+
+setup_proxing(SessionId, State0) ->
     %% Setup the meta subscriptions so that we can dynamically proxy
     %% events
-    State3 = subscribe_meta_events(Session, State2),
+    Session = session(SessionId, State0),
+
+    State1 = subscribe_meta_events(Session, State0),
 
     %% Get the already registered registrations and subscriptions and proxy them
-    State4 = proxy_existing(Session, State3),
+    State2 = proxy_existing(Session, State1),
 
     %% We finally subscribe to user events so that we can re-publish on the
     %% remote cluster
-    State5 = subscribe_topics(Session, State4),
+    subscribe_topics(Session, State2).
 
-    State5#state{
-        session = undefined
-    }.
 
 
 %% @private
