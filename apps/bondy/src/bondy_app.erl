@@ -107,6 +107,8 @@ start(_Type, Args) ->
             ok = init_registry(),
             ok = setup_wamp_subscriptions(),
             ok = start_admin_listeners(),
+            %% We need to re-enable AAE (if it was enabled) so that hashtrees
+            %% are build
             ok = restore_aae(),
             ok = maybe_wait_for_plum_db_hashtrees(),
             ok = maybe_wait_for_aae_exchange(),
@@ -355,7 +357,7 @@ setup_wamp_subscriptions() ->
 
 %% @private
 suspend_aae() ->
-    case plum_db_config:get(aae_enabled, true) of
+    case application:get_env(plum_db, aae_enabled, true) of
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = application:set_env(plum_db, aae_enabled, false),
@@ -374,7 +376,9 @@ restore_aae() ->
         true ->
             %% plum_db should have started so we call plum_db_config
             ok = plum_db_config:set(aae_enabled, true),
-            ?LOG_NOTICE(#{description => "Active anti-entropy (AAE) re-enabled"}),
+            ?LOG_NOTICE(#{
+                description => "Active anti-entropy (AAE) re-enabled"
+            }),
             ok;
         false ->
             ok
