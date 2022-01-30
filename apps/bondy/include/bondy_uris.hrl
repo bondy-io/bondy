@@ -32,6 +32,17 @@
 -define(BONDY_CLUSTER_PEER_INFO,        <<"bondy.cluster.peer_info">>).
 -define(BONDY_CLUSTER_STATUS,           <<"bondy.cluster.status">>).
 
+
+-define(BONDY_ROUTER_BRIDGE_ADD,          <<"bondy.router.bridge.add">>).
+-define(BONDY_ROUTER_BRIDGE_CHECK_SPEC,   <<"bondy.router.bridge.check_spec">>).
+-define(BONDY_ROUTER_BRIDGE_GET_SPEC,     <<"bondy.router.bridge.get_spec">>).
+-define(BONDY_ROUTER_BRIDGE_LIST,         <<"bondy.router.bridge.list">>).
+-define(BONDY_ROUTER_BRIDGE_STATUS,       <<"bondy.router.bridge.status">>).
+-define(BONDY_ROUTER_BRIDGE_REMOVE,       <<"bondy.router.bridge.remove">>).
+-define(BONDY_ROUTER_BRIDGE_START,        <<"bondy.router.bridge.start">>).
+-define(BONDY_ROUTER_BRIDGE_STOP,         <<"bondy.router.bridge.stop">>).
+-define(BONDY_ROUTER_BRIDGE_UPDATE,       <<"bondy.router.bridge.update">>).
+
 -define(BONDY_HTTP_GATEWAY_ADD,         <<"bondy.http_gateway.api.add">>).
 -define(BONDY_HTTP_GATEWAY_GET,         <<"bondy.http_gateway.api.get">>).
 -define(BONDY_HTTP_GATEWAY_LIST,        <<"bondy.http_gateway.api.list">>).

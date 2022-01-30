@@ -22,93 +22,50 @@
 %% =============================================================================
 
 
-{mapping, "edge.uplink", "bondy.edge.uplink.enabled", [
+{mapping, "bridge.$name", "bondy.bridges", [
   {default, off},
   {datatype, flag}
 ]}.
 
-%% @doc Defines the address and port number of the remote Bondy Router this
+%% @doc Defines the endpoint and port number of the remote Bondy Router this
 %% edge node will connect to.
-{mapping, "edge.uplink.endpoint", "bondy.edge.uplink.endpoint", [
+{mapping, "bridge.$name.endpoint", "bondy.bridges", [
   {commented, "127.0.0.1:18092"},
   {datatype, string}
 ]}.
 
 
-{translation,
-"bondy.edge.uplink.endpoint",
-fun(Conf) ->
-    try
-      case cuttlefish:conf_get("edge.uplink.endpoint", Conf) of
-          String when is_list(String) ->
-            case string:split(String, ":") of
-              [Host, PortStr] ->
-                Port = list_to_integer(PortStr),
-
-                Port >= 1024 andalso Port =< 65535
-                  orelse throw(invalid_port),
-
-                case inet:getaddr(Host, inet) of
-                  {ok, IP} ->
-                    {IP, Port};
-                  _ ->
-                    throw(invalid_addr)
-                end;
-              _ ->
-                throw(invalid)
-            end;
-          _ ->
-            throw(invalid)
-      end
-
-    catch
-      throw:invalid ->
-        cuttlefish:invalid(
-          "value should be string with IP or Hostname and Port Number separated by a colon e.g. \"127.0.0.1:18080\""
-        );
-      throw:invalid_port ->
-        cuttlefish:invalid(
-          "value for the Port Number should be greater than 1023 and lower than 65536"
-        );
-      throw:invalid_addr ->
-        cuttlefish:invalid(
-          "value for the Hostname referes to a non-existing domain"
-        )
-    end
-end}.
-
-
-{mapping, "edge.uplink.transport", "bondy.edge.uplink.transport", [
+{mapping, "bridge.$name.transport", "bondy.bridges", [
   {default, tcp},
   {datatype, {enum, [tcp, tls]}}
 ]}.
 
 %% @doc Default cert location for cluster TLS connection
-{mapping, "edge.uplink.tls.certfile", "bondy.edge.uplink.tls_opts.certfile", [
+{mapping, "bridge.$name.tls.certfile", "bondy.bridges", [
 {datatype, file},
 {commented, "{{platform_etc_dir}}/client/keycert.pem"}
 ]}.
 
 %% @doc Default key location for cluster TLS connection
-{mapping, "edge.uplink.tls.keyfile", "bondy.edge.uplink.tls_opts.keyfile", [
+{mapping, "bridge.$name.tls.keyfile", "bondy.bridges", [
 {datatype, file},
 {commented, "{{platform_etc_dir}}/client/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for cluster TLS connection
-{mapping, "edge.uplink.tls.cacertfile", "bondy.edge.uplink.tls_opts.cacertfile", [
+{mapping, "bridge.$name.tls.cacertfile", "bondy.bridges", [
 {datatype, file},
 {commented, "{{platform_etc_dir}}/client/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "edge.uplink.tls.versions", "bondy.edge.uplink.tls_opts.versions", [
+{mapping, "bridge.$name.tls.versions", "bondy.bridges", [
 {datatype, string},
 {default, "1.3"}
 ]}.
 
-{mapping, "edge.uplink.tls.verify", "bondy.edge.uplink.tls_opts.verify", [
+{mapping, "bridge.$name.tls.verify", "bondy.bridges", [
 {datatype, {enum, [verify_peer, verify_none]}},
 {default, verify_none}
 ]}.
@@ -123,40 +80,40 @@ end}.
 %% the realm has not yet been provisioned, so we want the connection to retry
 %% indefinitely.
 %% @end
-{mapping, "edge.uplink.reconnect", "bondy.edge.uplink.reconnect.enabled", [
+{mapping, "bridge.$name.reconnect", "bondy.bridges", [
   {default, on},
   {datatype, flag}
 ]}.
 
-{mapping, "edge.uplink.reconnect.max_retries", "bondy.edge.uplink.reconnect.max_retries", [
-  {default, 10},
+{mapping, "bridge.$name.reconnect.max_retries", "bondy.bridges", [
+  {default, 100},
   {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
-{mapping, "edge.uplink.reconnect.backoff.type", "bondy.edge.uplink.reconnect.backoff_type", [
+{mapping, "bridge.$name.reconnect.backoff.type", "bondy.bridges", [
   {default, jitter},
   {datatype, {enum, [jitter, normal]}}
 ]}.
 
-{mapping, "edge.uplink.reconnect.backoff.min", "bondy.edge.uplink.reconnect.backoff_min", [
+{mapping, "bridge.$name.reconnect.backoff.min", "bondy.bridges", [
   {default, "5s"},
   {datatype, {duration, ms}}
 ]}.
 
-{mapping, "edge.uplink.reconnect.backoff.max", "bondy.edge.uplink.reconnect.backoff_max", [
+{mapping, "bridge.$name.reconnect.backoff.max", "bondy.bridges", [
   {default, "60s"},
   {datatype, {duration, ms}}
 ]}.
 
 %% @doc Defines the number of TCP connections for the edge-remote connection
-{mapping, "edge.uplink.parallelism", "bondy.edge.uplink.parallelism", [
+{mapping, "bridge.$name.parallelism", "bondy.bridges", [
   {default, 1},
   {validators, [pos_integer]},
   {datatype, integer}
 ]}.
 
-{mapping, "edge.uplink.timeout", "bondy.edge.uplink.timeout", [
+{mapping, "bridge.$name.timeout", "bondy.bridges", [
   {default, "5s"},
   {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -168,7 +125,7 @@ end}.
 %% results in a value higher than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
-{mapping, "edge.uplink.idle_timeout", "bondy.edge.uplink.idle_timeout", [
+{mapping, "bridge.$name.idle_timeout", "bondy.bridges", [
 {default, "24h"},
 {default, infinity},
 {datatype, [{duration, ms}, {atom, infinity}]}
@@ -181,14 +138,14 @@ end}.
 %% always respond to those even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
-{mapping, "edge.uplink.ping", "bondy.edge.uplink.ping.enabled", [
+{mapping, "bridge.$name.ping", "bondy.bridges", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
 
 %% @doc If edge.uplink.ping.enabled is 'on', this value controls the
 %% interval in which Bondy Edge sends PING control messages to edge peers.
-{mapping, "edge.uplink.ping.interval", "bondy.edge.uplink.ping.interval", [
+{mapping, "bridge.$name.ping.interval", "bondy.bridges", [
   {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
@@ -199,8 +156,7 @@ end}.
 %% If the value is 'infinity' Bondy Edge will never timeout based on missed
 %% pings.
 {mapping,
-"edge.uplink.ping.max_retries",
-"bondy.edge.uplink.ping.max_retries", [
+"bridge.$name.ping.max_retries", "bondy.bridges", [
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
 ]}.
@@ -211,22 +167,22 @@ end}.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "edge.uplink.max_frame_size", "bondy.edge.uplink.max_frame_size", [
+{mapping, "bridge.$name.max_frame_size", "bondy.bridges", [
   {default, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
 
 
-{mapping, "edge.uplink.realm.$name.uri", "bondy.edge.uplink.realms", [
+{mapping, "bridge.$name.realm.$id.uri", "bondy.bridges", [
   {datatype, string}
 ]}.
 
-{mapping, "edge.uplink.realm.$name.authid", "bondy.edge.uplink.realms", [
+{mapping, "bridge.$name.realm.$id.authid", "bondy.bridges", [
   {datatype, string}
 ]}.
 
 
-{mapping, "edge.uplink.realm.$name.cryptosign.pubkey", "bondy.edge.uplink.realms", [
+{mapping, "bridge.$name.realm.$id.cryptosign.pubkey", "bondy.bridges", [
   {datatype, string}
 ]}.
 
@@ -242,7 +198,7 @@ end}.
 %% And it MUST return the base64 encoded binary resulting from signing
 %% the challenge with the users's private key known to the callee matching the
 %% provided pubkey.
-{mapping, "edge.uplink.realm.$name.cryptosign.procedure", "bondy.edge.uplink.realms", [
+{mapping, "bridge.$name.realm.$id.cryptosign.procedure", "bondy.bridges", [
   {datatype, string}
 ]}.
 
@@ -266,14 +222,14 @@ end}.
 %% the challenge with the users's private key known to the exec.
 
 {mapping,
-  "edge.uplink.realm.$name.cryptosign.exec",
-  "bondy.edge.uplink.realms", [
+  "bridge.$name.realm.$id.cryptosign.exec",
+  "bondy.bridges", [
     {datatype, string}
 ]}.
 
 {mapping,
-  "edge.uplink.realm.$name.cryptosign.privkey_env_var",
-  "bondy.edge.uplink.realms", [
+  "bridge.$name.realm.$id.cryptosign.privkey_env_var",
+  "bondy.bridges", [
     {datatype, string}
 ]}.
 
@@ -285,8 +241,8 @@ end}.
 %% <match-type> ::= "exact" | "prefix" | "wildcard"
 %% <direction> ::= "in" | "out" | "both"
 {mapping,
-  "edge.uplink.realm.$name.procedure.$id",
-  "bondy.edge.uplink.realms", [
+  "bridge.$name.realm.$id.procedure.$pid",
+  "bondy.bridges", [
     {datatype, string}
 ]}.
 
@@ -297,136 +253,345 @@ end}.
 %% <match-type> ::= "exact" | "prefix" | "wildcard"
 %% <direction> ::= "in" | "out" | "both"
 {mapping,
-  "edge.uplink.realm.$name.topic.$id",
-  "bondy.edge.uplink.realms", [
+  "bridge.$name.realm.$id.topic.$tid",
+  "bondy.bridges", [
     {datatype, string}
 ]}.
 
 
+{translation, "bondy.bridges", fun(Conf0) ->
+      Conf1 = cuttlefish_variable:filter_by_prefix("bridge", Conf0),
+    Conf2 = lists:filter(
+      fun
+          ({["bridge", "listener" | _], _}) -> false;
+          (_) -> true
+      end,
+      Conf1
+    ),
+    %% We turn all keys to binaries so that the following utils functions work
+    %% on paths
+    Conf = lists:map(
+      fun
+        ({["bridge" | T], V}) ->
+          {[list_to_binary(E) || E <- T], V};
+        (KV) ->
+          KV
+      end,
+      Conf2
+    ),
 
+    MaybeBadKey = fun
+      ('$error_badkey') ->
+        error(badkey);
+      (Value) ->
+        Value
+    end,
 
-{translation,
-"bondy.edge.uplink.realms",
+    Get = fun
+      Get([], _, _) ->
+        error(badkey);
 
-fun(Conf0) ->
-    Conf = cuttlefish_variable:filter_by_prefix("edge.uplink.realm", Conf0),
+      Get(_, [], Default) ->
+          MaybeBadKey(Default);
 
-    %% The following results in
-    %% #{
-    %% Id => #{uri, =authid, }
-    %% }
+      Get(_, KVTerm, Default)
+      when is_map(KVTerm) andalso map_size(KVTerm) == 0 ->
+          MaybeBadKey(Default);
 
-      Fun = fun
-        ({[_, _, _, IdStr, KeyStr], ValueStr}, Acc)
-        when  KeyStr == "uri";
-              KeyStr == "authid" ->
+      Get([H|[]], KVTerm, Default) ->
+          Get(H, KVTerm, Default);
 
-          Id = list_to_binary(IdStr),
-          Key = list_to_atom(KeyStr),
-          Value = list_to_binary(ValueStr),
-
-          case maps:get(Id, Acc, undefined) of
-            undefined ->
-              maps:put(Id, #{Key => Value}, Acc);
-            Old ->
-              maps:put(Id, maps:put(Key, Value, Old), Acc)
+      Get([H|T], KVTerm, Default) when is_list(KVTerm) ->
+          case lists:keyfind(H, 1, KVTerm) of
+              {H, Child} ->
+                  Get(T, Child, Default);
+              false ->
+                  MaybeBadKey(Default)
           end;
 
-        ({[_, _, _, IdStr, "cryptosign", KeyStr], ValueStr}, Acc)
-        when  KeyStr == "pubkey";
-              KeyStr == "procedure";
-              KeyStr == "exec";
-              KeyStr == "privkey_env_var" ->
+      Get(Key, KVTerm, Default) when is_list(KVTerm) ->
+          case lists:keyfind(Key, 1, KVTerm) of
+              {Key, Value} ->
+                  Value;
+              false ->
+                  MaybeBadKey(Default)
+          end;
 
-          Id = list_to_binary(IdStr),
-          Key = list_to_atom(KeyStr),
-          Value = list_to_binary(ValueStr),
+      Get([H|T], KVTerm, Default) when is_map(KVTerm) ->
+          case maps:find(H, KVTerm) of
+              {ok, Child} ->
+                  Get(T, Child, Default);
+              error ->
+                  MaybeBadKey(Default)
+          end;
 
-          %% #{id => #{cryptosign => #{Key => Value}}}
-          case maps:get(Id, Acc, undefined) of
-            undefined ->
-              Crypto = #{cryptosign => #{Key => Value}},
-              maps:put(Id, Crypto, Acc);
+      Get(Key, KVTerm, Default) when is_map(KVTerm) ->
+          MaybeBadKey(maps:get(Key, KVTerm, Default));
 
-            Old ->
-              case maps:get(cryptosign, Old, undefined) of
-                undefined ->
-                  Crypto = Old#{cryptosign => #{Key => Value}},
-                  maps:put(Id, Crypto, Acc);
-                Crypto0 ->
-                  Crypto1 = maps:put(Key, Value, Crypto0),
-                  maps:put(Id, Old#{cryptosign => Crypto1}, Acc)
+      Get(_, _, _) ->
+          error(badarg)
+
+    end,
+
+    Put = fun
+      Put([H|[]], Value, KVTerm) ->
+        Put(H, Value, KVTerm);
+
+      Put([H|T], Value, KVTerm) when is_list(KVTerm) ->
+
+          InnerTerm = Put(T, Value, Get(H, KVTerm, #{})),
+          % lists:keystore(H, 1, KVTerm, {H, InnerTerm});
+
+          Map = maps:from_list(KVTerm),
+          Merge = fun
+            (Term) when is_list(Term) ->
+              maps:merge(maps:from_list(Term), InnerTerm);
+            (Term) when is_map(Term) ->
+              maps:merge(Term, InnerTerm)
+          end,
+          maps:update_with(H, Merge, InnerTerm, Map);
+
+
+      Put([H|T], Value, KVTerm) when is_map(KVTerm) ->
+          InnerTerm = Put(T, Value, Get(H, KVTerm, #{})),
+          maps:put(H, InnerTerm, KVTerm);
+
+      Put([], _, _)  ->
+          error(badkey);
+
+      Put(Key, Value, KVTerm) when is_list(KVTerm) ->
+          % lists:keystore(Key, 1, KVTerm, {Key, Value});
+          Map = maps:from_list(KVTerm),
+          maps:put(Key, Value, Map);
+
+      Put(Key, Value, KVTerm) when is_map(KVTerm) ->
+          maps:put(Key, Value, KVTerm);
+
+      Put(_, _, _) ->
+          error(badarg)
+    end,
+
+    Fun = fun
+      ({[Name], Value}, Acc) ->
+        Put([Name, enabled], Value, Acc);
+
+      ({[Name, <<"endpoint">>], Endpoint}, Acc) ->
+        try
+          is_list(Endpoint) orelse throw(invalid),
+
+          case string:split(Endpoint, ":") of
+            [Host, PortStr] ->
+              Port = list_to_integer(PortStr),
+
+              Port >= 1024
+                andalso Port =< 65535
+                orelse throw(invalid_port),
+
+              case inet:getaddr(Host, inet) of
+                {ok, IP} ->
+                  Put([Name, endpoint], {IP, Port}, Acc);
+                _ ->
+                  case inet:getaddr(Host, inet6) of
+                    {ok, IP} ->
+                      Put([Name, endpoint], {IP, Port}, Acc);
+                    _ ->
+                      throw(invalid_endpoint)
+                  end
+              end;
+            _ ->
+              throw(invalid)
+          end
+
+        catch
+            throw:invalid ->
+              cuttlefish:invalid(
+                "value should be string with IP or Hostname and Port Number separated by a colon e.g. \"127.0.0.1:18080\""
+              );
+            throw:invalid_port ->
+              cuttlefish:invalid(
+                "value for the Port Number should be greater than 1023 and lower than 65536"
+              );
+            throw:invalid_endpoint ->
+              cuttlefish:invalid(
+                "value for the endpoint referes to a non-existing domain"
+              )
+        end;
+
+      ({[Name, <<"reconnect">>], Value}, Acc) ->
+        Put([Name, reconnect, enabled], Value, Acc);
+
+      ({[Name, <<"reconnect">>, KeyStr], Value}, Acc) ->
+        Key = binary_to_atom(KeyStr),
+        Put([Name, reconnect, Key], Value, Acc);
+
+      ({[Name, <<"reconnect">>, <<"backoff">>, KeyStr], Value}, Acc) ->
+        Key = binary_to_atom(<<"backoff_", KeyStr/binary>>),
+        Put([Name, reconnect, Key], Value, Acc);
+
+      ({[Name, <<"ping">>], Value}, Acc) ->
+        Put([Name, ping, enabled], Value, Acc);
+
+      ({[Name, <<"ping">>, KeyStr], Value}, Acc) ->
+        Key = binary_to_atom(KeyStr),
+        Put([Name, ping, Key], Value, Acc);
+
+      ({[Name, KeyStr], Value}, Acc)
+      when  KeyStr == <<"parallelism">>;
+            KeyStr == <<"transport">>;
+            KeyStr == <<"idle_timeout">>;
+            KeyStr == <<"timeout">>;
+            KeyStr == <<"max_frame_size">> ->
+        Key = binary_to_atom(KeyStr),
+        Put([Name, Key], Value, Acc);
+
+      ({[Name, <<"tls">>, KeyStr], Value}, Acc)
+      when  KeyStr == <<"cacertfile">>;
+            KeyStr == <<"certfile">>;
+            KeyStr == <<"keyfile">>;
+            KeyStr == <<"verify">>  ->
+        Key = binary_to_atom(KeyStr),
+        Put([Name, tls_opts, Key], Value, Acc);
+
+      ({[Name, <<"tls">>, <<"versions">>], Versions}, Acc) ->
+        try
+          is_list(Versions) orelse throw(invalid),
+
+          Value = [
+            begin
+              case string:strip(Version) of
+                "1.2" -> 'tlsv1.2';
+                "1.3" -> 'tlsv1.3';
+                _ -> throw({invalid_version, Version})
               end
+            end || Version <- string:split(Versions, ",")
+          ],
+
+          Put([Name, tls_opts, versions], Value, Acc)
+
+        catch
+            throw:invalid ->
+              cuttlefish:invalid(
+                "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
+              );
+
+            throw:{invalid_version, Version} ->
+              cuttlefish:invalid("invalid TLS version " ++ Version)
+        end;
+
+      ({[Name, <<"realm">>, Id, KeyStr], ValueStr}, Acc)
+      when  KeyStr == <<"uri">>;
+            KeyStr == <<"authid">> ->
+
+        Key = binary_to_atom(KeyStr),
+        Value = list_to_binary(ValueStr),
+
+        Put([Name, realms, Id, Key], Value, Acc);
+
+      ({[Name, <<"realm">>, Id, <<"cryptosign">>, KeyStr], ValueStr}, Acc)
+      when  KeyStr == <<"pubkey">>;
+            KeyStr == <<"procedure">>;
+            KeyStr == <<"exec">>;
+            KeyStr == <<"privkey_env_var">> ->
+
+        Key = binary_to_atom(KeyStr),
+        Value = list_to_binary(ValueStr),
+
+        Put([Name, realms, Id, cryptosign, Key], Value, Acc);
+
+
+      ({[Name, <<"realm">>, Id, UriType, KeyStr], Spec}, Acc)
+      when  UriType == <<"procedure">>;
+            UriType == <<"topic">> ->
+          %  Key = list_to_binary(KeyStr),
+          %% Plural key to use in map
+          Type = binary_to_atom(<<UriType/binary, "s">>),
+
+
+          try
+
+            case string:split(Spec, [$\s], all) of
+              [Uri, Match, Direction] ->
+                lists:member(Match, ["exact", "prefix", "wilcard"])
+                  orelse throw(invalid_match_spec),
+
+                lists:member(Direction, ["in", "out", "both"])
+                  orelse throw(invalid_match_spec),
+
+                E = #{
+                  uri => list_to_binary(Uri),
+                  match => list_to_binary(Match),
+                  direction => list_to_atom(Direction)
+                },
+
+                case Get([Name, realms, Id, Type], Acc, undefined) of
+                  undefined ->
+                    Put([Name, realms, Id, Type], [E], Acc);
+
+                  Es ->
+                    Put([Name, realms, Id, Type], [E|Es], Acc)
+                end;
+
+              _ ->
+                  throw(invalid_match_spec)
+            end
+
+          catch
+            throw:invalid_match_spec ->
+              cuttlefish:invalid(
+                "invalid " ++ UriType ++ " match specification " ++
+                "'" ++ Spec ++ "'" ++
+                " for identifier " ++
+                "'" ++ KeyStr ++ "'"
+              )
           end;
 
-        ({[_, _, _, IdStr, UriType, KeyStr], Spec}, Acc)
-        when  UriType == "procedure";
-              UriType == "topic" ->
+      (KV, Acc) ->
+        cuttlefish:invalid(
+          "invalid configuration option " ++
+          io_lib:format("~p", [KV])
+        )
 
-            Id = list_to_binary(IdStr),
-            Key = list_to_binary(KeyStr),
-            %% Plural key to use in map
-            Type = list_to_atom(UriType ++ "s"),
-
-            Value =
-              try
-
-                case string:split(Spec, [$\s], all) of
-                  [Uri, Match, Direction] ->
-                    lists:member(Match, ["exact", "prefix", "wilcard"])
-                      orelse throw(invalid_match_spec),
-
-                    lists:member(Direction, ["in", "out", "both"])
-                      orelse throw(invalid_match_spec),
-
-                    Map = #{
-                      uri => list_to_binary(Uri),
-                      match => list_to_binary(Match),
-                      direction => list_to_atom(Direction)
-                    };
-
-                  _ ->
-                      throw(invalid_match_spec)
-                end
-
-              catch
-                throw:invalid_match_spec ->
-                  cuttlefish:invalid(
-                    "invalid " ++ UriType ++ " match specification " ++
-                    "'" ++ Spec ++ "'" ++
-                    " for identifier " ++
-                    "'" ++ KeyStr ++ "'"
-                  )
-              end,
-
-            %% #{id => #{procedures => #{Key => Map}}}
-            case maps:get(Id, Acc, undefined) of
-              undefined ->
-                Uris = #{Type => [Value]},
-                maps:put(Id, Uris, Acc);
-
-              Old ->
-                case maps:get(Type, Old, undefined) of
-                  undefined ->
-                    Uris = Old#{Type => [Value]},
-                    maps:put(Id, Uris, Acc);
-                  Uris0 ->
-                    maps:put(Id, Old#{Type => [Value|Uris0]}, Acc)
-                end
-            end
       end,
 
-      Out = lists:foldl(Fun, maps:new(), Conf),
+      OutMap0 = lists:foldl(Fun, #{}, Conf),
 
-      %% we proyect
-      %% #{Uri => Config}
-      maps:fold(
-        fun(Id, #{uri := Uri} = Realm, Acc) ->
-          maps:put(Uri, Realm, Acc)
-        end,
-        maps:new(),
-        Out
-      )
+      try
+
+        maps:fold(
+          fun
+            (Name, Bridge0, Acc) ->
+              Bridge = maps:map(
+                  fun(realms, Realms0) ->
+
+                        maps:fold(
+                          fun(RealmId, Realm, Acc) ->
+                              [Realm | Acc]
+                          end,
+                          [],
+                          Realms0
+                        );
+                      (K, V) ->
+                          V
+                  end,
+                  Bridge0
+              ),
+              %% We project #{realms => [Realm], ...}}
+              maps:put(Name, Bridge, Acc);
+
+            (_, _, Acc) ->
+              Acc
+          end,
+          OutMap0,
+          OutMap0
+        )
+
+      catch
+        throw:badkey ->
+          cuttlefish:invalid(
+            "value for realm uri is required"
+          )
+
+      end
 
 end}.
 
@@ -436,34 +601,34 @@ end}.
 
 
 %% @doc Enables or disables Bondy edge nodes to connect to Bondy.
-{mapping, "edge.listener.tcp", "bondy.edge_tcp.enabled", [
+{mapping, "bridge.listener.tcp", "bondy.bridge_relay_tcp.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
-{mapping, "edge.listener.tcp.port", "bondy.edge_tcp.port", [
+{mapping, "bridge.listener.tcp.port", "bondy.bridge_relay_tcp.port", [
   {default, 18092},
   {validators, [port_number]},
   {datatype, integer}
 ]}.
 
 %% The ranch acceptors_pool_size for the socket tcp listener
-{mapping, "edge.listener.tcp.acceptors_pool_size", "bondy.edge_tcp.acceptors_pool_size", [
+{mapping, "bridge.listener.tcp.acceptors_pool_size", "bondy.bridge_relay_tcp.acceptors_pool_size", [
   {datatype, integer},
   {validators, [pos_integer]},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the socket tcp listener
-{mapping, "edge.listener.tcp.max_connections", "bondy.edge_tcp.max_connections", [
+{mapping, "bridge.listener.tcp.max_connections", "bondy.bridge_relay_tcp.max_connections", [
   {datatype, integer},
   {validators, [pos_integer]},
   {default, 100000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
-{mapping, "edge.listener.tcp.backlog", "bondy.edge_tcp.backlog", [
+{mapping, "bridge.listener.tcp.backlog", "bondy.bridge_relay_tcp.backlog", [
   {datatype, integer},
   {validators, [pos_integer]},
   {default, 1024}
@@ -473,18 +638,18 @@ end}.
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
-{mapping, "edge.listener.tcp.keepalive", "bondy.edge_tcp.socket_opts.keepalive", [
+{mapping, "bridge.listener.tcp.keepalive", "bondy.bridge_relay_tcp.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
-{mapping, "edge.listener.tcp.sndbuf", "bondy.edge_tcp.socket_opts.sndbuf", [
+{mapping, "bridge.listener.tcp.sndbuf", "bondy.bridge_relay_tcp.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
-{mapping, "edge.listener.tcp.recbuf", "bondy.edge_tcp.socket_opts.recbuf", [
+{mapping, "bridge.listener.tcp.recbuf", "bondy.bridge_relay_tcp.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -495,13 +660,13 @@ end}.
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "edge.listener.tcp.buffer", "bondy.edge_tcp.socket_opts.buffer", [
+{mapping, "bridge.listener.tcp.buffer", "bondy.bridge_relay_tcp.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "edge.listener.tcp.nodelay", "bondy.edge_tcp.socket_opts.nodelay", [
+{mapping, "bridge.listener.tcp.nodelay", "bondy.bridge_relay_tcp.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -513,37 +678,37 @@ end}.
 %% even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
-{mapping, "edge.listener.tcp.ping", "bondy.edge_tcp.ping.enabled", [
+{mapping, "bridge.listener.tcp.ping", "bondy.bridge_relay_tcp.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If edge.listener.tcp.ping.enabled is 'on', this value controls the interval
+%% @doc If bridge.listener.tcp.ping.enabled is 'on', this value controls the interval
 %% in which Bondy sends PING control messages to edge peers.
-{mapping, "edge.listener.tcp.ping.interval", "bondy.edge_tcp.ping.interval", [
+{mapping, "bridge.listener.tcp.ping.interval", "bondy.bridge_relay_tcp.ping.interval", [
   {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If edge.listener.tcp.ping.enabled is 'on', this value controls how many
+%% @doc If bridge.listener.tcp.ping.enabled is 'on', this value controls how many
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"edge.listener.tcp.ping.max_retries",
-"bondy.edge_tcp.ping.max_retries",[
+"bridge.listener.tcp.ping.max_retries",
+"bondy.bridge_relay_tcp.ping.max_retries",[
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
 ]}.
 
 %% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when edge.listener.tcp.ping.enabled is 'on'
-%% and edge.listener.tcp.ping.interval times
-%% edge.listener.tcp.ping.max_retries results in a value higher than this
+%% take effect when bridge.listener.tcp.ping.enabled is 'on'
+%% and bridge.listener.tcp.ping.interval times
+%% bridge.listener.tcp.ping.max_retries results in a value higher than this
 %% option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
-{mapping, "edge.listener.tcp.idle_timeout", "bondy.edge_tcp.idle_timeout", [
+{mapping, "bridge.listener.tcp.idle_timeout", "bondy.bridge_relay_tcp.idle_timeout", [
   {default, "8h"},
   {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -554,7 +719,7 @@ end}.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "edge.listener.tcp.max_frame_size", "bondy.edge_tcp.max_frame_size", [
+{mapping, "bridge.listener.tcp.max_frame_size", "bondy.bridge_relay_tcp.max_frame_size", [
   {default, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
@@ -566,34 +731,34 @@ end}.
 
 
 %% @doc Enables or disables Bondy edge nodes to connect to Bondy.
-{mapping, "edge.listener.tls", "bondy.edge_tls.enabled", [
+{mapping, "bridge.listener.tls", "bondy.bridge_relay_tls.enabled", [
   {default, off},
   {datatype, {flag, on, off}}
 ]}.
 
 %% @doc TCP port that Bondy edge nodes will use to connect to Bondy.
-{mapping, "edge.listener.tls.port", "bondy.edge_tls.port", [
+{mapping, "bridge.listener.tls.port", "bondy.bridge_relay_tls.port", [
   {default, 18093},
   {validators, [port_number]},
   {datatype, integer}
 ]}.
 
 %% The ranch acceptors_pool_size for the socket tcp listener
-{mapping, "edge.listener.tls.acceptors_pool_size", "bondy.edge_tls.acceptors_pool_size", [
+{mapping, "bridge.listener.tls.acceptors_pool_size", "bondy.bridge_relay_tls.acceptors_pool_size", [
   {datatype, integer},
   {validators, [pos_integer]},
   {default, 200}
 ]}.
 
 %% The ranch max number of connections for the edge TLS listener
-{mapping, "edge.listener.tls.max_connections", "bondy.edge_tls.max_connections", [
+{mapping, "bridge.listener.tls.max_connections", "bondy.bridge_relay_tls.max_connections", [
   {datatype, integer},
   {validators, [pos_integer]},
   {default, 100000}
 ]}.
 
 %% The maximum length that the queue of pending connections can grow to.
-{mapping, "edge.listener.tls.backlog", "bondy.edge_tls.backlog", [
+{mapping, "bridge.listener.tls.backlog", "bondy.bridge_relay_tls.backlog", [
   {datatype, integer},
   {default, 1024}
 ]}.
@@ -602,18 +767,18 @@ end}.
 %% Enables/disables periodic transmission on a connected socket when no other
 %% data is exchanged. If the other end does not respond, the connection is
 %% considered broken and an error message is sent to the controlling process.
-{mapping, "edge.listener.tls.keepalive", "bondy.edge_tls.socket_opts.keepalive", [
+{mapping, "bridge.listener.tls.keepalive", "bondy.bridge_relay_tls.socket_opts.keepalive", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
 
 %% The minimum size of the send buffer to use for the socket.
-{mapping, "edge.listener.tls.sndbuf", "bondy.edge_tls.socket_opts.sndbuf", [
+{mapping, "bridge.listener.tls.sndbuf", "bondy.bridge_relay_tls.socket_opts.sndbuf", [
   {datatype, bytesize}
 ]}.
 
 %% The minimum size of the receive buffer to use for the socket.
-{mapping, "edge.listener.tls.recbuf", "bondy.edge_tls.socket_opts.recbuf", [
+{mapping, "bridge.listener.tls.recbuf", "bondy.bridge_relay_tls.socket_opts.recbuf", [
   {datatype, bytesize}
 ]}.
 
@@ -624,13 +789,13 @@ end}.
 %% avoid performance issues because of unnecessary copying.
 %% val(buffer) is automatically set to the above maximum when values sndbuf or
 %% recbuf are set.
-{mapping, "edge.listener.tls.buffer", "bondy.edge_tls.socket_opts.buffer", [
+{mapping, "bridge.listener.tls.buffer", "bondy.bridge_relay_tls.socket_opts.buffer", [
   {datatype, bytesize}
 ]}.
 
 %% If Boolean == true, option TCP_NODELAY is turned on for the socket, which
 %% means that also small amounts of data are sent immediately.
-{mapping, "edge.listener.tls.nodelay", "bondy.edge_tls.socket_opts.nodelay", [
+{mapping, "bridge.listener.tls.nodelay", "bondy.bridge_relay_tls.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
 ]}.
@@ -643,36 +808,36 @@ end}.
 %% even if this option is turned off.
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy.
-{mapping, "edge.listener.tls.ping", "bondy.edge_tls.ping.enabled", [
+{mapping, "bridge.listener.tls.ping", "bondy.bridge_relay_tls.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
 ]}.
 
-%% @doc If edge.listener.tls.ping.enabled is 'on', this value controls the interval
+%% @doc If bridge.listener.tls.ping.enabled is 'on', this value controls the interval
 %% in which Bondy sends PING control messages to edge peers.
-{mapping, "edge.listener.tls.ping.interval", "bondy.edge_tls.ping.interval", [
+{mapping, "bridge.listener.tls.ping.interval", "bondy.bridge_relay_tls.ping.interval", [
   {default, "30s"},
   {datatype, {duration, ms}}
 ]}.
 
-%% @doc If edge.listener.tls.ping.enabled is 'on', this value controls how many
+%% @doc If bridge.listener.tls.ping.enabled is 'on', this value controls how many
 %% missed pings are considered a timeout. Thus, after this number of attempts
 %% Bondy will drop the connection.
 %% If the value is 'infinity' Bondy will never timeout based on missed pings.
 {mapping,
-"edge.listener.tls.ping.max_retries",
-"bondy.edge_tls.ping.max_retries", [
+"bridge.listener.tls.ping.max_retries",
+"bondy.bridge_relay_tls.ping.max_retries", [
   {default, 3},
   {datatype, [integer, {atom, infinity}]}
 ]}.
 
 %% @doc Drops the connection after a period of inactivity. This option does not
-%% take effect when edge.listener.tls.ping.enabled is 'on' and edge.listener.tls.ping.
-%% interval times edge.listener.tls.ping.max_retries results in a value higher
+%% take effect when bridge.listener.tls.ping.enabled is 'on' and bridge.listener.tls.ping.
+%% interval times bridge.listener.tls.ping.max_retries results in a value higher
 %% than this option.
 %% Notice that for some clients using this option alone is not enough to keep
 %% a connection alive as the client will drop the connection due to inactivity.
-{mapping, "edge.listener.tls.idle_timeout", "bondy.edge_tls.idle_timeout", [
+{mapping, "bridge.listener.tls.idle_timeout", "bondy.bridge_relay_tls.idle_timeout", [
   {default, "8h"},
   {datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
@@ -683,7 +848,7 @@ end}.
 %% For fragmented frames this applies to the size of the reconstituted frame.
 %%
 %% A value of zero means un unbounded size (internally translated to 'infinity')
-{mapping, "edge.listener.tls.max_frame_size", "bondy.edge_tls.max_frame_size", [
+{mapping, "bridge.listener.tls.max_frame_size", "bondy.bridge_relay_tls.max_frame_size", [
   {default, infinity},
   {datatype, [{atom, infinity}, integer]}
 ]}.
@@ -691,63 +856,38 @@ end}.
 
 %% @doc Default cert location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "edge.listener.tls.certfile", "bondy.edge_tls.tls_opts.certfile", [
+{mapping, "bridge.listener.tls.certfile", "bondy.bridge_relay_tls.tls_opts.certfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cert.pem"}
 ]}.
 
 %% @doc Default key location for https can be overridden with the
 %%edge.tls config variable, for example:
-{mapping, "edge.listener.tls.keyfile", "bondy.edge_tls.tls_opts.keyfile", [
+{mapping, "bridge.listener.tls.keyfile", "bondy.bridge_relay_tls.tls_opts.keyfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/key.pem"}
 ]}.
 
 %% @doc Default signing authority location for https can be overridden
 %% with the edge.tls config variable, for example:
-{mapping, "edge.listener.tls.cacertfile", "bondy.edge_tls.tls_opts.cacertfile", [
+{mapping, "bridge.listener.tls.cacertfile", "bondy.bridge_relay_tls.tls_opts.cacertfile", [
   {datatype, file},
   {default, "{{platform_etc_dir}}/cacert.pem"}
 ]}.
 
 %% @doc A comma separate list of TLS protocol versions that will be supported
 %% At the moment Bondy only supports versions 1.2 and 1.3
-{mapping, "edge.listener.tls.versions", "bondy.edge_tls.tls_opts.versions", [
+{mapping, "bridge.listener.tls.versions", "bondy.bridge_relay_tls.tls_opts.versions", [
   {datatype, string},
   {default, "1.3"}
 ]}.
 
 
 
-{translation, "bondy.edge.uplink.tls_opts.versions",
-fun(Conf) ->
-  case cuttlefish:conf_get("edge.uplink.tls.versions", Conf) of
-      Value when is_list(Value) ->
-        try
-          [
-            begin
-              case string:strip(Version) of
-                "1.2" -> 'tlsv1.2';
-                "1.3" -> 'tlsv1.3';
-                _ -> throw({invalid_version, Version})
-              end
-            end || Version <- string:split(Value, ",")
-          ]
-        catch
-          throw:{invalid_version, Version} ->
-            cuttlefish:invalid("invalid TLS version " ++ Version)
-        end;
-      _ ->
-          cuttlefish:invalid(
-            "value should be string containing valid comma separated version numbers e.g. \"1.2, 1.3\""
-          )
-  end
-end
-}.
 
-{translation, "bondy.edge_tls.tls_opts.versions",
+{translation, "bondy.bridge_relay_tls.tls_opts.versions",
 fun(Conf) ->
-  case cuttlefish:conf_get("edge.listener.tls.versions", Conf) of
+  case cuttlefish:conf_get("bridge.listener.tls.versions", Conf) of
       Value when is_list(Value) ->
         try
           [

@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_uplink_session_sup.erl -
+%%  bondy_bridge_relay_sup.erl -
 %%
 %%  Copyright (c) 2018-2022 Leapsight. All rights reserved.
 %%
@@ -20,11 +20,17 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_exchanges_sup).
-
+-module(bondy_bridge_relay_sup).
 -behaviour(supervisor).
 
--include_lib("wamp/include/wamp.hrl").
+-define(SUPERVISOR(Id, Args, Restart, Timeout), #{
+    id => Id,
+    start => {Id, start_link, Args},
+    restart => Restart,
+    shutdown => Timeout,
+    type => supervisor,
+    modules => [Id]
+}).
 
 -define(WORKER(Id, Args, Restart, Timeout), #{
     id => Id,
@@ -37,12 +43,11 @@
 
 %% API
 -export([start_link/0]).
--export([start_exchange/3]).
--export([stop_exchange/1]).
 
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
+
 
 
 
@@ -61,33 +66,12 @@ start_link() ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Starts a new exchange provided we would not reach the limit set by the
-%% `aae_concurrency' config parameter.
-%% If the limit is reached returns the error tuple `{error, concurrency_limit}'
-%% @end
-%% -----------------------------------------------------------------------------
--spec start_exchange(
-    Conn :: pid(), Sessions :: [bondy_edge_session:t()], Opts :: map()) ->
-    {ok, pid()} | {error, any()}.
-
-start_exchange(Conn, Sessions, Opts) ->
-    Children = supervisor:count_children(?MODULE),
-    {active, Count} = lists:keyfind(active, 1, Children),
-    case bondy_config:get([edge, aae_concurrency], 1) > Count of
-        true ->
-            Args = [Conn, Sessions, Opts],
-            supervisor:start_child(?MODULE, Args);
-        false ->
-            {error, concurrency_limit}
-    end.
-
-
-%% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-stop_exchange(Pid) when is_pid(Pid)->
-    supervisor:terminate_child(?MODULE, Pid).
+%% add_sink_sup(Name, Config) ->
+%%     {error, not_implemented}.
+
 
 
 
@@ -99,8 +83,15 @@ stop_exchange(Pid) when is_pid(Pid)->
 
 init([]) ->
     Children = [
-        ?WORKER(bondy_edge_exchange_statem, [], temporary, 5000)
+        ?WORKER(bondy_bridge_relay_manager, [], permanent, 5000),
+        ?SUPERVISOR(bondy_bridge_relay_client_sup, [], permanent, infinity)
     ],
-    Specs = {{simple_one_for_one, 0, 1}, Children},
-    {ok, Specs}.
+    {ok, {{one_for_one, 1, 5}, Children}}.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
 

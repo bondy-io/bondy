@@ -127,13 +127,11 @@ wamp.tls.versions= 1.2,1.3
 
 wamp.websocket.compression_enabled=on
 
-edge.uplink = off
+bridge.listener.tcp = on
+bridge.listener.tcp.port = 18092
 
-edge.listener.tcp = on
-edge.listener.tcp.port = 18092
-
-edge.listener.tls = on
-edge.listener.tls.port = 18093
-edge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
-edge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
-edge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem
+bridge.listener.tls = on
+bridge.listener.tls.port = 18093
+bridge.listener.tls.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
+bridge.listener.tls.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
+bridge.listener.tls.keyfile = ${BONDY_ETC_DIR}/ssl/server/key.pem

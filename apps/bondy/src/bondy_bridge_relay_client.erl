@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_uplink_client -
+%%  bondy_bridge_relay_client -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -20,9 +20,11 @@
 %% @doc EARLY DRAFT implementation of the client-side connection between and
 %% edge node (client) and a remote/core node (server).
 %%
+%% == Configuration ==
+%%
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_uplink_client).
+-module(bondy_bridge_relay_client).
 -behaviour(gen_statem).
 
 -include_lib("kernel/include/logger.hrl").
@@ -34,120 +36,12 @@
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
 
--define(REALM_SPEC, #{
-    uri => #{
-        alias => <<"uri">>,
-        required => true,
-        validator => fun bondy_data_validators:realm_uri/1
-    },
-    authid => #{
-        alias => <<"authid">>,
-        required => true,
-        validator => fun bondy_data_validators:username/1
-    },
-    cryptosign => #{
-        alias => <<"cryptosign">>,
-        required => true,
-        validator => #{
-            pubkey => #{
-                alias => <<"pubkey">>,
-                required => true,
-                datatype => binary
-            },
-            procedure => #{
-                alias => <<"procedure">>,
-                required => false,
-                validator => fun
-                    (Mod) when is_atom(Mod) ->
-                        true;
-                    (Mod) when is_binary(Mod) ->
-                        case catch binary_to_existing_atom(Mod) of
-                            {'EXIT', _} -> false;
-                            Val -> {ok, Val}
-                        end
-                end
-            },
-            exec => #{
-                alias => <<"exec">>,
-                required => false,
-                validator => fun
-                    (Name) when is_list(Name) ->
-                        true;
-                    (Name) when is_binary(Name) ->
-                        {ok, binary_to_list(Name)}
-                end
-            },
-            privkey_env_var => #{
-                alias => <<"privkey_env_var">>,
-                required => false,
-                validator => fun
-                    (Name) when is_list(Name) ->
-                        true;
-                    (Name) when is_binary(Name) ->
-                        {ok, binary_to_list(Name)}
-                end
-            }
-        }
-    },
-    procedures => #{
-        alias => <<"procedures">>,
-        required => true,
-        default => [],
-        validator => {list, ?MATCH_SPEC}
-
-    },
-    topics => #{
-        alias => <<"topics">>,
-        required => true,
-        default => [],
-        validator => {list, ?MATCH_SPEC}
-    }
-}).
-
--define(MATCH_SPEC, #{
-    uri => #{
-        alias => <<"uri">>,
-        required => true,
-        datatype => binary
-    },
-    match => #{
-        alias => <<"match">>,
-        required => false,
-        default => ?EXACT_MATCH,
-        datatype => {in, ?MATCH_STRATEGIES}
-    },
-    direction => #{
-        alias => <<"direction">>,
-        required => true,
-        default => out,
-        validator => fun
-            (in) ->
-                true;
-            (out) ->
-                true;
-            (both) ->
-                true;
-            ("in") ->
-                {ok, in};
-            ("out") ->
-                {ok, out};
-            ("both") ->
-                {ok, both};
-            (<<"in">>) ->
-                {ok, in};
-            (<<"out">>) ->
-                {ok, out};
-            (<<"both">>) ->
-                {ok, both}
-        end
-    }
-}).
 
 
 -record(state, {
+    config                  ::  bondy_bridge_relay:t(),
     transport               ::  gen_tcp | ssl,
     endpoint                ::  {inet:ip_address(), inet:port_number()},
-    opts                    ::  key_value:t(),
     socket                  ::  gen_tcp:socket() | ssl:sslsocket(),
     idle_timeout            ::  pos_integer(),
     reconnect_retry         ::  maybe(bondy_retry:t()),
@@ -156,7 +50,6 @@
     ping_retry_tref         ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
     hibernate = false       ::  boolean(),
-    realms                  ::  map(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
     tab                     ::  ets:tid(),
@@ -167,11 +60,11 @@
 
 -type t()                   ::  #state{}.
 -type sessions()            ::  #{
-    bondy_session_id:t() => bondy_edge_session:t()
+    bondy_session_id:t() => bondy_bridge_relay_session:t()
 }.
 
 %% API.
--export([start_link/3]).
+-export([start_link/1]).
 -export([forward/2]).
 
 %% GEN_STATEM CALLBACKS
@@ -196,8 +89,8 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-start_link(Transport, Endpoint, Opts) ->
-    gen_statem:start_link(?MODULE, {Transport, Endpoint, Opts}, []).
+start_link(Bridge) ->
+    gen_statem:start_link(?MODULE, Bridge, []).
 
 
 %% -----------------------------------------------------------------------------
@@ -232,32 +125,36 @@ callback_mode() ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-init({Transport0, Endpoint, Opts}) ->
+init(Config0) ->
+    ?LOG_NOTICE(#{description => "Starting bridge-relay client"}),
 
-    ?LOG_NOTICE(#{description => "Starting edge client"}),
+    #{
+        transport := Transport,
+        endpoint := Endpoint,
+        parallelism := _,
+        idle_timeout := IdleTimeout,
+        realms := Realms0
+    } = Config0,
 
-    TransportMod = transport_mod(Transport0),
-
-    Realms0 = key_value:get(realms, Opts, #{}),
-    Realms = maps:map(
-        fun(_Uri, Realm) ->
-            maps_utils:validate(Realm, ?REALM_SPEC)
-        end,
+    %% We rewrite the realms for fast access
+    Realms = lists:foldl(
+        fun(#{uri := Uri} = R, Acc) -> maps:put(Uri, R, Acc) end,
+        #{},
         Realms0
     ),
+    Config = maps:put(realms, Realms, Config0),
 
     State0 = #state{
-        transport = TransportMod,
+        config = Config,
+        transport = transport(Transport),
         endpoint = Endpoint,
-        opts = Opts,
-        realms = Realms,
-        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(1)),
+        idle_timeout = IdleTimeout,
         tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
     },
 
     %% Setup reconnect
-    ReconnectOpts = key_value:get(reconnect, Opts),
+    ReconnectOpts = key_value:get(reconnect, Config),
 
     State1 = case key_value:get(enabled, ReconnectOpts) of
         true ->
@@ -270,7 +167,7 @@ init({Transport0, Endpoint, Opts}) ->
     end,
 
     %% Setup ping
-    PingOpts = key_value:get(ping, Opts),
+    PingOpts = key_value:get(ping, Config),
 
     State = case key_value:get(enabled, PingOpts) of
         true ->
@@ -601,16 +498,16 @@ maybe_reconnect(#state{reconnect_retry = R0} = State0) ->
 connect(State) ->
     Transport = State#state.transport,
     Endpoint = State#state.endpoint,
-    Opts = State#state.opts,
-    connect(Transport, Endpoint, Opts).
+    Config = State#state.config,
+    connect(Transport, Endpoint, Config).
 
 
 %% @private
-connect(Transport, {Host, PortNumber}, Opts) ->
+connect(Transport, {Host, PortNumber}, Config) ->
 
-    Timeout = key_value:get(timeout, Opts, 5000),
-    SocketOpts = key_value:get(socket_opts, Opts, []),
-    TLSOpts = key_value:get(tls_opts, Opts, []),
+    Timeout = key_value:get(timeout, Config, 5000),
+    SocketOpts = maps:to_list(key_value:get(socket_opts, Config, [])),
+    TLSOpts = maps:to_list(key_value:get(tls_opts, Config, [])),
 
     %% We use Erlang packet mode i.e. {packet, 4}
     %% So erlang first reads 4 bytes to get length of our data, allocates a
@@ -634,26 +531,34 @@ connect(Transport, {Host, PortNumber}, Opts) ->
         end
 
     catch
-        Class:EReason ->
+        Class:EReason:Stacktrace ->
             ?LOG_WARNING(#{
                 description => "Error while trying to establish connection with remote router",
                 class => Class,
-                reason => EReason
+                reason => EReason,
+                stacktrace => Stacktrace
             }),
             {error, EReason}
     end.
 
 
 %% @private
-transport_mod(tcp) -> gen_tcp;
-transport_mod(tls) -> ssl;
-transport_mod(gen_tcp) -> gen_tcp;
-transport_mod(ssl) -> ssl.
+transport(gen_tcp) -> gen_tcp;
+transport(ssl) -> ssl;
+transport(tcp) -> gen_tcp;
+transport(tls) -> ssl.
+
+
+setopts(gen_tcp, Socket, Opts) ->
+    inet:setopts(Socket, Opts);
+
+setopts(ssl, Socket, Opts) ->
+    ssl:setopts(Socket, Opts).
 
 
 %% @private
 set_socket_active(State) ->
-    (State#state.transport):setopts(State#state.socket, [{active, once}]).
+    setopts(State#state.transport, State#state.socket, [{active, once}]).
 
 
 %% @private
@@ -717,7 +622,6 @@ send_ping(Data, State0) ->
 idle_timeout(State) ->
     %% We use an event timeout meaning any event received will cancel it
     {timeout, State#state.idle_timeout, idle_timeout}.
-
 
 
 
@@ -803,7 +707,7 @@ authenticate(ChallengeExtra, State) ->
 
 %% @private
 open_sessions(State0) ->
-    case maps:to_list(State0#state.realms) of
+    case maps:to_list(maps:get(realms, State0#state.config)) of
         [] ->
             State0;
         [{Uri, H}|_T] ->
@@ -822,7 +726,8 @@ open_sessions(State0) ->
                 }
             },
 
-            %% TODO HELLO should include the Bondy Edge protocol v1
+            %% TODO HELLO should include the Bondy Router Bridge Relay protocol
+            %% version
             ok = send_message({hello, Uri, Details}, State0),
 
             Session = #{
@@ -956,7 +861,7 @@ subscribe_meta_events(Session, State) ->
     %% forward(Me, Event, SessionId)
 
     _ = bondy_event_manager:add_sup_handler(
-        {bondy_edge_event_handler, SessionId}, [RealmUri, MyRef]
+        {bondy_bridge_relay_event_handler, SessionId}, [RealmUri, MyRef]
     ),
 
     State.
@@ -973,7 +878,7 @@ subscribe_meta_events(Session, State) ->
 subscribe_topics(Session0, State) ->
     MyRef = maps:get(ref, Session0),
     RealmUri = maps:get(realm_uri, Session0),
-    RealmConfig = maps:get(RealmUri, State#state.realms),
+    RealmConfig = key_value:get([realms, RealmUri], State#state.config),
     Topics = maps:get(topics, RealmConfig),
 
     Session = lists:foldl(

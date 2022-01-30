@@ -10,7 +10,9 @@
 # Bondy
 
 ### The distributed application networking platform
-Bondy is an open source, distributed, scaleable and robust networking platform for microservices and IoT applications written in Erlang. It implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) comunication patterns.
+Bondy is an open source, always-on and scalable application networking platform for modern distributed architectures.  It is an all-in-one event and service mesh with support for multiple communication patterns, multiple protocols and secure multi-tenancy.
+
+Bondy implements the open Web Application Messaging Protocol (WAMP) offering both Publish and Subscribe (PubSub) and routed Remote Procedure Calls (RPC) communication patterns.
 
 <p align="center">
      <img src="https://github.com/Leapsight/bondy/blob/develop/doc/assets/bondy_cluster.png?raw=true" alt="drawing" width="600"/>

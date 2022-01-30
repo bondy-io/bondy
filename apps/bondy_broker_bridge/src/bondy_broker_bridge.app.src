@@ -1,19 +1,25 @@
-{application, bondy_broker_bridge,
- [{description, "An OTP application"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, { bondy_broker_bridge_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    brod,
-    hash,
-    mops
-   ]},
-  {env,[]},
-  {modules, []},
-
-  {maintainers, []},
-  {licenses, ["Apache 2.0"]},
-  {links, []}
+{application, bondy_broker_bridge, [
+    {description,
+        "Bondy Broker Bridge is an application that is part of Bondy"
+    },
+    {vsn, "1.0.0-beta.28"},
+    {registered, []},
+    {mod, {bondy_broker_bridge_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        brod,
+        hash,
+        mops
+    ]},
+    {env,[]},
+    {modules, []},
+    {maintainers, ["Alejandro M. Ramallo"]},
+    {licenses, ["Apache 2.0"]},
+    {links, [
+        {"Github", "https://github/leapsight/bondy"},
+        {"Docs", "https://docs.getbondy.io"},
+        {"Website", "https://getbondy.io"},
+        {"Docker", "https://hub.docker.com/r/leapsight/bondy"}
+    ]}
  ]}.

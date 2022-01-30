@@ -359,7 +359,7 @@ forward(M, Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Handles a message sent by a peer node through the bondy_router_relay.
+%% @doc Handles a message sent by a peer node through the bondy_relay.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(
@@ -387,7 +387,7 @@ forward(#publish{} = M, undefined, FwdOpts) ->
 
     MatchOpts = case bondy_ref:is_bridge_relay(Relay) of
         true ->
-            %% A publish relayed from another cluster or node e.g. edge.
+            %% A publish relayed from another cluster or node e.g. bridge relay.
             %% We need to send to all subscribers in the cluster.
             MatchOpts0;
         false ->
@@ -851,7 +851,7 @@ forward_using_relay(M, FwdOpts, Nodes) ->
         partition_key => erlang:phash2(RealmUri)
     },
 
-    ok = bondy_router_relay:forward(Nodes, RelayMsg, RelayOpts).
+    ok = bondy_relay:forward(Nodes, RelayMsg, RelayOpts).
 
 
 %% -----------------------------------------------------------------------------
@@ -867,7 +867,7 @@ forward_using_bridge_relay(_, _, []) ->
 forward_using_bridge_relay(M, FwdOpts, [H|T]) ->
     RelayMsg = {forward, undefined, M, FwdOpts},
 
-    ok = bondy_edge_uplink_client:forward(H, RelayMsg),
+    ok = bondy_bridge_relay:forward(H, RelayMsg),
 
     forward_using_bridge_relay(M, FwdOpts, T).
 

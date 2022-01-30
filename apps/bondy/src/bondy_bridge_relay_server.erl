@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_uplink_server -
+%%  bondy_bridge_relay_server -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -21,7 +21,7 @@
 %% edge node (client) and a remote/core node (server).
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_uplink_server).
+-module(bondy_bridge_relay_server).
 -behaviour(gen_statem).
 -behaviour(ranch_protocol).
 
@@ -46,7 +46,7 @@
     ping_retry              ::  maybe(bondy_retry:t()),
     ping_tref               ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
-    sessions = #{}          ::  #{id() => bondy_edge_session:t()},
+    sessions = #{}          ::  #{id() => bondy_bridge_relay_session:t()},
     sessions_by_uri = #{}   ::  #{uri() => id()},
     registrations = #{}     ::  reg_indx(),
     session                 ::  maybe(map()),
@@ -248,7 +248,7 @@ connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
 
 connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     ?LOG_INFO(#{
-        description => "Edge connection closed due to error",
+        description => "Bridge Relay connection closed due to error",
         reason => Reason
     }),
     {stop, Reason};

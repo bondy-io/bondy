@@ -299,15 +299,14 @@ start_public_listeners() ->
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
 
-    %% Bondy Edge (server) downlink connection listeners
-    ok = bondy_edge:start_listeners(),
+    %% Bondy Router Bridge Relay (server) connection listeners
+    ok = bondy_bridge_relay_manager:start_listeners(),
 
-    %% Bondy Edge (client) uplink connection
-    ok = bondy_edge:start_uplinks(),
+    %% Bondy Router Bridge Relay (client) connection
+    ok = bondy_bridge_relay_manager:start_bridges(),
 
-    %% We flag the status, the /ready path will now return true.
-    ok = bondy_config:set(status, ready),
-    ok.
+    %% We flag the status, the HTTP /ready path will now return true.
+    ok = bondy_config:set(status, ready).
 
 
 %% @private
@@ -399,10 +398,10 @@ suspend_listeners() ->
 
     %% We stop accepting new connections on TCP/TLS
     ?LOG_NOTICE(#{description =>
-        "Suspending TCP/TLS Edge listeners. "
+        "Suspending TCP/TLS Bridge Relay listeners. "
         "No new connections will be accepted."
     }),
-    ok = bondy_edge:suspend_listeners().
+    ok = bondy_bridge_relay_manager:suspend_listeners().
 
 
 stop_listeners() ->
@@ -416,5 +415,5 @@ stop_listeners() ->
     ok = bondy_wamp_tcp:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Edge connections"}),
-    ok = bondy_edge:stop_listeners().
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Bridge Relay connections"}),
+    ok = bondy_bridge_relay_manager:stop_listeners().

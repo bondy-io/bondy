@@ -21,9 +21,11 @@
 
 -export([authorized_key/1]).
 -export([cidr/1]).
+-export([endpoint/1]).
 -export([existing_atom/1]).
 -export([groupname/1]).
 -export([groupnames/1]).
+-export([inet_host/1]).
 -export([ip_address/1]).
 -export([password/1]).
 -export([peer/1]).
@@ -33,8 +35,10 @@
 -export([rolenames/1]).
 -export([strict_groupname/1]).
 -export([strict_username/1]).
+-export([tls_versions/1]).
 -export([username/1]).
 -export([usernames/1]).
+
 
 -on_load(on_load/0).
 
@@ -121,6 +125,44 @@ usernames(L) when is_list(L) ->
     end;
 
 usernames(_) ->
+    false.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Allows reserved names like "all", "anonymous", etc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec tls_versions(Term :: [atom()]) -> {ok, [ssl:tls_version()]} | boolean().
+
+tls_versions(L) when is_list(L) ->
+    try
+        Valid = lists:foldl(
+            fun
+                ('tlsv1.2' = Term, Acc) ->
+                    [Term | Acc];
+                ('tlsv1.3'  = Term, Acc) ->
+                    [Term | Acc];
+                (<<"tlsv1.2">>, Acc) ->
+                    ['tlsv1.2' | Acc];
+                (<<"tlsv1.3">>, Acc) ->
+                    ['tlsv1.3' | Acc];
+                (<<"1.2">>, Acc) ->
+                    ['tlsv1.2' | Acc];
+                (<<"1.3">>, Acc) ->
+                    ['tlsv1.3' | Acc];
+                (_, _) ->
+                    throw(abort)
+            end,
+            [],
+            L
+        ),
+        {ok, lists:reverse(Valid)}
+    catch
+        throw:abort ->
+            {error, <<"One or more values are not valid tls version.">>}
+    end;
+
+tls_versions(_) ->
     false.
 
 
@@ -368,10 +410,43 @@ ip_address(Term) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec inet_host(inet:ip_address() | inet:hostname()) -> boolean().
+
+inet_host(Term) ->
+    case inet:getaddr(Term, inet) of
+        {ok, _} ->
+            true;
+        {error, einval} ->
+            case inet:getaddr(Term, inet6) of
+                {ok, _} ->
+                    true;
+                {error, einval} ->
+                    false
+            end
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 -spec port_number(N :: 1024..65535) -> boolean().
 
 port_number(N) ->
     N >= 1024 andalso N =< 65535.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec endpoint({
+        Host :: inet:ip_address() | inet:hostname(),
+        PortNumber :: N :: 1024..65535
+    }) -> any().
+
+endpoint({Host, PortNumber}) ->
+    inet_host(Host) andalso port_number(PortNumber).
 
 
 %% -----------------------------------------------------------------------------

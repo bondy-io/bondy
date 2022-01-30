@@ -537,15 +537,16 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
 %% @end
 %% -----------------------------------------------------------------------------
 relay_message(RealmUri, Node, To, Msg, Opts) ->
+    From = maps:get(from, Opts, undefined),
     RelayMsg = {forward, To, Msg, Opts#{realm_uri => RealmUri}},
 
     RelayOpts = #{
         ack => true,
         retransmission => true,
-        partition_key => erlang:phash2(RealmUri)
+        partition_key => erlang:phash2({From, To})
     },
 
-    bondy_router_relay:forward(Node, RelayMsg, RelayOpts).
+    bondy_relay:forward(Node, RelayMsg, RelayOpts).
 
 
 %% -----------------------------------------------------------------------------

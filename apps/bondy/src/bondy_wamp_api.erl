@@ -98,6 +98,9 @@ do_handle_call(<<"bondy.backup.", _/binary>> = Proc, M, Ctxt) ->
 do_handle_call(<<"bondy.cluster.", _/binary>> = Proc, M, Ctxt) ->
     bondy_cluster_wamp_api:handle_call(Proc, M, Ctxt);
 
+do_handle_call(<<"bondy.edge.", _/binary>> = Proc, M, Ctxt) ->
+    bondy_bridge_relay_wamp_api:handle_call(Proc, M, Ctxt);
+
 do_handle_call(<<"bondy.realm.", _/binary>> = Proc, M, Ctxt) ->
     bondy_realm_wamp_api:handle_call(Proc, M, Ctxt);
 

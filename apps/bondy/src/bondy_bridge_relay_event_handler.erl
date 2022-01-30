@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_event_handler - An event handler to turn bondy events into
+%%  bondy_bridge_relay_event_handler - An event handler to turn bondy events into
 %% WAMP events.
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
@@ -22,7 +22,7 @@
 %% Bondy events
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_event_handler).
+-module(bondy_bridge_relay_event_handler).
 -behaviour(gen_event).
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
@@ -72,7 +72,7 @@ orelse Tag =:= subscription_removed
 orelse Tag =:= subscription_deleted ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     SessionId = bondy_registry_entry:session_id(Entry),
-    %% We avoid forwaring our own teh edge client own subscriptions
+    %% We avoid forwaring our own the bridge relay client own subscriptions
     Forward =
         RealmUri =:= State#state.realm_uri
         andalso SessionId =/= State#state.session_id,
@@ -118,4 +118,4 @@ code_change(_OldVsn, State, _Extra) ->
 
 forward(Msg, State) ->
     Ref = State#state.ref,
-    bondy_edge_uplink_client:forward(Ref, Msg).
+    bondy_bridge_relay:forward(Ref, Msg).
