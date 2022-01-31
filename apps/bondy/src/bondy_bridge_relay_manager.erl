@@ -504,6 +504,9 @@ supervised_bridges(_State) ->
     [Id || {Id, _, _, _} <- All].
 
 
+maybe_start_bridge(Bridge, #{<<"autostart">> := Val} = Opts, State) ->
+    maybe_start_bridge(Bridge, Opts#{autostart => Val}, State);
+
 maybe_start_bridge(Bridge, #{autostart := true}, State0) ->
     try
         State = do_start_bridge(Bridge, State0),
