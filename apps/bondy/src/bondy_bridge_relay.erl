@@ -31,6 +31,10 @@
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").
 
+-define(TYPE, bridge_relay).
+-define(VERSION, <<"1.0">>).
+-define(PLUMDB_PREFIX, {?MODULE, all}).
+
 -define(BRIDGE_RELAY_SPEC, #{
     name => #{
         alias => <<"name">>,
@@ -372,6 +376,7 @@
 
 -type t() :: #{
     name            :=  binary(),
+    nodestring      :=  binary(),
     enabled         :=  boolean(),
     restart         :=  restart(),
     endpoint        :=  endpoint(),
@@ -410,6 +415,7 @@
 -export([lookup/1]).
 -export([new/1]).
 -export([remove/1]).
+-export([exists/1]).
 
 
 
@@ -438,18 +444,23 @@ forward(Ref, Msg) ->
 -spec new(Data :: map()) -> t() | no_return().
 
 new(Data) ->
-    maps_utils:validate(Data, ?BRIDGE_RELAY_SPEC).
+    type_and_version(maps_utils:validate(Data, ?BRIDGE_RELAY_SPEC)).
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(t()) -> ok.
+-spec add(t()) -> ok | {error, already_exists}.
 
-add(#{name := Name} = Data) ->
-    Prefix = {?MODULE, bondy_config:nodestring()},
-    plum_db:put(Prefix, Name, Data).
+add(#{type := ?TYPE, name := Name} = Bridge0) ->
+    case exists(Name) of
+        true ->
+            {error, already_exists};
+        false ->
+            Bridge = Bridge0#{nodestring => bondy_config:nodestring()},
+            plum_db:put(?PLUMDB_PREFIX, Name, Bridge)
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -459,8 +470,20 @@ add(#{name := Name} = Data) ->
 -spec remove(Name :: binary()) -> ok.
 
 remove(Name) ->
-    Prefix = {?MODULE, bondy_config:nodestring()},
-    plum_db:delete(Prefix, Name).
+    plum_db:delete(?PLUMDB_PREFIX, Name).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec exists(Name :: binary()) -> boolean().
+
+exists(Name) ->
+    case lookup(Name) of
+        {ok, _} -> true;
+        {error, not_found} -> false
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -470,8 +493,7 @@ remove(Name) ->
 -spec lookup(Name :: binary()) -> {ok, t()} | {error, not_found}.
 
 lookup(Name) ->
-    Prefix = {?MODULE, bondy_config:nodestring()},
-    case plum_db:get(Prefix, Name) of
+    case plum_db:get(?PLUMDB_PREFIX, Name) of
         undefined ->
             {error, not_found};
         Value when is_map(Value) ->
@@ -486,9 +508,23 @@ lookup(Name) ->
 -spec list() -> [t()].
 
 list() ->
-    Prefix = {?MODULE, bondy_config:nodestring()},
     PDBOpts = [
         {resolver, lww},
         {remove_tombstones, true}
     ],
-    plum_db:match(Prefix, '_', PDBOpts).
+    [V || {_, V} <- plum_db:match(?PLUMDB_PREFIX, '_', PDBOpts)].
+
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
+%% @private
+type_and_version(Map) ->
+    Map#{
+        version => ?VERSION,
+        type => ?TYPE
+    }.

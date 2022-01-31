@@ -23,7 +23,7 @@
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 
--include_lib("bondy_uris.hrl").
+-include("bondy_uris.hrl").
 
 -export([handle_call/3]).
 
@@ -43,11 +43,26 @@
     | {reply, wamp_result() | wamp_error()}.
 
 
-handle_call(?BONDY_ROUTER_BRIDGE_ADD, #call{} = M, _Ctxt) ->
-    no_such_procedure(M);
+handle_call(?BONDY_ROUTER_BRIDGE_ADD, #call{} = M, Ctxt) ->
+    [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    Reply = case bondy_bridge_relay_manager:add_bridge(Data, M#call.kwargs) of
+        {ok, Bridge} ->
+            wamp_message:result(M#call.request_id, #{}, [Bridge]);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end,
+    {reply, Reply};
 
-handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, _Ctxt) ->
-    no_such_procedure(M);
+handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
+    [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    Reply = try bondy_bridge_relay:new(Data) of
+        Bridge ->
+            wamp_message:result(M#call.request_id, #{}, [Bridge])
+        catch
+            _:Reason ->
+                bondy_wamp_utils:error(Reason, M)
+    end,
+    {reply, Reply};
 
 handle_call(?BONDY_ROUTER_BRIDGE_GET_SPEC, #call{} = M, _Ctxt) ->
     no_such_procedure(M);
@@ -55,11 +70,35 @@ handle_call(?BONDY_ROUTER_BRIDGE_GET_SPEC, #call{} = M, _Ctxt) ->
 handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, _Ctxt) ->
     no_such_procedure(M);
 
-handle_call(?BONDY_ROUTER_BRIDGE_REMOVE, #call{} = M, _Ctxt) ->
-    no_such_procedure(M);
+handle_call(?BONDY_ROUTER_BRIDGE_REMOVE, #call{} = M, Ctxt) ->
+    [Name] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    Reply = case bondy_bridge_relay_manager:remove_bridge(Name) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{}, []);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end,
+    {reply, Reply};
 
-handle_call(?BONDY_ROUTER_BRIDGE_STOP, #call{} = M, _Ctxt) ->
-    no_such_procedure(M);
+handle_call(?BONDY_ROUTER_BRIDGE_START, #call{} = M, Ctxt) ->
+    [Name] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    Reply = case bondy_bridge_relay_manager:start_bridge(Name) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{}, []);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end,
+    {reply, Reply};
+
+handle_call(?BONDY_ROUTER_BRIDGE_STOP, #call{} = M, Ctxt) ->
+    [Name] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
+    Reply = case bondy_bridge_relay_manager:stop_bridge(Name) of
+        ok ->
+            wamp_message:result(M#call.request_id, #{}, []);
+        {error, Reason} ->
+            bondy_wamp_utils:error(Reason, M)
+    end,
+    {reply, Reply};
 
 handle_call(_, #call{} = M, _) ->
     no_such_procedure(M).

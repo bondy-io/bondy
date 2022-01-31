@@ -36,6 +36,7 @@
 %% API
 -export([start_link/0]).
 -export([start_child/1]).
+-export([delete_child/1]).
 -export([terminate_child/1]).
 
 
@@ -68,7 +69,16 @@ start_link() ->
 start_child(Bridge) ->
     Id = maps:get(name, Bridge),
     ChildSpec = ?CLIENT(Id, [Bridge], permanent, 5000),
-    supervisor:start_child(?MODULE, ChildSpec).
+
+    case supervisor:start_child(?MODULE, ChildSpec) of
+        {ok, _} = OK ->
+            OK;
+        {error, already_present} ->
+            ok = supervisor:delete_child(?MODULE, Id),
+            start_child(Bridge);
+        {error, _} = Error ->
+            Error
+    end.
 
 
 %% -----------------------------------------------------------------------------
@@ -78,6 +88,13 @@ start_child(Bridge) ->
 terminate_child(Name) ->
     supervisor:terminate_child(?MODULE, Name).
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+delete_child(Name) ->
+    supervisor:delete_child(?MODULE, Name).
 
 
 %% =============================================================================
