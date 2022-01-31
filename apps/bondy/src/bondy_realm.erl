@@ -536,6 +536,18 @@
         },
         #{
             usernames => <<"all">>,
+            authmethod => ?WAMP_CRYPTOSIGN_AUTH,
+            cidr => <<"0.0.0.0/0">>,
+            meta => #{
+                <<"description">> => <<
+                    "Allows all users from any network authenticate using "
+                    "cryptosign. This should ideally be restricted "
+                    "to your local administrative or DMZ network."
+                >>
+            }
+        },
+        #{
+            usernames => <<"all">>,
             authmethod => ?WAMP_CRA_AUTH,
             cidr => <<"0.0.0.0/0">>,
             meta => #{
@@ -570,7 +582,7 @@
             }
         },
         #{
-            usernames => [<<"anonymous">>, <<"admin">>],
+            usernames => [<<"anonymous">>],
             authmethod => ?WAMP_ANON_AUTH,
             cidr => <<"127.0.0.0/8">>,
             meta => #{
