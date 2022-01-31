@@ -144,7 +144,7 @@ prep_stop(_State) ->
         description => "Awaiting for client sessions to gracefully terminate",
         timer_secs => Secs
     }),
-    ok = timer:sleep(Secs * 1000),
+    ok = timer:sleep(timer:seconds(Secs)),
 
     %% We remove all session and their registrations and subscriptions, also
     %% broadcasting those to the other nodes.
