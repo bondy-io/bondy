@@ -281,17 +281,13 @@ start_admin_listeners() ->
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
-    ?LOG_NOTICE(#{
-        description => "Starting Admin API listeners"
-    }),
+    ?LOG_NOTICE(#{description => "Starting Admin API listeners"}),
     bondy_http_gateway:start_admin_listeners().
 
 
 %% @private
 start_public_listeners() ->
-    ?LOG_NOTICE(#{
-        description => "Starting listeners"
-    }),
+    ?LOG_NOTICE(#{description => "Starting listeners"}),
     %% Now that the registry has been initialised we can initialise
     %% the remaining listeners for clients to connect
     %% WAMP TCP listeners
@@ -301,14 +297,14 @@ start_public_listeners() ->
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
 
+    %% We flag the status, the HTTP /ready path will now return true.
+    ok = bondy_config:set(status, ready),
+
     %% Bondy Router Bridge Relay (server) connection listeners
     ok = bondy_bridge_relay_manager:start_listeners(),
 
-    %% Bondy Router Bridge Relay (client) connection
-    ok = bondy_bridge_relay_manager:start_bridges(),
-
-    %% We flag the status, the HTTP /ready path will now return true.
-    ok = bondy_config:set(status, ready).
+    %% Bondy Router Bridge Relay (client) connections
+    ok = bondy_bridge_relay_manager:start_bridges().
 
 
 %% @private
