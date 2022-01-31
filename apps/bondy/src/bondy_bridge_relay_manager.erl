@@ -428,21 +428,37 @@ do_add_bridge(Data, Opts, State0) ->
     end.
 
 
-do_remove_bridge(Name, State0) ->
-    case lists:member(Name, supervised_bridges(State0)) of
-        true ->
-            case bondy_bridge_relay_client_sup:delete_child(Name) of
-                ok ->
-                    State = State0#state{
-                        bridges = maps:without([Name], State0#state.bridges)
-                    },
-                    {ok, State};
-                {error, _} = Error ->
-                    {Error, State0}
-            end;
-        false ->
-            {ok, State0}
+do_remove_bridge(Name, State0) when is_binary(Name) ->
+
+    case bondy_bridge_relay_client_sup:delete_child(Name) of
+        ok ->
+            remove_from_state(Name, State0);
+
+        {error, not_found} ->
+            remove_from_state(Name, State0);
+
+        {error, _} = Error ->
+            {Error, State0}
     end.
+
+
+
+remove_from_state(Name, State) ->
+    case maps:take(Name, State#state.bridges) of
+        {Bridge, Bridges} ->
+            ok = maybe_delete_from_store(Bridge),
+            {ok, State#state{bridges = Bridges}};
+        error ->
+            {ok, State}
+    end.
+
+
+
+maybe_delete_from_store(#{restart := permanent, name := Name}) ->
+    bondy_bridge_relay:remove(Name);
+
+maybe_delete_from_store(_) ->
+    ok.
 
 
 start_all(State) ->
