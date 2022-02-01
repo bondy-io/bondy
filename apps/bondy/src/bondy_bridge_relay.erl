@@ -19,11 +19,12 @@
 %% -----------------------------------------------------------------------------
 %% @doc
 %% restart defines when a terminated bridge must be restarted.
-%% A permanent bridge is always restarted, even after a node crash.
-%% A transient bridge is restarted only if it terminated
-%% abnormally. In case of a node crash they will not be restarted.
-%% A temporary bridge is never restarted, not even after
-%% recovering from a node crash.
+%% A permanent bridge is always restarted, even after recovering from a Bondy
+%% node crash or when the node is manually stopped and re-started. Bondy
+%% persists the configuration of permanent bridges in the database and reads
+%% them during startup.
+%% A transient bridge is restarted only if it terminated abnormally. In case of
+%% a node crash or manually stopped and re-started they will not be restarted.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay).
@@ -55,16 +56,14 @@
         %% to transient too.
         default => transient,
         datatype => {in, [
-            permanent, transient, temporary,
-            <<"permanent">>, <<"transient">>, <<"temporary">>
+            permanent, transient,
+            <<"permanent">>, <<"transient">>
         ]},
         validator => fun
             (permanent) -> true;
             (transient) -> true;
-            (temporary) -> true;
             (<<"permanent">>) -> {ok, permanent};
             (<<"transient">>) -> {ok, transient};
-            (<<"temporary">>) -> {ok, temporary};
             (_) -> false
         end
     },
@@ -395,7 +394,7 @@
                             inet:ip_address() | inet:hostname(),
                             inet:port_number()
                         }.
--type restart()     ::  permanent | transient | temporary.
+-type restart()     ::  permanent | transient.
 -type realm()       ::  #{}.
 -type reconnect()   ::  #{}.
 -type ping()        ::  #{}.
@@ -410,12 +409,13 @@
 % -export([fetch/1]).
 % -export([update/1]).
 -export([add/1]).
+-export([exists/1]).
 -export([forward/2]).
 -export([list/0]).
 -export([lookup/1]).
 -export([new/1]).
 -export([remove/1]).
--export([exists/1]).
+-export([to_external/1]).
 
 
 
@@ -514,6 +514,23 @@ list() ->
     ],
     [V || {_, V} <- plum_db:match(?PLUMDB_PREFIX, '_', PDBOpts)].
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec to_external(Bridge :: t()) -> map().
+
+to_external(Bridge) ->
+    {Host, Port} = maps:get(endpoint, Bridge),
+    Endpoint = <<
+        (list_to_binary(Host))/binary,
+        (integer_to_binary(Port))/binary
+    >>,
+
+    Bridge#{
+        endpoint => Endpoint
+    }.
 
 
 

@@ -47,7 +47,8 @@ handle_call(?BONDY_ROUTER_BRIDGE_ADD, #call{} = M, Ctxt) ->
     [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
     Reply = case bondy_bridge_relay_manager:add_bridge(Data, M#call.kwargs) of
         {ok, Bridge} ->
-            wamp_message:result(M#call.request_id, #{}, [Bridge]);
+            Ext = bondy_bridge_relay:to_external(Bridge),
+            wamp_message:result(M#call.request_id, #{}, [Ext]);
         {error, Reason} ->
             bondy_wamp_utils:error(Reason, M)
     end,
@@ -57,7 +58,8 @@ handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
     [Data] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 1),
     Reply = try bondy_bridge_relay:new(Data) of
         Bridge ->
-            wamp_message:result(M#call.request_id, #{}, [Bridge])
+            Ext = bondy_bridge_relay:to_external(Bridge),
+            wamp_message:result(M#call.request_id, #{}, [Ext])
         catch
             _:Reason ->
                 bondy_wamp_utils:error(Reason, M)
@@ -65,9 +67,6 @@ handle_call(?BONDY_ROUTER_BRIDGE_CHECK_SPEC, #call{} = M, Ctxt) ->
     {reply, Reply};
 
 handle_call(?BONDY_ROUTER_BRIDGE_GET_SPEC, #call{} = M, _Ctxt) ->
-    no_such_procedure(M);
-
-handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, _Ctxt) ->
     no_such_procedure(M);
 
 handle_call(?BONDY_ROUTER_BRIDGE_REMOVE, #call{} = M, Ctxt) ->
@@ -99,6 +98,9 @@ handle_call(?BONDY_ROUTER_BRIDGE_STOP, #call{} = M, Ctxt) ->
             bondy_wamp_utils:error(Reason, M)
     end,
     {reply, Reply};
+
+handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, _Ctxt) ->
+    no_such_procedure(M);
 
 handle_call(_, #call{} = M, _) ->
     no_such_procedure(M).
