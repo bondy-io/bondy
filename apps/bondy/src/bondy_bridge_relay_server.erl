@@ -244,6 +244,9 @@ when ?SOCKET_DATA(Tag) ->
     end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
+    ?LOG_INFO(#{
+        description => "Bridge Relay connection closed by client"
+    }),
     {stop, normal};
 
 connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
@@ -304,7 +307,12 @@ connected(timeout, _Msg, _) ->
     }),
     {stop, normal};
 
-connected(_EventType, _Msg, _) ->
+connected(EventType, Msg, _) ->
+    ?LOG_INFO(#{
+        description => "Received unknown message",
+        type => EventType,
+        event => Msg
+    }),
     {stop, normal}.
 
 
