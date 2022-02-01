@@ -40,7 +40,7 @@
 %%
 %% This module handles only the concurrency and basic routing logic,
 %% delegating the rest to either {@link bondy_broker} for PubSub interactions,
-%% {@link bondy_dealer} for RPC interactions and {@link bondy_router_relay} for
+%% {@link bondy_dealer} for RPC interactions and {@link bondy_relay} for
 %% all interactions targetting a remote peer.
 %%
 %% ```
@@ -238,7 +238,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                 undefined ->
                     Node = bondy_ref:node(To),
                     PeerMsg = {forward, To, Msg, Opts},
-                    bondy_router_relay:forward(Node, PeerMsg, RelayOpts);
+                    bondy_relay:forward(Node, PeerMsg, RelayOpts);
                 Relay ->
                     case bondy_ref:is_local(Relay) of
                         true ->
@@ -251,7 +251,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                                 retransmission => true,
                                 partition_key => erlang:phash2(RealmUri)
                             },
-                            bondy_router_relay:forward(Node, PeerMsg)
+                            bondy_relay:forward(Node, PeerMsg)
                     end
             end
     end.

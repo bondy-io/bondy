@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_uplink_session_sup.erl -
+%%  bondy_bridge_relay_session_sup.erl -
 %%
 %%  Copyright (c) 2018-2022 Leapsight. All rights reserved.
 %%
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_exchanges_sup).
+-module(bondy_bridge_relay_exchanges_sup).
 
 -behaviour(supervisor).
 
@@ -67,7 +67,7 @@ start_link() ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_exchange(
-    Conn :: pid(), Sessions :: [bondy_edge_session:t()], Opts :: map()) ->
+    Conn :: pid(), Sessions :: [bondy_bridge_relay_session:t()], Opts :: map()) ->
     {ok, pid()} | {error, any()}.
 
 start_exchange(Conn, Sessions, Opts) ->
@@ -99,7 +99,7 @@ stop_exchange(Pid) when is_pid(Pid)->
 
 init([]) ->
     Children = [
-        ?WORKER(bondy_edge_exchange_statem, [], temporary, 5000)
+        ?WORKER(bondy_bridge_relay_exchange_statem, [], temporary, 5000)
     ],
     Specs = {{simple_one_for_one, 0, 1}, Children},
     {ok, Specs}.

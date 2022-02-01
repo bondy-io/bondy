@@ -132,3 +132,43 @@
 %% =============================================================================
 
 -define(TOMBSTONE, '$deleted').
+
+
+
+
+
+
+%% =============================================================================
+%% LISTENERS
+%% =============================================================================
+
+
+-define(SOCKET_OPTS_SPEC, #{
+    keepalive => #{
+        alias => <<"keepalive">>,
+        required => true,
+        default => true,
+        datatype => boolean
+    },
+    nodelay => #{
+        alias => <<"nodelay">>,
+        required => true,
+        default => true,
+        datatype => boolean
+    },
+    sndbuf => #{
+        alias => <<"sndbuf">>,
+        required => false,
+        datatype => pos_integer
+    },
+    recbuf => #{
+        alias => <<"recbuf">>,
+        required => false,
+        datatype => pos_integer
+    },
+    buffer => #{
+        alias => <<"buffer">>,
+        required => false,
+        datatype => pos_integer
+    }
+}).

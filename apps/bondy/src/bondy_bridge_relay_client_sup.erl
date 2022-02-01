@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_edge_uplink_client_sup.erl -
+%%  bondy_bridge_relay_client_sup.erl -
 %%
 %%  Copyright (c) 2018-2022 Leapsight. All rights reserved.
 %%
@@ -20,22 +20,24 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_uplink_client_sup).
+-module(bondy_bridge_relay_client_sup).
 
 -behaviour(supervisor).
 
-
--define(WORKER(Id, Args, Restart, Timeout), #{
+-define(CLIENT(Id, Args, Restart, Timeout), #{
     id => Id,
-    start => {Id, start_link, Args},
+    start => {bondy_bridge_relay_client, start_link, Args},
     restart => Restart,
     shutdown => Timeout,
     type => worker,
-    modules => [Id]
+    modules => [bondy_bridge_relay_client]
 }).
 
 %% API
 -export([start_link/0]).
+-export([start_child/1]).
+-export([delete_child/1]).
+-export([terminate_child/1]).
 
 
 %% SUPERVISOR CALLBACKS
@@ -58,6 +60,43 @@ start_link() ->
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec start_child(bondy_bridge_relay:t()) -> {ok, pid()} | {error, any()}.
+
+start_child(Bridge) ->
+    Id = maps:get(name, Bridge),
+    ChildSpec = ?CLIENT(Id, [Bridge], permanent, 5000),
+
+    case supervisor:start_child(?MODULE, ChildSpec) of
+        {ok, _} = OK ->
+            OK;
+        {error, already_present} ->
+            ok = supervisor:delete_child(?MODULE, Id),
+            start_child(Bridge);
+        {error, _} = Error ->
+            Error
+    end.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+terminate_child(Name) ->
+    supervisor:terminate_child(?MODULE, Name).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+delete_child(Name) ->
+    supervisor:delete_child(?MODULE, Name).
+
+
 %% =============================================================================
 %% SUPERVISOR CALLBACKS
 %% =============================================================================
@@ -65,28 +104,4 @@ start_link() ->
 
 
 init([]) ->
-    Opts = bondy_config:get([edge, uplink]),
-
-    case key_value:get(enabled, Opts) of
-        true ->
-            Args = [
-                key_value:get(transport, Opts),
-                key_value:get(endpoint, Opts),
-                Opts
-            ],
-
-            Children = [
-                ?WORKER(
-                    bondy_edge_uplink_client, Args, permanent, 5000
-                )
-                % ,
-                % ?SUPERVISOR(
-                %     bondy_edge_exchanges_sup, Args, permanent, 5000
-                % )
-            ],
-            {ok, {{rest_for_one, 5, 60}, Children}};
-
-        false ->
-            ignore
-    end.
-
+    {ok, {{one_for_one, 5, 60}, []}}.

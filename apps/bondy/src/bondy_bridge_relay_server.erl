@@ -1,9 +1,27 @@
+%% =============================================================================
+%%  bondy_bridge_relay_server -
+%%
+%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
+%%
+%%  Licensed under the Apache License, Version 2.0 (the "License");
+%%  you may not use this file except in compliance with the License.
+%%  You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%%  Unless required by applicable law or agreed to in writing, software
+%%  distributed under the License is distributed on an "AS IS" BASIS,
+%%  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%%  See the License for the specific language governing permissions and
+%%  limitations under the License.
+%% =============================================================================
+
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the server-side connection between and
 %% edge node (client) and a remote/core node (server).
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_edge_uplink_server).
+-module(bondy_bridge_relay_server).
 -behaviour(gen_statem).
 -behaviour(ranch_protocol).
 
@@ -28,7 +46,7 @@
     ping_retry              ::  maybe(bondy_retry:t()),
     ping_tref               ::  maybe(timer:ref()),
     ping_sent               ::  maybe({Ref :: timer:ref(), Data :: binary()}),
-    sessions = #{}          ::  #{id() => bondy_edge_session:t()},
+    sessions = #{}          ::  #{id() => bondy_bridge_relay_session:t()},
     sessions_by_uri = #{}   ::  #{uri() => id()},
     registrations = #{}     ::  reg_indx(),
     session                 ::  maybe(map()),
@@ -109,7 +127,7 @@ init({RanchRef, Transport, Opts}) ->
         ranch_ref = RanchRef,
         transport = Transport,
         opts = Opts,
-        idle_timeout = key_value:get(idle_timeout, Opts, timer:minutes(10)),
+        idle_timeout = key_value:get(idle_timeout, Opts, infinity),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -226,11 +244,14 @@ when ?SOCKET_DATA(Tag) ->
     end;
 
 connected(info, {Tag, _Socket}, _) when ?CLOSED_TAG(Tag) ->
+    ?LOG_INFO(#{
+        description => "Bridge Relay connection closed by client"
+    }),
     {stop, normal};
 
 connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     ?LOG_INFO(#{
-        description => "Edge connection closed due to error",
+        description => "Bridge Relay connection closed due to error",
         reason => Reason
     }),
     {stop, Reason};
@@ -286,7 +307,12 @@ connected(timeout, _Msg, _) ->
     }),
     {stop, normal};
 
-connected(_EventType, _Msg, _) ->
+connected(EventType, Msg, _) ->
+    ?LOG_INFO(#{
+        description => "Received unknown message",
+        type => EventType,
+        event => Msg
+    }),
     {stop, normal}.
 
 
@@ -525,6 +551,8 @@ handle_message({authenticate, Signature, Extra}, State0) ->
 handle_message({aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
     ok = full_sync(SessionId, RealmUri, Opts, State),
+    Finish = {aae_sync, SessionId, finished},
+    ok = gen_statem:cast(self(), {forward, Finish}),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
@@ -737,10 +765,7 @@ full_sync(SessionId, RealmUri, Opts, State) ->
     %% ALSO we are currently copying the CRA passwords which we shouldn't
 
     %% Finally we sync the realm
-    ok = do_full_sync(SessionId, RealmUri, Opts, State),
-
-    Finish = {aae_sync, SessionId, finished},
-    gen_statem:cast(self(), {forward, Finish}).
+    ok = do_full_sync(SessionId, RealmUri, Opts, State).
 
 
 

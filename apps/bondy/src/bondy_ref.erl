@@ -375,8 +375,8 @@ is_type(_) ->
 %%
 %% If the reference type is `relay' the target refers to the session
 %% and/or process owning the network connection to the edge or
-%% remote cluster (See {@link bondy_edge_uplink_client} and
-%% {@link bondy_edge_uplink_server} respectively). The relay acts as a proxy
+%% remote cluster (See {@link bondy_bridge_relay_client} and
+%% {@link bondy_bridge_relay_server} respectively). The relay acts as a proxy
 %% for the actual edge or remote clients, internal and callback targets.
 %%
 %% @end

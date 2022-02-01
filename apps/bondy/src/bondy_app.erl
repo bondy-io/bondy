@@ -107,6 +107,8 @@ start(_Type, Args) ->
             ok = init_registry(),
             ok = setup_wamp_subscriptions(),
             ok = start_admin_listeners(),
+            %% We need to re-enable AAE (if it was enabled) so that hashtrees
+            %% are build
             ok = restore_aae(),
             ok = maybe_wait_for_plum_db_hashtrees(),
             ok = maybe_wait_for_aae_exchange(),
@@ -142,7 +144,7 @@ prep_stop(_State) ->
         description => "Awaiting for client sessions to gracefully terminate",
         timer_secs => Secs
     }),
-    ok = timer:sleep(Secs * 1000),
+    ok = timer:sleep(timer:seconds(Secs)),
 
     %% We remove all session and their registrations and subscriptions, also
     %% broadcasting those to the other nodes.
@@ -279,17 +281,13 @@ start_admin_listeners() ->
     %% The /ping (liveness) and /metrics paths will now go live
     %% The /ready (readyness) path will now go live but will return false as
     %% bondy_config:get(status) will return `initialising'
-    ?LOG_NOTICE(#{
-        description => "Starting Admin API listeners"
-    }),
+    ?LOG_NOTICE(#{description => "Starting Admin API listeners"}),
     bondy_http_gateway:start_admin_listeners().
 
 
 %% @private
 start_public_listeners() ->
-    ?LOG_NOTICE(#{
-        description => "Starting listeners"
-    }),
+    ?LOG_NOTICE(#{description => "Starting listeners"}),
     %% Now that the registry has been initialised we can initialise
     %% the remaining listeners for clients to connect
     %% WAMP TCP listeners
@@ -299,15 +297,14 @@ start_public_listeners() ->
     %% @TODO We need to separate the /ws path into another listener/port number
     ok = bondy_http_gateway:start_listeners(),
 
-    %% Bondy Edge (server) downlink connection listeners
-    ok = bondy_edge:start_listeners(),
-
-    %% Bondy Edge (client) uplink connection
-    ok = bondy_edge:start_uplinks(),
-
-    %% We flag the status, the /ready path will now return true.
+    %% We flag the status, the HTTP /ready path will now return true.
     ok = bondy_config:set(status, ready),
-    ok.
+
+    %% Bondy Router Bridge Relay (server) connection listeners
+    ok = bondy_bridge_relay_manager:start_listeners(),
+
+    %% Bondy Router Bridge Relay (client) connections
+    ok = bondy_bridge_relay_manager:start_bridges().
 
 
 %% @private
@@ -356,7 +353,7 @@ setup_wamp_subscriptions() ->
 
 %% @private
 suspend_aae() ->
-    case plum_db_config:get(aae_enabled, true) of
+    case application:get_env(plum_db, aae_enabled, true) of
         true ->
             ok = application:set_env(plum_db, priv_aae_enabled, true),
             ok = application:set_env(plum_db, aae_enabled, false),
@@ -375,7 +372,9 @@ restore_aae() ->
         true ->
             %% plum_db should have started so we call plum_db_config
             ok = plum_db_config:set(aae_enabled, true),
-            ?LOG_NOTICE(#{description => "Active anti-entropy (AAE) re-enabled"}),
+            ?LOG_NOTICE(#{
+                description => "Active anti-entropy (AAE) re-enabled"
+            }),
             ok;
         false ->
             ok
@@ -399,10 +398,10 @@ suspend_listeners() ->
 
     %% We stop accepting new connections on TCP/TLS
     ?LOG_NOTICE(#{description =>
-        "Suspending TCP/TLS Edge listeners. "
+        "Suspending TCP/TLS Bridge Relay listeners. "
         "No new connections will be accepted."
     }),
-    ok = bondy_edge:suspend_listeners().
+    ok = bondy_bridge_relay_manager:suspend_listeners().
 
 
 stop_listeners() ->
@@ -416,5 +415,5 @@ stop_listeners() ->
     ok = bondy_wamp_tcp:stop_listeners(),
 
     %% We force the TCP/TLS connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Edge connections"}),
-    ok = bondy_edge:stop_listeners().
+    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Bridge Relay connections"}),
+    ok = bondy_bridge_relay_manager:stop_listeners().

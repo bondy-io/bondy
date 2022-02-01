@@ -1,7 +1,7 @@
 %% =============================================================================
-%%  bondy_sup.erl -
+%%  bondy_bridge_relay_sup.erl -
 %%
-%%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
+%%  Copyright (c) 2018-2022 Leapsight. All rights reserved.
 %%
 %%  Licensed under the Apache License, Version 2.0 (the "License");
 %%  you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_sup).
+-module(bondy_bridge_relay_sup).
 -behaviour(supervisor).
 
 -define(SUPERVISOR(Id, Args, Restart, Timeout), #{
@@ -41,33 +41,37 @@
     modules => [Id]
 }).
 
--define(EVENT_MANAGER(Id, Restart, Timeout), #{
-    id => Id,
-    start => {gen_event, start_link, [{local, Id}]},
-    restart => Restart,
-    shutdown => Timeout,
-    type => worker,
-    modules => [dynamic]
-}).
-
-
-
 %% API
 -export([start_link/0]).
+
 
 %% SUPERVISOR CALLBACKS
 -export([init/1]).
 
 
 
+
 %% =============================================================================
 %% API
 %% =============================================================================
 
 
 
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+%% add_sink_sup(Name, Config) ->
+%%     {error, not_implemented}.
+
 
 
 
@@ -79,18 +83,15 @@ start_link() ->
 
 init([]) ->
     Children = [
-        %% We start bondy processes
-        ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
-        ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
-        ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
-        ?SUPERVISOR(bondy_session_manager_sup, [], permanent, infinity),
-        ?WORKER(bondy_registry, [], permanent, 5000),
-        ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
-        ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
-        ?WORKER(bondy_relay, [], permanent, 5000),
-        ?WORKER(bondy_backup, [], permanent, 5000),
-        ?WORKER(bondy_http_gateway, [], permanent, 5000),
-        ?WORKER(bondy_peer_discovery_agent, [], permanent, 5000),
-        ?SUPERVISOR(bondy_bridge_relay_sup, [], permanent, infinity)
+        ?WORKER(bondy_bridge_relay_manager, [], permanent, 5000),
+        ?SUPERVISOR(bondy_bridge_relay_client_sup, [], permanent, infinity)
     ],
     {ok, {{one_for_one, 1, 5}, Children}}.
+
+
+
+%% =============================================================================
+%% PRIVATE
+%% =============================================================================
+
+
