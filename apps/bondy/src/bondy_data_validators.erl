@@ -19,6 +19,11 @@
 -module(bondy_data_validators).
 -include_lib("wamp/include/wamp.hrl").
 
+-type endpoint() :: {
+    Host :: inet:ip_address() | inet:hostname(),
+    PortNumber :: N :: 1024..65535
+}.
+
 -export([authorized_key/1]).
 -export([cidr/1]).
 -export([endpoint/1]).
@@ -440,13 +445,39 @@ port_number(N) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec endpoint({
-        Host :: inet:ip_address() | inet:hostname(),
-        PortNumber :: N :: 1024..65535
-    }) -> any().
+-spec endpoint(endpoint() | binary() | list()) -> {ok, endpoint()} | boolean().
 
 endpoint({Host, PortNumber}) ->
-    inet_host(Host) andalso port_number(PortNumber).
+    inet_host(Host) andalso port_number(PortNumber);
+
+endpoint(Endpoint) when is_binary(Endpoint) ->
+    endpoint(binary_to_list(Endpoint));
+
+endpoint(Endpoint) when is_list(Endpoint) ->
+    case string:split(Endpoint, [$:]) of
+        [Host, PortStr] ->
+            try
+                Port = list_to_integer(PortStr),
+                inet_host(Host)
+                    andalso port_number(Port)
+                    orelse throw(invalid),
+
+                {ok, {Host, Port}}
+
+            catch
+                error:badarg ->
+                    %% PortStr is not an integer
+                    false;
+                throw:invalid ->
+                    false
+            end;
+        _ ->
+            false
+    end;
+
+endpoint(_) ->
+    false.
+
 
 
 %% -----------------------------------------------------------------------------
