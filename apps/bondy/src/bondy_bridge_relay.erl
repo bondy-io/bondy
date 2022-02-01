@@ -109,7 +109,10 @@
     socket_opts => #{
         alias => <<"socket_opts">>,
         required => true,
-        default => #{},
+        default => #{
+            keepalive => true,
+            nodelay => true
+        },
         validator => ?SOCKET_OPTS_SPEC
     },
     timeout => #{
