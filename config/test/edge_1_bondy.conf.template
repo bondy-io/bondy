@@ -106,19 +106,19 @@ wamp.tls.enabled = off
 wamp.websocket.compression_enabled = on
 
 
-bridge.edge = on
-bridge.edge.transport = tls
-bridge.edge.timeout = 5s
-bridge.edge.reconnect = on
-bridge.edge.reconnect.max_retries = 10
+# bridge.edge = on
+# bridge.edge.transport = tls
+# bridge.edge.timeout = 5s
+# bridge.edge.reconnect = on
+# bridge.edge.reconnect.max_retries = 10
 
 
-bridge.edge.endpoint = 127.0.0.1:18093
-bridge.edge.realm.1.uri = com.leapsight.test
-bridge.edge.realm.1.authid = device1
-bridge.edge.realm.1.cryptosign.pubkey = 1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd
-bridge.edge.realm.1.cryptosign.privkey_env_var = EDGE1_DEVICE1_PRIVKEY
-bridge.edge.realm.1.procedure.1 = com.example.add exact out
-bridge.edge.realm.1.procedure.2 = com.example.mult exact out
-bridge.edge.realm.1.topic.1 = com.example. prefix out
-bridge.edge.realm.1.topic.2 = com.foo. prefix out
+# bridge.edge.endpoint = 127.0.0.1:18093
+# bridge.edge.realm.1.uri = com.leapsight.test
+# bridge.edge.realm.1.authid = device1
+# bridge.edge.realm.1.cryptosign.pubkey = 1766c9e6ec7d7b354fd7a2e4542753a23cae0b901228305621e5b8713299ccdd
+# bridge.edge.realm.1.cryptosign.privkey_env_var = EDGE1_DEVICE1_PRIVKEY
+# bridge.edge.realm.1.procedure.1 = com.example.add exact out
+# bridge.edge.realm.1.procedure.2 = com.example.mult exact out
+# bridge.edge.realm.1.topic.1 = com.example. prefix out
+# bridge.edge.realm.1.topic.2 = com.foo. prefix out
