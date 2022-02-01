@@ -101,7 +101,9 @@
     tls_opts => #{
         alias => <<"tls_opts">>,
         required => true,
-        default => #{},
+        default => #{
+            verify => verify_none
+        },
         validator => ?TLS_OPTS_SPEC
     },
     socket_opts => #{
