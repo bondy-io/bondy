@@ -37,6 +37,15 @@
 -define(TCP, bridge_relay_tcp).
 -define(TLS, bridge_relay_tls).
 
+-define(OPTS_SPEC, #{
+    autostart => #{
+        alias => <<"autostart">>,
+        required => true,
+        default => false,
+        datatype => boolean
+    }
+}).
+
 -record(state, {
     bridges = #{}   :: bridges(),
     started = []    :: [binary()]
@@ -107,8 +116,17 @@ start_link() ->
 -spec add_bridge(Data :: map(), Opts :: add_opts()) ->
     {ok, bondy_bridge_relay:t()} | {error, Reason :: any()}.
 
-add_bridge(Data, Opts) ->
-    gen_server:call(?MODULE, {add_bridge, Data, Opts}, timer:seconds(30)).
+add_bridge(Data, Opts0) ->
+    try maps_utils:validate(Opts0, ?OPTS_SPEC) of
+        Opts ->
+            Timeout = timer:seconds(10),
+            gen_server:call(?MODULE, {add_bridge, Data, Opts}, Timeout)
+    catch
+        _:Reason ->
+            {error, Reason}
+    end.
+
+
 
 
 %% -----------------------------------------------------------------------------
@@ -503,9 +521,6 @@ supervised_bridges(_State) ->
     All = supervisor:which_children(bondy_bridge_relay_client_sup),
     [Id || {Id, _, _, _} <- All].
 
-
-maybe_start_bridge(Bridge, #{<<"autostart">> := Val} = Opts, State) ->
-    maybe_start_bridge(Bridge, Opts#{autostart => Val}, State);
 
 maybe_start_bridge(Bridge, #{autostart := true}, State0) ->
     try
