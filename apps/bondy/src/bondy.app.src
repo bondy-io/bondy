@@ -26,10 +26,10 @@
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
         "and is written in Erlang."
     },
-    {vsn, "1.0.0-beta.28"},
+    {vsn, "1.0.0-beta.29"},
     {registered, []},
     %% We pass the version number in the bondy_app:start/2 arguments
-    {mod, {bondy_app, [{vsn, "1.0.0-beta.28"}]}},
+    {mod, {bondy_app, [{vsn, "1.0.0-beta.29"}]}},
     {applications,[
         %% Erlang/OTP
         stdlib,
