@@ -416,31 +416,48 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 
-do_add_bridge(Data, Opts, State0) ->
-    try bondy_bridge_relay:new(Data) of
-        #{name := Name} = Bridge when map_get(restart, Bridge) =:= permanent ->
-            case bondy_bridge_relay:add(Bridge) of
-                ok ->
-                    State1 = State0#state{
-                        bridges = maps:put(Name, Bridge, State0#state.bridges)
-                    },
-                    maybe_start_bridge(Bridge, Opts, State1);
-                {error, _} = Reply ->
-                    {Reply, State0}
-            end;
-        #{name := Name} = Bridge ->
-            case bondy_bridge_relay:exists(Name) of
-                true ->
-                    Reply = {error, already_exists},
-                    {Reply, State0};
-                false ->
-                    State1 = State0#state{
-                        bridges = maps:put(Name, Bridge, State0#state.bridges)
-                    },
-                    maybe_start_bridge(Bridge, Opts, State1)
-            end
+new_bridge(Data) ->
+    try
+        bondy_bridge_relay:new(Data)
     catch
-        _:Reason ->
+        error:Reason ->
+            throw(Reason)
+    end.
+
+
+add_bridge_to_state(#{restart := permanent} = Bridge, State) ->
+    Name = maps:get(name, Bridge),
+
+    maps:is_key(Name, State#state.bridges)
+        andalso throw(already_exists),
+
+    Bridges = State#state.bridges,
+
+    case bondy_bridge_relay:add(Bridge) of
+        ok ->
+            State#state{bridges = maps:put(Name, Bridge, Bridges)};
+
+        {error, Reason} ->
+            throw(Reason)
+    end;
+
+add_bridge_to_state(#{restart := transient} = Bridge, State) ->
+    Name = maps:get(name, Bridge),
+
+    maps:is_key(Name, State#state.bridges)
+        andalso throw(already_exists),
+
+    Bridges = State#state.bridges,
+    State#state{bridges = maps:put(Name, Bridge, Bridges)}.
+
+
+do_add_bridge(Data, Opts, State0) ->
+    try
+        Bridge = new_bridge(Data),
+        State = add_bridge_to_state(Bridge, State0),
+        maybe_start_bridge(Bridge, Opts, State)
+    catch
+        throw:Reason ->
             {{error, Reason}, State0}
     end.
 
