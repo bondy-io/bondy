@@ -21,7 +21,7 @@
         allow_undefined => false
     }
 }).
-%% @private
+
 
 -export([init/1]).
 -export([validate_action/1]).
@@ -59,7 +59,7 @@ init(Config) ->
     catch
        _:Reason ->
            ?LOG_ERROR(#{
-                description => "Error while initialising brigde",
+                description => "Error while initialising bridge",
                 config => Config,
                 reason => Reason
             }),
@@ -108,7 +108,7 @@ apply_action(Action) ->
             ok;
         {error, Reason} = Error ->
             ?LOG_ERROR(#{
-                description => "Error while sending sms",
+                description => "Error while sending message",
                 phone_number => PhoneNumber,
                 reason => Reason
             }),
@@ -116,7 +116,7 @@ apply_action(Action) ->
     catch
         Class:EReason:Stacktrace ->
             ?LOG_ERROR(#{
-                description => "Error while sending sms",
+                description => "Error while sending message",
                 phone_number => PhoneNumber,
                 class => Class,
                 reason => EReason,
@@ -147,8 +147,8 @@ terminate(_Reason, _State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec send_sms(map())
-    -> {ok, binary()} | {error, Reason :: any()} | no_return().
+-spec send_sms(map()) ->
+    {ok, binary()} | {error, Reason :: any()} | no_return().
 
 send_sms(Action) ->
     #{
