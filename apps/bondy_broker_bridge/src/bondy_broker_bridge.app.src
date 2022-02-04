@@ -1,6 +1,6 @@
 {application, bondy_broker_bridge, [
     {description,
-        "Bondy Broker Bridge is an application that is part of Bondy"
+        "Bondy Broker Bridge is an application that is part of Bondy and provides a way to integrate Events with external brokers and systems."
     },
     {vsn, "1.0.0-beta.29"},
     {registered, []},
@@ -13,7 +13,7 @@
         mops
         erlcloud,
         email
-    ]},
+   ]},
     {env,[]},
     {modules, []},
   {maintainers, []},
