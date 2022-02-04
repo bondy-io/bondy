@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_router_relay.erl - forwards INVOCATION (their RESULT or
+%%  bondy_relay.erl - forwards INVOCATION (their RESULT or
 %%  ERROR), INTERRUPT and PUBLISH messages between WAMP clients connected to
 %%  different Bondy peers (nodes).
 %%
@@ -79,7 +79,7 @@
 %% '''
 %% @end
 %% -----------------------------------------------------------------------------
--module(bondy_router_relay).
+-module(bondy_relay).
 -behaviour(gen_server).
 
 -include_lib("kernel/include/logger.hrl").
@@ -120,7 +120,7 @@
 -spec start_link() -> {'ok', pid()} | 'ignore' | {'error', term()}.
 
 start_link() ->
-    %% bondy_router_relay may receive a huge amount of
+    %% bondy_relay may receive a huge amount of
     %% messages. Make sure that they are stored off heap to
     %% avoid exessive GCs. This makes messaging slower though.
     SpawnOpts = [

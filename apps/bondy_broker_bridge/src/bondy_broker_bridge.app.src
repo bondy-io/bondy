@@ -1,21 +1,22 @@
-{application, bondy_broker_bridge,
- [{description, "An OTP application"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, { bondy_broker_bridge_app, []}},
-  {applications,
-   [kernel,
-    stdlib,
-    brod,
-    hash,
-    mops,
-    erlcloud,
-    email
-   ]},
-  {env,[]},
-  {modules, []},
-
+{application, bondy_broker_bridge, [
+    {description,
+        "Bondy Broker Bridge is an application that is part of Bondy"
+    },
+    {vsn, "1.0.0-beta.28"},
+    {registered, []},
+    {mod, {bondy_broker_bridge_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        brod,
+        hash,
+        mops
+        erlcloud,
+        email
+    ]},
+    {env,[]},
+    {modules, []},
   {maintainers, []},
-  {licenses, ["Apache 2.0"]},
+  {licenses, []},
   {links, []}
  ]}.

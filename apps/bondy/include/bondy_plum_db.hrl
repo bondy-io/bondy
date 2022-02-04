@@ -37,5 +37,6 @@
     %% ------------------------------------------
     {api_gateway, disk},
     {?PLUM_DB_TICKET_TAB, disk},
-    {oauth2_refresh_tokens, disk}
+    {oauth2_refresh_tokens, disk},
+    {bondy_bridge_relay, disk}
 ]).

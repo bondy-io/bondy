@@ -169,8 +169,8 @@ transport_opts(Ref) ->
 
 %% @private
 %% These MUST match the listener names defined in bondy.schema
-ref_to_transport(edge_tcp) -> ranch_tcp;
-ref_to_transport(edge_tls) -> ranch_ssl;
+ref_to_transport(bridge_relay_tcp) -> ranch_tcp;
+ref_to_transport(bridge_relay_tls) -> ranch_ssl;
 ref_to_transport(wamp_tcp) -> ranch_tcp;
 ref_to_transport(wamp_tls) -> ranch_ssl.
 

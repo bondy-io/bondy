@@ -19,10 +19,12 @@
 {application, bondy,
  [
     {description,
-        "Leapsight Bondy is an open source distributed networking platform for "
-        "microservices and IoT applications written in Erlang. "
+        "Bondy is an open source, always-on and scalable "
+        "application networking platform for modern architectures. "
+        "It is an all-in-one event and service mesh "
+        "that offers both Publish-Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC), additional protocols and secure multi-tenancy. "
         "Bondy implements the open Web Application Messaging Protocol (WAMP) "
-        "offering both Publish and Subscribe (PubSub) and routed Remote " "Procedure Calls (RPC)."
+        "and is written in Erlang."
     },
     {vsn, "1.0.0-beta.28"},
     {registered, []},
@@ -30,12 +32,12 @@
     {mod, {bondy_app, [{vsn, "1.0.0-beta.28"}]}},
     {applications,[
         %% Erlang/OTP
+        stdlib,
+        kernel,
         crypto,
         inets,
-        kernel,
         runtime_tools,
         sasl,
-        stdlib,
         tools,
         %% 3rd-party Crypto
         enacl,
@@ -49,9 +51,7 @@
         %% 3rd-party Utils
         %% 3rd-party Instrumentation
         bear,
-        observer_cli,
         prometheus,
-        redbug,
         telemetry,
         %% 3rd-party Serialization formats
         jsone,
@@ -70,9 +70,9 @@
     {maintainers, ["Alejandro M. Ramallo"]},
     {licenses, ["Apache 2.0"]},
     {links, [
-        {"Gitlab", "https://gitlab.com/leapsight/bondy"},
         {"Github", "https://github/leapsight/bondy"},
         {"Docs", "https://docs.getbondy.io"},
-        {"Website", "https://getbondy.io"}
+        {"Website", "https://getbondy.io"},
+        {"Docker", "https://hub.docker.com/r/leapsight/bondy"}
     ]}
  ]}.

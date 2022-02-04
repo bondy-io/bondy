@@ -1,4 +1,4 @@
--module(bondy_edge_session).
+-module(bondy_bridge_relay_session).
 % -behaviour(gen_server).
 
 % -include_lib("kernel/include/logger.hrl").

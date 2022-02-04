@@ -514,7 +514,7 @@ forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
                 %% If we are handling this here is because any remaining relays
                 %% in the 'via' stack are part of the route back to the Caller.
                 %% If this was an INVOCATION destined to another peer node then
-                %% bondy_router_relay would have forwarded itself.
+                %% bondy_relay would have forwarded itself.
                 Via = maps:get(via, SendOpts, undefined),
 
                 %% We enqueue an invocation promise so that we can match it
