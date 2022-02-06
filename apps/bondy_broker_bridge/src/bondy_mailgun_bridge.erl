@@ -87,12 +87,7 @@ init(Config) ->
     }),
 
     try
-        %% stop the pre-loaded and started email app
-        ok = application:stop(email),
-        ok = application:unload(email),
-
         application:set_env([{email, Config}]),
-        ok = application:load(email),
 
         {ok, _} = application:ensure_all_started(email),
 

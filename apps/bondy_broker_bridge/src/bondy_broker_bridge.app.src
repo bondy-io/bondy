@@ -8,11 +8,14 @@
     {applications, [
         kernel,
         stdlib,
-        brod,
-        hash,
-        mops,
-        erlcloud,
-        email
+        %% The ollowing are not enabled as we want the Bondy the bridge to
+        %% dynamically start them
+        %% brod, hash,
+        %% erlcloud,
+        %% email,
+        %% already started by Bondy
+        jsone,
+        mops
     ]},
     {env,[]},
     {modules, []},

@@ -302,6 +302,8 @@
 init(Config) ->
     _ = [application:set_env(brod, K, V) || {K, V} <- Config, K =:= clients],
 
+    _ = application:ensure_all_started(hash),
+
     try application:ensure_all_started(brod) of
         {ok, _} ->
             {ok, Clients} = application:get_env(brod, clients),
@@ -422,6 +424,7 @@ apply_action(Action) ->
 
 
 terminate(_Reason, _State) ->
+    _  = application:stop(hash),
     _  = application:stop(brod),
     ok.
 
