@@ -79,8 +79,6 @@
 -define(RETRY_TIMES, 3).
 -define(RETRY_BACKOFF_MS, 2000).
 
--define(HACKNEY_POOL_NAME, mypool).
-
 
 -export([init/1]).
 -export([validate_action/1]).
@@ -198,8 +196,6 @@ apply_action(Action) ->
 %% @end
 %% -----------------------------------------------------------------------------
 terminate(_Reason, _State) ->
-    % _  = application:stop(hackney),
-    _ = hackney_pool:stop_pool(?HACKNEY_POOL_NAME),
     ok.
 
 
