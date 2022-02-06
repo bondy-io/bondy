@@ -113,7 +113,7 @@ init(Config) ->
         %% set the email sender in the context for the action using mops
         case lists:keyfind(email_sender, 1, Config) of
             false ->
-                error(badarg);
+                error({invalid_config, Config});
             SenderTuple ->
                 Context = maps:from_list([SenderTuple]),
                 {ok, Context}
@@ -121,7 +121,7 @@ init(Config) ->
     catch
         _:Reason ->
             ?LOG_ERROR(#{
-                description => "Error while initialising brigde",
+                description => "Error while initialising bridge",
                 config => Config,
                 reason => Reason
             }),
