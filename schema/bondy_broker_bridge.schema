@@ -369,7 +369,7 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.enabled", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.enabled", [
+{mapping, "broker_bridge.email.enabled", "bondy_broker_bridge.bridges.bondy_email_bridge.enabled", [
   {datatype, flag},
   {default, off}
 ]}.
@@ -379,17 +379,32 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.adapter", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.adapter", [
-  {datatype, atom},
-  {default, mailgun2}
+{mapping, "broker_bridge.email.backend", "bondy_broker_bridge.bridges.bondy_email_bridge.backend", [
+  {datatype, {enum, [sendgrid, mailgun]}},
+  {default, mailgun}
 ]}.
+
+{translation, "bondy_broker_bridge.bridges.bondy_email_bridge.adapter",
+  fun(Conf) ->
+    case cuttlefish:conf_get("broker_bridge.email.backend", Conf) of
+        sendgrid ->
+          bondy_email_sendgrid;
+        mailgun ->
+          bondy_email_mailgun;
+        _ ->
+            cuttlefish:invalid(
+              "value should be either 'sendgrid' or 'mailgun'"
+            )
+    end
+  end
+}.
 
 
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.domain", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.domain", [
+{mapping, "broker_bridge.email.domain", "bondy_broker_bridge.bridges.bondy_email_bridge.domain", [
   {datatype, string}
 ]}.
 
@@ -398,7 +413,34 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.apiurl", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.apiurl", [
+{mapping, "broker_bridge.email.api_host", "bondy_broker_bridge.bridges.bondy_email_bridge.api_host", [
+  {datatype, string}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.email.api_port", "bondy_broker_bridge.bridges.bondy_email_bridge.api_port", [
+  {default, 443},
+  {datatype, integer}
+]}.
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.email.transport", "bondy_broker_bridge.bridges.bondy_email_bridge.transport", [
+  {default, tls},
+  {datatype, {enum, [tcp, tls]}}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.email.api_key", "bondy_broker_bridge.bridges.bondy_email_bridge.api_key", [
   {datatype, string}
 ]}.
 
@@ -407,67 +449,6 @@ end}.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.apikey", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.apikey", [
-  {datatype, string}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.mailgun.sender", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.email_sender", [
-  {datatype, string}
-]}.
-
-
-%% =============================================================================
-%% SENDGRID BRIDGE
-%% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.sendgrid.enabled", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.enabled", [
-  {datatype, flag},
-  {default, off}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.sendgrid.adapter", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.adapter", [
-  {datatype, atom},
-  {default, sendgrid}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.sendgrid.apiurl", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.sendgrid.apiurl", [
-  {datatype, string}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.sendgrid.apikey", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.sendgrid.apikey", [
-  {datatype, string}
-]}.
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
-{mapping, "broker_bridge.sendgrid.sender", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.email_sender", [
+{mapping, "broker_bridge.email.sender", "bondy_broker_bridge.bridges.bondy_email_bridge.sender", [
   {datatype, string}
 ]}.

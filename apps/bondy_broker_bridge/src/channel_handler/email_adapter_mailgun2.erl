@@ -77,11 +77,11 @@ start(Options) ->
     application:start(asn1),
     application:start(public_key),
     application:start(ssl),
-    
+
     Domain = proplists:get_value(domain, Options),
     ApiUrl = proplists:get_value(apiurl, Options),
     ApiKey = proplists:get_value(apikey, Options),
-    
+
     {ok, #state{apiurl=ApiUrl ++ "/" ++ Domain, apikey=ApiKey}}.
 
 
@@ -185,7 +185,7 @@ url_encode([{Key, Value} | T], <<"">>) ->
     url_encode(T,
         <<(escape_uri(Key))/binary, $=, (escape_uri(Value))/binary>>
     );
-                
+
 url_encode([{Key, Value} | T], Acc) ->
     url_encode(T,
         <<Acc/binary, $&, (escape_uri(Key))/binary, $=,

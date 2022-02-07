@@ -514,8 +514,8 @@ init_bridges(State) ->
 
 %% @private
 terminate_bridges(Reason, #state{bridges = Map} = State) ->
-    Fun = fun(Bridge, _Config, Acc) ->
-        ok = Bridge:terminate(Reason),
+    Fun = fun(Bridge, Config, Acc) ->
+        ok = Bridge:terminate(Reason, Config),
         Acc#state{bridges = maps:remove(Bridge, Map)}
     end,
     maps:fold(Fun, State, Map).
