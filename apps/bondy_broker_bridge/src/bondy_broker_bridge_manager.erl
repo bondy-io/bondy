@@ -102,7 +102,6 @@
 -include_lib("wamp/include/wamp.hrl").
 
 -define(TIMEOUT, 30000).
--define(PREFIX, {broker_bridge, subscription_specs}).
 
 -define(SUBSCRIPTIONS_SPEC, #{
     <<"id">> => #{
