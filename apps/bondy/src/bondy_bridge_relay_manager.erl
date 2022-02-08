@@ -286,7 +286,7 @@ tcp_connections() ->
 
 
 init([]) ->
-    Config = bondy_config:get(bridges),
+    Config = bondy_config:get(bridges, #{}),
     {ok, #state{}, {continue, {add_bridges, Config}}}.
 
 
