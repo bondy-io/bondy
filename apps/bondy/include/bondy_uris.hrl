@@ -35,7 +35,7 @@
 
 -define(BONDY_ROUTER_BRIDGE_ADD,          <<"bondy.router.bridge.add">>).
 -define(BONDY_ROUTER_BRIDGE_CHECK_SPEC,   <<"bondy.router.bridge.check_spec">>).
--define(BONDY_ROUTER_BRIDGE_GET_SPEC,     <<"bondy.router.bridge.get_spec">>).
+-define(BONDY_ROUTER_BRIDGE_GET,          <<"bondy.router.bridge.get">>).
 -define(BONDY_ROUTER_BRIDGE_LIST,         <<"bondy.router.bridge.list">>).
 -define(BONDY_ROUTER_BRIDGE_STATUS,       <<"bondy.router.bridge.status">>).
 -define(BONDY_ROUTER_BRIDGE_REMOVE,       <<"bondy.router.bridge.remove">>).
