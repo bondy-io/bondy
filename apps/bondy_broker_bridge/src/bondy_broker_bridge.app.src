@@ -2,7 +2,7 @@
     {description,
         "Bondy Broker Bridge is an application that is part of Bondy"
     },
-    {vsn, "1.0.0-beta.29"},
+    {vsn, "1.0.0-beta.30"},
     {registered, []},
     {mod, {bondy_broker_bridge_app, []}},
     {applications, [
