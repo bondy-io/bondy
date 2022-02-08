@@ -127,7 +127,7 @@ wamp.tls.versions= 1.2,1.3
 
 wamp.websocket.compression_enabled=on
 
-bridge.listener.tcp = on
+bridge.listener.tcp = off
 bridge.listener.tcp.port = 18092
 
 bridge.listener.tls = on
