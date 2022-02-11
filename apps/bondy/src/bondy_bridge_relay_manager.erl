@@ -55,19 +55,26 @@
 -type add_opts()    ::  #{
     autostart  => boolean()
 }.
+-type status()      ::  #{Name :: binary() => #{
+                            status =>
+                                running | restarting | stopped | not_started
+                        }}.
 
 %% API
 -export([add_bridge/2]).
--export([start_bridge/1]).
--export([stop_bridge/1]).
--export([remove_bridge/1]).
--export([enable_bridge/1]).
--export([disable_bridge/1]).
 -export([connections/0]).
+-export([disable_bridge/1]).
+-export([enable_bridge/1]).
+-export([get_bridge/1]).
+-export([status/0]).
+-export([list_bridges/0]).
+-export([remove_bridge/1]).
 -export([resume_listeners/0]).
+-export([start_bridge/1]).
 -export([start_bridges/0]).
 -export([start_link/0]).
 -export([start_listeners/0]).
+-export([stop_bridge/1]).
 -export([stop_bridges/0]).
 -export([stop_listeners/0]).
 -export([suspend_listeners/0]).
@@ -126,6 +133,36 @@ add_bridge(Data, Opts0) ->
             {error, Reason}
     end.
 
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec get_bridge(Name :: binary()) ->
+    {ok, bondy_bridge_relay:t()} | {error, not_found}.
+
+get_bridge(Name) ->
+    gen_server:call(?MODULE, {get_bridge, Name}, timer:seconds(30)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec list_bridges() -> [bondy_bridge_relay:t()].
+
+list_bridges() ->
+    gen_server:call(?MODULE, list_bridges, timer:seconds(15)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec status() -> status().
+
+status() ->
+    gen_server:call(?MODULE, status, timer:seconds(15)).
 
 
 %% -----------------------------------------------------------------------------
@@ -286,7 +323,7 @@ tcp_connections() ->
 
 
 init([]) ->
-    Config = bondy_config:get(bridges),
+    Config = bondy_config:get(bridges, #{}),
     {ok, #state{}, {continue, {add_bridges, Config}}}.
 
 
@@ -375,6 +412,46 @@ handle_call({stop_bridge, Name}, _From, State0) ->
         throw:Reason ->
             {reply, {error, Reason}, State0}
     end;
+
+handle_call({get_bridge, Name}, _From, State) ->
+    Reply =
+        case maps:find(Name, State#state.bridges) of
+            {ok, _} = OK ->
+                OK;
+            error ->
+                {error, not_found}
+        end,
+    {reply, Reply, State};
+
+handle_call(list_bridges, _From, State) ->
+    Reply = maps:values(State#state.bridges),
+    {reply, Reply, State};
+
+handle_call(status, _From, State) ->
+    Managed = maps:keys(State#state.bridges),
+    Default = lists:foldl(
+        fun(K, Acc) ->
+            maps:put(K, #{status => not_started}, Acc)
+        end,
+        #{},
+        Managed
+    ),
+
+    Started = supervisor:which_children(bondy_bridge_relay_client_sup),
+    Status = lists:foldl(
+        fun
+            ({K, Term, _, _}, Acc) when is_pid(Term) ->
+                maps:put(K, #{status => running}, Acc);
+            ({K, restarting, _, _}, Acc) ->
+                maps:put(K, #{status => restarting}, Acc);
+            ({K, undefined, _, _}, Acc) ->
+                maps:put(K, #{status => stopped}, Acc)
+        end,
+        Default,
+        Started
+    ),
+    {reply, Status, State};
+
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
