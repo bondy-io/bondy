@@ -294,13 +294,19 @@ external_session_id(undefined) ->
     undefined.
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc It returns the timeout in ms.
+%% - Provided timeout if it is greater than 0
+%% - wamp_max_call_timeout if the provided timeout is equals to 0
+%% - wamp_call_timeout if no timeout is provided
 %% @end
 %% -----------------------------------------------------------------------------
 timeout(#{timeout := T}) when is_integer(T), T > 0 ->
-    T;
+    case T >= 1000 of
+        true -> T;  %% it assumes are ms
+        false -> T * 1000 %% it assumes are seconds
+    end;
 timeout(#{timeout := 0}) ->
-    infinity;
+    bondy_config:get(wamp_max_call_timeout);
 timeout(_) ->
     bondy_config:get(wamp_call_timeout).
 
