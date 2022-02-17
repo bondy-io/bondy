@@ -301,10 +301,7 @@ external_session_id(undefined) ->
 %% @end
 %% -----------------------------------------------------------------------------
 timeout(#{timeout := T}) when is_integer(T), T > 0 ->
-    case T >= 1000 of
-        true -> T;  %% it assumes are ms
-        false -> T * 1000 %% it assumes are seconds
-    end;
+    T;
 timeout(#{timeout := 0}) ->
     bondy_config:get(wamp_max_call_timeout);
 timeout(_) ->
