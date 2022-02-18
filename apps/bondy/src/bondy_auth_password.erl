@@ -93,7 +93,7 @@ requirements() ->
     | {error, Reason :: any(), NewState :: state()}.
 
 challenge(_, _, State) ->
-    {false, State}.
+    {true, #{}, State}.
 
 
 %% -----------------------------------------------------------------------------
