@@ -156,36 +156,6 @@ agent() ->
     | {reply, Reply :: wamp_message(), bondy_context:t()}
     | {stop, Reply :: wamp_message(), bondy_context:t()}.
 
-forward(#subscribe{} = M, #{session := _} = Ctxt) ->
-    %% This is a sync call as clients can call subscribe multiple times
-    %% concurrently. This is becuase matching and adding to the registry is not
-    %% done atomically: bondy_registry:add uses art_server:match/2 to
-    %% determine if a subscription already exists and then adds to the registry
-    %% (and trie). If we allow this request to be concurrent 2 or more request
-    %% could get no matches from match and thus create 3 subscriptions when
-    %% according to the protocol the subscriber should always get the same
-    %% subscription as result.
-    %% REVIEW An alternative approach would be for this to be handled async and
-    %% a pool of register servers to block.
-    ok = sync_forward({M, Ctxt}),
-    {ok, Ctxt};
-
-forward(#register{} = M, #{session := _} = Ctxt) ->
-    %% This is a sync call as it is an easy way to preserve RPC ordering as
-    %% defined by RFC 11.2:
-    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
-    %% message will be sent by _Dealer_ to _Callee A_ before any
-    %% "INVOCATION" message for *Procedure 1*.
-    %% Because we block the callee until we get the response,
-    %% the callee will not receive any other messages.
-    %% However, notice that if the callee has another connection with the
-    %% router, then it might receive an invocation through that connection
-    %% before we reply here.
-    %% At the moment this relies on Erlang's guaranteed causal delivery of
-    %% messages between two processes even when in different nodes.
-    ok = sync_forward({M, Ctxt}),
-    {ok, Ctxt};
-
 forward(
     #call{procedure_uri = <<"wamp.", _/binary>>} = M, #{session := _} = Ctxt) ->
     async_forward(M, Ctxt);
@@ -211,6 +181,41 @@ forward(#call{} = M, #{session := _} = Ctxt0) ->
     %% The invocation is always async and the result or error will be delivered
     %% asynchronously by the dealer.
     {ok, Ctxt0};
+
+
+forward(M, #{session := _} = Ctxt)
+when is_record(M, subscribe) orelse is_record(M, unsubscribe) ->
+    %% This is a sync request as clients can subscribe multiple times
+    %% concurrently. This is beczuse matching and adding to the registry is not
+    %% done atomically: bondy_registry:add uses art_server:match/2 to
+    %% determine if a subscription already exists and then adds to the registry
+    %% (and trie). If we allow this request to be concurrent 2 or more request
+    %% could get no matches from match and thus create 3 subscriptions when
+    %% according to the protocol the subscriber should always get the same
+    %% subscription as result.
+    %% Same for UNSUBSCRIBE
+    %% REVIEW An alternative approach would be for this to be handled async and
+    %% a pool of register servers to block.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
+
+forward(M, #{session := _} = Ctxt)
+when is_record(M, register) orelse is_record(M, unregister) ->
+    %% This is a sync call as it is an easy way to preserve RPC ordering as
+    %% defined by RFC 11.2:
+    %% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
+    %% message will be sent by _Dealer_ to _Callee A_ before any
+    %% "INVOCATION" message for *Procedure 1*.
+    %% Because we block the callee until we get the response,
+    %% the callee will not receive any other messages.
+    %% However, notice that if the callee has another connection with the
+    %% router, then it might receive an invocation through that connection
+    %% before we reply here.
+    %% Same for UNREGISTER
+    %% At the moment this relies on Erlang's guaranteed causal delivery of
+    %% messages between two processes even when in different nodes.
+    ok = sync_forward({M, Ctxt}),
+    {ok, Ctxt};
 
 forward(M, #{session := _} = Ctxt) ->
     async_forward(M, Ctxt).
