@@ -120,12 +120,8 @@ handle_call(?BONDY_ROUTER_BRIDGE_LIST, #call{} = M, Ctxt) ->
 
 handle_call(?BONDY_ROUTER_BRIDGE_STATUS, #call{} = M, Ctxt) ->
     [] = bondy_wamp_utils:validate_admin_call_args(M, Ctxt, 0),
-    Reply = case bondy_bridge_relay_manager:status() of
-        {ok, Status} ->
-            wamp_message:result(M#call.request_id, #{}, [Status]);
-        {error, Reason} ->
-            bondy_wamp_utils:error(Reason, M)
-    end,
+    Status = bondy_bridge_relay_manager:status(),
+    Reply = wamp_message:result(M#call.request_id, #{}, [Status]),
     {reply, Reply};
 
 handle_call(_, #call{} = M, _) ->
