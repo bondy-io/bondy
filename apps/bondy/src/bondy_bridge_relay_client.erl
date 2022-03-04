@@ -76,6 +76,7 @@
 %% STATE FUNCTIONS
 -export([connecting/3]).
 -export([connected/3]).
+% -export([established/3]).
 
 
 
@@ -126,7 +127,10 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config0) ->
-    ?LOG_NOTICE(#{description => "Starting bridge-relay client"}),
+    ?LOG_NOTICE(#{
+        description => "Starting bridge-relay client",
+        config => Config0
+    }),
 
     #{
         transport := Transport,
@@ -287,15 +291,17 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
         details => Details
     }),
 
-    State = init_session_and_sync(SessionId, State0),
+    State1 = init_session_and_sync(SessionId, State0),
+    State = reset_reconnect_retry_state(State1),
 
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {abort, #{}, Reason}, State) ->
+connected(internal, {abort, Reason, Details}, State) ->
     ?LOG_NOTICE(#{
         description => "Got abort message from server, closing connection.",
-        reason => Reason
+        reason => Reason,
+        details => Details
     }),
     {stop, server_error, State};
 
@@ -568,13 +574,17 @@ send_message(Message, State) ->
 
 
 %% @private
-on_connect(State0) ->
+on_connect(State) ->
     ?LOG_NOTICE(#{description => "Established connection with remote router"}),
 
     %% We join any realms defined by the config
-    {_, R1} = bondy_retry:succeed(State0#state.reconnect_retry),
-    State = State0#state{reconnect_retry = R1},
     open_sessions(State).
+
+
+%% @private
+reset_reconnect_retry_state(State) ->
+    {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
+    State#state{reconnect_retry = R1}.
 
 
 %% @private
