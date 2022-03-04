@@ -636,7 +636,6 @@ signer(_, #{cryptosign := #{procedure := _}}) ->
     error(not_implemented);
 
 signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
-
     SignerFun = fun(Message) ->
         try
             Port = erlang:open_port(
@@ -666,6 +665,12 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
         error:Reason ->
             error(Reason)
     end;
+signer(_, #{cryptosign := #{privkey := HexString}}) ->
+    %% For testing only, this will be remove on 1.0.0
+    fun(Message) ->
+        PrivKey = hex_utils:hexstr_to_bin(HexString),
+        sign(Message, PrivKey)
+    end;
 
 signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
 
@@ -673,18 +678,23 @@ signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
         false ->
             error({invalid_config, {privkey_env_var, Var}});
         HexString ->
-            PrivKey = hex_utils:hexstr_to_bin(HexString),
             fun(Message) ->
-                list_to_binary(
-                    hex_utils:bin_to_hexstr(
-                        enacl:sign_detached(Message, PrivKey)
-                    )
-                )
+                PrivKey = hex_utils:hexstr_to_bin(HexString),
+                sign(Message, PrivKey)
             end
     end;
 
 signer(_, _) ->
     error(invalid_cryptosign_config).
+
+
+%% @private
+sign(Message, PrivKey) ->
+    list_to_binary(
+        hex_utils:bin_to_hexstr(
+            enacl:sign_detached(Message, PrivKey)
+        )
+    ).
 
 
 %% @private

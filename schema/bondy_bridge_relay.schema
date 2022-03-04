@@ -231,6 +231,14 @@
     {datatype, string}
 ]}.
 
+%% For testing only, it will be removed on 1.0.0 release
+{mapping,
+  "bridge.$name.realm.$id.cryptosign.privkey",
+  "bondy.bridges", [
+    {datatype, string}
+]}.
+
+
 
 %% Defines a procedure URI pattern that is shared between the two routers for
 %% in the defined realm.
@@ -489,6 +497,7 @@
       when  KeyStr == <<"pubkey">>;
             KeyStr == <<"procedure">>;
             KeyStr == <<"exec">>;
+            KeyStr == <<"privkey">>; %% this will be removed on 1.0.0
             KeyStr == <<"privkey_env_var">> ->
 
         Key = binary_to_atom(KeyStr),
