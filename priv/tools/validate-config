@@ -59,7 +59,7 @@ main([EtcDir, _ReleaseDir]) ->
         [] ->
             ?LOG_INFO(
                 "No Bondy configuration file found at ~p. Bondy will use the default configuration. Otherwise please make sure a 'bondy.conf' file (or 'bondy.conf.template' in case environment variables replacement is required) is present in the ~p directory.",
-                [EtcDir]
+                [EtcDir, EtcDir]
             ),
             true;
         [B1] ->
