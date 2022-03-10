@@ -518,7 +518,7 @@
 
             case string:split(Spec, [$\s], all) of
               [Uri, Match, Direction] ->
-                lists:member(Match, ["exact", "prefix", "wilcard"])
+                lists:member(Match, ["exact", "prefix", "wildcard"])
                   orelse throw(invalid_match_spec),
 
                 lists:member(Direction, ["in", "out", "both"])

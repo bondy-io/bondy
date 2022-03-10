@@ -1200,7 +1200,7 @@ trie_key(Entry, Policy) ->
         _ when SessionId == <<>> ->
             %% As we currently do not support wildcard matching in art, we turn
             %% this into a prefix matching query
-            %% TODO change when wilcard matching is enabled in art.
+            %% TODO change when wildcard matching is enabled in art.
             <<>>;
         Id0 ->
             term_to_trie_key_part(Id0)
