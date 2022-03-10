@@ -833,7 +833,8 @@ abort_message({no_authmethod, []}) ->
 
 abort_message({no_authmethod, _Opts}) ->
     Details = #{
-        message => <<"The requested authentication methods are not available for this user on this realm.">>
+        message => <<"The requested authentication methods are not available for this user on this realm.">>,
+        description => <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>
     },
     wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
