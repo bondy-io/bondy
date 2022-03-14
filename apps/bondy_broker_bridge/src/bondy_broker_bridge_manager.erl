@@ -316,10 +316,10 @@ subscribe(RealmUri, Opts, Topic, Bridge, Spec) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(id()) -> ok | {error, not_found}.
+-spec unsubscribe(pid()) -> ok | {error, not_found}.
 
-unsubscribe(Id) ->
-    gen_server:call(?MODULE, {unsubscribe, Id}, ?TIMEOUT).
+unsubscribe(Pid) ->
+    gen_server:call(?MODULE, {unsubscribe, Pid}, ?TIMEOUT).
 
 
 %% -----------------------------------------------------------------------------
@@ -413,8 +413,8 @@ handle_call({subscribe, RealmUri, Opts, Topic, Bridge, Spec0}, _From, State) ->
             {reply, {error, Reason}, State}
     end;
 
-handle_call({unsubscribe, Id}, _From, State) ->
-    Res = bondy_broker:unsubscribe(Id),
+handle_call({unsubscribe, Pid}, _From, State) ->
+    Res = bondy_broker:unsubscribe(Pid),
     {reply, Res, State};
 
 handle_call({load, Term}, _From, State) ->

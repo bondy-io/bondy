@@ -353,7 +353,7 @@ key(#entry{key = Key}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns either a session identifier, a pid() or a callback module
-%% depending on the type of entry. I can also return the wilcard '_' when the
+%% depending on the type of entry. I can also return the wildcard '_' when the
 %% entry is used as a pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -438,7 +438,7 @@ is_callback(#entry{key = Key}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the callback arguments when target is a callback, otherwise
-%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% returns `undefined' or the wildcard value '_' when the entry was used as a
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -450,7 +450,7 @@ callback_args(#entry{callback_args = Val}) ->
 
 %% -----------------------------------------------------------------------------
 %% @doc Returns the callback module when target is a callback, otherwise
-%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% returns `undefined' or the wildcard value '_' when the entry was used as a
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------
@@ -469,7 +469,7 @@ callback(#entry{}) ->
 %% -----------------------------------------------------------------------------
 %% @doc Returns the value of the subscription's or registration's pid
 %% property when target is a pid() or a session identifier. Otherwise
-%% returns `undefined' or the wilcard value '_' when the entry was used as a
+%% returns `undefined' or the wildcard value '_' when the entry was used as a
 %% pattern (See {@link pattern/5}).
 %% @end
 %% -----------------------------------------------------------------------------

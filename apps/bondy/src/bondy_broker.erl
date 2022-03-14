@@ -280,11 +280,10 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
 %% bondy_subscribers_sup:terminate_subscriber/1
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(pid()) -> ok | {error, not_found}.
+-spec unsubscribe(pid() | integer()) -> ok | {error, not_found}.
 
-unsubscribe(Subscriber) when is_integer(Subscriber) ->
-    bondy_subscribers_sup:terminate_subscriber(
-        bondy_subscriber:pid(Subscriber));
+unsubscribe(SubscriberId) when is_integer(SubscriberId) ->
+    unsubscribe(bondy_subscriber:pid(SubscriberId));
 
 unsubscribe(Subscriber) when is_pid(Subscriber) ->
     bondy_subscribers_sup:terminate_subscriber(Subscriber).
@@ -296,10 +295,10 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 %% -----------------------------------------------------------------------------
 -spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
 
-unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
+unsubscribe(SubsId, RealmUri) when is_integer(SubsId), is_binary(RealmUri) ->
     unsubscribe(SubsId, bondy_context:local_context(RealmUri));
 
-unsubscribe(SubsId, Ctxt) ->
+unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
     case bondy_registry:lookup(subscription, SubsId, RealmUri) of
@@ -462,12 +461,14 @@ do_forward(#subscribe{} = M, Ctxt) ->
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
+    SubsId = M#unsubscribe.subscription_id,
 
-    case unsubscribe(M, Ctxt) of
+    case unsubscribe(SubsId, Ctxt) of
         ok ->
             ReqId = M#unsubscribe.request_id,
             Reply = wamp_message:unsubscribed(ReqId),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
         {error, not_found} ->
             throw(not_found)
     end;
