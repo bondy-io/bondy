@@ -27,7 +27,6 @@
 %% Also an in-memory trie-based indexed (materialised vieq) is used for exact
 %% and prefix matching.
 %%
-%% Note: support for wildcard matching is soon to be supported.
 %%
 %% This module also provides a singleton server to perform the initialisation
 %% of the trie from the plum_db tables.
@@ -50,7 +49,6 @@
 ).
 
 %% ART TRIES
--define(ANY, <<"*">>).
 -define(SUBSCRIPTION_TRIE, bondy_subscription_trie).
 -define(REGISTRATION_TRIE, bondy_registration_trie).
 -define(TRIES, [?SUBSCRIPTION_TRIE, ?REGISTRATION_TRIE]).
@@ -645,7 +643,7 @@ match(Type, Uri, RealmUri) ->
 match(Type, Uri, RealmUri, Opts) ->
     try
         Trie = trie(Type),
-        Pattern = <<RealmUri/binary, $,, Uri/binary>>,
+        Pattern = <<RealmUri/binary, $., Uri/binary>>,
         MS = trie_ms(Opts),
 
         case art_server:find_matches(Pattern, MS, Trie) of
@@ -1206,17 +1204,15 @@ trie_key(Entry, Policy) ->
             term_to_trie_key_part(Id0)
     end,
 
-    %% art uses $\31 for separating the suffixes of the key so we cannot
-    %% use it.
-    %% WAMP reserves the use of $\s, $#, $. and $, for the broker,
-    %% so we could use them but MQTT uses $+ and $# for wildcard patterns
-    %% that rules out $#, so we use $,
-    Key = <<RealmUri/binary, $,, Uri/binary>>,
+    %% RealmUri is always ground, so we join it with URI using a $. as any
+    %% other separator will not work with art:find_matches/2
+    Key = <<RealmUri/binary, $., Uri/binary>>,
 
     %% We add Nodestring for cases where SessionId == <<>>
     case Policy of
         ?PREFIX_MATCH ->
-            {<<Key/binary, ?ANY/binary>>, Nodestring, SessionId, Id};
+            %% art lib uses the star char to explicitely denote a prefix
+            {<<Key/binary, $*>>, Nodestring, SessionId, Id};
         _ ->
             {Key, Nodestring, SessionId, Id}
     end.
@@ -1249,6 +1245,7 @@ trie_ms(Opts) ->
             %% Non eligible! Most probably a mistake but we need to
             %% respect the semantics
             throw(non_eligible_entries);
+
         {ok, EligibleIds} ->
             %% We include the provided SessionIds
             [
@@ -1259,6 +1256,7 @@ trie_ms(Opts) ->
                     ]
                 )
             ];
+
         error ->
             []
     end,
@@ -1266,6 +1264,7 @@ trie_ms(Opts) ->
     Conds2 = case maps:find(exclude, Opts) of
         {ok, []} ->
             Conds1;
+
         {ok, ExcludedIds} ->
             %% We exclude the provided SessionIds
             ExclConds = maybe_and(
@@ -1275,6 +1274,7 @@ trie_ms(Opts) ->
                 ]
             ),
             [ExclConds | Conds1];
+
         error ->
             Conds1
     end,
@@ -1282,12 +1282,14 @@ trie_ms(Opts) ->
     case Conds2 of
         [] ->
             undefined;
+
         [_] ->
             [
                 {
                     {{'_', Node, '$3', '_'}, '_'}, Conds2, ['$_']
                 }
             ];
+
         _ ->
             Conds3 = [list_to_tuple(['andalso' | Conds2])],
             [
