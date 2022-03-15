@@ -38,8 +38,8 @@ For our work-in-progress documentation go to [http://docs.getbondy.io](http://do
 In addition Bondy provides
 * [x] HTTP OAuth2
 * [x] HTTP Password
-* [x] Same Sign-on
-* [x] Single Sign-on
+* [x] Same Sign-on -- use a single set of credentials to sign on to multiple realms
+* [x] Single Sign-on -- combines Same Sign-on with Ticket authentication. The resulting ticket can be used to sign on to multiple realms.
 
 ### Advanced RPC features
 * [x] Call Canceling
