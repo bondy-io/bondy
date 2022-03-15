@@ -288,7 +288,7 @@ add(subscription = Type, Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% We use the trie to match as we need the Topic Uri in the key
-    case art_server:match(TrieKey, ?SUBSCRIPTION_TRIE) of
+    case art_server:lookup(TrieKey, ?SUBSCRIPTION_TRIE) of
         [] ->
             %% No matching subscriptions for this SessionId exists
             RegId = subscription_id(RealmUri, Opts),
@@ -1047,7 +1047,7 @@ add_registration(Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% TODO we should limit the match to 1 result!!!
-    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
+    case art_server:lookup(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
             RegId = registration_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(Type, RegId, RealmUri, Ref, Uri, Opts),
@@ -1196,8 +1196,8 @@ trie_key(Entry, Policy) ->
 
     Id = case bondy_registry_entry:id(Entry) of
         _ when SessionId == <<>> ->
-            %% As we currently do not support wildcard matching in art, we turn
-            %% this into a prefix matching query
+            %% As we currently do not support wildcard matching in art:match,
+            %% we turn this into a prefix matching query
             %% TODO change when wildcard matching is enabled in art.
             <<>>;
         Id0 ->

@@ -7,7 +7,7 @@
   1},
  {<<"art">>,
   {git,"https://gitlab.com/leapsight/art.git",
-       {ref,"7b1a78f02216cf05e3861458fd1a709799fc1626"}},
+       {ref,"00ba8795b575de13f04ddc79dcaaab0aa241efb2"}},
   0},
  {<<"backoff">>,{pkg,<<"backoff">>,<<"1.1.6">>},0},
  {<<"base62">>,
