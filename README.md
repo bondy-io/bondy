@@ -50,8 +50,12 @@ In addition Bondy provides
 * [ ] Progressive Call Results
 * [ ] Progressive Calls
 * [x] Shared Registration
-     * [x] First, Last, Random
-     * [x] Roundrobin Load balancing
+     * [x] Load Balancing
+          * [x] Random
+          * [x] Roundrobin
+     * [x] Hot Stand-by
+          * [x] First, Last
+
 
 ### Advanced Pub/Sub features
 * [x] Event Retention
