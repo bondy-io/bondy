@@ -23,6 +23,12 @@ docs: xref
 	cp -r doc/assets/* apps/bondy/doc/assets/
 	cp -r doc/assets/* apps/bondy_broker_bridge/doc/assets/
 
+clean-docs:
+	rm -rf apps/bondy/doc/*
+	rm -f apps/bondy/doc/.build
+	rm -rf apps/bondy_broker_bridge/doc/*
+	rm -f apps/bondy_broker_bridge/doc/.build
+
 test: xref
 	${REBAR} as test ct
 
