@@ -40,6 +40,7 @@
 -export([rolenames/1]).
 -export([strict_groupname/1]).
 -export([strict_username/1]).
+-export([aliases/1]).
 -export([tls_versions/1]).
 -export([username/1]).
 -export([usernames/1]).
@@ -73,6 +74,53 @@ cidr(Bin) when is_binary(Bin) ->
 cidr(Term)  ->
     bondy_cidr:is_type(Term).
 
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Does not allow reserved namess
+%% @end
+%% -----------------------------------------------------------------------------
+-spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
+
+strict_username(<<"all">>) -> false;
+strict_username(<<"anonymous">>) -> false;
+strict_username(<<"any">>) -> false;
+strict_username(<<"from">>) -> false;
+strict_username(<<"on">>) -> false;
+strict_username(<<"to">>) -> false;
+strict_username(Term) -> username(Term).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Does not allow reserved namess
+%% @end
+%% -----------------------------------------------------------------------------
+-spec aliases(List :: [binary()]) -> {ok, [term()]} | boolean().
+
+aliases(L) when is_list(L) ->
+    try
+        Valid = lists:foldl(
+            fun(Term, Acc) ->
+                case strict_username(Term) of
+                    {ok, Value} ->
+                        [Value | Acc];
+                    true ->
+                        [Term | Acc];
+                    false ->
+                        throw(abort)
+                end
+            end,
+            [],
+            L
+        ),
+        {ok, lists:reverse(Valid)}
+    catch
+        throw:abort ->
+            {error, <<"One or more values are not valid aliases.">>}
+    end;
+
+aliases(_) ->
+    false.
 
 %% -----------------------------------------------------------------------------
 %% @doc Allows reserved names like "all", "anonymous", etc
@@ -169,22 +217,6 @@ tls_versions(L) when is_list(L) ->
 
 tls_versions(_) ->
     false.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Does not allow reserved namess
-%% @end
-%% -----------------------------------------------------------------------------
--spec strict_username(Term :: binary()) -> {ok, term()} | boolean().
-
-strict_username(<<"all">>) -> false;
-strict_username(<<"anonymous">>) -> false;
-strict_username(<<"any">>) -> false;
-strict_username(<<"from">>) -> false;
-strict_username(<<"on">>) -> false;
-strict_username(<<"to">>) -> false;
-strict_username(Term) -> username(Term).
 
 
 %% -----------------------------------------------------------------------------
@@ -510,3 +542,4 @@ on_load() ->
     ),
     ok = persistent_term:put({?MODULE, illegal_rolename_regex}, Regex),
     ok.
+
