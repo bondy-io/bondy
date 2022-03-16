@@ -16,10 +16,12 @@ compile:
 
 docs: xref
 	${REBAR} ex_doc
-	cp doc/js/* app/bondy/doc/*
-	cp doc/js/* app/bondy_broker_bridge/doc/*
-	cp doc/assets/* app/bondy/assets/*
-	cp doc/assets/* app/bondy_broker_bridge/assets/*
+	cp -r doc/js/* apps/bondy/doc/
+	cp -r doc/js/* apps/bondy_broker_bridge/doc/
+	mkdir -p apps/bondy/doc/assets/
+	mkdir -p apps/bondy_broker_bridge/doc/assets/
+	cp -r doc/assets/* apps/bondy/doc/assets/
+	cp -r doc/assets/* apps/bondy_broker_bridge/doc/assets/
 
 test: xref
 	${REBAR} as test ct
