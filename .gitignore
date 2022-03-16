@@ -32,5 +32,6 @@ log/index
 logs
 rebar3.crashdump
 relx
-
+apps/*/doc/*.html
+apps/*/doc/figures/*.js
 
