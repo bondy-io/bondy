@@ -795,7 +795,7 @@ setup_proxing(SessionId, State0) ->
 
 
 
-%% @private
+% %% @private
 % leave_session(Id, #state{} = State) ->
 %     Sessions0 = State#state.sessions,
 %     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),

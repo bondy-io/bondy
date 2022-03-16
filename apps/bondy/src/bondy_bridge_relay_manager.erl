@@ -200,8 +200,9 @@ disable_bridge(Name) ->
 %% @doc Adds a bridge to the manager and optionally starts it.
 %% Options:
 %% <ul>
-%% <li>`autostart :: boolean()'</i> - if true and the add operation succeded
+%% <li>`autostart :: boolean()'</li> - if true and the add operation succeded
 %% the bridge will be immediately started.
+%% </ul>
 %% @end
 %% -----------------------------------------------------------------------------
 -spec start_bridges() -> ok.
