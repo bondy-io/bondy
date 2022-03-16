@@ -186,12 +186,15 @@ publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt)
 when is_map(Ctxt) ->
     try
+
         ok = bondy_rbac:authorize(<<"wamp.publish">>, TopicUri, Ctxt),
         M = wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
         do_publish(M, Ctxt)
+
     catch
         _:{not_authorized, _Reason} ->
             {error, not_authorized};
+
         _:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),
             ExtId = bondy_utils:external_session_id(SessionId),
@@ -266,9 +269,11 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
         {ok, Entry, true} ->
             on_create(Entry),
             {ok, bondy_registry_entry:id(Entry)};
+
         {ok, Entry, false} ->
             on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
+
         {error, {already_exists, _}} ->
             {error, already_exists}
     end.
@@ -304,6 +309,7 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
     case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
+
         Entry ->
             Topic = bondy_registry_entry:uri(Entry),
             ok = bondy_rbac:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
@@ -311,11 +317,14 @@ unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unsubscribe(Entry);
+
                 {ok, false} ->
                     on_unsubscribe(Entry);
+
                 {ok, true} ->
                     ok = on_unsubscribe(Entry),
                     on_delete(Entry);
+
                 Error ->
                     Error
             end
@@ -348,9 +357,11 @@ forward(M, Ctxt) ->
                 false ->
                     ok
             end;
+
         _:{not_authorized, Reason} ->
             Reply = not_authorized_error(M, Reason),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
@@ -414,7 +425,6 @@ forward(#publish{} = M, undefined, FwdOpts) ->
             ok;
 
         {Relays, Nodes} ->
-
             ok = forward_using_relay(M, FwdOpts, Nodes),
 
             ok = forward_using_bridge_relay(M, FwdOpts, Relays)
@@ -450,10 +460,12 @@ do_forward(#subscribe{} = M, Ctxt) ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_create(Entry);
+
         {ok, Entry, false} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);
+
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id))

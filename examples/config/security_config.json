@@ -227,7 +227,8 @@
                     "wamp.unsubscribe",
                     "wamp.publish"
                 ],
-                "uri" : "com.example.event",
+                "uri" : "com.example.",
+                "match": "prefix",
                 "roles" : ["peer1", "peer2"]
             },
             {

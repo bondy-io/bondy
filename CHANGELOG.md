@@ -3,6 +3,7 @@
 ## 1.0.0-beta
 
 ### Added
+ * Pattern matching now supports wildcards
 
 #### General
 * Upgraded to OTP 24
@@ -14,13 +15,16 @@
 * Realm Prototypes
 * Added libsodium (enacl lib)
 
-#### Bondy Edge
+#### Bondy Edge (EXPERIMENTAL)
+
+* New Bridge Relay connection allows to link an edge router to a core/remote router. This syncs (at the moment) a single realm and forwards procedures and subscriptions to the remote.
 
 ### Fixed
 * Fixes group ordering issue in processing of security (realm) configuration files.
     - bondy_realm topological ordering of groups within each realm according to their group membership relationship. If any cycles are found amongst groups, an error is raised.
     - Existing groups referred by name in the group's 'group' property are not fetched, so cycles might still be created once the new groups are stored on the database.
 * Fixes a concurrency issue with busy clients, in particular when they end up calling themselves. This was produced by an unnecesary used of internal acknowledgments which have been removed
+* Fixes the following issues: #6, #7, #8
 
 ### WAMP
 * Erlang encoding now enforces WAMP-compatible data structures and tries to convert certain types e.g. pids while it fails with others.
