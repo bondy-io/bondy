@@ -18,6 +18,8 @@ docs: xref
 	${REBAR} ex_doc
 	cp doc/js/* app/bondy/doc/*
 	cp doc/js/* app/bondy_broker_bridge/doc/*
+	cp doc/assets/* app/bondy/assets/*
+	cp doc/assets/* app/bondy_broker_bridge/assets/*
 
 test: xref
 	${REBAR} as test ct
