@@ -149,6 +149,9 @@ agent() ->
 %% or asynchronously (by sending the message to the router load regulated
 %% worker pool).
 %%
+%% This function is called by {@link bondy_wamp_protocol} for messages that
+%% originate from WAMP peers connected to this Bondy node.
+%%
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(M :: wamp_message(), Ctxt :: bondy_context:t()) ->
@@ -223,7 +226,8 @@ forward(M, #{session := _} = Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc This function is called by {@link bondy_relay} for messages
+%% that originate from another Bondy node.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec forward(wamp_message(), maybe(bondy_ref:t()), map()) -> ok | no_return().
@@ -232,8 +236,10 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
     %% To == undefined when Msg == #publish{}
     case To == undefined orelse bondy_ref:is_local(To) of
         true ->
+            %% The message is addressed to a local process or peer
             do_forward(Msg, To, Opts);
         false ->
+            %% We need to route the message through a relay
             RelayOpts = #{
                 ack => true,
                 retransmission => true,
@@ -380,6 +386,7 @@ async_forward(M, Ctxt0) ->
                 #{error => ErrorMap}
             ),
             {reply, Reply, Ctxt0};
+
         Class:Reason:Stacktrace ->
             Ctxt = bondy_context:realm_uri(Ctxt0),
             SessionId = bondy_context:session_id(Ctxt0),
