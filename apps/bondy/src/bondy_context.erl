@@ -68,6 +68,8 @@
 -export([close/1]).
 -export([close/2]).
 -export([encoding/1]).
+-export([features/2]).
+-export([features/3]).
 -export([get_id/2]).
 -export([has_session/1]).
 -export([is_anonymous/1]).
@@ -78,11 +80,11 @@
 -export([new/0]).
 -export([new/2]).
 -export([peer/1]).
--export([ref/1]).
 -export([peername/1]).
 -export([publisher_details/2]).
 -export([rbac_context/1]).
 -export([realm_uri/1]).
+-export([ref/1]).
 -export([request_details/1]).
 -export([reset/1]).
 -export([roles/1]).
@@ -311,6 +313,39 @@ roles(Ctxt) ->
 
 
 %% -----------------------------------------------------------------------------
+%% @doc Returns the features that the session's owner supports for role `Role'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t(), bondy_session:peer_role()) -> map().
+
+features(Ctxt, Role) ->
+    bondy_session:features(session(Ctxt), Role).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns those features in list `With' that the session's owner supports
+%% for role `Role'.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t(), bondy_session:peer_role(), With :: [atom()]) -> map().
+
+features(Ctxt, Role, With) ->
+    bondy_session:features(session(Ctxt), Role, With).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% Returns true if the feature Feature is enabled for role Role.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec is_feature_enabled(t(), atom(), binary()) -> boolean().
+
+is_feature_enabled(Ctxt, Role, Feature) ->
+    maps_utils:get_path([Role, Feature], roles(Ctxt), false).
+
+
+
+%% -----------------------------------------------------------------------------
 %% @doc
 %% Returns the realm uri of the provided context.
 %% @end
@@ -443,7 +478,6 @@ rbac_context(#{}) ->
     undefined.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @doc Returns an ID based on scope. If context does not have a session the
 %% global sceop is used.
@@ -462,8 +496,6 @@ get_id(#{session := Session}, session) ->
 
 get_id(_, session) ->
     bondy_utils:get_id(global).
-
-
 
 
 %% -----------------------------------------------------------------------------
@@ -592,16 +624,6 @@ publisher_details(#{session := Session} = Ctxt, Details) ->
         publisher_authrole => name_to_binary(authrole(Ctxt))
     }.
 
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% Returns true if the feature Feature is enabled for role Role.
-%% @end
-%% -----------------------------------------------------------------------------
--spec is_feature_enabled(t(), atom(), binary()) -> boolean().
-
-is_feature_enabled(Ctxt, Role, Feature) ->
-    maps_utils:get_path([Role, Feature], roles(Ctxt), false).
 
 %% -----------------------------------------------------------------------------
 %% @doc

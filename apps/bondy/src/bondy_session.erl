@@ -76,6 +76,7 @@
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
+-type peer_role()               ::  caller | callee | subscriber | publisher.
 -type t()                       ::  #session{}.
 -type t_or_id()                 ::  t() | bondy_session_id:t().
 
@@ -108,6 +109,7 @@
 %% this should be a UUID or KSUID but not a random integer.
 -export_type([id/0]).
 -export_type([peer/0]).
+-export_type([peer_role/0]).
 -export_type([properties/0]).
 -export_type([external/0]).
 
@@ -123,9 +125,11 @@
 -export([authroles/1]).
 -export([close/1]).
 -export([created/1]).
+-export([external_id/1]).
+-export([features/2]).
+-export([features/3]).
 -export([fetch/1]).
 -export([id/1]).
--export([external_id/1]).
 -export([incr_seq/1]).
 -export([info/1]).
 -export([is_security_enabled/1]).
@@ -378,6 +382,40 @@ roles(#session{roles = Val}) ->
 
 roles(Id) when is_binary(Id) ->
     roles(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t_or_id(), Role :: peer_role()) ->
+    map().
+
+features(#session{roles = Roles}, Role)
+when Role == caller; Role == callee; Role == subscriber; Role == published ->
+    case maps:find(Role, Roles) of
+        {ok, Value} ->
+            Value;
+        error ->
+            #{}
+    end;
+
+features(Id, Role) when is_binary(Id) ->
+    features(fetch(Id), Role).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t_or_id(), Role :: peer_role(), With :: [atom()]) ->
+    map().
+
+features(#session{} = Session, Role, With) when is_list(With) ->
+    maps:with(With, features(Session, Role));
+
+features(Id, Role, With) when is_binary(Id) ->
+    features(fetch(Id), Role, With).
 
 
 %% -----------------------------------------------------------------------------
