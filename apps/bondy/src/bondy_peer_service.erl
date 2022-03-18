@@ -25,7 +25,6 @@
 %% -----------------------------------------------------------------------------
 -module(bondy_peer_service).
 -include_lib("partisan/include/partisan.hrl").
--define(DEFAULT_PEER_SERVICE, bondy_partisan_peer_service).
 
 -type partisan_peer() :: plum_db_peer_service:partisan_peer().
 
@@ -105,14 +104,6 @@
 %% =============================================================================
 %% API
 %% =============================================================================
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Return the currently active peer service.
-%% @end
-%% -----------------------------------------------------------------------------
-peer_service() ->
-    bondy_config:get(peer_service, ?DEFAULT_PEER_SERVICE).
 
 
 %% -----------------------------------------------------------------------------
@@ -256,7 +247,6 @@ stop(Reason) ->
 %% @end
 %% -----------------------------------------------------------------------------
 do(Function, Args) ->
-    Backend = peer_service(),
-    erlang:apply(Backend, Function, Args).
+    erlang:apply(bondy_partisan_peer_service, Function, Args).
 
 
