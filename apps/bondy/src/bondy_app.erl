@@ -148,6 +148,8 @@ prep_stop(_State) ->
     %% broadcasting those to the other nodes.
     ok = bondy_router:stop(),
 
+    ok = maybe_leave(),
+
     ok = stop_listeners().
 
 
@@ -204,7 +206,7 @@ maybe_wait_for_aae_exchange() ->
     %% join the cluster before this phase and perform a first aae exchange
     case wait_for_aae_exchange() of
         true ->
-            MyNode = plum_db_peer_service:mynode(),
+            MyNode = partisan_peer_service_manager:mynode(),
             Members = partisan_plumtree_broadcast:broadcast_members(),
 
             case lists:delete(MyNode, Members) of
@@ -431,3 +433,16 @@ stop_listeners() ->
         description => "Terminating all Bridge Relay connections."
     }),
     ok = bondy_bridge_relay_manager:stop_listeners().
+
+
+maybe_leave() ->
+    case bondy_config:get(automatic_leave, false) of
+        true ->
+            ?LOG_NOTICE(#{
+                description => "Leaving Bondy cluster.",
+                automatic_leave => true
+            }),
+            bondy_peer_service:leave();
+        false ->
+            ok
+    end.
