@@ -42,7 +42,6 @@
 -export([members/0]).
 -export([mynode/0]).
 -export([myself/0]).
--export([peer_service/0]).
 -export([peers/0]).
 -export([stop/0]).
 -export([stop/1]).
