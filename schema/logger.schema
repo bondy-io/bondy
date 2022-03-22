@@ -347,7 +347,7 @@
 
 %% @doc allows to enable or disable a comnfigured handler
 {mapping, "log.handlers.$id.enabled", "kernel.logger", [
-    {default, on},
+    {default, off},
     {datatype, flag}
 ]}.
 
@@ -712,6 +712,7 @@
     HandlersConf = cuttlefish_variable:filter_by_prefix(
         "log.handlers", CuttleConf
     ),
+
 
     HandlerIDs = sets:to_list(
         sets:from_list(
