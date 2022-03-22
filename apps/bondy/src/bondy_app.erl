@@ -126,8 +126,6 @@ start(_Type, Args) ->
 prep_stop(_State) ->
     ok = bondy_config:set(status, shutting_down),
 
-    ?LOG_NOTICE(#{description => "Initiating shutdown"}),
-
     ok = suspend_listeners(),
 
     %% We ask the router to shutdown.
@@ -149,6 +147,8 @@ prep_stop(_State) ->
     %% We remove all session and their registrations and subscriptions, also
     %% broadcasting those to the other nodes.
     ok = bondy_router:stop(),
+
+    ok = maybe_leave(),
 
     ok = stop_listeners().
 
@@ -206,7 +206,7 @@ maybe_wait_for_aae_exchange() ->
     %% join the cluster before this phase and perform a first aae exchange
     case wait_for_aae_exchange() of
         true ->
-            MyNode = plum_db_peer_service:mynode(),
+            MyNode = partisan_peer_service_manager:mynode(),
             Members = partisan_plumtree_broadcast:broadcast_members(),
 
             case lists:delete(MyNode, Members) of
@@ -275,7 +275,7 @@ init_registry() ->
 
 %% @private
 start_admin_listeners() ->
-    %% We start just the admin API rest listeners (HTTP/HTTPS, WS/WSS).
+    %% We start just the admin API rest listeners (HTTP/HTTPS, WS(S)).
     %% This is to enable certain operations during startup i.e. liveness and
     %% readiness http probes.
     %% The /ping (liveness) and /metrics paths will now go live
@@ -309,6 +309,13 @@ start_public_listeners() ->
 
 %% @private
 setup_event_handlers() ->
+    %% We replace the default OTP signal handler with ours
+    _ = gen_event:swap_handler(
+        erl_signal_server,
+        {erl_signal_handler, []},
+        {bondy_signal_handler, []}
+    ),
+
     %% We replace the default OTP alarm handler with ours
     _ = bondy_event_manager:swap_watched_handler(
         alarm_handler, {alarm_handler, normal}, {bondy_alarm_handler, []}
@@ -323,9 +330,11 @@ setup_event_handlers() ->
 
     %% We subscribe to partisan up and down events and republish them
     Mod = partisan_peer_service:manager(),
+
     Mod:on_up('_', fun(Node) ->
         bondy_event_manager:notify({cluster_connection_up, Node})
     end),
+
     Mod:on_down('_', fun(Node) ->
         bondy_event_manager:notify({cluster_connection_down, Node})
     end),
@@ -382,38 +391,58 @@ restore_aae() ->
 
 
 suspend_listeners() ->
-    %% We stop accepting new connections on HTTP/S and WS/S
-    ?LOG_NOTICE(#{description =>
-        "Suspending HTTP/S and WS/S client listeners. "
-        "No new connections will be accepted."
+    %% We stop accepting new connections on all listeners.
+    %% Existing connections are unaffected.
+
+    ?LOG_NOTICE(#{
+        description =>
+            "Suspending HTTP(S) and WS(S) client listeners. "
+            "No new connections will be accepted from now on."
     }),
     ok = bondy_http_gateway:suspend_listeners(),
 
-    %% We stop accepting new connections on TCP/TLS
     ?LOG_NOTICE(#{description =>
-        "Suspending TCP/TLS client listeners. "
-        "No new connections will be accepted."
+        "Suspending TCP(TLS) client listeners. "
+        "No new connections will be accepted from now on."
     }),
     ok = bondy_wamp_tcp:suspend_listeners(),
 
-    %% We stop accepting new connections on TCP/TLS
     ?LOG_NOTICE(#{description =>
-        "Suspending TCP/TLS Bridge Relay listeners. "
-        "No new connections will be accepted."
+        "Suspending Bridge Relay listeners. "
+        "No new connections will be accepted from now on."
     }),
     ok = bondy_bridge_relay_manager:suspend_listeners().
 
 
 stop_listeners() ->
+    %% We force all listeners to stop.
+    %% All existing connections will be terminated.
 
-    %% We force the HTTP/S and WS/S connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all client HTTP/S and WS/S client connections"}),
+    ?LOG_NOTICE(#{
+        description =>
+            "Terminating all client HTTP(S) and WS(S) client connections."
+        }),
     ok = bondy_http_gateway:stop_listeners(),
 
-    %% We force the TCP/TLS connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS client connections"}),
+    ?LOG_NOTICE(#{
+        description => "Terminating all TCP(TLS) client connections."
+    }),
     ok = bondy_wamp_tcp:stop_listeners(),
 
-    %% We force the TCP/TLS connections to stop
-    ?LOG_NOTICE(#{description => "Terminating all TCP/TLS Bridge Relay connections"}),
+    ?LOG_NOTICE(#{
+        description => "Terminating all Bridge Relay connections."
+    }),
     ok = bondy_bridge_relay_manager:stop_listeners().
+
+
+maybe_leave() ->
+    case bondy_config:get(automatic_leave, false) of
+        true ->
+            ?LOG_NOTICE(#{
+                description => "Leaving Bondy cluster.",
+                automatic_leave => true
+            }),
+            bondy_peer_service:leave();
+        false ->
+            ok
+    end.

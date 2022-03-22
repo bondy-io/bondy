@@ -1540,6 +1540,14 @@
 %%   {datatype, integer}
 %% ]}.
 
+%% @doc Defines wether a Bondy node should perform a cluster leave operation
+%% automatically when it is being shutdown.
+{mapping, "cluster.automatic_leave", "bondy.automatic_leave", [
+  {default, off},
+  {datatype, flag}
+]}.
+
+
 %% @doc Defines the port to use for the cluster TCP connection
 {mapping, "cluster.peer_port", "partisan.peer_port", [
   {default, 18086},

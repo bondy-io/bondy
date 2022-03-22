@@ -49,6 +49,13 @@
         datatype => binary,
         validator => fun bondy_data_validators:strict_username/1
     },
+    <<"aliases">> => #{
+        alias => aliases,
+        key => aliases,
+        required => false,
+        datatype => {list, binary},
+        validator => fun bondy_data_validators:aliases/1
+    },
     <<"password">> => #{
         alias => password,
         key => password,

@@ -18,10 +18,9 @@
 
 
 %% =============================================================================
-%% @doc
-%% This module implements the capabilities of a Broker. It is used by
+%% @doc This module implements the capabilities of a Broker. It is used by
 %% {@link bondy_router}.
-%% Regarding *Publish & Subscribe*, the ordering guarantees are as
+%% Regarding *Publish &amp; Subscribe*, the ordering guarantees are as
 %% follows:
 %%
 %% If _Subscriber A_ is subscribed to both *Topic 1* and *Topic 2*, and
@@ -31,7 +30,7 @@
 %% identical.
 %%
 %% In other words, WAMP guarantees ordering of events between any given
-%% _pair_ of _Publisher_ and _Subscriber_.
+%% _pair_ of _Publisher_ &amp; _Subscriber_.
 %% Further, if _Subscriber A_ subscribes to *Topic 1*, the "SUBSCRIBED"
 %% message will be sent by the _Broker_ to _Subscriber A_ before any
 %% "EVENT" message for *Topic 1*.
@@ -41,6 +40,7 @@
 %% _Broker_ to do a time-consuming lookup in some database, whereas
 %% another subscribe request second might be permissible immediately.
 %%
+%% ```
 %% ,---------.          ,------.             ,----------.
 %% |Publisher|          |Broker|             |Subscriber|
 %% `----+----'          `--+---'             `----+-----'
@@ -63,6 +63,7 @@
 %% ,----+----.          ,--+---.             ,----+-----.
 %% |Publisher|          |Broker|             |Subscriber|
 %% `---------'          `------'             `----------'
+%% '''
 %% @end
 %% =============================================================================
 -module(bondy_broker).

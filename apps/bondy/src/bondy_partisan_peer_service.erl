@@ -87,7 +87,7 @@ join(Node, Node, Auto) ->
 leave() ->
     %% Avoid autojoining after leave
     ok = bondy_peer_discovery_agent:disable(),
-    partisan_peer_service:leave(mynode()).
+    partisan_peer_service:leave(myself()).
 
 
 %% -----------------------------------------------------------------------------
