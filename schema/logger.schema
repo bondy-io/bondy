@@ -703,7 +703,7 @@
         {agent, [" agent=", agent], ""},
         {authmethod, [" authmethod=", authmethod], ""},
         {session_id, [" session_id=", session_id], ""},
-        {session_external_id, [" session_external_id=", session_external_id], ""},
+        {protocol_session_id, [" protocol_session_id=", protocol_session_id], ""},
         {protocol, [" protocol=", protocol], ""},
         {transport, [" transport=", transport], ""},
         {peername, [" peername=", peername], ""},

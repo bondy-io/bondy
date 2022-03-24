@@ -631,7 +631,7 @@ open_session(Extra, St0) when is_map(Extra) ->
             authmethod => Authmethod,
             realm => RealmUri,
             session_id => SessionId0,
-            session_external_id => SessionId
+            protocol_session_id => SessionId
         }),
 
         {reply, Bin, St1#wamp_state{state_name = established}}

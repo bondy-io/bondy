@@ -397,7 +397,7 @@ async_forward(M, Ctxt0) ->
                 class => Class,
                 reason => Reason,
                 stacktrace => Stacktrace,
-                session_external_id => ExtId,
+                protocol_session_id => ExtId,
                 session_id => SessionId,
                 context => Ctxt,
                 message => M

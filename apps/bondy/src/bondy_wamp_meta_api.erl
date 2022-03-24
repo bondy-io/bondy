@@ -532,7 +532,7 @@ list_registration_callees(_RealmUri, _RegId) ->
     %%         {[], '$end_of_table'} ->
     %% {error, bondy_wamp_utils:no_such_registration_error(RegId)};
     %%         {[Entries], '$end_of_table'} ->
-    %%             Sessions = [bondy_registry_entry:session_external_id(E) || E <- Entries],
+    %%             Sessions = [bondy_registry_entry:protocol_session_id(E) || E <- Entries],
     %%             {ok, Sessions}
     %%     end
     %% catch
