@@ -212,7 +212,7 @@ connected(enter, connected, State) ->
     {ok, Peername} = bondy_utils:peername(Transport, Socket),
     PeernameBin = inet_utils:peername_to_binary(Peername),
 
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => Transport,
         peername => PeernameBin,
         socket => Socket

@@ -454,6 +454,8 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
         {error, not_found} ->
             stop({authentication_failed, no_such_realm}, St1);
         Realm ->
+            ok = logger:update_process_metadata(#{realm => Uri}),
+
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St1)
             )
@@ -577,9 +579,10 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authmethod = bondy_auth:method(AuthCtxt),
         Agent = maps:get(agent, ReqDetails, undefined),
         UserMeta = bondy_rbac_user:meta(bondy_auth:user(AuthCtxt)),
+        Peer = bondy_context:peer(Ctxt0),
 
         Properties = #{
-            peer => maps:get(peer, Ctxt0),
+            peer => Peer,
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
             agent => Agent,
@@ -623,10 +626,12 @@ open_session(Extra, St0) when is_map(Extra) ->
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
 
-        ok = bondy_logger_utils:update_process_metadata(#{
+        ok = logger:update_process_metadata(#{
             agent => bondy_utils:maybe_slice(Agent, 0, 64),
             authmethod => Authmethod,
-            realm_uri => RealmUri
+            realm => RealmUri,
+            session_id => SessionId0,
+            session_external_id => SessionId
         }),
 
         {reply, Bin, St1#wamp_state{state_name = established}}
@@ -1007,12 +1012,15 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 
 %% @private
 do_init({_, _, Serializer} = Subprotocol, Peer, _Opts) ->
+    Ctxt = bondy_context:new(Peer, Subprotocol),
     State = #wamp_state{
         subprotocol = Subprotocol,
-        context = bondy_context:new(Peer, Subprotocol)
+        context = Ctxt
     },
-    ok = bondy_logger_utils:update_process_metadata(#{
-        serializer => Serializer
+    ok = logger:update_process_metadata(#{
+        protocol => wamp,
+        serializer => Serializer,
+        peername => bondy_context:peername(Ctxt)
     }),
     {ok, State}.
 

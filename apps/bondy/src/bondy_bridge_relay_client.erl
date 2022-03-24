@@ -239,7 +239,7 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connecting(enter, _, State) ->
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => State#state.transport,
         endpoint => State#state.endpoint,
         reconnect => State#state.reconnect_retry =/= undefined
