@@ -271,7 +271,7 @@ nodestring() ->
 -spec node_spec() -> node_spec().
 
 node_spec() ->
-    bondy_peer_service:myself().
+    partisan_peer_service:myself().
 
 
 
