@@ -24,6 +24,7 @@
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_rpc_promise).
+
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
 -include("bondy.hrl").

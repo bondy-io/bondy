@@ -202,7 +202,7 @@ when is_map(Ctxt) ->
             ?LOG_WARNING(#{
                 description => "Error while publishing",
                 reason => Reason,
-                session_external_id => ExtId,
+                protocol_session_id => ExtId,
                 session_id => SessionId,
                 topic => TopicUri,
                 stacktrace => Stacktrace

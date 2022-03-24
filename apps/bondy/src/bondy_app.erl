@@ -96,6 +96,12 @@ start(_Type, Args) ->
     _ = application:ensure_all_started(tuplespace, permanent),
     _ = application:ensure_all_started(plum_db, permanent),
 
+
+    ok = logger:update_primary_config(#{metadata => #{
+        node => bondy_config:node(),
+        router_vsn => vsn()
+    }}),
+
     case bondy_sup:start_link() of
         {ok, Pid} ->
             %% Please do not change the order of this function calls

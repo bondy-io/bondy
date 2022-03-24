@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_bridge_relay_server -
+%%  bondy_bridge_relay_server.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -18,7 +18,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the server-side connection between and
-%% edge node (client) and a remote/core node (server).
+%% edge node ({@link bondy_bridge_relay_client}) and a remote/core node
+%% (this module).
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_server).
@@ -27,9 +28,8 @@
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("wamp/include/wamp.hrl").
--include("bondy.hrl").
 -include_lib("bondy_plum_db.hrl").
-
+-include("bondy.hrl").
 
 -define(SOCKET_DATA(Tag), Tag == tcp orelse Tag == ssl).
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
@@ -54,6 +54,7 @@
     start_ts                ::  pos_integer()
 }).
 
+
 % -type t()                   ::  #state{}.
 -type reg_indx()            ::  #{
     SessionId :: bondy_session_id:t() => proxy_map()
@@ -74,7 +75,7 @@
 -export([connected/3]).
 
 %% TODO pings should only be allowed if we have at least one session, otherwise
-%% they do not count towads the idle_timeout.
+%% they do not count towards the idle_timeout.
 %% At least one session has to be active for the connection to stay
 %% online.
 
@@ -212,7 +213,7 @@ connected(enter, connected, State) ->
     {ok, Peername} = bondy_utils:peername(Transport, Socket),
     PeernameBin = inet_utils:peername_to_binary(Peername),
 
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => Transport,
         peername => PeernameBin,
         socket => Socket

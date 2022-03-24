@@ -526,7 +526,8 @@ entries({_, ?EOT}) ->
     ?EOT;
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
-    case plum_db:match(Cont) of
+    %% We need to add back the resolver strategy
+    case plum_db:match(Cont, [{resolver, lww}]) of
         ?EOT ->
             ?EOT;
         {L, ?EOT} ->
@@ -948,8 +949,6 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
     ok.
 
 
-
-
 %% @private
 do_remove_all(Matches, SessionId, Fun) ->
     do_remove_all(Matches, SessionId, Fun, []).
@@ -967,14 +966,13 @@ do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    do_remove_all(plum_db:match(Cont), SessionId, Fun, Acc);
+    do_remove_all(plum_db:match(Cont, [{resolver, lww}]), SessionId, Fun, Acc);
 
-do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
-    Key = bondy_registry_entry:session_id(Entry),
+do_remove_all({[{EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
+    Session = bondy_registry_entry:session_id(Entry),
 
-    case SessionId =:= Key orelse SessionId == '_' of
+    case SessionId =:= Session orelse SessionId == '_' of
         true ->
-            EntryKey = bondy_registry_entry:key(Entry),
             ok = delete_from_trie(Entry),
             %% We delete the entry from plum_db.
             %% This will broadcast the delete

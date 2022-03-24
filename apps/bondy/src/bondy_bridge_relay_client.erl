@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_bridge_relay_client -
+%%  bondy_bridge_relay_client.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -18,10 +18,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the client-side connection between and
-%% edge node (client) and a remote/core node (server).
-%%
-%% == Configuration ==
-%%
+%% edge node (this module) and a remote/core node
+%% ({@link bondy_bridge_relay_server}).
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_client).
@@ -35,7 +33,6 @@
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
-
 
 
 -record(state, {
@@ -239,7 +236,7 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connecting(enter, _, State) ->
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => State#state.transport,
         endpoint => State#state.endpoint,
         reconnect => State#state.reconnect_retry =/= undefined
@@ -892,7 +889,7 @@ subscribe_meta_events(Session, State) ->
 %% @doc We subscribe to the topics configured for this realm.
 %% But instead of receiving an EVENT we will get a PUBLISH message. This is an
 %% optimization performed by bondy_broker to avoid sending N events to N
-%% subscribers that are remote.
+%% remote subscribers over the relay or bridge relay.
 %% @end
 %% -----------------------------------------------------------------------------
 subscribe_topics(Session0, State) ->

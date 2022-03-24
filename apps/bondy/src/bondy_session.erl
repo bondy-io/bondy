@@ -320,7 +320,7 @@ close(#session{} = S) ->
         description => "Session closed",
         realm => RealmUri,
         session_id => Id,
-        session_external_id => ExtId
+        protocol_session_id => ExtId
     }),
 
     ok.

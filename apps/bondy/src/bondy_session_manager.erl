@@ -182,7 +182,7 @@ handle_cast({close, Session}, State0) ->
         description => "Session closing, demonitoring session connection",
         realm => Uri,
         session_id => Id,
-        session_external_id => ExtId
+        protocol_session_id => ExtId
     }),
     Refs = State0#state.monitor_refs,
 
@@ -220,7 +220,7 @@ handle_info({'DOWN', Ref, _, _, _}, State0) ->
                 {ok, Session} ->
                     ?LOG_DEBUG(#{
                         description => "Connection process for session terminated, cleaning up",
-                        session_external_id => bondy_session:external_id(Session),
+                        protocol_session_id => bondy_session:external_id(Session),
                         session_id => Id
                     }),
                     cleanup(Session);

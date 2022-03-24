@@ -119,13 +119,10 @@ init({Ref, Transport, _Opts0}) ->
 
     St1 = St0#state{socket = Socket},
 
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => Transport,
-        socket => Socket,
         peername => inet_utils:peername_to_binary(Peername)
     }),
-
-    ?LOG_INFO(#{metadata => logger:get_process_metadata()}),
 
     ok = socket_opened(St1),
 
@@ -227,11 +224,9 @@ handle_info({?BONDY_PEER_REQUEST, _Pid, _RealmUri, M}, St) ->
 
 
 handle_info(timeout, #state{ping_sent = false} = State0) ->
-    _ = log(
-        debug,
-        #{description => "Connection timeout, sending first ping"},
-        State0
-    ),
+    ?LOG_DEBUG(#{
+        description => "Connection timeout, sending first ping"
+    }),
     {ok, State1} = send_ping(State0),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timet
     {noreply, State1};
@@ -239,24 +234,16 @@ handle_info(timeout, #state{ping_sent = false} = State0) ->
 handle_info(
     ping_timeout,
     #state{ping_sent = Val, ping_attempts = N, ping_max_attempts = N} = State) when Val =/= false ->
-    _ = log(
-        error,
-        #{
-            description => "Connection closing",
-            reason => ping_timeout,
-            attempts => N
-        },
-        State
-    ),
+    ?LOG_ERROR(#{
+        description => "Connection closing",
+        reason => ping_timeout,
+        attempts => N
+    }),
     {stop, ping_timeout, State#state{ping_sent = false}};
 
 handle_info(ping_timeout, #state{ping_sent = {_, Bin, _}} = State) ->
     %% We try again until we reach ping_max_attempts
-    _ = log(
-        debug,
-        #{description => "Ping timeout, sending another ping"},
-        State
-    ),
+    ?LOG_DEBUG(#{description => "Ping timeout, sending another ping"}),
     %% We reuse the same payload, in case the client responds the previous one
     {ok, State1} = send_ping(Bin, State),
     %% Here we do not return a timeout value as send_ping set an ah-hoc timer
@@ -337,15 +324,11 @@ when Len > MaxLen ->
     %% handshake reply.
     %% If a message received during a connection exceeds the limit requested,
     %% a Peer MUST fail the connection.
-    _ = log(
-        error,
-        #{
-            description => "Client committed a WAMP protocol violation",
-            reason => maximum_message_length_exceeded,
-            message_length => Len
-        },
-        St
-    ),
+    ?LOG_ERROR(#{
+        description => "Client committed a WAMP protocol violation",
+        reason => maximum_message_length_exceeded,
+        message_length => Len
+    }),
     {stop, maximum_message_length_exceeded, St};
 
 handle_data(<<0:5, 0:3, Len:24, Mssg:Len/binary, Rest/binary>>, St) ->
@@ -384,7 +367,8 @@ handle_data(<<0:5, 1:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
 
 handle_data(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
     %% We received a PONG
-    _ = log(debug, #{description => "Received pong"}, St),
+    ?LOG_DEBUG(#{description => "Received pong"}),
+
     case St#state.ping_sent of
         {true, Payload, TimerRef} ->
             %% We reset the state
@@ -392,24 +376,17 @@ handle_data(<<0:5, 2:3, Len:24, Payload:Len/binary, Rest/binary>>, St) ->
             handle_data(Rest, St#state{ping_sent = false, ping_attempts = 0});
         {true, Bin, TimerRef} ->
             ok = erlang:cancel_timer(TimerRef, [{info, false}]),
-            _ = log(error,
-                #{
-                    description => "Invalid pong message from peer",
-                    reason => invalid_ping_response,
-                    received => Bin,
-                    expected => Payload
-                },
-                St
-            ),
+            ?LOG_ERROR(#{
+                description => "Invalid pong message from peer",
+                reason => invalid_ping_response,
+                received => Bin,
+                expected => Payload
+            }),
             {stop, invalid_ping_response, St};
         false ->
-            _ = log(
-                error,
-                #{
-                    description => "Unrequested pong message from peer"
-                },
-                St
-            ),
+            ?LOG_ERROR(#{
+                description => "Unrequested pong message from peer"
+            }),
             %% Should we stop instead?
             handle_data(Rest, St)
     end;
@@ -419,16 +396,13 @@ when R > 2 ->
     %% The three bits (R) encode the type of the transport message,
     %% values 3 to 7 are reserved
     ok = send_frame(error_number(use_of_reserved_bits), St),
-    _ = log(
-        error,
-        #{
-            description => "Client committed a WAMP protocol violation, message dropped",
-            reason => use_of_reserved_bits,
-            value => R,
-            message => Mssg
-        },
-        St
-    ),
+    ?LOG_ERROR(#{
+        description =>
+            "Client committed a WAMP protocol violation, message dropped",
+        reason => use_of_reserved_bits,
+        value => R,
+        message => Mssg
+    }),
     %% Should we stop instead?
     handle_data(Rest, St);
 
@@ -525,6 +499,7 @@ init_wamp(Len, Enc, St0) ->
                     }),
 
                     {ok, St1};
+
                 {error, Reason} ->
                     {stop, Reason, St0}
             end;
@@ -694,60 +669,46 @@ close_socket(Reason, St) ->
         )
     end,
 
-    {Level, LogMsg} = case Reason of
+    case Reason of
         normal ->
-            {
-                info,
-                #{
-                    description => <<"Connection closed by peer">>,
-                    reason => Reason
-                }
-            };
+            ?LOG_INFO(#{
+                description => <<"Connection closed by peer">>,
+                reason => Reason
+            }),
+            ok;
 
         closed ->
-            {
-                info,
-                #{
-                    description => <<"Connection closed by peer">>,
-                    reason => Reason
-                }
-            };
+            ?LOG_INFO(#{
+                description => <<"Connection closed by peer">>,
+                reason => Reason
+            }),
+            ok;
 
         shutdown ->
-            {
-                info,
-                #{
-                    description => <<"Connection closed by router">>,
-                    reason => Reason
-                }
-            };
+            ?LOG_INFO(#{
+                description => <<"Connection closed by router">>,
+                reason => Reason
+            }),
+            ok;
 
-        {tcp_error, Socket, Reason} ->
+        {tcp_error, _Socket, TCPReason} ->
             %% We increase the socker error counter
             ok = IncrSockerErrorCnt(),
-            {
-                error,
-                #{
-                    description => <<"Connection closing due to tcp_error">>,
-                    reason => Reason
-                }
-            };
-
+            ?LOG_ERROR(#{
+                description => <<"Connection closing due to TCP error">>,
+                reason => TCPReason
+            }),
+            ok;
 
         _ ->
             %% We increase the socket error counter
             ok = IncrSockerErrorCnt(),
-            {
-                error,
-                #{
-                    description => <<"Connection closing due to system error">>,
-                    reason => Reason
-                }
-            }
-    end,
-
-    _ = log(Level, LogMsg, St),
-    ok.
+            ?LOG_ERROR(#{
+                description => <<"Connection closing due to system error">>,
+                reason => Reason
+            }),
+            ok
+    end.
 
 
 
@@ -786,30 +747,3 @@ maybe_error({error, Reason}) ->
 
 maybe_error(Term) ->
     Term.
-
-
-%% @private
-log(Level, Msg, #state{protocol_state = undefined}) ->
-    logger:log(Level, Msg);
-
-log(Level, Msg0, St) ->
-    ProtocolState = St#state.protocol_state,
-
-    Msg = Msg0#{
-        agent => bondy_wamp_protocol:agent(ProtocolState),
-        serializer => St#state.encoding,
-        frame_type => St#state.frame_type,
-        message_max_length => St#state.max_len,
-        socket => St#state.socket
-    },
-
-    SessionId = bondy_wamp_protocol:session_id(ProtocolState),
-    ExtId = bondy_session_id:to_external(SessionId),
-
-    Meta = #{
-        realm => bondy_wamp_protocol:realm_uri(ProtocolState),
-        session_id => SessionId,
-        session_external_id => ExtId,
-        peername => St#state.peername
-    },
-    logger:log(Level, Msg, Meta).
