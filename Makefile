@@ -29,8 +29,15 @@ clean-docs:
 	rm -rf apps/bondy_broker_bridge/doc/*
 	rm -f apps/bondy_broker_bridge/doc/.build
 
+CT_SUITE_FILE?=
+ifdef CT_SUITE_FILE
+CT_SUITE_ARGS = --suite ${CT_SUITE_FILE}
+else
+CT_SUITE_ARGS =
+endif
+
 test: xref
-	${REBAR} as test ct
+	${REBAR} as test ct ${CT_SUITE_ARGS}
 
 xref:
 	${REBAR} xref skip_deps=true
