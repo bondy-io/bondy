@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_bridge_relay_client -
+%%  bondy_bridge_relay_client.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -889,7 +889,7 @@ subscribe_meta_events(Session, State) ->
 %% @doc We subscribe to the topics configured for this realm.
 %% But instead of receiving an EVENT we will get a PUBLISH message. This is an
 %% optimization performed by bondy_broker to avoid sending N events to N
-%% subscribers that are remote.
+%% remote subscribers over the relay or bridge relay.
 %% @end
 %% -----------------------------------------------------------------------------
 subscribe_topics(Session0, State) ->
