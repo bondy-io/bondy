@@ -18,10 +18,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the client-side connection between and
-%% edge node (client) and a remote/core node (server).
-%%
-%% == Configuration ==
-%%
+%% edge node (this module) and a remote/core node
+%% ({@link bondy_bridge_relay_server}).
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_client).
@@ -35,7 +33,6 @@
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
-
 
 
 -record(state, {
