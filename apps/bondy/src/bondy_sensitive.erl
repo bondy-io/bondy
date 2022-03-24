@@ -50,7 +50,7 @@
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Returns true is module `Mod' conforms with this behaviour.
+%% @doc Returns true if module `Mod' conforms with this behaviour.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec conforms(Mod :: module()) -> boolean().
