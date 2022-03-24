@@ -284,7 +284,10 @@ handle_inbound(Data, St) ->
             %% Validation of the message option or details failed
             stop(Reason, St);
         _:{invalid_message, _} = Reason ->
-            stop(Reason, St)
+            stop(Reason, St);
+        error:function_clause ->
+            %% Validation of the message option or details failed
+            stop({invalid_message, Data}, St)
     end.
 
 
