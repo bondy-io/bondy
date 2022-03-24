@@ -442,7 +442,7 @@ maybe_leave() ->
                 description => "Leaving Bondy cluster.",
                 automatic_leave => true
             }),
-            bondy_peer_service:leave();
+            partisan_peer_service:leave();
         false ->
             ok
     end.

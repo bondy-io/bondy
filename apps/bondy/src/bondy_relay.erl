@@ -152,15 +152,13 @@ forward(Node, Msg) ->
 -spec forward(Node :: node() | [node()], Msg :: any(), Opts :: map()) -> ok.
 
 forward(Node, Msg, Opts) when is_atom(Node) ->
-    Manager = bondy_peer_service:manager(),
-    Channel = bondy_config:get(wamp_peer_channel, default),
-    Manager:cast_message(Node, Channel, ?MODULE, Msg, Opts);
+    Channel = bondy_config:get(wamp_peer_channel, undefined),
+    partisan_peer_service:cast_message(Node, Channel, ?MODULE, Msg, Opts);
 
 forward(Nodes, Msg, Opts) when is_list(Nodes) ->
-    Manager = bondy_peer_service:manager(),
-    Channel = bondy_config:get(wamp_peer_channel, default),
+    Channel = bondy_config:get(wamp_peer_channel, undefined),
     _ = [
-        Manager:cast_message(Node, Channel, ?MODULE, Msg, Opts)
+        partisan_peer_service:cast_message(Node, Channel, ?MODULE, Msg, Opts)
         || Node <- Nodes
     ],
     ok.

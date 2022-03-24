@@ -34,6 +34,7 @@
 -behaviour(gen_statem).
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("partisan/include/partisan.hrl").
 
 -record(state, {
     enabled                 ::  boolean(),
@@ -45,9 +46,13 @@
     polling_interval        ::  integer(),
     timeout                 ::  integer(),
     join_retry_interval     ::  integer(),
-    peers = []              ::  [bondy_peer_service:peer()]
+    peers = []              ::  [peer()]
 }).
 
+-type peer()                ::  node_spec(). % partisan's
+
+
+-export_type([peer/0]).
 
 %% API
 -export([start/0]).
@@ -88,7 +93,7 @@
 %%
 %% -----------------------------------------------------------------------------
 -callback lookup(State :: any(), Timeout :: timeout()) ->
-    {ok, [bondy_peer_service:peer()], NewState :: any()}
+    {ok, [peer()], NewState :: any()}
     | {error, Reason :: any(), NewState :: any()}.
 
 
@@ -233,7 +238,7 @@ discovering(internal, lookup, State) ->
     CBState = State#state.callback_state,
     Timeout = State#state.timeout,
 
-    {ok, Members} = bondy_peer_service:members(),
+    {ok, Members} = partisan_peer_service:members(),
     case length(Members) == 1 of
         true ->
             %% Not in cluster
@@ -333,7 +338,7 @@ do_maybe_join([], State) ->
     schedule_lookup_action(State);
 
 do_maybe_join([H|T], State) ->
-    try bondy_peer_service:join(H) of
+    try partisan_peer_service:join(H) of
         ok ->
             {next_state, joined, State};
         {error, _} ->
