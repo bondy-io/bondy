@@ -141,7 +141,7 @@
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RealmUri, Ref, Uri, Options) ->
-    RegId = bondy_utils:get_id({router, RealmUri}),
+    RegId = bondy_utils:gen_message_id({router, RealmUri}),
     new(Type, RegId, RealmUri, Ref, Uri, Options).
 
 
@@ -661,7 +661,7 @@ proxy(Ref, External) ->
     Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),
 
-    Id = bondy_utils:get_id({router, RealmUri}),
+    Id = bondy_utils:gen_message_id({router, RealmUri}),
 
     #entry{
         key = #entry_key{

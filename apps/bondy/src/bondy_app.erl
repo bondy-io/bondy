@@ -263,6 +263,9 @@ configure_services() ->
     ?LOG_NOTICE(#{
         description => "Configuring master and user realms from configuration file"
     }),
+
+    ok = bondy_session_counter:init(),
+
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
     _ = bondy_realm:get(?MASTER_REALM_URI),

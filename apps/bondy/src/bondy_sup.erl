@@ -80,6 +80,7 @@ start_link() ->
 init([]) ->
     Children = [
         %% We start bondy processes
+        ?WORKER(bondy_table_owner, [], permanent, 5000),
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),

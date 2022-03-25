@@ -58,8 +58,6 @@
     peer                            ::  maybe(peer()),
     %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
-    %% Sequence number used for ID generation
-    seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles played by peer
     roles                           ::  maybe(map()),
     %% WAMP Auth
@@ -130,7 +128,7 @@
 -export([features/3]).
 -export([fetch/1]).
 -export([id/1]).
--export([incr_seq/1]).
+-export([gen_message_id/1]).
 -export([info/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
@@ -315,6 +313,9 @@ close(#session{} = S) ->
     %% Delete index
     Tab2 = tuplespace:locate_table(?SESSION_SPACE, ExtId),
     true = ets:delete(Tab2, ExtId),
+
+    %% Delete counters
+    ok = bondy_session_counter:delete_all(Id),
 
     ?LOG_DEBUG(#{
         description => "Session closed",
@@ -640,19 +641,17 @@ refresh_rbac_context(Id) when is_binary(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec incr_seq(t_or_id()) -> map().
+-spec gen_message_id(t_or_id()) -> map().
 
-incr_seq(#session{id = Id}) ->
-    incr_seq(Id);
+gen_message_id(#session{id = Id}) ->
+    gen_message_id(Id);
 
-incr_seq(Id) when is_binary(Id) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-
+gen_message_id(Id) when is_binary(Id) ->
     try
-        ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0})
+        bondy_session_counter:incr(Id, message_id)
     catch
         error:badarg ->
-            bondy_utils:get_id(global)
+            bondy_utils:gen_message_id(global)
     end.
 
 

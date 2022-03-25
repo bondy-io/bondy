@@ -479,7 +479,7 @@ cast(ProcedureUri, Opts, Args, KWArgs, Ctxt0) ->
     %% FIXME we need to fix the wamp.hrl timeout
     %% TODO also, according to WAMP the default is 0 which deactivates
     %% the Call Timeout Feature
-    ReqId = bondy_context:get_id(Ctxt0, session),
+    ReqId = bondy_context:gen_message_id(Ctxt0, session),
 
     M = wamp_message:call(ReqId, Opts, ProcedureUri, Args, KWArgs),
 

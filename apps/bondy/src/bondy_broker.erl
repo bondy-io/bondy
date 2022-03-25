@@ -168,7 +168,7 @@ flush(RealmUri, Ref) ->
     bondy_context:t()) -> {ok, id()} | {error, any()}.
 
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
-    ReqId = bondy_context:get_id(Ctxt, session),
+    ReqId = bondy_context:gen_message_id(Ctxt, session),
     publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt).
 
 
@@ -243,7 +243,7 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% is restarted by the supervisor.
     Id = case maps:find(subscription_id, Opts) of
         {ok, Value} -> Value;
-        error -> bondy_utils:get_id(global)
+        error -> bondy_utils:gen_message_id(global)
     end,
 
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
@@ -684,7 +684,7 @@ do_publish(#publish{} = M, Ctxt) ->
     Details = make_event_details(TopicUri, Opts, Ctxt),
 
     %% We generate a new publication id
-    PubId = bondy_utils:get_id(global),
+    PubId = bondy_utils:gen_message_id(global),
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id

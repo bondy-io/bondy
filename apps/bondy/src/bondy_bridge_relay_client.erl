@@ -49,7 +49,6 @@
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
 }).
@@ -150,7 +149,6 @@ init(Config0) ->
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
-        tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
     },
 

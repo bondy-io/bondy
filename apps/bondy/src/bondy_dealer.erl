@@ -1157,7 +1157,7 @@ format_error(Error, #{error_formatter := Fun}) ->
 
 %% @private
 call_to_invocation(M, Uri, Entry, Ctxt1) ->
-    ReqId = bondy_context:get_id(Ctxt1, session),
+    ReqId = bondy_context:gen_message_id(Ctxt1, session),
     Details = invocation_details(M#call.request_id, M, Uri, Entry, Ctxt1),
     KWArgs = M#call.kwargs,
 
