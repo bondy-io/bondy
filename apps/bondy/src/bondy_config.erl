@@ -118,7 +118,18 @@
                 named_table,
                 public,
                 {read_concurrency, true},
-                {write_concurrency, true}
+                {write_concurrency, true},
+                {decentralized_counters, true}
+            ]},
+            %% Used by bondy_session_counter.erl
+            {bondy_session_counter, [
+                set,
+                {keypos, 2},
+                named_table,
+                public,
+                {read_concurrency, true},
+                {write_concurrency, true},
+                {decentralized_counters, true}
             ]},
             %% Used by bondy_registry.erl counters
             {bondy_registry_state, [
@@ -127,7 +138,8 @@
                 named_table,
                 public,
                 {read_concurrency, true},
-                {write_concurrency, true}
+                {write_concurrency, true},
+                {decentralized_counters, true}
             ]},
             %% Holds information required to implement the different invocation
             %% strategies like round_robin
@@ -137,7 +149,8 @@
                 named_table,
                 public,
                 {read_concurrency, true},
-                {write_concurrency, true}
+                {write_concurrency, true},
+                {decentralized_counters, true}
             ]}
         ]}
     ]}

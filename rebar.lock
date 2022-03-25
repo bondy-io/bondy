@@ -96,7 +96,7 @@
  {<<"telemetry">>,{pkg,<<"telemetry">>,<<"1.0.0">>},0},
  {<<"tuplespace">>,
   {git,"https://gitlab.com/leapsight/tuplespace.git",
-       {ref,"b10fa11ed6c549cdb2b933804c907ab2e64037f6"}},
+       {ref,"d5e540dc2e1d3a4b75dbf3841de99d4547e118ff"}},
   0},
  {<<"types">>,{pkg,<<"types">>,<<"0.1.8">>},2},
  {<<"unicode_util_compat">>,{pkg,<<"unicode_util_compat">>,<<"0.7.0">>},1},
