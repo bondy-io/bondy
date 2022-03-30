@@ -212,7 +212,7 @@ maybe_wait_for_aae_exchange() ->
     %% join the cluster before this phase and perform a first aae exchange
     case wait_for_aae_exchange() of
         true ->
-            MyNode = partisan_peer_service_manager:mynode(),
+            MyNode = partisan:node(),
             Members = partisan_plumtree_broadcast:broadcast_members(),
 
             case lists:delete(MyNode, Members) of

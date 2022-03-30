@@ -284,7 +284,7 @@ nodestring() ->
 -spec node_spec() -> node_spec().
 
 node_spec() ->
-    partisan_peer_service:myself().
+    partisan:node_spec().
 
 
 

@@ -153,12 +153,12 @@ forward(Node, Msg) ->
 
 forward(Node, Msg, Opts) when is_atom(Node) ->
     Channel = bondy_config:get(wamp_peer_channel, undefined),
-    partisan_peer_service:cast_message(Node, Channel, ?MODULE, Msg, Opts);
+    partisan:cast_message(Node, Channel, ?MODULE, Msg, Opts);
 
 forward(Nodes, Msg, Opts) when is_list(Nodes) ->
     Channel = bondy_config:get(wamp_peer_channel, undefined),
     _ = [
-        partisan_peer_service:cast_message(Node, Channel, ?MODULE, Msg, Opts)
+        partisan:cast_message(Node, Channel, ?MODULE, Msg, Opts)
         || Node <- Nodes
     ],
     ok.
