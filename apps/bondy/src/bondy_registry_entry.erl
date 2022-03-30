@@ -20,6 +20,10 @@
 %% @doc An entry is a record of a RPC registration or PubSub subscription. It
 %% is stored in-memory in the Registry {@link bondy_registry} and replicated
 %% globally and is immutable.
+%%
+%% @TODO Because entries is replicated (even if only in memmory), changes to
+%% the data structure MUST be managed to be able to support rolling cluster
+%% updates.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
@@ -38,6 +42,7 @@
     realm_uri           ::  uri(),
     target              ::  wildcard(bondy_ref:target()),
     session_id          ::  wildcard(maybe(id())),
+    %% The message_id
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())
 }).
@@ -50,8 +55,11 @@
     ref                 ::  bondy_ref:t(),
     callback_args       ::  maybe(list(term())),
     created             ::  pos_integer() | atom(),
-    options             ::  map(),
+    options             ::  options(),
+    %% If a proxy, this is the registration|subscription id
+    %% of the origin client
     origin_id           ::  wildcard(id()),
+    %% If a proxy, this is the ref for the origin client
     origin_ref          ::  wildcard(maybe(bondy_ref:t()))
 }).
 
@@ -62,6 +70,7 @@
 -type entry_type()      ::  registration | subscription.
 -type wildcard(T)       ::  T | '_'.
 -type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
+-type options()         ::  map().
 
 -type details_map()     ::  #{
     id => id(),
@@ -79,7 +88,7 @@
     ref              :=  bondy_ref:t(),
     callback_args    :=  list(term()),
     created          :=  pos_integer(),
-    options          :=  map(),
+    options          :=  options(),
     origin_id        :=  maybe(id()),
     origin_ref       :=  maybe(bondy_ref:t())
 }.

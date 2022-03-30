@@ -478,24 +478,26 @@ forward(M, Ctxt) ->
 
 
 forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
-    %% A remote Caller is making a CALL to a local Callee via a
-    %% Relay.
+    %% A remote Caller is making a CALL to a local Callee or local proxied
+    %% Callee via a Bondy Relay.
 
     %% Fails with no_realm exception if not present
     RealmUri = ?GET_REALM_URI(Opts),
 
     case bondy_ref:target_type(Callee) of
         callback ->
-            %% A callback implemented procedure e.g. WAMP Session APIs
-            %% on this node. We apply here as we do not need invoke/5 to
+            %% A callback implemented procedure e.g. WAMP Session APIs.
+            %% We apply here as we do not need invoke/5 to
             %% enqueue a promise, we will call the module sequentially.
 
             %% INVOCATION already has the static arguments appended
             %% to its positional args (see call_to_invocation/4).
             CBArgs = [],
             Yield = apply_dynamic_callback(Msg, Callee, Caller, CBArgs),
+
             {To, SendOpts0} = bondy:prepare_send(Caller, Opts),
             SendOpts = SendOpts0#{from => Callee},
+
             bondy:send(RealmUri, To, Yield, SendOpts);
 
         _ ->
@@ -504,12 +506,6 @@ forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
             try
                 Timeout = bondy_utils:timeout(Opts),
                 InvocationId = Msg#invocation.request_id,
-                CallId = maps:get(
-                    x_call_id, Msg#invocation.details, undefined
-                ),
-                Procedure = maps:get(
-                    procedure, Msg#invocation.details, undefined
-                ),
 
                 %% If we are handling this here is because any remaining relays
                 %% in the 'via' stack are part of the route back to the Caller.
@@ -521,6 +517,20 @@ forward(#invocation{} = Msg, Callee, #{from := Caller} = Opts) ->
                 %% with the future YIELD or ERROR response from the Callee.
                 %% We add the relay so that we can route back the YIELD or
                 %% ERROR response to Caller.
+                %% Notice that this is a second promise for the associated CALL.
+                %% The first one was enqueued at the origin node and it is used
+                %% to trigger a timeout to the caller or match the YIELD |
+                %% ERROR that this second promise will match in this node,
+                %% which is the one connected to the Callee (or a Bridge Relay
+                %% to a node that is connected to the Callee).
+
+                CallId = maps:get(
+                    x_call_id, Msg#invocation.details, undefined
+                ),
+                Procedure = maps:get(
+                    procedure, Msg#invocation.details, undefined
+                ),
+
                 Promise = bondy_rpc_promise:new(
                     InvocationId, Callee, Caller, #{
                         call_id => CallId,
