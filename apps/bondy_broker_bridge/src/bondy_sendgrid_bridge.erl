@@ -280,6 +280,12 @@ send_email(Action) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+-spec formatted_body(map()) -> list() | no_return().
+ 
+formatted_body(#{<<"template_id">> := _, <<"template_data">> := _}) ->
+    %% the message is not used when a template is provided
+    [];
+
 formatted_body(#{<<"text/html">> := HTML}) ->
     Message =  <<
         "Please open this email with an HTML viewer to complete the process."
@@ -287,7 +293,10 @@ formatted_body(#{<<"text/html">> := HTML}) ->
     [{html, HTML}, {text, Message}];
 
 formatted_body(#{<<"text/plain">> := Text}) ->
-    [{text, Text}].
+    [{text, Text}];
+
+formatted_body(_) ->
+    error({error, <<"Missing body data Keys: [text/html, text/plain or template_id and template_data]">>}).
 
 
 %% -----------------------------------------------------------------------------
