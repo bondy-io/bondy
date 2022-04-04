@@ -581,6 +581,7 @@ created(#entry{created = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec options(t()) -> map().
+
 options(#entry{options = Val}) -> Val.
 
 
@@ -588,9 +589,9 @@ options(#entry{options = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_option(t(), any(), any()) -> any().
+-spec get_option(any(), t(), any()) -> any().
 
-get_option(#entry{options = Opts}, Key, Default) ->
+get_option(Key, #entry{options = Opts}, Default) ->
     maps:get(Key, Opts, Default).
 
 
