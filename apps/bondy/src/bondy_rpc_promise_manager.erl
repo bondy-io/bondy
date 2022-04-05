@@ -95,51 +95,46 @@ handle_cast(Event, State) ->
 handle_info(evict, State) ->
     %% Start a helper per table
     Fun = fun(Promise) ->
-        Type = bondy_rpc_promise:type(Promise),
-        case Type of
-            call ->
-                RealmUri = bondy_rpc_promise:realm_uri(Promise),
-                CallId = bondy_rpc_promise:call_id(Promise),
-                InvocationId = bondy_rpc_promise:invocation_id(Promise),
-                Caller = bondy_rpc_promise:caller(Promise),
-                Timeout = bondy_rpc_promise:timeout(Promise),
-                ProcUri = bondy_rpc_promise:procedure_uri(Promise),
+        RealmUri = bondy_rpc_promise:realm_uri(Promise),
+        CallId = bondy_rpc_promise:call_id(Promise),
+        InvocationId = bondy_rpc_promise:invocation_id(Promise),
+        Caller = bondy_rpc_promise:caller(Promise),
+        Timeout = bondy_rpc_promise:timeout(Promise),
+        ProcUri = bondy_rpc_promise:procedure_uri(Promise),
 
-                ?LOG_DEBUG(#{
-                    description => "RPC Promise evicted from queue",
-                    realm_uri => RealmUri,
-                    caller => Caller,
-                    call_id => CallId,
-                    procedure_uri => ProcUri,
-                    invocation_id => InvocationId,
-                    timeout => Timeout
-                }),
+        ?LOG_DEBUG(#{
+            description => "RPC Promise evicted from queue",
+            realm_uri => RealmUri,
+            caller => Caller,
+            call_id => CallId,
+            procedure_uri => ProcUri,
+            invocation_id => InvocationId,
+            timeout => Timeout
+        }),
 
-                Mssg = iolist_to_binary(
-                    io_lib:format(
-                        "The operation could not be completed in time"
-                        " (~p milliseconds).",
-                        [Timeout]
-                    )
-                ),
+        Mssg = iolist_to_binary(
+            io_lib:format(
+                "The operation could not be completed in time"
+                " (~p milliseconds).",
+                [Timeout]
+            )
+        ),
 
-                Error = wamp_message:error(
-                    ?CALL,
-                    CallId,
-                    #{
-                        procedure_uri => ProcUri,
-                        timeout => Timeout
-                    },
-                    ?WAMP_TIMEOUT,
-                    [Mssg]
-                ),
+        %% We always create a CALL error, regardless of whether promise is of
+        %% type call or invocation
+        Error = wamp_message:error(
+            ?CALL,
+            CallId,
+            #{
+                procedure_uri => ProcUri,
+                timeout => Timeout
+            },
+            ?WAMP_TIMEOUT,
+            [Mssg]
+        ),
 
-                bondy:send(RealmUri, Caller, Error);
+        bondy:send(RealmUri, Caller, Error)
 
-            invocation ->
-                %% We only send a timeout message for call promises
-                ok
-        end
     end,
 
     Opts = #{

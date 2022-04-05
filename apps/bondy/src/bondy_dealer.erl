@@ -625,13 +625,25 @@ forward(
 
     Key = bondy_rpc_promise:call_key_pattern(RealmUri, Caller, CallId),
 
-    case bondy_rpc_promise:take(Key) of
+    Status = case M#error.error_uri of
+        ?WAMP_TIMEOUT ->
+            %% This is a peer node's promise manager timeout error produced
+            %% while matching an expired invocation promise, so we want to
+            %% match the local promise even if it is timeout to
+            %% prevent the local promise manager to generate another one based
+            %% on the call promise.
+            expired;
+        _ ->
+            active
+    end,
+
+    case bondy_rpc_promise:take(Key, Status) of
         {ok, _Promise} ->
-            %% Even if promise has timeout but bondy_rpc_promise_manager has
-            %% not evicted it yet.
             bondy:send(RealmUri, Caller, M, #{from => Callee});
 
         error ->
+            %% The promise timed out already and local promise manager evicted
+            %% it sending the timeout error message to caller
             no_matching_promise(M)
     end;
 

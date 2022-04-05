@@ -65,11 +65,12 @@
 
 
 -opaque t()                 ::  #bondy_rpc_promise{}.
--type key()            ::  #bondy_rpc_promise_key{}.
+-type key()                 ::  #bondy_rpc_promise_key{}.
 -type info()                ::  map().
 -type take_fun()            ::  fun((error | {ok, t()}) -> any()).
 -type evict_fun()           ::  fun((t()) -> ok).
 -type wildcard(T)           ::  T | '_'.
+-type status()              ::  all | active | expired.
 -type opts()                ::  #{
                                     call_id => id(),
                                     procedure_uri => uri(),
@@ -110,7 +111,6 @@
 -export([timestamp/1]).
 -export([type/1]).
 -export([via/1]).
-
 
 
 %% =============================================================================
@@ -435,7 +435,6 @@ timestamp(#bondy_rpc_promise{timestamp = Val}) ->
     CallId :: wildcard(id())) -> key().
 
 call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
-
     CallId == '_' orelse is_integer(CallId)
         orelse error({badarg, {invocation_id, CallId}}),
 
@@ -449,7 +448,6 @@ call_key_pattern(RealmUri, Caller, CallId) when is_binary(RealmUri) ->
         _ ->
             bondy_ref:session_id(Caller)
     end,
-
 
     #bondy_rpc_promise_key{
         realm_uri = RealmUri,
@@ -504,7 +502,6 @@ when is_binary(RealmUri) ->
             bondy_ref:session_id(Caller)
     end,
 
-
     #bondy_rpc_promise_key{
         realm_uri = RealmUri,
         type = invocation,
@@ -556,9 +553,20 @@ add([#bondy_rpc_promise{key = Key} | _] = L) ->
 %% -----------------------------------------------------------------------------
 -spec take(Pattern :: key()) -> {ok, t()} | error.
 
-take(#bondy_rpc_promise_key{} = Pattern) ->
+take(Pattern) ->
+    take(Pattern, active).
 
-    case find(Pattern) of
+
+%% -----------------------------------------------------------------------------
+%% @doc Return and removes the promise that matches key pattern.
+%% @end
+%% -----------------------------------------------------------------------------
+-spec take(Pattern :: key(), Status :: status()) -> {ok, t()} | error.
+
+take(#bondy_rpc_promise_key{} = Pattern, Status)
+when Status == all orelse Status == active orelse Status == expired ->
+    %% Key is a pattern so we need to do a find followed by a delete.
+    case do_find(Pattern, Status) of
         {ok, #bondy_rpc_promise{key = Key}} = OK ->
             Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
             true = ets:delete(Tab, Key),
@@ -569,40 +577,20 @@ take(#bondy_rpc_promise_key{} = Pattern) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc Dequeues the promise that matches key pattern
-%% @end
-%% -----------------------------------------------------------------------------
--spec take(Pattern :: key(), take_fun()) -> any().
-
-take(Pattern, Fun) when is_function(Fun, 1) ->
-    Fun(take(Pattern)).
-
-
-%% -----------------------------------------------------------------------------
-%% @doc Reads the promise that matches the key pattern
+%% @doc Reads the active promise that matches the key pattern
 %% @end
 %% -----------------------------------------------------------------------------
 -spec find(key()) -> {ok, t()} | error.
 
 find(#bondy_rpc_promise_key{} = Key) ->
-    Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
-    MS = match_spec(Key),
-
-    case ets:select(Tab, MS, 1) of
-        {[#bondy_rpc_promise{} = Promise], _Cont} ->
-            {ok, Promise};
-
-        '$end_of_table' ->
-            error
-    end.
+    do_find(Key, active).
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Starting at the front of the queue Q, it removes all expired items.
-%% If the item was enqueued using the option `on_expiry`, the
-%% the bound function will be called passing the enqueued item as argument.
-%% An expired item if one for which its time-to-live (TTLSecs) has been reached.
+%% @doc Removes all expired items.
+%% If the option `on_evict` was set, the bound function will be called passing
+%% the expired item as argument.
+%% An expired item is one for which its expiry (millisecs) has been reached.
 %% Returns the atom 'ok'.
 %% @end
 %% -----------------------------------------------------------------------------
@@ -660,6 +648,19 @@ flush(RealmUri, Ref) ->
 %% PRIVATE
 %% =============================================================================
 
+
+
+do_find(#bondy_rpc_promise_key{} = Key, Status) ->
+    Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
+    MS = match_spec(Key, Status),
+
+    case ets:select(Tab, MS, 1) of
+        {[#bondy_rpc_promise{} = Promise], _Cont} ->
+            {ok, Promise};
+
+        '$end_of_table' ->
+            error
+    end.
 
 
 %% @private
