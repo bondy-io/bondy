@@ -930,7 +930,7 @@ proxy_existing(Session, State0) ->
     %% We proxy all existing registrations
     Regs = bondy_dealer:registrations(RealmUri, SessionId, Limit),
     GetRegs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
-    State1 = proxy_existing(Session, State0,GetRegs, Regs),
+    State1 = proxy_existing(Session, State0, GetRegs, Regs),
 
     %% We proxy all existing subscriptions
     Subs = bondy_broker:subscriptions(RealmUri, SessionId, Limit),

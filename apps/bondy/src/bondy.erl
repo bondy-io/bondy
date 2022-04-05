@@ -98,7 +98,8 @@ request(Pid, RealmUri, M) ->
 %% It calls `send/3' with a an empty map for Options.
 %% @end
 %% -----------------------------------------------------------------------------
--spec send(RealmUri :: uri(), bondy_ref:t(), wamp_message()) -> ok.
+-spec send(RealmUri :: uri(), bondy_ref:t(), wamp_message()) ->
+    ok | no_return().
 
 send(RealmUri, Ref, M) ->
     send(RealmUri, Ref, M, #{}).
