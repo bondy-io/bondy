@@ -345,7 +345,7 @@ handle_info(
     {plum_db_event, exchange_finished, {Pid, _Reason}},
     #state{exchange_ref = {Pid, Ref}} = State0) ->
 
-    true = erlang:demonitor(Ref),
+    true = erlang:demonitor(Ref, [flush]),
     ok = handle_spec_updates(State0),
     State1 = State0#state{updated_specs = [], exchange_ref = undefined},
     {noreply, State1};
@@ -412,7 +412,8 @@ handle_info(
 handle_info(Info, State) ->
     ?LOG_WARNING(#{
         reason => unsupported_event,
-        event => Info
+        event => Info,
+        state_exchange_ref => State#state.exchange_ref
     }),
     {noreply, State}.
 
