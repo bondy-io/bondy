@@ -133,7 +133,7 @@
 
 -export([iterate/1]).
 -export([iterate/2]).
--export([get/2]).
+-export([select/2]).
 
 
 
@@ -147,11 +147,12 @@
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get(entries(), opts()) -> bondy_registry_entry:t() | {error, noproc}.
+-spec select(entries(), opts()) ->
+    {ok, bondy_registry_entry:t()} | {error, noproc | map()}.
 
-get(Entries, Opts) when is_list(Entries) ->
+select(Entries, Opts) when is_list(Entries) ->
     Node = bondy_config:nodestring(),
-    do_get(iterate(Entries, Opts), Node).
+    do_select(iterate(Entries, Opts), Node).
 
 
 %% -----------------------------------------------------------------------------
@@ -172,14 +173,13 @@ iterate(Entries, Opts0) when is_list(Entries) ->
             {error, Error}
     end.
 
+
 %% -----------------------------------------------------------------------------
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
 -spec iterate(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | {error, noproc} | 'end_of_table'.
-
-
 
 iterate(#iterator{strategy = round_robin} = Iter) ->
     next_round_robin(Iter);
@@ -243,7 +243,7 @@ prepare_entries(Entries, #{strategy := last}) ->
 
 prepare_entries(Entries, #{strategy := single}) ->
     %% There should only be one entry here, but instead of failing
-    %% we would consistently pick the first one, regardless of location.
+    %% we would consistently select the first one, regardless of location.
     lists:keysort(1, Entries);
 
 prepare_entries(Entries, _) ->
@@ -269,13 +269,13 @@ maybe_sort_by_locality(false, L) ->
 
 
 %% @private
-do_get('$end_of_table', _) ->
+do_select('$end_of_table', _) ->
     {error, noproc};
 
-do_get({error, _} = Error, _) ->
+do_select({error, _} = Error, _) ->
     Error;
 
-do_get({Entry, Iter}, Node) ->
+do_select({Entry, Iter}, Node) ->
     case bondy_registry_entry:nodestring(Entry) =:= Node of
         true ->
             %% The wamp peer is local, so we should have a peer
@@ -284,19 +284,19 @@ do_get({Entry, Iter}, Node) ->
 
             case erlang:is_process_alive(Pid) of
                 true ->
-                    Entry;
+                    {ok, Entry};
                 false ->
                     %% This should happen when the WAMP Peer
                     %% disconnected between the time we read the entry
                     %% and now. We contine trying with other entries.
-                    do_get(iterate(Iter), Node)
+                    do_select(iterate(Iter), Node)
             end;
         false ->
             %% This wamp peer is remote.
             %% We cannot check the remote node as we might not have
             %% a direct connection, so we trust we have an up-todate state.
             %% Any failover strategy should be handled by the user.
-            Entry
+            {ok, Entry}
     end.
 
 
@@ -449,7 +449,7 @@ next_queue_least_loaded(
             end;
         false ->
             %% We already covered all local callees,
-            %% pick the first remote callee (in effect randomnly as we already
+            %% select the first remote callee (in effect randomnly as we already
             %% shuffled the list of entries)
             {H, NewIter}
     end;

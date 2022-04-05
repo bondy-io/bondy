@@ -236,7 +236,8 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
     %% To == undefined when Msg == #publish{}
     case To == undefined orelse bondy_ref:is_local(To) of
         true ->
-            %% The message is addressed to a local process or peer
+            %% The message is addressed to a local process or peer from a
+            %% remote peer.
             do_forward(Msg, To, Opts);
         false ->
             %% We need to route the message through a relay
@@ -342,13 +343,6 @@ acknowledge_message(_) ->
     false.
 
 
-
-%% =============================================================================
-%% PRIVATE : GEN_SERVER
-%% =============================================================================
-
-
-
 %% @private
 async_forward(M, Ctxt0) ->
     %% Client already has a session.
@@ -357,10 +351,12 @@ async_forward(M, Ctxt0) ->
     %% This behavior can be changed with the option
     %% "PUBLISH.Options.acknowledge|bool"
     Acknowledge = acknowledge_message(M),
+
     %% Asynchronously forwards a message by either sending it to an
     %% existing worker or spawning a new one depending on
     %% bondy_broker_pool_type.
     Event = {M, Ctxt0},
+
     try bondy_router_worker:cast(fun() -> sync_forward(Event) end) of
         ok ->
             {ok, Ctxt0};
@@ -409,8 +405,10 @@ async_forward(M, Ctxt0) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc
-%% Synchronously forwards a message in the calling process.
+%% @doc Synchronously forwards a message in the calling process.
+%% These are messages sent by Caller or Publisher only i.e. client-to-router
+%% direction.
+%% This function is called by {@link async_forward/2}.
 %% @end.
 %% -----------------------------------------------------------------------------
 -spec sync_forward(event()) -> ok.
@@ -448,22 +446,32 @@ sync_forward({M, _Ctxt}) ->
 
 
 
-
+%% -----------------------------------------------------------------------------
+%% @private
+%% @doc Auxiliary function used by forward/3.
+%% These are messages sent by Caller or Publisher only i.e. client-to-router
+%% direction or a router-to-client message that is also being forewarded by
+%% another cluster peer node.
+%% The following messages are never forwarded between cluster peer nodes:
+%% INVOCATION, YIELD, INTERRUPT, EVENT.
+%% EVENT is particular since Bondy forwards PUBLISH messages when subscribers
+%% exist in cluster peer nodes, this is becuase in WAMP every EVENT has a per
+%% subscriber sequence number, so these events could not possibly be generated
+%% on the publisher's node.
+%% @end.
+%% -----------------------------------------------------------------------------
 do_forward(#publish{} = M, To, Opts) ->
     bondy_broker:forward(M, To, Opts);
-
-do_forward(#error{} = M, To, Opts) ->
-    %% This is a CALL, INVOCATION or INTERRUPT error
-    bondy_dealer:forward(M, To, Opts);
-
-do_forward(#interrupt{} = M, To, Opts) ->
-    bondy_dealer:forward(M, To, Opts);
 
 do_forward(#call{} = M, To, Opts) ->
     bondy_dealer:forward(M, To, Opts);
 
-do_forward(#invocation{} = M, To, Opts) ->
+do_forward(#cancel{} = M, To, Opts) ->
     bondy_dealer:forward(M, To, Opts);
 
-do_forward(#yield{} = M, To, Opts) ->
+do_forward(#result{} = M, To, Opts) ->
+    bondy_dealer:forward(M, To, Opts);
+
+do_forward(#error{} = M, To, Opts) ->
+    %% This is a CALL, INVOCATION or INTERRUPT error
     bondy_dealer:forward(M, To, Opts).

@@ -57,6 +57,7 @@
         'x_routing_key'
     ]},
     {subscribe, [
+        'x_disclose_session_info'
     ]},
     {yield, [
     ]}
@@ -75,11 +76,12 @@
     {error, [
     ]},
     {event, [
+        'x_session_info'
+    ]},
+    {call, [
     ]},
     {invocation, [
-        'x_session_info',
-        %% Use by bondy relays
-        'x_call_id'
+        'x_session_info'
     ]},
     {result, [
     ]}
@@ -134,6 +136,15 @@
             %% Used by bondy_registry.erl counters
             {bondy_registry_state, [
                 set,
+                {keypos, 2},
+                named_table,
+                public,
+                {read_concurrency, true},
+                {write_concurrency, true},
+                {decentralized_counters, true}
+            ]},
+            {bondy_rpc_promise,  [
+                ordered_set,
                 {keypos, 2},
                 named_table,
                 public,
