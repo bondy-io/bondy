@@ -347,7 +347,7 @@
 
 %% @doc allows to enable or disable a comnfigured handler
 {mapping, "log.handlers.$id.enabled", "kernel.logger", [
-    {default, on},
+    {default, off},
     {datatype, flag}
 ]}.
 
@@ -700,10 +700,14 @@
         {node, [" node=", node], ""},
         {router_vsn, [" router_vsn=", router_vsn], ""},
         {realm, [" realm=", realm], ""},
+        {agent, [" agent=", agent], ""},
+        {authmethod, [" authmethod=", authmethod], ""},
         {session_id, [" session_id=", session_id], ""},
+        {protocol_session_id, [" protocol_session_id=", protocol_session_id], ""},
         {protocol, [" protocol=", protocol], ""},
         {transport, [" transport=", transport], ""},
         {peername, [" peername=", peername], ""},
+        {serializer, [" serializer=", serializer], ""},
         " ",
         msg,
         "\n"
@@ -712,6 +716,7 @@
     HandlersConf = cuttlefish_variable:filter_by_prefix(
         "log.handlers", CuttleConf
     ),
+
 
     HandlerIDs = sets:to_list(
         sets:from_list(

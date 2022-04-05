@@ -263,8 +263,10 @@ handle_inbound(Data, St) ->
     catch
         _:{unsupported_encoding, _} = Reason ->
             stop(Reason, St);
+
         _:badarg ->
             stop(decoding_error, St);
+
         _:{invalid_uri, Uri, ReqInfo} ->
             #{request_type := ReqType, request_id := ReqId} = ReqInfo,
             Error = wamp_message:error(
@@ -276,15 +278,28 @@ handle_inbound(Data, St) ->
                 #{}
             ),
             Bin = wamp_encoding:encode(Error, encoding(St)),
+            %% TODO Shouldn't we stop here?
             %% At the moment messages contain only one message as we do not yet
             %% support batched encoding, when/if we enable support for batched
             %% we need to continue processing the additional messages
             {reply, [Bin], St};
+
         _:{validation_failed, _, _} = Reason ->
             %% Validation of the message option or details failed
             stop(Reason, St);
+
         _:{invalid_message, _} = Reason ->
-            stop(Reason, St)
+            stop(Reason, St);
+
+        _:Reason:Stacktrace ->
+            %% Catch any error produced by handle_inbound_messages/2
+            ?LOG_ERROR(#{
+                description => <<"Error while evaluating inbound data">>,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                data => Data
+            }),
+            stop(internal_error, St)
     end.
 
 
@@ -454,6 +469,8 @@ handle_inbound_messages([#hello{realm_uri = Uri} = M|_], St0, _) ->
         {error, not_found} ->
             stop({authentication_failed, no_such_realm}, St1);
         Realm ->
+            ok = logger:update_process_metadata(#{realm => Uri}),
+
             maybe_open_session(
                 maybe_auth_challenge(M#hello.details, Realm, St1)
             )
@@ -577,9 +594,10 @@ open_session(Extra, St0) when is_map(Extra) ->
         Authmethod = bondy_auth:method(AuthCtxt),
         Agent = maps:get(agent, ReqDetails, undefined),
         UserMeta = bondy_rbac_user:meta(bondy_auth:user(AuthCtxt)),
+        Peer = bondy_context:peer(Ctxt0),
 
         Properties = #{
-            peer => maps:get(peer, Ctxt0),
+            peer => Peer,
             security_enabled => bondy_realm:is_security_enabled(RealmUri),
             is_anonymous => Authid == anonymous,
             agent => Agent,
@@ -623,10 +641,12 @@ open_session(Extra, St0) when is_map(Extra) ->
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
         Bin = wamp_encoding:encode(Welcome, encoding(St1)),
 
-        ok = bondy_logger_utils:update_process_metadata(#{
+        ok = logger:update_process_metadata(#{
             agent => bondy_utils:maybe_slice(Agent, 0, 64),
             authmethod => Authmethod,
-            realm_uri => RealmUri
+            realm => RealmUri,
+            session_id => SessionId0,
+            protocol_session_id => SessionId
         }),
 
         {reply, Bin, St1#wamp_state{state_name = established}}
@@ -833,7 +853,8 @@ abort_message({no_authmethod, []}) ->
 
 abort_message({no_authmethod, _Opts}) ->
     Details = #{
-        message => <<"The requested authentication methods are not available for this user on this realm.">>
+        message => <<"The requested authentication methods are not available for this user on this realm.">>,
+        description => <<"The requested methods are either not enabled for the authenticating user or realm or they are restricted to a specific network address range that doesn't match the client's. Check the realm configuration including the user (its roles) and the assigned sources.">>
     },
     wamp_message:abort(Details, ?WAMP_NOT_AUTH_METHOD);
 
@@ -1006,12 +1027,15 @@ encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
 
 %% @private
 do_init({_, _, Serializer} = Subprotocol, Peer, _Opts) ->
+    Ctxt = bondy_context:new(Peer, Subprotocol),
     State = #wamp_state{
         subprotocol = Subprotocol,
-        context = bondy_context:new(Peer, Subprotocol)
+        context = Ctxt
     },
-    ok = bondy_logger_utils:update_process_metadata(#{
-        serializer => Serializer
+    ok = logger:update_process_metadata(#{
+        protocol => wamp,
+        serializer => Serializer,
+        peername => bondy_context:peername(Ctxt)
     }),
     {ok, State}.
 

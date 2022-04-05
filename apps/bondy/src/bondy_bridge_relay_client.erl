@@ -1,5 +1,5 @@
 %% =============================================================================
-%%  bondy_bridge_relay_client -
+%%  bondy_bridge_relay_client.erl -
 %%
 %%  Copyright (c) 2016-2022 Leapsight. All rights reserved.
 %%
@@ -18,10 +18,8 @@
 
 %% -----------------------------------------------------------------------------
 %% @doc EARLY DRAFT implementation of the client-side connection between and
-%% edge node (client) and a remote/core node (server).
-%%
-%% == Configuration ==
-%%
+%% edge node (this module) and a remote/core node
+%% ({@link bondy_bridge_relay_server}).
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_bridge_relay_client).
@@ -35,7 +33,6 @@
 -define(SOCKET_ERROR(Tag), Tag == tcp_error orelse Tag == ssl_error).
 -define(CLOSED_TAG(Tag), Tag == tcp_closed orelse Tag == ssl_closed).
 % -define(PASSIVE_TAG(Tag), Tag == tcp_passive orelse Tag == ssl_passive).
-
 
 
 -record(state, {
@@ -52,7 +49,6 @@
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
 }).
@@ -76,6 +72,7 @@
 %% STATE FUNCTIONS
 -export([connecting/3]).
 -export([connected/3]).
+% -export([established/3]).
 
 
 
@@ -126,7 +123,10 @@ callback_mode() ->
 %% @end
 %% -----------------------------------------------------------------------------
 init(Config0) ->
-    ?LOG_NOTICE(#{description => "Starting bridge-relay client"}),
+    ?LOG_NOTICE(#{
+        description => "Starting bridge-relay client",
+        config => Config0
+    }),
 
     #{
         transport := Transport,
@@ -149,7 +149,6 @@ init(Config0) ->
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
-        tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -235,7 +234,7 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 %% @end
 %% -----------------------------------------------------------------------------
 connecting(enter, _, State) ->
-    ok = bondy_logger_utils:set_process_metadata(#{
+    ok = logger:set_process_metadata(#{
         transport => State#state.transport,
         endpoint => State#state.endpoint,
         reconnect => State#state.reconnect_retry =/= undefined
@@ -287,15 +286,17 @@ connected(internal, {welcome, SessionId, Details}, State0) ->
         details => Details
     }),
 
-    State = init_session_and_sync(SessionId, State0),
+    State1 = init_session_and_sync(SessionId, State0),
+    State = reset_reconnect_retry_state(State1),
 
     %% TODO open sessions on remaning realms
     {keep_state, State, idle_timeout(State)};
 
-connected(internal, {abort, #{}, Reason}, State) ->
+connected(internal, {abort, Reason, Details}, State) ->
     ?LOG_NOTICE(#{
         description => "Got abort message from server, closing connection.",
-        reason => Reason
+        reason => Reason,
+        details => Details
     }),
     {stop, server_error, State};
 
@@ -568,13 +569,17 @@ send_message(Message, State) ->
 
 
 %% @private
-on_connect(State0) ->
+on_connect(State) ->
     ?LOG_NOTICE(#{description => "Established connection with remote router"}),
 
     %% We join any realms defined by the config
-    {_, R1} = bondy_retry:succeed(State0#state.reconnect_retry),
-    State = State0#state{reconnect_retry = R1},
     open_sessions(State).
+
+
+%% @private
+reset_reconnect_retry_state(State) ->
+    {_, R1} = bondy_retry:succeed(State#state.reconnect_retry),
+    State#state{reconnect_retry = R1}.
 
 
 %% @private
@@ -636,7 +641,6 @@ signer(_, #{cryptosign := #{procedure := _}}) ->
     error(not_implemented);
 
 signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
-
     SignerFun = fun(Message) ->
         try
             Port = erlang:open_port(
@@ -666,6 +670,12 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
         error:Reason ->
             error(Reason)
     end;
+signer(_, #{cryptosign := #{privkey := HexString}}) ->
+    %% For testing only, this will be remove on 1.0.0
+    fun(Message) ->
+        PrivKey = hex_utils:hexstr_to_bin(HexString),
+        sign(Message, PrivKey)
+    end;
 
 signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
 
@@ -673,18 +683,23 @@ signer(_, #{cryptosign := #{privkey_env_var := Var}}) ->
         false ->
             error({invalid_config, {privkey_env_var, Var}});
         HexString ->
-            PrivKey = hex_utils:hexstr_to_bin(HexString),
             fun(Message) ->
-                list_to_binary(
-                    hex_utils:bin_to_hexstr(
-                        enacl:sign_detached(Message, PrivKey)
-                    )
-                )
+                PrivKey = hex_utils:hexstr_to_bin(HexString),
+                sign(Message, PrivKey)
             end
     end;
 
 signer(_, _) ->
     error(invalid_cryptosign_config).
+
+
+%% @private
+sign(Message, PrivKey) ->
+    list_to_binary(
+        hex_utils:bin_to_hexstr(
+            enacl:sign_detached(Message, PrivKey)
+        )
+    ).
 
 
 %% @private
@@ -775,7 +790,7 @@ setup_proxing(SessionId, State0) ->
 
 
 
-%% @private
+% %% @private
 % leave_session(Id, #state{} = State) ->
 %     Sessions0 = State#state.sessions,
 %     {#{realm_uri := Uri}, Sessions} = maps:take(Id, Sessions0),
@@ -872,7 +887,7 @@ subscribe_meta_events(Session, State) ->
 %% @doc We subscribe to the topics configured for this realm.
 %% But instead of receiving an EVENT we will get a PUBLISH message. This is an
 %% optimization performed by bondy_broker to avoid sending N events to N
-%% subscribers that are remote.
+%% remote subscribers over the relay or bridge relay.
 %% @end
 %% -----------------------------------------------------------------------------
 subscribe_topics(Session0, State) ->
@@ -915,7 +930,7 @@ proxy_existing(Session, State0) ->
     %% We proxy all existing registrations
     Regs = bondy_dealer:registrations(RealmUri, SessionId, Limit),
     GetRegs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
-    State1 = proxy_existing(Session, State0,GetRegs, Regs),
+    State1 = proxy_existing(Session, State0, GetRegs, Regs),
 
     %% We proxy all existing subscriptions
     Subs = bondy_broker:subscriptions(RealmUri, SessionId, Limit),

@@ -40,7 +40,8 @@ groups() ->
         ]},
         {exact_matching, [sequence], [
             add_subscription,
-            match_prefix
+            match_prefix,
+            match_wildcard
         ]}
     ].
 
@@ -89,9 +90,7 @@ add_subscription(Config) ->
     Uri = <<"com.a.b.c">>,
 
     Ref = bondy_context:ref(Ctxt),
-    {ok, Entry, true} = bondy_registry:add(
-        subscription, Uri, Opts, Realm, Ref
-    ),
+    {ok, Entry, true} = bondy_registry:add(subscription, Uri, Opts, Realm, Ref),
 
     Id1 = bondy_registry_entry:id(Entry),
     Found = bondy_registry:lookup(subscription, Id1, Realm),
@@ -155,25 +154,106 @@ match_prefix(Config) ->
     ?assertEqual(Id, bondy_registry_entry:id(E)),
 
     ?assertEqual(
-        2,
-        length(
-            element(1, bondy_registry:match(subscription, <<"com.a">>, Realm))
-        )
+        lists:sort([{<<"com.a">>, <<"prefix">>}, {<<"com.a">>, <<"exact">>}]),
+        project(bondy_registry:match(subscription, <<"com.a">>, Realm))
     ),
+
     ?assertEqual(
-        2,
-        length(
-            element(1, bondy_registry:match(subscription, <<"com.a.b">>, Realm))
-        )
+        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
+        project(bondy_registry:match(subscription, <<"com.a.b">>, Realm))
     ),
+
     ?assertEqual(
-        2,
-        length(
-            element(
-                1, bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm)
-            )
-        )
+        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
+        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
     ).
+
+
+match_wildcard(Config) ->
+    Realm = ?config(realm_uri, Config),
+    Ctxt = ?config(context, Config),
+
+    Ref = bondy_context:ref(Ctxt),
+
+    {ok, _Entry, true} = bondy_registry:add(
+        subscription, <<"com.">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    ?assertEqual(
+        lists:sort([
+            {<<"com.">>, <<"wildcard">>},
+            {<<"com.a">>, <<"exact">>},
+            {<<"com.a">>, <<"prefix">>}
+        ]),
+        project(bondy_registry:match(subscription, <<"com.a">>, Realm))
+    ),
+
+    ?assertEqual(
+        lists:sort([
+            {<<"com.">>, <<"wildcard">>}
+        ]),
+        project(bondy_registry:match(subscription, <<"com.b">>, Realm))
+    ),
+
+    ?assertEqual(
+        lists:sort([
+            {<<"com.">>, <<"wildcard">>}
+        ]),
+        project(bondy_registry:match(subscription, <<"com.bar">>, Realm))
+    ),
+
+    ?assertEqual(
+        lists:sort([
+            {<<"com.a">>,<<"prefix">>},
+            {<<"com.a.b">>,<<"prefix">>}
+        ]),
+        project(bondy_registry:match(subscription, <<"com.a.b">>, Realm))
+    ),
+
+    ?assertEqual(
+        lists:sort([{<<"com.a">>,<<"prefix">>}, {<<"com.a.b">>,<<"prefix">>}]),
+        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<"....">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<"com....">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<".a...">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<"..b..">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<"...c.">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+    {ok, _, true} = bondy_registry:add(
+        subscription, <<"....d">>, #{match => <<"wildcard">>}, Realm, Ref
+    ),
+
+
+    ?assertEqual(
+        lists:sort([
+            {<<"....">>, <<"wildcard">>},
+            {<<"com....">>, <<"wildcard">>},
+            {<<"....d">>, <<"wildcard">>},
+            {<<".a...">>, <<"wildcard">>},
+            {<<"..b..">>, <<"wildcard">>},
+            {<<"...c.">>, <<"wildcard">>},
+            {<<"com.a">>, <<"prefix">>},
+            {<<"com.a.b">>, <<"prefix">>}
+        ]),
+        project(bondy_registry:match(subscription, <<"com.a.b.c.d">>, Realm))
+    ).
+
 
 
 register_invoke_single(Config) ->
@@ -272,3 +352,13 @@ register_callback(Config) ->
         {error, already_exists},
         bondy_dealer:register(Uri1, Opts, Realm, Ref3)
     ).
+
+
+
+project({L, _Cont}) ->
+    lists:sort([
+        {
+            bondy_registry_entry:uri(X),
+            bondy_registry_entry:match_policy(X)
+        } || X <- L
+    ]).

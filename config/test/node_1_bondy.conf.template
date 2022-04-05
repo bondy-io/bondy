@@ -60,6 +60,7 @@ broker_bridge.kafka.enabled = off
 
 # broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
 
+cluster.automatic_leave = on
 cluster.parallelism = 1
 cluster.peer_port = 18087
 cluster.peer_discovery.enabled = off

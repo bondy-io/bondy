@@ -310,6 +310,12 @@
                         {ok, binary_to_list(Name)}
                 end
             },
+             %% For testing only, this will be removed on 1.0.0
+            privkey => #{
+                alias => <<"privkey">>,
+                required => false,
+                datatype => binary
+            },
             privkey_env_var => #{
                 alias => <<"privkey_env_var">>,
                 required => false,

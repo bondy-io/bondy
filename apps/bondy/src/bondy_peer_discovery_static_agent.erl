@@ -62,7 +62,7 @@
 }).
 
 -record(state, {
-    peers = []  :: [bondy_peer_service:peer()]
+    peers = []  :: [bondy_peer_discovery_agent:peer()]
 }).
 
 -export([init/1]).
@@ -97,7 +97,7 @@ init(Opts) ->
 %% @end
 %% -----------------------------------------------------------------------------
 -spec lookup(State :: any(), timeout()) ->
-    {ok, [bondy_peer_service:peer()], NewState :: any()}
+    {ok, [bondy_peer_discovery_agent:peer()], NewState :: any()}
     | {error, Reason :: any(), NewState :: any()}.
 
 lookup(State, _Timeout) ->

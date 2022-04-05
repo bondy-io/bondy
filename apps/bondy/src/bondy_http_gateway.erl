@@ -464,7 +464,7 @@ subscribe(State) ->
     {ok, Id} = bondy_broker:subscribe(
         ?MASTER_REALM_URI,
         #{
-            subscription_id => bondy_utils:get_id(global),
+            subscription_id => bondy_utils:gen_message_id(global),
             match => <<"exact">>
         },
         ?BONDY_REALM_DELETED
@@ -491,7 +491,7 @@ unsubscribe(State) ->
 %% @private
 do_start_listeners(public) ->
     ?LOG_NOTICE(#{
-        description => "Starting public HTTP/S listeners"
+        description => "Starting public HTTP(S) listeners"
     }),
     DTables = load_dispatch_tables(),
     _ = [start_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
@@ -499,7 +499,7 @@ do_start_listeners(public) ->
 
 do_start_listeners(admin) ->
     ?LOG_NOTICE(#{
-        description => "Starting admin HTTP/S listeners"
+        description => "Starting admin HTTP(S) listeners"
     }),
     DTables = parse_specs([admin_spec()], admin_base_routes()),
     _ = [start_admin_listener({Scheme, Routes}) || {Scheme, Routes} <- DTables],
@@ -509,7 +509,7 @@ do_start_listeners(admin) ->
 %% @private
 do_suspend_listeners(public) ->
     ?LOG_NOTICE(#{
-        description => "Suspending public HTTP/S listeners"
+        description => "Suspending public HTTP(S) listeners"
     }),
     catch ranch:suspend_listener(?HTTP),
     catch ranch:suspend_listener(?HTTPS),
@@ -517,7 +517,7 @@ do_suspend_listeners(public) ->
 
 do_suspend_listeners(admin) ->
     ?LOG_NOTICE(#{
-        description => "Suspending admin HTTP/S listeners"
+        description => "Suspending admin HTTP(S) listeners"
     }),
     catch ranch:suspend_listener(?ADMIN_HTTP),
     catch ranch:suspend_listener(?ADMIN_HTTPS),
@@ -527,7 +527,7 @@ do_suspend_listeners(admin) ->
 %% @private
 do_resume_listeners(public) ->
     ?LOG_NOTICE(#{
-        description => "Resuming public HTTP/S listeners"
+        description => "Resuming public HTTP(S) listeners"
     }),
     catch ranch:resume_listener(?HTTP),
     catch ranch:resume_listener(?HTTPS),
@@ -535,7 +535,7 @@ do_resume_listeners(public) ->
 
 do_resume_listeners(admin) ->
     ?LOG_NOTICE(#{
-        description => "Resuming admin HTTP/S listeners"
+        description => "Resuming admin HTTP(S) listeners"
     }),
     catch ranch:resume_listener(?ADMIN_HTTP),
     catch ranch:resume_listener(?ADMIN_HTTPS),
@@ -545,7 +545,7 @@ do_resume_listeners(admin) ->
 %% @private
 do_stop_listeners(public) ->
     ?LOG_NOTICE(#{
-        description => "Stopping public HTTP/S listeners"
+        description => "Stopping public HTTP(S) listeners"
     }),
     catch cowboy:stop_listener(?HTTP),
     catch cowboy:stop_listener(?HTTPS),
@@ -553,7 +553,7 @@ do_stop_listeners(public) ->
 
 do_stop_listeners(admin) ->
     ?LOG_NOTICE(#{
-        description => "Stopping admin HTTP/S listeners"
+        description => "Stopping admin HTTP(S) listeners"
     }),
     catch cowboy:stop_listener(?ADMIN_HTTP),
     catch cowboy:stop_listener(?ADMIN_HTTPS),

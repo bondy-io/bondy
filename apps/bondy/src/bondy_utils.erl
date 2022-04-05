@@ -30,7 +30,7 @@
 -export([elapsed_time/2]).
 -export([foreach/2]).
 -export([generate_fragment/1]).
--export([get_id/1]).
+-export([gen_message_id/1]).
 -export([get_nonce/0]).
 -export([get_nonce/1]).
 -export([get_random_string/2]).
@@ -253,21 +253,23 @@ decode(ContentType, Term) ->
 %% distribution_ over the complete range [0, 2^53]
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_id(Scope :: global | {router, uri()} | {session, id()}) -> id().
+-spec gen_message_id(Scope :: global | {router, uri()} | {session, id()}) ->
+    id().
 
-get_id(global) ->
+gen_message_id(global) ->
     %% IDs in the _global scope_ MUST be drawn _randomly_ from a _uniform
     %% distribution_ over the complete range [0, 2^53]
     wamp_utils:rand_uniform();
 
-get_id({router, _}) ->
-    get_id(global);
+gen_message_id({router, _}) ->
+    gen_message_id(global);
 
-get_id({session, SessionId}) when is_binary(SessionId) ->
+gen_message_id({session, SessionOrId}) ->
     %% IDs in the _session scope_ SHOULD be incremented by 1 beginning
     %% with 1 (for each direction - _Client-to-Router_ and _Router-to-
     %% Client_)
-    bondy_session:incr_seq(SessionId).
+    %% This is the router-to-client direction
+    bondy_session:gen_message_id(SessionOrId).
 
 
 %% -----------------------------------------------------------------------------
@@ -294,13 +296,16 @@ external_session_id(undefined) ->
     undefined.
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc It returns the timeout in ms.
+%% - Provided timeout if it is greater than 0
+%% - wamp_max_call_timeout if the provided timeout is equals to 0
+%% - wamp_call_timeout if no timeout is provided
 %% @end
 %% -----------------------------------------------------------------------------
 timeout(#{timeout := T}) when is_integer(T), T > 0 ->
     T;
 timeout(#{timeout := 0}) ->
-    infinity;
+    bondy_config:get(wamp_max_call_timeout);
 timeout(_) ->
     bondy_config:get(wamp_call_timeout).
 

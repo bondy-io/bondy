@@ -58,8 +58,6 @@
     peer                            ::  maybe(peer()),
     %% User-Agent HTTP header or WAMP equivalent
     agent                           ::  binary(),
-    %% Sequence number used for ID generation
-    seq = 0                         ::  non_neg_integer(),
     %% Peer WAMP Roles played by peer
     roles                           ::  maybe(map()),
     %% WAMP Auth
@@ -76,6 +74,7 @@
 }).
 
 -type peer()                    ::  {inet:ip_address(), inet:port_number()}.
+-type peer_role()               ::  caller | callee | subscriber | publisher.
 -type t()                       ::  #session{}.
 -type t_or_id()                 ::  t() | bondy_session_id:t().
 
@@ -108,6 +107,7 @@
 %% this should be a UUID or KSUID but not a random integer.
 -export_type([id/0]).
 -export_type([peer/0]).
+-export_type([peer_role/0]).
 -export_type([properties/0]).
 -export_type([external/0]).
 
@@ -123,10 +123,12 @@
 -export([authroles/1]).
 -export([close/1]).
 -export([created/1]).
+-export([external_id/1]).
+-export([features/2]).
+-export([features/3]).
 -export([fetch/1]).
 -export([id/1]).
--export([external_id/1]).
--export([incr_seq/1]).
+-export([gen_message_id/1]).
 -export([info/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
@@ -312,11 +314,14 @@ close(#session{} = S) ->
     Tab2 = tuplespace:locate_table(?SESSION_SPACE, ExtId),
     true = ets:delete(Tab2, ExtId),
 
+    %% Delete counters
+    ok = bondy_session_counter:delete_all(Id),
+
     ?LOG_DEBUG(#{
         description => "Session closed",
         realm => RealmUri,
         session_id => Id,
-        session_external_id => ExtId
+        protocol_session_id => ExtId
     }),
 
     ok.
@@ -378,6 +383,40 @@ roles(#session{roles = Val}) ->
 
 roles(Id) when is_binary(Id) ->
     roles(fetch(Id)).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t_or_id(), Role :: peer_role()) ->
+    map().
+
+features(#session{roles = Roles}, Role)
+when Role == caller; Role == callee; Role == subscriber; Role == published ->
+    case maps:find(Role, Roles) of
+        {ok, Value} ->
+            Value;
+        error ->
+            #{}
+    end;
+
+features(Id, Role) when is_binary(Id) ->
+    features(fetch(Id), Role).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec features(t_or_id(), Role :: peer_role(), With :: [atom()]) ->
+    map().
+
+features(#session{} = Session, Role, With) when is_list(With) ->
+    maps:with(With, features(Session, Role));
+
+features(Id, Role, With) when is_binary(Id) ->
+    features(fetch(Id), Role, With).
 
 
 %% -----------------------------------------------------------------------------
@@ -602,19 +641,17 @@ refresh_rbac_context(Id) when is_binary(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec incr_seq(t_or_id()) -> map().
+-spec gen_message_id(t_or_id()) -> map().
 
-incr_seq(#session{id = Id}) ->
-    incr_seq(Id);
+gen_message_id(#session{id = Id}) ->
+    gen_message_id(Id);
 
-incr_seq(Id) when is_binary(Id) ->
-    Tab = tuplespace:locate_table(?SESSION_SPACE, Id),
-
+gen_message_id(Id) when is_binary(Id) ->
     try
-        ets:update_counter(Tab, Id, {#session.seq, 1, ?MAX_ID, 0})
+        bondy_session_counter:incr(Id, message_id)
     catch
         error:badarg ->
-            bondy_utils:get_id(global)
+            bondy_utils:gen_message_id(global)
     end.
 
 

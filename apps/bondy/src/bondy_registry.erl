@@ -27,7 +27,6 @@
 %% Also an in-memory trie-based indexed (materialised vieq) is used for exact
 %% and prefix matching.
 %%
-%% Note: support for wildcard matching is soon to be supported.
 %%
 %% This module also provides a singleton server to perform the initialisation
 %% of the trie from the plum_db tables.
@@ -50,7 +49,6 @@
 ).
 
 %% ART TRIES
--define(ANY, <<"*">>).
 -define(SUBSCRIPTION_TRIE, bondy_subscription_trie).
 -define(REGISTRATION_TRIE, bondy_registration_trie).
 -define(TRIES, [?SUBSCRIPTION_TRIE, ?REGISTRATION_TRIE]).
@@ -290,7 +288,7 @@ add(subscription = Type, Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% We use the trie to match as we need the Topic Uri in the key
-    case art_server:match(TrieKey, ?SUBSCRIPTION_TRIE) of
+    case art_server:lookup(TrieKey, ?SUBSCRIPTION_TRIE) of
         [] ->
             %% No matching subscriptions for this SessionId exists
             RegId = subscription_id(RealmUri, Opts),
@@ -528,7 +526,8 @@ entries({_, ?EOT}) ->
     ?EOT;
 
 entries({Type, Cont}) when Type == registration orelse Type == subscription ->
-    case plum_db:match(Cont) of
+    %% We need to add back the resolver strategy
+    case plum_db:match(Cont, [{resolver, lww}]) of
         ?EOT ->
             ?EOT;
         {L, ?EOT} ->
@@ -645,7 +644,7 @@ match(Type, Uri, RealmUri) ->
 match(Type, Uri, RealmUri, Opts) ->
     try
         Trie = trie(Type),
-        Pattern = <<RealmUri/binary, $,, Uri/binary>>,
+        Pattern = <<RealmUri/binary, $., Uri/binary>>,
         MS = trie_ms(Opts),
 
         case art_server:find_matches(Pattern, MS, Trie) of
@@ -950,8 +949,6 @@ maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
     ok.
 
 
-
-
 %% @private
 do_remove_all(Matches, SessionId, Fun) ->
     do_remove_all(Matches, SessionId, Fun, []).
@@ -969,14 +966,13 @@ do_remove_all({[], Cont}, SessionId, Fun, Acc) ->
     %% We apply the Fun here as opposed to in every iteration to minimise art
     %% trie concurrency access,
     _ = [maybe_execute(Fun, Entry) || Entry <- Acc],
-    do_remove_all(plum_db:match(Cont), SessionId, Fun, Acc);
+    do_remove_all(plum_db:match(Cont, [{resolver, lww}]), SessionId, Fun, Acc);
 
-do_remove_all({[{_, Entry}|T], Cont}, SessionId, Fun, Acc) ->
-    Key = bondy_registry_entry:session_id(Entry),
+do_remove_all({[{EntryKey, Entry}|T], Cont}, SessionId, Fun, Acc) ->
+    Session = bondy_registry_entry:session_id(Entry),
 
-    case SessionId =:= Key orelse SessionId == '_' of
+    case SessionId =:= Session orelse SessionId == '_' of
         true ->
-            EntryKey = bondy_registry_entry:key(Entry),
             ok = delete_from_trie(Entry),
             %% We delete the entry from plum_db.
             %% This will broadcast the delete
@@ -1049,7 +1045,7 @@ add_registration(Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% TODO we should limit the match to 1 result!!!
-    case art_server:match(TrieKey, ?REGISTRATION_TRIE) of
+    case art_server:lookup(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
             RegId = registration_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(Type, RegId, RealmUri, Ref, Uri, Opts),
@@ -1198,25 +1194,23 @@ trie_key(Entry, Policy) ->
 
     Id = case bondy_registry_entry:id(Entry) of
         _ when SessionId == <<>> ->
-            %% As we currently do not support wildcard matching in art, we turn
-            %% this into a prefix matching query
-            %% TODO change when wilcard matching is enabled in art.
+            %% As we currently do not support wildcard matching in art:match,
+            %% we turn this into a prefix matching query
+            %% TODO change when wildcard matching is enabled in art.
             <<>>;
         Id0 ->
             term_to_trie_key_part(Id0)
     end,
 
-    %% art uses $\31 for separating the suffixes of the key so we cannot
-    %% use it.
-    %% WAMP reserves the use of $\s, $#, $. and $, for the broker,
-    %% so we could use them but MQTT uses $+ and $# for wildcard patterns
-    %% that rules out $#, so we use $,
-    Key = <<RealmUri/binary, $,, Uri/binary>>,
+    %% RealmUri is always ground, so we join it with URI using a $. as any
+    %% other separator will not work with art:find_matches/2
+    Key = <<RealmUri/binary, $., Uri/binary>>,
 
     %% We add Nodestring for cases where SessionId == <<>>
     case Policy of
         ?PREFIX_MATCH ->
-            {<<Key/binary, ?ANY/binary>>, Nodestring, SessionId, Id};
+            %% art lib uses the star char to explicitely denote a prefix
+            {<<Key/binary, $*>>, Nodestring, SessionId, Id};
         _ ->
             {Key, Nodestring, SessionId, Id}
     end.
@@ -1249,6 +1243,7 @@ trie_ms(Opts) ->
             %% Non eligible! Most probably a mistake but we need to
             %% respect the semantics
             throw(non_eligible_entries);
+
         {ok, EligibleIds} ->
             %% We include the provided SessionIds
             [
@@ -1259,6 +1254,7 @@ trie_ms(Opts) ->
                     ]
                 )
             ];
+
         error ->
             []
     end,
@@ -1266,6 +1262,7 @@ trie_ms(Opts) ->
     Conds2 = case maps:find(exclude, Opts) of
         {ok, []} ->
             Conds1;
+
         {ok, ExcludedIds} ->
             %% We exclude the provided SessionIds
             ExclConds = maybe_and(
@@ -1275,6 +1272,7 @@ trie_ms(Opts) ->
                 ]
             ),
             [ExclConds | Conds1];
+
         error ->
             Conds1
     end,
@@ -1282,12 +1280,14 @@ trie_ms(Opts) ->
     case Conds2 of
         [] ->
             undefined;
+
         [_] ->
             [
                 {
                     {{'_', Node, '$3', '_'}, '_'}, Conds2, ['$_']
                 }
             ];
+
         _ ->
             Conds3 = [list_to_tuple(['andalso' | Conds2])],
             [
@@ -1341,7 +1341,7 @@ registration_id(_, #{registration_id := Val}) ->
     Val;
 
 registration_id(Uri, _) ->
-    bondy_utils:get_id({router, Uri}).
+    bondy_utils:gen_message_id({router, Uri}).
 
 
 %% @private
@@ -1349,7 +1349,7 @@ subscription_id(_, #{subscription_id := Val}) ->
     Val;
 
 subscription_id(Uri, _) ->
-    bondy_utils:get_id({router, Uri}).
+    bondy_utils:gen_message_id({router, Uri}).
 
 
 filter_duplicate_entry_keys(_, undefined) ->

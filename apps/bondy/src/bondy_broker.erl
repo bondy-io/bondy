@@ -18,10 +18,9 @@
 
 
 %% =============================================================================
-%% @doc
-%% This module implements the capabilities of a Broker. It is used by
+%% @doc This module implements the capabilities of a Broker. It is used by
 %% {@link bondy_router}.
-%% Regarding *Publish & Subscribe*, the ordering guarantees are as
+%% Regarding *Publish &amp; Subscribe*, the ordering guarantees are as
 %% follows:
 %%
 %% If _Subscriber A_ is subscribed to both *Topic 1* and *Topic 2*, and
@@ -31,7 +30,7 @@
 %% identical.
 %%
 %% In other words, WAMP guarantees ordering of events between any given
-%% _pair_ of _Publisher_ and _Subscriber_.
+%% _pair_ of _Publisher_ &amp; _Subscriber_.
 %% Further, if _Subscriber A_ subscribes to *Topic 1*, the "SUBSCRIBED"
 %% message will be sent by the _Broker_ to _Subscriber A_ before any
 %% "EVENT" message for *Topic 1*.
@@ -41,6 +40,7 @@
 %% _Broker_ to do a time-consuming lookup in some database, whereas
 %% another subscribe request second might be permissible immediately.
 %%
+%% ```
 %% ,---------.          ,------.             ,----------.
 %% |Publisher|          |Broker|             |Subscriber|
 %% `----+----'          `--+---'             `----+-----'
@@ -63,6 +63,7 @@
 %% ,----+----.          ,--+---.             ,----+-----.
 %% |Publisher|          |Broker|             |Subscriber|
 %% `---------'          `------'             `----------'
+%% '''
 %% @end
 %% =============================================================================
 -module(bondy_broker).
@@ -167,7 +168,7 @@ flush(RealmUri, Ref) ->
     bondy_context:t()) -> {ok, id()} | {error, any()}.
 
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
-    ReqId = bondy_context:get_id(Ctxt, session),
+    ReqId = bondy_context:gen_message_id(Ctxt, session),
     publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt).
 
 
@@ -186,19 +187,22 @@ publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
 publish(ReqId, Opts, TopicUri, Args, KWArgs, Ctxt)
 when is_map(Ctxt) ->
     try
+
         ok = bondy_rbac:authorize(<<"wamp.publish">>, TopicUri, Ctxt),
         M = wamp_message:publish(ReqId, Opts, TopicUri, Args, KWArgs),
         do_publish(M, Ctxt)
+
     catch
         _:{not_authorized, _Reason} ->
             {error, not_authorized};
+
         _:Reason:Stacktrace->
             SessionId = bondy_context:session_id(Ctxt),
             ExtId = bondy_utils:external_session_id(SessionId),
             ?LOG_WARNING(#{
                 description => "Error while publishing",
                 reason => Reason,
-                session_external_id => ExtId,
+                protocol_session_id => ExtId,
                 session_id => SessionId,
                 topic => TopicUri,
                 stacktrace => Stacktrace
@@ -239,7 +243,7 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% is restarted by the supervisor.
     Id = case maps:find(subscription_id, Opts) of
         {ok, Value} -> Value;
-        error -> bondy_utils:get_id(global)
+        error -> bondy_utils:gen_message_id(global)
     end,
 
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
@@ -266,9 +270,11 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
         {ok, Entry, true} ->
             on_create(Entry),
             {ok, bondy_registry_entry:id(Entry)};
+
         {ok, Entry, false} ->
             on_subscribe(Entry),
             {ok, bondy_registry_entry:id(Entry)};
+
         {error, {already_exists, _}} ->
             {error, already_exists}
     end.
@@ -280,11 +286,10 @@ subscribe(RealmUri, Opts, Topic, Ref)  ->
 %% bondy_subscribers_sup:terminate_subscriber/1
 %% @end
 %% -----------------------------------------------------------------------------
--spec unsubscribe(pid()) -> ok | {error, not_found}.
+-spec unsubscribe(pid() | integer()) -> ok | {error, not_found}.
 
-unsubscribe(Subscriber) when is_integer(Subscriber) ->
-    bondy_subscribers_sup:terminate_subscriber(
-        bondy_subscriber:pid(Subscriber));
+unsubscribe(SubscriberId) when is_integer(SubscriberId) ->
+    unsubscribe(bondy_subscriber:pid(SubscriberId));
 
 unsubscribe(Subscriber) when is_pid(Subscriber) ->
     bondy_subscribers_sup:terminate_subscriber(Subscriber).
@@ -296,15 +301,16 @@ unsubscribe(Subscriber) when is_pid(Subscriber) ->
 %% -----------------------------------------------------------------------------
 -spec unsubscribe(id(), bondy_context:t() | uri()) -> ok | {error, not_found}.
 
-unsubscribe(SubsId, RealmUri) when is_binary(RealmUri) ->
+unsubscribe(SubsId, RealmUri) when is_integer(SubsId), is_binary(RealmUri) ->
     unsubscribe(SubsId, bondy_context:local_context(RealmUri));
 
-unsubscribe(SubsId, Ctxt) ->
+unsubscribe(SubsId, Ctxt) when is_integer(SubsId) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
 
     case bondy_registry:lookup(subscription, SubsId, RealmUri) of
         {error, not_found} = Error ->
             Error;
+
         Entry ->
             Topic = bondy_registry_entry:uri(Entry),
             ok = bondy_rbac:authorize(<<"wamp.unsubscribe">>, Topic, Ctxt),
@@ -312,11 +318,14 @@ unsubscribe(SubsId, Ctxt) ->
             case bondy_registry:remove(Entry) of
                 ok ->
                     on_unsubscribe(Entry);
+
                 {ok, false} ->
                     on_unsubscribe(Entry);
+
                 {ok, true} ->
                     ok = on_unsubscribe(Entry),
                     on_delete(Entry);
+
                 Error ->
                     Error
             end
@@ -349,9 +358,11 @@ forward(M, Ctxt) ->
                 false ->
                     ok
             end;
+
         _:{not_authorized, Reason} ->
             Reply = not_authorized_error(M, Reason),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
         throw:not_found ->
             Reply = not_found_error(M, Ctxt),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply)
@@ -415,7 +426,6 @@ forward(#publish{} = M, undefined, FwdOpts) ->
             ok;
 
         {Relays, Nodes} ->
-
             ok = forward_using_relay(M, FwdOpts, Nodes),
 
             ok = forward_using_bridge_relay(M, FwdOpts, Relays)
@@ -451,10 +461,12 @@ do_forward(#subscribe{} = M, Ctxt) ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_create(Entry);
+
         {ok, Entry, false} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id)),
             on_subscribe(Entry);
+
         {error, {already_exists, Entry}} ->
             Id = bondy_registry_entry:id(Entry),
             bondy:send(RealmUri, Ref, wamp_message:subscribed(ReqId, Id))
@@ -462,12 +474,14 @@ do_forward(#subscribe{} = M, Ctxt) ->
 
 do_forward(#unsubscribe{} = M, Ctxt) ->
     RealmUri = bondy_context:realm_uri(Ctxt),
+    SubsId = M#unsubscribe.subscription_id,
 
-    case unsubscribe(M, Ctxt) of
+    case unsubscribe(SubsId, Ctxt) of
         ok ->
             ReqId = M#unsubscribe.request_id,
             Reply = wamp_message:unsubscribed(ReqId),
             bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply);
+
         {error, not_found} ->
             throw(not_found)
     end;
@@ -670,7 +684,7 @@ do_publish(#publish{} = M, Ctxt) ->
     Details = make_event_details(TopicUri, Opts, Ctxt),
 
     %% We generate a new publication id
-    PubId = bondy_utils:get_id(global),
+    PubId = bondy_utils:gen_message_id(global),
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
