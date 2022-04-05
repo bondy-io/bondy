@@ -792,6 +792,7 @@ to_external(#session{} = S) ->
         'x_session_id' => S#session.id,
         authid => S#session.authid,
         authrole => authrole(S),
+        %% TODO to be deprecated (leave it inside authextra)
         'x_authroles' => S#session.authroles,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
