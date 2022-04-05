@@ -263,8 +263,10 @@ handle_inbound(Data, St) ->
     catch
         _:{unsupported_encoding, _} = Reason ->
             stop(Reason, St);
+
         _:badarg ->
             stop(decoding_error, St);
+
         _:{invalid_uri, Uri, ReqInfo} ->
             #{request_type := ReqType, request_id := ReqId} = ReqInfo,
             Error = wamp_message:error(
@@ -276,18 +278,28 @@ handle_inbound(Data, St) ->
                 #{}
             ),
             Bin = wamp_encoding:encode(Error, encoding(St)),
+            %% TODO Shouldn't we stop here?
             %% At the moment messages contain only one message as we do not yet
             %% support batched encoding, when/if we enable support for batched
             %% we need to continue processing the additional messages
             {reply, [Bin], St};
+
         _:{validation_failed, _, _} = Reason ->
             %% Validation of the message option or details failed
             stop(Reason, St);
+
         _:{invalid_message, _} = Reason ->
             stop(Reason, St);
-        error:function_clause ->
-            %% Validation of the message option or details failed
-            stop({invalid_message, Data}, St)
+
+        _:Reason:Stacktrace ->
+            %% Catch any error produced by handle_inbound_messages/2
+            ?LOG_ERROR(#{
+                description => <<"Error while evaluating inbound data">>,
+                reason => Reason,
+                stacktrace => Stacktrace,
+                data => Data
+            }),
+            stop(internal_error, St)
     end.
 
 
