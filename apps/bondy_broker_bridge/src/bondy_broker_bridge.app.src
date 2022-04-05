@@ -1,6 +1,6 @@
 {application, bondy_broker_bridge, [
     {description,
-        "Bondy Broker Bridge is an application that is part of Bondy"
+        "Bondy Broker Bridge is an application that is part of Bondy and provides a way to integrate Events with external brokers and systems."
     },
     {vsn, "1.0.0-beta.41"},
     {registered, []},
@@ -8,8 +8,12 @@
     {applications, [
         kernel,
         stdlib,
-        brod,
-        hash,
+        %% The following are not enabled as we want the Bondy the bridge to
+        %% dynamically start them
+        %% brod,
+        %% hash,
+        %% erlcloud,
+        %% email,
         mops
     ]},
     {env,[]},
