@@ -84,6 +84,9 @@
                                         authrole => binary(),
                                         authmethod => binary(),
                                         authprovider => binary(),
+                                        authextra => #{
+                                            x_authroles => [binary()]
+                                        },
                                         transport => #{
                                             agent => binary(),
                                             peername => binary()
@@ -792,6 +795,9 @@ to_external(#session{} = S) ->
         'x_authroles' => S#session.authroles,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
+        authextra => #{
+            x_authroles => S#session.authroles
+        },
         transport => #{
             agent => S#session.agent,
             peername => inet_utils:peername_to_binary(S#session.peer)
