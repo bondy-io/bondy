@@ -31,7 +31,6 @@
 
 -define(TABLES, tuplespace:tables(bondy_rpc_promise)).
 -define(TAB(RealmUri), tuplespace:locate_table(bondy_rpc_promise, RealmUri)).
--define(IS_GROUND(X), X =/= '_').
 
 -record(bondy_rpc_promise, {
     key                     ::  key(),
@@ -557,26 +556,8 @@ add([#bondy_rpc_promise{key = Key} | _] = L) ->
 %% -----------------------------------------------------------------------------
 -spec take(Pattern :: key()) -> {ok, t()} | error.
 
-take(#bondy_rpc_promise_key{
-    realm_uri = A,
-    type = B,
-    caller_session_id = C, call_id = D,
-    callee_session_id = E, invocation_id = F,
-    expiry = G
-} = Key)
-when
-?IS_GROUND(A) andalso ?IS_GROUND(B) andalso ?IS_GROUND(C) andalso
-?IS_GROUND(D) andalso ?IS_GROUND(E) andalso ?IS_GROUND(F) andalso
-?IS_GROUND(G) ->
-    case ets:take(?TAB(A), Key) of
-        [Promise] ->
-            {ok, Promise};
-        [] ->
-            error
-    end;
-
 take(#bondy_rpc_promise_key{} = Pattern) ->
-    %% Key is a pattern so we need to do a find followed by a delete.
+
     case find(Pattern) of
         {ok, #bondy_rpc_promise{key = Key}} = OK ->
             Tab = ?TAB(Key#bondy_rpc_promise_key.realm_uri),
