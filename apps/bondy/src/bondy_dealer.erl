@@ -502,13 +502,12 @@ forward(#call{} = Msg, Callee, #{from := Caller} = Opts) ->
             %% CALL already has the static arguments appended
             %% to its positional args (see call_to_invocation/4) so we use
             %% apply_dynamic_callback/3.
-            Yield = apply_dynamic_callback(Msg, Callee, Caller),
-            Result = yield_to_result(Msg#call.request_id, Yield),
+            Response = apply_dynamic_callback(Msg, Callee),
 
             {To, SendOpts0} = bondy:prepare_send(Caller, Opts),
             SendOpts = SendOpts0#{from => Callee},
 
-            bondy:send(RealmUri, To, Result, SendOpts);
+            bondy:send(RealmUri, To, Response, SendOpts);
 
         _  when CalleeType == bridge_relay ->
             %% We need to send the CALL to the bridge relay,
@@ -782,7 +781,14 @@ do_forward(#yield{} = M, Ctxt0) ->
             %% a call_promise.
             %% If Caller is local, then we are done (as we only created one
             %% promise).
-            Result = yield_to_result(CallId, M),
+            Result = wamp_message:result(
+                CallId,
+                %% TODO check if yield.options should be assigned to result.details
+                M#yield.options,
+                M#yield.args,
+                M#yield.kwargs
+            ),
+
             bondy:send(RealmUri, To, Result, SendOpts);
 
         error ->
@@ -893,21 +899,32 @@ apply_static_callback(#call{} = M0, Ctxt, Mod) ->
 
 
 %% @private
-apply_dynamic_callback(#call{} = Msg, Callee, Ctxt) ->
-    apply_dynamic_callback(Msg, Callee, Ctxt, []).
+-spec apply_dynamic_callback(wamp_call(), bondy_ref:t()) ->
+    wamp_result() | wamp_error().
+
+apply_dynamic_callback(#call{} = Msg, Callee) ->
+    apply_dynamic_callback(Msg, Callee, []).
 
 
 %% @private
-apply_dynamic_callback(#call{} = Msg, Callee, Ctxt, CBArgs)
-when is_map(Ctxt) ->
+-spec apply_dynamic_callback(wamp_call(), bondy_ref:t(), [any()]) ->
+    wamp_result() | wamp_error().
+
+apply_dynamic_callback(#call{} = Msg, Callee, CBArgs) ->
     CallId = Msg#call.request_id,
 
+    A = lists:append([
+        CBArgs,
+        args_to_list(Msg#call.args),
+        args_to_list(Msg#call.kwargs),
+        args_to_list(Msg#call.options)
+    ]),
+
     {M, F} = bondy_ref:callback(Callee),
-    A = to_callback_args(Msg, CBArgs),
 
     try erlang:apply(M, F, A) of
         {ok, Details, Args, KWArgs} ->
-            wamp_message:yield(
+            wamp_message:result(
                 CallId,
                 Details,
                 Args,
@@ -932,64 +949,7 @@ when is_map(Ctxt) ->
 
         error:{badarg, _} ->
             badarg_error(CallId, ?CALL)
-    end;
-
-apply_dynamic_callback(#invocation{} = Msg, Callee, Caller, CBArgs) ->
-    bondy_ref:is_type(Caller)
-        orelse error({badarg, {caller, Caller}}),
-
-    ReqId = Msg#invocation.request_id,
-
-    {M, F} = bondy_ref:callback(Callee),
-
-    A = to_callback_args(Msg, CBArgs),
-
-    try erlang:apply(M, F, A) of
-        {ok, Details, Args, KWArgs} ->
-            wamp_message:yield(
-                ReqId,
-                Details,
-                Args,
-                KWArgs
-            );
-
-        {error, Uri, Details, Args, KWArgs} ->
-            wamp_message:error(
-                ?INVOCATION,
-                ReqId,
-                Details,
-                Uri,
-                Args,
-                KWArgs
-            );
-
-        Other ->
-            error({invalid_return, Other})
-    catch
-        error:undef ->
-            badarity_error(ReqId, ?INVOCATION);
-
-        error:{badarg, _} ->
-            badarg_error(ReqId, ?INVOCATION)
     end.
-
-
-%% @private
-to_callback_args(#call{} = Msg, ExtraArgs) ->
-    lists:append([
-        ExtraArgs,
-        args_to_list(Msg#call.args),
-        args_to_list(Msg#call.kwargs),
-        args_to_list(Msg#call.options)
-    ]);
-
-to_callback_args(#invocation{} = Msg, ExtraArgs) ->
-    lists:append([
-        ExtraArgs,
-        args_to_list(Msg#invocation.args),
-        args_to_list(Msg#invocation.kwargs),
-        args_to_list(Msg#invocation.details)
-    ]).
 
 
 %% @private
@@ -1447,11 +1407,10 @@ handle_call(#call{} = Msg, Ctxt0, Uri, Opts0) ->
                     %% enqueue a promise, we will apply the callback
                     %% and respond sequentially.
                     CBArgs = bondy_registry_entry:callback_args(Entry),
-                    Yield = apply_dynamic_callback(Msg, Callee, Ctxt, CBArgs),
-                    Result = yield_to_result(Msg#call.request_id, Yield),
+                    Response = apply_dynamic_callback(Msg, Callee, CBArgs),
 
                     %% We reply to Caller
-                    bondy:send(RealmUri, Caller, Result, #{from => Callee}),
+                    bondy:send(RealmUri, Caller, Response, #{from => Callee}),
 
                     %% We return no message as we already replied
                     {ok, Ctxt};
@@ -1959,16 +1918,6 @@ badarg_error(CallId, Type) ->
         #{},
         ?WAMP_INVALID_ARGUMENT,
         [Msg]
-    ).
-
-%% @private
-yield_to_result(CallId, M) ->
-    wamp_message:result(
-        CallId,
-        %% TODO check if yield.options should be assigned to result.details
-        M#yield.options,
-        M#yield.args,
-        M#yield.kwargs
     ).
 
 
