@@ -749,8 +749,7 @@ forward(#result{} = M, Caller, #{from := _Callee} = Opts) ->
             no_matching_promise(M)
     end;
 
-forward(
-    #error{request_type = ?CALL} = M, Caller, #{from := Callee} = Opts) ->
+forward(#error{request_type = ?CALL} = M, Caller, Opts) ->
     %% A remote callee is returning an ERROR to an CALL done
     %% on behalf of a local Caller.
 
@@ -775,7 +774,7 @@ forward(
 
     case bondy_rpc_promise:take(Key, Status) of
         {ok, _Promise} ->
-            bondy:send(RealmUri, Caller, M, #{from => Callee});
+            bondy:send(RealmUri, Caller, M, #{});
 
         error ->
             %% The promise timed out already and local promise manager evicted
@@ -783,7 +782,7 @@ forward(
             no_matching_promise(M)
     end;
 
-forward(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee} = Opts) ->
+forward(#error{request_type = ?CANCEL} = M, Caller, Opts) ->
     %% A CANCEL a local Caller made to a remote Callee has failed.
     %% We send the error back to the local Caller, keeping the promise to be
     %% able to match the still pending YIELD message,
@@ -799,7 +798,7 @@ forward(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee} = Opts) ->
         {ok, _Promise} ->
             %% Even if promise has timeout but bondy_rpc_promise_manager has
             %% not evicted it yet.
-            bondy:send(RealmUri, Caller, M, #{from => Callee});
+            bondy:send(RealmUri, Caller, M, #{});
         error ->
             %% The promise already expired the Caller would have already
             %% received a TIMEOUT error as a response for the original CALL.
