@@ -188,7 +188,7 @@ handle_cast({close, Session}, State0) ->
 
     State = case maps:find(Id, Refs) of
         {ok, Ref} ->
-            true = erlang:demonitor(Ref),
+            true = erlang:demonitor(Ref, [flush]),
             State0#state{
                 monitor_refs = maps:without([Id, Ref], Refs)
             };

@@ -80,11 +80,13 @@ start_link() ->
 init([]) ->
     Children = [
         %% We start bondy processes
+        ?WORKER(bondy_table_owner, [], permanent, 5000),
         ?SUPERVISOR(bondy_event_handler_watcher_sup, [], permanent, infinity),
         ?EVENT_MANAGER(bondy_event_manager, permanent, 5000),
         ?EVENT_MANAGER(bondy_wamp_event_manager, permanent, 5000),
         ?SUPERVISOR(bondy_session_manager_sup, [], permanent, infinity),
         ?WORKER(bondy_registry, [], permanent, 5000),
+        ?WORKER(bondy_rpc_promise_manager, [], permanent, 5000),
         ?SUPERVISOR(bondy_subscribers_sup, [], permanent, infinity),
         ?WORKER(bondy_retained_message_manager, [], permanent, 5000),
         ?WORKER(bondy_relay, [], permanent, 5000),

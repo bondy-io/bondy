@@ -308,3 +308,166 @@ fun(Conf0) ->
     end,
     lists:foldl(Fun, [], Clients)
 end}.
+
+%% =============================================================================
+%% AWS SNS BRIDGE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.aws.sns.enabled", "bondy_broker_bridge.bridges.bondy_aws_sns_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.aws.region", "bondy_broker_bridge.bridges.bondy_aws_sns_bridge.aws_region", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.aws.sns_host", "bondy_broker_bridge.bridges.bondy_aws_sns_bridge.aws_config.sns_host", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.aws.access_key_id", "bondy_broker_bridge.bridges.bondy_aws_sns_bridge.aws_access_key_id", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.aws.secret_access_key", "bondy_broker_bridge.bridges.bondy_aws_sns_bridge.aws_secret_access_key", [
+  {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% MAILGUN BRIDGE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.enabled", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.adapter", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.adapter", [
+  {datatype, atom},
+  {default, mailgun2}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.domain", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.domain", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.apiurl", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.apiurl", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.apikey", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.mailgun2.apikey", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.mailgun.sender", "bondy_broker_bridge.bridges.bondy_mailgun_bridge.email_sender", [
+  {datatype, string}
+]}.
+
+
+%% =============================================================================
+%% SENDGRID BRIDGE
+%% =============================================================================
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.sendgrid.enabled", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.enabled", [
+  {datatype, flag},
+  {default, off}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.sendgrid.adapter", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.adapter", [
+  {datatype, atom},
+  {default, sendgrid}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.sendgrid.apiurl", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.sendgrid.apiurl", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.sendgrid.apikey", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.sendgrid.apikey", [
+  {datatype, string}
+]}.
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+{mapping, "broker_bridge.sendgrid.sender", "bondy_broker_bridge.bridges.bondy_sendgrid_bridge.email_sender", [
+  {datatype, string}
+]}.

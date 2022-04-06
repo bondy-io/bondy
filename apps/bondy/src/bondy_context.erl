@@ -70,7 +70,7 @@
 -export([encoding/1]).
 -export([features/2]).
 -export([features/3]).
--export([get_id/2]).
+-export([gen_message_id/2]).
 -export([has_session/1]).
 -export([is_anonymous/1]).
 -export([is_feature_enabled/3]).
@@ -483,19 +483,20 @@ rbac_context(#{}) ->
 %% global sceop is used.
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_id(Ctxt :: t(), Scope :: global | router | session) -> id().
+-spec gen_message_id(Ctxt :: t(), Scope :: global | router | session) -> id().
 
-get_id(_, global) ->
-    bondy_utils:get_id(global);
+gen_message_id(_, global) ->
+    bondy_utils:gen_message_id(global);
 
-get_id(#{realm_uri := Uri}, router) ->
-    bondy_utils:get_id({router, Uri});
+gen_message_id(#{realm_uri := Uri}, router) ->
+    bondy_utils:gen_message_id({router, Uri});
 
-get_id(#{session := Session}, session) ->
-    bondy_utils:get_id({session, bondy_session:id(Session)});
+gen_message_id(#{session := Session}, session) ->
+    bondy_session:gen_message_id(Session);
 
-get_id(_, session) ->
-    bondy_utils:get_id(global).
+gen_message_id(_, session) ->
+    %% Internal process without sessions
+    bondy_utils:gen_message_id(global).
 
 
 %% -----------------------------------------------------------------------------

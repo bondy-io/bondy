@@ -1341,7 +1341,7 @@ registration_id(_, #{registration_id := Val}) ->
     Val;
 
 registration_id(Uri, _) ->
-    bondy_utils:get_id({router, Uri}).
+    bondy_utils:gen_message_id({router, Uri}).
 
 
 %% @private
@@ -1349,7 +1349,7 @@ subscription_id(_, #{subscription_id := Val}) ->
     Val;
 
 subscription_id(Uri, _) ->
-    bondy_utils:get_id({router, Uri}).
+    bondy_utils:gen_message_id({router, Uri}).
 
 
 filter_duplicate_entry_keys(_, undefined) ->

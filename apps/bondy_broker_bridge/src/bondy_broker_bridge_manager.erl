@@ -647,12 +647,12 @@ do_subscribe(Subscription, State) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
-do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
+do_subscribe(RealmUri, Opts0, Topic, Bridge, Action0, State) ->
     try
         %% We build the fun that we will use for the subscriber
         Fun = fun
             (Topic1, #event{} = Event) when Topic1 == Topic ->
-                Ctxt = mops_ctxt(Event, RealmUri, Opts, Topic, Bridge, State),
+                Ctxt = mops_ctxt(Event, RealmUri, Opts0, Topic, Bridge, State),
                 Action1 = mops:eval(Action0, Ctxt),
                 case Bridge:validate_action(Action1) of
                     {ok, Action2} ->
@@ -664,7 +664,15 @@ do_subscribe(RealmUri, Opts, Topic, Bridge, Action0, State) ->
                 end
         end,
         %% We use bondy_broker subscribers, this is an intance of a
-        %% bondy_subscriber gen_server supervised by bondy_subscribers_sup
+        %% bondy_subscriber gen_server supervised by bondy_subscribers_sup.
+        Opts = Opts0#{
+            %% This tells bondy_broker that every node has an instance of this
+            %% subscriber and thus the broker will only process events that
+            %% have been was published by a local Publisher and avoid
+            %% processing forwarded events which would result in duplication.
+            %% See bondy_broker:do_publish/4.
+            group_id => Bridge
+        },
         {ok, Id, Pid} = Res = bondy_broker:subscribe(
             RealmUri, Opts, Topic, Fun
         ),

@@ -20,6 +20,10 @@
 %% @doc An entry is a record of a RPC registration or PubSub subscription. It
 %% is stored in-memory in the Registry {@link bondy_registry} and replicated
 %% globally and is immutable.
+%%
+%% @TODO Because entries is replicated (even if only in memmory), changes to
+%% the data structure MUST be managed to be able to support rolling cluster
+%% updates.
 %% @end
 %% -----------------------------------------------------------------------------
 -module(bondy_registry_entry).
@@ -38,6 +42,7 @@
     realm_uri           ::  uri(),
     target              ::  wildcard(bondy_ref:target()),
     session_id          ::  wildcard(maybe(id())),
+    %% The message_id
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())
 }).
@@ -50,8 +55,11 @@
     ref                 ::  bondy_ref:t(),
     callback_args       ::  maybe(list(term())),
     created             ::  pos_integer() | atom(),
-    options             ::  map(),
+    options             ::  options(),
+    %% If a proxy, this is the registration|subscription id
+    %% of the origin client
     origin_id           ::  wildcard(id()),
+    %% If a proxy, this is the ref for the origin client
     origin_ref          ::  wildcard(maybe(bondy_ref:t()))
 }).
 
@@ -62,6 +70,7 @@
 -type entry_type()      ::  registration | subscription.
 -type wildcard(T)       ::  T | '_'.
 -type mfargs()          ::  {M :: module(), F :: atom(), A :: maybe([term()])}.
+-type options()         ::  map().
 
 -type details_map()     ::  #{
     id => id(),
@@ -79,7 +88,7 @@
     ref              :=  bondy_ref:t(),
     callback_args    :=  list(term()),
     created          :=  pos_integer(),
-    options          :=  map(),
+    options          :=  options(),
     origin_id        :=  maybe(id()),
     origin_ref       :=  maybe(bondy_ref:t())
 }.
@@ -95,6 +104,7 @@
 -export([callback_args/1]).
 -export([created/1]).
 -export([get_option/3]).
+-export([find_option/2]).
 -export([id/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
@@ -141,7 +151,7 @@
 -spec new(entry_type(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RealmUri, Ref, Uri, Options) ->
-    RegId = bondy_utils:get_id({router, RealmUri}),
+    RegId = bondy_utils:gen_message_id({router, RealmUri}),
     new(Type, RegId, RealmUri, Ref, Uri, Options).
 
 
@@ -572,6 +582,7 @@ created(#entry{created = Val}) -> Val.
 %% @end
 %% -----------------------------------------------------------------------------
 -spec options(t()) -> map().
+
 options(#entry{options = Val}) -> Val.
 
 
@@ -579,10 +590,20 @@ options(#entry{options = Val}) -> Val.
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec get_option(t(), any(), any()) -> any().
+-spec get_option(any(), t(), any()) -> any().
 
-get_option(#entry{options = Opts}, Key, Default) ->
+get_option(Key, #entry{options = Opts}, Default) ->
     maps:get(Key, Opts, Default).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_option(any(), t()) -> {ok, any()} | error.
+
+find_option(Key, #entry{options = Opts}) ->
+    maps:find(Key, Opts).
 
 
 %% -----------------------------------------------------------------------------
@@ -661,7 +682,7 @@ proxy(Ref, External) ->
     Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),
 
-    Id = bondy_utils:get_id({router, RealmUri}),
+    Id = bondy_utils:gen_message_id({router, RealmUri}),
 
     #entry{
         key = #entry_key{

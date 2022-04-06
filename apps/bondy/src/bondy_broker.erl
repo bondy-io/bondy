@@ -168,7 +168,7 @@ flush(RealmUri, Ref) ->
     bondy_context:t()) -> {ok, id()} | {error, any()}.
 
 publish(Opts, TopicUri, Args, ArgsKw, Ctxt) ->
-    ReqId = bondy_context:get_id(Ctxt, session),
+    ReqId = bondy_context:gen_message_id(Ctxt, session),
     publish(ReqId, Opts, TopicUri, Args, ArgsKw, Ctxt).
 
 
@@ -243,7 +243,7 @@ subscribe(RealmUri, Opts, Topic, Fun) when is_function(Fun, 2) ->
     %% is restarted by the supervisor.
     Id = case maps:find(subscription_id, Opts) of
         {ok, Value} -> Value;
-        error -> bondy_utils:get_id(global)
+        error -> bondy_utils:gen_message_id(global)
     end,
 
     %% subscriber will call subscribe(RealmUri, Opts, Topic, Pid)
@@ -421,7 +421,7 @@ forward(#publish{} = M, undefined, FwdOpts) ->
     %% We publish to all matching local subscribers and we get back the list of
     %% local bridge relays and the cluster peer nodes where we found remote
     %% subscribers
-    case do_publish(RealmUri, Subscriptions, MakeEvent) of
+    case do_publish(RealmUri, Subscriptions, MakeEvent, remote) of
         {[], []} ->
             ok;
 
@@ -665,7 +665,8 @@ match_subscriptions(Cont) ->
 -spec do_publish(M :: wamp_message:publish(), bondy_context:t()) -> {ok, id()}.
 
 do_publish(#publish{} = M, Ctxt) ->
-    %% REVIEW We need to parallelise this based on batches
+    %% REVIEW We need to parallelise this based on batches.
+
     %% (RFC) When a single event matches more than one of a _Subscriber's_
     %% subscriptions, the event will be delivered for each subscription.
     RealmUri = bondy_context:realm_uri(Ctxt),
@@ -684,7 +685,7 @@ do_publish(#publish{} = M, Ctxt) ->
     Details = make_event_details(TopicUri, Opts, Ctxt),
 
     %% We generate a new publication id
-    PubId = bondy_utils:get_id(global),
+    PubId = bondy_utils:gen_message_id(global),
 
     %% We create a high order fun that will generate the event for each
     %% subscription_id
@@ -693,13 +694,14 @@ do_publish(#publish{} = M, Ctxt) ->
     end,
 
     %% If retained options is provided the message will be retained, this is
-    %% regardless there are any currnet subscribers to the topic.
+    %% regardless of whether there are any current subscribers to the topic or
+    %% not.
     ok = maybe_retain(Opts, RealmUri, TopicUri, MatchOpts, MakeEvent),
 
     %% We publish to all matching local subscribers and we get back the list of
     %% local bridge relays and the cluster peer nodes where we found remote
     %% subscribers
-    case do_publish(RealmUri, Subscriptions, MakeEvent) of
+    case do_publish(RealmUri, Subscriptions, MakeEvent, local) of
         {[], []} ->
             ok;
 
@@ -720,28 +722,40 @@ do_publish(#publish{} = M, Ctxt) ->
 
 
 %% @private
-do_publish(RealmUri, Subscriptions, MakeEvent) ->
-    %% TODO Consider creating a Broadcast tree out of the registry trie results
-    %% so that instead of us sending possibly millions of Erlang messages to
-    %% millions of peers (processes) we delegate that to peers.
-    %%
+do_publish(RealmUri, Subscriptions, MakeEvent, Origin) ->
+    %% REVIEW Consider creating a Broadcast tree out of the registry trie
+    %% results so that instead of us sending possibly millions of Erlang
+    %% messages to millions of peers (processes) we delegate that to peers as
+    %% Erlang might penalise a process that is sending lots of messages to many
+    %% processes.
     Fun = fun(Entry, {RelayAcc0, NodeAcc0}) ->
         Subscriber = bondy_registry_entry:ref(Entry),
+        IsLocal = bondy_ref:is_local(Subscriber),
+        Publish =
+            case bondy_registry_entry:find_option(group_id, Entry) of
+                {ok, _} when Origin == remote ->
+                    %% We MUST not publish or forward if Subscriber is in a
+                    %% group and the message has been forwarded, as the
+                    %% instance of this subscriber local to the Publisher must
+                    %% have already received this event.
+                    false;
+                _ ->
+                    true
+            end,
 
-        case bondy_ref:is_local(Subscriber) of
-            true ->
+        case {Publish, IsLocal} of
+            {true, true} ->
                 case bondy_ref:is_bridge_relay(Subscriber) of
                     true ->
                         {[Subscriber|RelayAcc0], NodeAcc0};
+
                     false ->
-                        %% A local subscriber
-                        SubsId = bondy_registry_entry:id(Entry),
-                        Event = MakeEvent(SubsId),
+                        Event = MakeEvent(bondy_registry_entry:id(Entry)),
                         ok = bondy:send(RealmUri, Subscriber, Event),
                         {RelayAcc0, NodeAcc0}
                 end;
 
-            false ->
+            {true, false} ->
                 %% A remote subscriber in a peer cluster node.
                 %% We just acummulate the subscribers per node, later we will
                 %% forward a single message to each node.
@@ -749,7 +763,10 @@ do_publish(RealmUri, Subscriptions, MakeEvent) ->
                 NodeAcc = maps:update_with(
                     Nodestring, fun(V) -> V + 1 end, 1, NodeAcc0
                 ),
-                {RelayAcc0, NodeAcc}
+                {RelayAcc0, NodeAcc};
+
+            {false, _} ->
+                {RelayAcc0, NodeAcc0}
         end
     end,
 

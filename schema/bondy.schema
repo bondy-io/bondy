@@ -1540,7 +1540,7 @@
 %%   {datatype, integer}
 %% ]}.
 
-%% @doc Defines wether a Bondy node should perform a cluster leave operation
+%% @doc Defines whether a Bondy node should perform a cluster leave operation
 %% automatically when it is being shutdown.
 {mapping, "cluster.automatic_leave", "bondy.automatic_leave", [
   {default, off},

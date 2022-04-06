@@ -212,7 +212,7 @@ maybe_wait_for_aae_exchange() ->
     %% join the cluster before this phase and perform a first aae exchange
     case wait_for_aae_exchange() of
         true ->
-            MyNode = partisan_peer_service_manager:mynode(),
+            MyNode = partisan:node(),
             Members = partisan_plumtree_broadcast:broadcast_members(),
 
             case lists:delete(MyNode, Members) of
@@ -263,6 +263,9 @@ configure_services() ->
     ?LOG_NOTICE(#{
         description => "Configuring master and user realms from configuration file"
     }),
+
+    ok = bondy_session_counter:init(),
+
     %% We use bondy_realm:get/1 to force the creation of the bondy admin realm
     %% if it does not exist.
     _ = bondy_realm:get(?MASTER_REALM_URI),

@@ -49,7 +49,6 @@
     hibernate = false       ::  boolean(),
     sessions = #{}          ::  sessions(),
     sessions_by_uri = #{}   ::  #{uri() => bondy_session_id:t()},
-    tab                     ::  ets:tid(),
     session                 ::  maybe(map()),
     start_ts                ::  integer()
 }).
@@ -150,7 +149,6 @@ init(Config0) ->
         transport = transport(Transport),
         endpoint = Endpoint,
         idle_timeout = IdleTimeout,
-        tab = ets:new(?MODULE, [set, protected, {keypos, 1}]),
         start_ts = erlang:system_time(millisecond)
     },
 
@@ -932,7 +930,7 @@ proxy_existing(Session, State0) ->
     %% We proxy all existing registrations
     Regs = bondy_dealer:registrations(RealmUri, SessionId, Limit),
     GetRegs = fun(Cont) -> bondy_dealer:registrations(Cont) end,
-    State1 = proxy_existing(Session, State0,GetRegs, Regs),
+    State1 = proxy_existing(Session, State0, GetRegs, Regs),
 
     %% We proxy all existing subscriptions
     Subs = bondy_broker:subscriptions(RealmUri, SessionId, Limit),
