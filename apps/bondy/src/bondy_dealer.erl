@@ -1894,7 +1894,10 @@ call_to_invocation(#call{options = #{'$private' := Private}} = M, ReqId) ->
 %% we avoid the receiving node having to look the local copy of the entry
 %% to retrieve the arguments.
 %% @end
-maybe_append_callback_args(Args, Entry) when is_list(Args) ->
+
+maybe_append_callback_args(Args0, Entry) ->
+    Args = args_to_list(Args0),
+
     case bondy_registry_entry:is_callback(Entry) of
         true ->
             bondy_registry_entry:callback_args(Entry) ++ Args;
