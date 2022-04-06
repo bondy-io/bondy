@@ -104,6 +104,7 @@
 -export([callback_args/1]).
 -export([created/1]).
 -export([get_option/3]).
+-export([find_option/2]).
 -export([id/1]).
 -export([is_callback/1]).
 -export([is_entry/1]).
@@ -593,6 +594,16 @@ options(#entry{options = Val}) -> Val.
 
 get_option(Key, #entry{options = Opts}, Default) ->
     maps:get(Key, Opts, Default).
+
+
+%% -----------------------------------------------------------------------------
+%% @doc
+%% @end
+%% -----------------------------------------------------------------------------
+-spec find_option(any(), t()) -> {ok, any()} | error.
+
+find_option(Key, #entry{options = Opts}) ->
+    maps:find(Key, Opts).
 
 
 %% -----------------------------------------------------------------------------
