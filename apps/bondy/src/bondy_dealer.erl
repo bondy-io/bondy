@@ -1868,13 +1868,17 @@ prepare_call(M, Uri, Entry, Ctxt) ->
 
 
 %% @private
-call_to_invocation(#call{options = #{'$private' := _}} = M, _, _, Ctxt) ->
-    ReqId = bondy_context:gen_message_id(Ctxt, session),
-    call_to_invocation(M, ReqId);
+call_to_invocation(#call{options = #{'$private' := _}} = M, _, Entry, _) ->
+    Callee = bondy_registry_entry:ref(Entry),
+    CalleeSessionId = bondy_ref:session_id(Callee),
+    InvocationId = bondy_session:gen_message_id(CalleeSessionId),
+    call_to_invocation(M, InvocationId);
 
 call_to_invocation(#call{} = M, Uri, Entry, Ctxt) ->
-    ReqId = bondy_context:gen_message_id(Ctxt, session),
-    call_to_invocation(prepare_call(M, Uri, Entry, Ctxt), ReqId).
+    Callee = bondy_registry_entry:ref(Entry),
+    CalleeSessionId = bondy_ref:session_id(Callee),
+    InvocationId = bondy_session:gen_message_id(CalleeSessionId),
+    call_to_invocation(prepare_call(M, Uri, Entry, Ctxt), InvocationId).
 
 
 %% @private
