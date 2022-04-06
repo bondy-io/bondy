@@ -18,12 +18,11 @@
 
 
 %% =============================================================================
-%% @doc
-%% This module implements the capabilities of a Dealer. It is used by
+%% @doc This module implements the capabilities of a Dealer. It is used by
 %% {@link bondy_router}.
 %%
 %% A Dealer is one of the two roles a Router plays. In particular a Dealer is
-%% the middleman between an Caller and a Callee in an RPC interaction,
+%% the middleman between an Caller and a Callee in an Routed RPC interaction,
 %% i.e. it works as a generic router for remote procedure calls
 %% decoupling Callers and Callees.
 %%
@@ -86,7 +85,7 @@
 %%
 %% '''
 %%
-%% # Calling and Invocations
+%% == Calling and Invocations ==
 %%
 %% The message flow between _Callers_, a _Dealer_ and _Callees_ for
 %% calling procedures and invoking endpoints involves the following
@@ -116,38 +115,176 @@
 %%    (from the point of view of the _Caller_), when a (final) result or
 %%    error has not yet been received by the _Caller_.
 %%
-%% # Remote Procedure Call Ordering
+%% == Routing ==
+%% The following sections describes how RPC routing is performed for all the
+%% generic use cases involving clustering and bridge relay connections.
+%% The following diagram shows the the example used in all the use cases, which
+%% involves a single Caller making calls to four different Callees that are
+%% local or remote to the caller.
 %%
-%%    Regarding *Remote Procedure Calls*, the ordering guarantees are as
-%%    follows:
+%% Notice that the erlang code included in the diagram notes are to be
+%% considered pseudo-code as they do not necesarily match the actual function
+%% signatures.
 %%
-%%    If _Callee A_ has registered endpoints for both *Procedure 1* and
-%%    *Procedure 2*, and _Caller B_ first issues a *Call 1* to *Procedure
-%%    1* and then a *Call 2* to *Procedure 2*, and both calls are routed to
-%%    _Callee A_, then _Callee A_ will first receive an invocation
-%%    corresponding to *Call 1* and then *Call 2*. This also holds if
-%%    *Procedure 1* and *Procedure 2* are identical.
+%% <pre><code class="mermaid">
+%%   flowchart TB
+%%     %%{init: {'theme': 'neutral'} }%%
+%%     subgraph Bondy Cluster
+%%     Node1
+%%     Node2
+%%     end
+%%     subgraph Clients
+%%     CALLER --> Node1
+%%     CALLEE1 --> Node1
+%%     CALLEE2 --> Node2
+%%     end
+%%     subgraph Bondy Edge Cluster
+%%     EdgeNode1
+%%     EdgeNode2
+%%     end
+%%     Node1 -.Bridge Relay Connection...- EdgeNode1
+%%     subgraph Edge Clients
+%%     CALLEE3 --> EdgeNode1
+%%     CALLEE4 --> EdgeNode2
+%%     end
+%% </code></pre>
 %%
-%%    In other words, WAMP guarantees ordering of invocations between any
-%%    given _pair_ of _Caller_ and _Callee_. The current implementation
-%%    relies on Distributed Erlang which guarantees message ordering betweeen
-%%    processes in different nodes.
+%% === Call to a local Callee ===
 %%
-%%    There are no guarantees on the order of call results and errors in
-%%    relation to _different_ calls, since the execution of calls upon
-%%    different invocations of endpoints in _Callees_ are running
-%%    independently.  A first call might require an expensive, long-running
-%%    computation, whereas a second, subsequent call might finish
-%%    immediately.
+%% <pre><code class="mermaid">
+%%     sequenceDiagram
+%%     %%{init: {'theme': 'neutral'} }%%
+%%     	autonumber
+%%       participant CALLER
+%%       participant node1
+%%       participant CALLEE1
+%%     	note over node1: CALLEE1 seq = 99
+%%     	CALLER ->> node1:CALL.1
+%%     	note over node1: CALLEE1 seq = 100
+%%     	node1 -->> node1: promise:add({100, 1})
+%%     	node1 ->> CALLEE1: INVOCATION.100
+%%     	CALLEE1 ->> node1: YIELD.100
+%%     	node1 -->> node1: bondy_rpc_promise:take({100, 1})
+%%     	node1 ->> CALLER: RESULT.1
+%% </code></pre>
 %%
-%%    Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
-%%    message will be sent by _Dealer_ to _Callee A_ before any
-%%    "INVOCATION" message for *Procedure 1*.
+%% === Call to a Remote Callee ===
 %%
-%%    There is no guarantee regarding the order of return for multiple
-%%    subsequent register requests.  A register request might require the
-%%    _Dealer_ to do a time-consuming lookup in some database, whereas
-%%    another register request second might be permissible immediately.
+%% <pre><code class="mermaid">
+%%    sequenceDiagram
+%%     %%{init: {'theme': 'neutral'} }%%
+%%      autonumber
+%%     	participant CALLER
+%%     	participant Node1
+%%     	participant Node2
+%%     	participant CALLEE2
+%%     	note over Node2: CALLEE2 seq = 99
+%%     	CALLER ->> Node1:CALL.2
+%%     	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
+%%     	rect RGB(230, 230, 230)
+%%     	note over Node1,Node2: CLUSTER CONNECTION
+%%     	Node1 -->> Node2: CALL.2
+%%      end
+%%     	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
+%%     	note over Node2: CALLEE2 seq = 100
+%%     	Node2 ->> CALLEE2: INVOCATION.100
+%%     	CALLEE2 ->> Node2: YIELD.100
+%%     	Node2 -->> Node2: bondy_rpc_promise:take({invocation, 100, '_'})
+%%     	Node2 -->> Node1: RESULT.2
+%%     	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
+%%     	Node1 ->> CALLER: RESULT.2
+%% </code></pre>
+%%
+%% === Call to Bridged Callee ===
+%%
+%% <pre><code class="mermaid">
+%%   sequenceDiagram
+%%     %%{init: {'theme': 'neutral'} }%%
+%%     autonumber
+%%     	participant CALLER
+%%     	participant Node1
+%%     	participant Node2
+%%     	participant CALLEE2
+%%     	note over Node2: CALLEE2 seq = 99
+%%     	CALLER ->> Node1:CALL.2
+%%     	Node1 -->> Node1: bondy_rpc_promise:new_call(2)
+%%     	rect RGB(230, 230, 230)
+%%     	note over Node1,Node2: CLUSTER CONNECTION
+%%     	Node1 -->> Node2: CALL.2
+%%      end
+%%     	Node2 -->> Node2: bondy_rpc_promise:new_invocation(100, 2)
+%%     	note over Node2: CALLEE2 seq = 100
+%%     	Node2 ->> CALLEE2: INVOCATION.100
+%%     	CALLEE2 ->> Node2: YIELD.100
+%%     	Node2 -->> Node2: bondy_rpc_promise:take(invocation, 100, '_')
+%%     	Node2 -->> Node1: RESULT.2
+%%     	Node1 -->> Node1: bondy_rpc_promise:take({call, 2})
+%%     	Node1 ->> CALLER: RESULT.2
+%% </code></pre>
+%%
+%% === Call to remote Bridged Callee ===
+%%
+%% <pre><code class="mermaid">
+%%    sequenceDiagram
+%%     %%{init: {'theme': 'neutral'} }%%
+%%     	participant CALLER
+%%     	participant Node1
+%%     	participant Node2
+%%     	participant Bridged_Node1
+%%     	participant Bridged_Node2
+%%     	note over Bridged_Node2: CALLEE seq = 99
+%%     	participant CALLEE4
+%%     	CALLER ->> Node1:CALL.5
+%%     	Node1 -->> Node1: promise:add({5, 5})
+%%     	Node1 -->> Node2: Call.5
+%%     	rect RGB(230, 230, 230)
+%%     	note over Node2,Bridged_Node1: BRIDGE RELAY CONNECTION
+%%       Node2 -->> Bridged_Node1:CALL.5
+%%     	end
+%%     	Bridged_Node1 -->> Bridged_Node2: CALL.5
+%%     	note over Bridged_Node2: CALLEE4 seq = 100
+%%     	Bridged_Node2 ->> CALLEE4: INVOCATION.100
+%%     	CALLEE4 ->> Bridged_Node2: YIELD.100
+%%     	Bridged_Node2 -->> Bridged_Node2: bondy_rpc_promise:take({invocation, 100, 5})
+%%     	Bridged_Node2 -->> Bridged_Node1: RESULT.5
+%%     	Bridged_Node1 -->> Node2: RESULT.5
+%%     	Node2 -->> Node1: RESULT.5
+%%     	Node1 ->> Node1: bondy_rpc_promise:take({call, 5})
+%%     	Node1 ->> CALLER: RESULT.5
+%% </code></pre>
+%%
+%% == Remote Procedure Call Ordering ==
+%%
+%% Regarding *Remote Procedure Calls*, the ordering guarantees are as
+%% follows:
+%%
+%% If _Callee A_ has registered endpoints for both *Procedure 1* and
+%% *Procedure 2*, and _Caller B_ first issues a *Call 1* to *Procedure
+%% 1* and then a *Call 2* to *Procedure 2*, and both calls are routed to
+%% _Callee A_, then _Callee A_ will first receive an invocation
+%% corresponding to *Call 1* and then *Call 2*. This also holds if
+%% *Procedure 1* and *Procedure 2* are identical.
+%%
+%% In other words, WAMP guarantees ordering of invocations between any
+%% given _pair_ of _Caller_ and _Callee_. The current implementation
+%% relies on Distributed Erlang which guarantees message ordering betweeen
+%% processes in different nodes.
+%%
+%% There are no guarantees on the order of call results and errors in
+%% relation to _different_ calls, since the execution of calls upon
+%% different invocations of endpoints in _Callees_ are running
+%% independently.  A first call might require an expensive, long-running
+%% computation, whereas a second, subsequent call might finish
+%% immediately.
+%%
+%% Further, if _Callee A_ registers for *Procedure 1*, the "REGISTERED"
+%% message will be sent by _Dealer_ to _Callee A_ before any
+%% "INVOCATION" message for *Procedure 1*.
+%%
+%% There is no guarantee regarding the order of return for multiple
+%% subsequent register requests.  A register request might require the
+%% _Dealer_ to do a time-consuming lookup in some database, whereas
+%% another register request second might be permissible immediately.
 %% @end
 %% =============================================================================
 -module(bondy_dealer).
@@ -677,7 +814,7 @@ forward(#error{request_type = ?CANCEL} = M, Caller, #{from := Callee} = Opts) ->
 
 
 
-%% @private
+
 % maybe_reassign_invocation(
 %     #invocation{} = Msg, To, #{realm_uri := RealmUri} = Opts) ->
 %     %% TODO https://www.notion.so/leapsight/Call-Re-Routing-c18901c7aaea4ef7896b993d4e5d307f
