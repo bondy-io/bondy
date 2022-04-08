@@ -321,14 +321,14 @@ terminate(remote, _Req, St) ->
     %% The remote endpoint closed the connection without giving any further
     %% details.
     ?LOG_INFO(#{
-        description => "Connection closed by peer",
+        description => "Connection closed by client",
         reason => remote
     }),
     do_terminate(St);
 
 terminate({remote, Code, Payload}, _Req, St) ->
     ?LOG_INFO(#{
-        description => "Connection closed by peer",
+        description => "Connection closed by client",
         reason => remote,
         code => Code,
         payload => Payload

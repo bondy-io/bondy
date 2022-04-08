@@ -672,14 +672,14 @@ close_socket(Reason, St) ->
     case Reason of
         normal ->
             ?LOG_INFO(#{
-                description => <<"Connection closed by peer">>,
+                description => <<"Connection closed by client">>,
                 reason => Reason
             }),
             ok;
 
         closed ->
             ?LOG_INFO(#{
-                description => <<"Connection closed by peer">>,
+                description => <<"Connection closed by client">>,
                 reason => Reason
             }),
             ok;
