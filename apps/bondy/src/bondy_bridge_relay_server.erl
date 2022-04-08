@@ -413,8 +413,11 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
 
     {AuthCtxt, Reply} =
         case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
-            {ok, WelcomeAuthExtra, AuthCtxt1} ->
-                M = {welcome, SessionId, #{authextra => WelcomeAuthExtra}},
+            {ok, AuthExtra0, AuthCtxt1} ->
+                AuthExtra = AuthExtra0#{
+                    node => bondy_config:nodestring()
+                },
+                M = {welcome, SessionId, #{authextra => AuthExtra}},
                 {AuthCtxt1, M};
             {error, Reason} ->
                 throw({authentication_failed, Reason})
