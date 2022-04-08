@@ -293,6 +293,10 @@ connected(cast, {forward_message, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
+connected(cast, {forward, Msg}, State) ->
+    ok = send_message(Msg, State),
+    {keep_state_and_data, [idle_timeout(State)]};
+
 connected(cast, Msg, State) ->
     ?LOG_INFO(#{
         description => "Received unknown message",
@@ -556,7 +560,7 @@ handle_message({aae_sync, SessionId, Opts}, State) ->
     RealmUri = session_realm(SessionId, State),
     ok = full_sync(SessionId, RealmUri, Opts, State),
     Finish = {aae_sync, SessionId, finished},
-    ok = gen_statem:cast(self(), {forward, Finish}),
+    ok = gen_statem:cast(self(), {forward_message, Finish}),
     {keep_state_and_data, [idle_timeout(State)]}.
 
 
@@ -809,7 +813,7 @@ do_full_sync(SessionId, RealmUri, _Opts, _State0) ->
             lists:foreach(
                 fun(O) ->
                     Msg = {aae_data, SessionId, O},
-                    gen_statem:cast(Me, {forward, Msg})
+                    gen_statem:cast(Me, {forward_message, Msg})
                 end,
                 pdb_objects(Prefix)
             )
