@@ -94,7 +94,6 @@
         {connect_disterl, false},
         {exchange_tick_period, timer:minutes(1)},
         {lazy_tick_period, timer:seconds(5)},
-        {parallelism, 3},
         {membership_strategy, partisan_full_membership_strategy},
         {partisan_peer_service_manager,
             partisan_pluggable_peer_service_manager},
