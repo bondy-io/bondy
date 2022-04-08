@@ -385,11 +385,17 @@ build_backup(Iterator, Log, Acc0) ->
 
 %% @private
 maybe_add({{{registry_registrations, _}, _}, _}, Acc) ->
+    %% Legacy prefix
     Acc;
 maybe_add({{{registry_subscriptions, _}, _}, _}, Acc) ->
+    %% Legacy prefix
     Acc;
 maybe_add({{{registry, _}, _}, _}, Acc) ->
     %% Legacy prefix
+    Acc;
+maybe_add({{{bondy_registration, _}, _}, _}, Acc) ->
+    Acc;
+maybe_add({{{bondy_subscription, _}, _}, _}, Acc) ->
     Acc;
 maybe_add(E, Acc) ->
     [E | Acc].

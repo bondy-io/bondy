@@ -854,6 +854,7 @@ aae_sync(#{id := SessionId}, State) ->
 handle_aae_data({PKey, RemoteObj}, _State) ->
     %% We should be getting plum_db_object instances to be able to sync, for
     %% now we do this
+    %% TODO this can return false if local is newer
     _ = plum_db:merge({PKey, undefined}, RemoteObj),
     ok.
 

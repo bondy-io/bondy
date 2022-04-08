@@ -235,7 +235,7 @@ when ?SOCKET_DATA(Tag) ->
                 reason => Msg,
                 session_id => SessionId
             }),
-            safe_handle_session_message(Msg, SessionId, State);
+            safe_receive_message(Msg, SessionId, State);
         Msg ->
             ?LOG_DEBUG(#{
                 description => "Got message from edge",
@@ -258,7 +258,7 @@ connected(info, {Tag, _, Reason}, _) when ?SOCKET_ERROR(Tag) ->
     {stop, Reason};
 
 connected(info, {?BONDY_PEER_REQUEST, _Pid, RealmUri, M}, State) ->
-    %% A local send, we need to forward to edge client
+    %% A local bondy:send(), we need to forward to edge client
     ?LOG_DEBUG(#{
         description => "Received WAMP request we need to FWD to edge",
         message => M
@@ -289,7 +289,7 @@ connected({call, From}, Request, State) ->
 
     {keep_state_and_data, [idle_timeout(State)]};
 
-connected(cast, {forward, Msg}, State) ->
+connected(cast, {forward_message, Msg}, State) ->
     ok = send_message(Msg, State),
     {keep_state_and_data, [idle_timeout(State)]};
 
@@ -413,8 +413,11 @@ authenticate(AuthMethod, Signature, Extra, State0) ->
 
     {AuthCtxt, Reply} =
         case bondy_auth:authenticate(AuthMethod, Signature, Extra, AuthCtxt0) of
-            {ok, WelcomeAuthExtra, AuthCtxt1} ->
-                M = {welcome, SessionId, #{authextra => WelcomeAuthExtra}},
+            {ok, AuthExtra0, AuthCtxt1} ->
+                AuthExtra = AuthExtra0#{
+                    node => bondy_config:nodestring()
+                },
+                M = {welcome, SessionId, #{authextra => AuthExtra}},
                 {AuthCtxt1, M};
             {error, Reason} ->
                 throw({authentication_failed, Reason})
@@ -558,9 +561,9 @@ handle_message({aae_sync, SessionId, Opts}, State) ->
 
 
 %% @private
-safe_handle_session_message(Msg, SessionId, State) ->
+safe_receive_message(Msg, SessionId, State) ->
     try
-        handle_session_message(Msg, SessionId, State)
+        receive_message(Msg, SessionId, State)
     catch
         throw:Reason:Stacktrace ->
             ?LOG_ERROR(#{
@@ -591,46 +594,46 @@ safe_handle_session_message(Msg, SessionId, State) ->
 
 
 %% @private
-handle_session_message({registration_created, Entry}, SessionId, State0) ->
+receive_message({registration_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({registration_added, Entry}, SessionId, State0) ->
+receive_message({registration_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({registration_removed, Entry}, SessionId, State0) ->
+receive_message({registration_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({registration_deleted, Entry}, SessionId, State0) ->
+receive_message({registration_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_created, Entry}, SessionId, State0) ->
+receive_message({subscription_created, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_added, Entry}, SessionId, State0) ->
+receive_message({subscription_added, Entry}, SessionId, State0) ->
     State = add_registry_entry(SessionId, Entry, State0),
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_removed, Entry}, SessionId, State0) ->
+receive_message({subscription_removed, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({subscription_deleted, Entry}, SessionId, State0) ->
+receive_message({subscription_deleted, Entry}, SessionId, State0) ->
     State = remove_registry_entry(SessionId, Entry, State0),
 
     {keep_state, State, [idle_timeout(State)]};
 
-handle_session_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
+receive_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
     RealmUri = session_realm(SessionId, State),
     ReqId = M#publish.request_id,
     TopicUri = M#publish.topic_uri,
@@ -657,7 +660,7 @@ handle_session_message({forward, _, #publish{} = M, _Opts}, SessionId, State) ->
 
     {keep_state_and_data, [idle_timeout(State)]};
 
-handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
+receive_message({forward, To, Msg, Opts}, SessionId, State) ->
     %% using cast here in theory breaks the CALL order guarantee!!!
     %% We either need to implement Partisan 4 plus:
     %% a) causality or
@@ -678,7 +681,7 @@ handle_session_message({forward, To, Msg, Opts}, SessionId, State) ->
 
     {keep_state_and_data, [idle_timeout(State)]};
 
-handle_session_message(Other, SessionId, State) ->
+receive_message(Other, SessionId, State) ->
     ?LOG_INFO(#{
         description => "Unhandled message",
         session => SessionId,
