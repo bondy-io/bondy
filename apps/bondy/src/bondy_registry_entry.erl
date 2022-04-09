@@ -162,7 +162,8 @@ new(Type, RealmUri, Ref, Uri, Options) ->
 -spec new(entry_type(), id(), uri(), bondy_ref:t(), uri(), map()) -> t().
 
 new(Type, RegId, RealmUri, Ref, Uri, Opts0)
-when Type == registration orelse Type == subscription ->
+when is_binary(Uri) andalso is_map(Opts0) andalso
+(Type == registration orelse Type == subscription) ->
     Target = bondy_ref:target(Ref),
     SessionId = bondy_ref:session_id(Ref),
 

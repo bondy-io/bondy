@@ -864,7 +864,7 @@ init_tries(Iterator, #state{start_time = Now} = State) ->
 
 %% -----------------------------------------------------------------------------
 %% @private
-%% @doc In the event of Bondy not terminating properly, the last sessions'
+%% @doc In the event of another not terminating properly, the last sessions'
 %% registrations will still be in the DB. This function ensures no stale entry
 %% is restore from db to memory and that they are removed from the db.
 %% @end
@@ -895,20 +895,26 @@ maybe_add_to_trie(Entry, Now) ->
 delete_from_trie(Entry) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Type = bondy_registry_entry:type(Entry),
-    EntryKey = bondy_registry_entry:key(Entry),
     TrieKey = trie_key(Entry),
+    delete_from_trie(RealmUri, TrieKey, Type).
 
-    case art_server:take(TrieKey, trie(Type)) of
-        {value, Key} when Key =:= EntryKey ->
+
+%% @private
+delete_from_trie(RealmUri, TrieKey, Type) ->
+    Procedure = trie_key_realm_procedure(RealmUri, TrieKey),
+
+    try art_server:delete(TrieKey, trie(Type)) of
+        ok ->
             %% Entry should match because entries are immutable
-            Uri = bondy_registry_entry:uri(Entry),
-            _ = decr_counter(RealmUri, Uri, 1),
-            ok;
+            _ = decr_counter(RealmUri, Procedure, 1),
+            ok
 
-        error ->
+    catch
+        error:Reason ->
             ?LOG_DEBUG(#{
                 description => "Failed deleting entry from trie",
-                key => TrieKey
+                key => TrieKey,
+                reason => Reason
             }),
             ok
     end.
@@ -1025,17 +1031,16 @@ prefix(registration, RealmUri) ->
 
 %% @private
 add_registration(Uri, Opts, RealmUri, Ref) ->
-    Type = registration,
     SessionId = bondy_ref:session_id(Ref),
 
     %% plum_db prefix to fetch entries
-    FullPrefix = full_prefix(Type, RealmUri),
+    FullPrefix = full_prefix(registration, RealmUri),
 
     %% A session can register a procedure even if it is already
     %% registered if shared_registration is enabled.
     %% So we do not match Node nor SessionId to retrieve other session's
     %% registrations
-    Pattern = bondy_registry_entry:pattern(Type, RealmUri, Uri, Opts),
+    Pattern = bondy_registry_entry:pattern(registration, RealmUri, Uri, Opts),
 
     %% We generate a trie key based on pattern
     %% We use the trie as it allows us to match the URI (which is not part of
@@ -1048,7 +1053,9 @@ add_registration(Uri, Opts, RealmUri, Ref) ->
     case art_server:lookup(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
             RegId = registration_id(RealmUri, Opts),
-            Entry = bondy_registry_entry:new(Type, RegId, RealmUri, Ref, Uri, Opts),
+            Entry = bondy_registry_entry:new(
+                registration, RegId, RealmUri, Ref, Uri, Opts
+            ),
             do_add(Entry);
 
         All ->
@@ -1057,65 +1064,103 @@ add_registration(Uri, Opts, RealmUri, Ref) ->
             %% 1. Multiple invoke == single registrations
             %% 2. Multiple registrations with differring invoke values
             %% If we do we need to decide which registrations to revoke.
-            DuplicateKeys = filter_duplicate_entry_keys(All, SessionId),
+            DuplicatedKeys = filter_duplicate_entry_keys(All, SessionId),
 
             %% We check this callee has not already registered this same
             %% procedure and if it did, we return the same registration Id.
-            case DuplicateKeys of
+            case DuplicatedKeys of
                 [] ->
                     %% No duplicates but there are existing registrations done
                     %% by other calles.
                     %% We take the first one (we should have checked for
                     %% incosistencies above).
-                    {_K, EntryKey} = hd(All),
-
-                    %% The trie stores plum_db keys, so we fetch the entry from
-                    %% plum_db, this should not fail, if it does we have an
-                    %% inconsistency between plum_db and the trie.
-                    Entry = plum_db:get(FullPrefix, EntryKey),
-
-                    EOpts = bondy_registry_entry:options(Entry),
-                    EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
-                    Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
-
-                    %% Shared Registration (RFC 13.3.9)
-                    %% When shared registrations are supported, then the first
-                    %% Callee to register a procedure for a particular URI
-                    %% MAY determine that additional registrations for this URI
-                    %% are allowed, and what Invocation Rules to apply in case
-                    %% such additional registrations are made.
-                    %% When invoke is not 'single', Dealer MUST fail
-                    %% all subsequent attempts to register a procedure for the
-                    %% URI where the value for the invoke option does not match
-                    %% that of the initial registration.
-                    SharedRegAllowed =
-                        maps:get(shared_registration, Opts, false),
-
-                    %% Notice we are allowing a session to register the same URI
-                    %% multiple times i.e. we are not checking
-                    Allow =
-                        SharedRegAllowed
-                        andalso EPolicy =/= ?INVOKE_SINGLE
-                        andalso EPolicy =:= Policy,
-
-                    case Allow of
-                        true ->
-                            NewOpts = maps:without([shared_registration], Opts),
-                            NewEntry = bondy_registry_entry:new(
-                                Type, RealmUri, Ref, Uri, NewOpts
-                            ),
-                            do_add(NewEntry);
-                        false ->
-                            {error, {already_exists, Entry}}
-                    end;
+                    FirstTrieEntry = hd(All),
+                    maybe_add_registration(
+                        Uri, Opts, RealmUri, Ref, FullPrefix, FirstTrieEntry
+                    );
 
                 _ ->
                     %% The callee has already registered this procedure, we
                     %% return the existing
-                    EntryKey = hd(DuplicateKeys),
+                    EntryKey = hd(DuplicatedKeys),
                     Entry = plum_db:get(FullPrefix, EntryKey),
                     {ok, Entry, false}
             end
+    end.
+
+%% @private
+maybe_add_registration(
+    Uri, Opts, RealmUri, Ref, FullPrefix, {_, EntryKey} = TrieEntry) ->
+    %% The trie stores plum_db keys, so we fetch the entry from
+    %% plum_db
+    case plum_db:get(FullPrefix, EntryKey) of
+        undefined ->
+            %% We have an inconsistency between plum_db and the trie!
+            ok = resolve_registration_inconsistency(FullPrefix, TrieEntry),
+            do_add_registration(Uri, Opts, RealmUri, Ref);
+        Entry ->
+            EOpts = bondy_registry_entry:options(Entry),
+            EPolicy = maps:get(invoke, EOpts, ?INVOKE_SINGLE),
+            Policy = maps:get(invoke, Opts, ?INVOKE_SINGLE),
+
+            %% Shared Registration (RFC 13.3.9)
+            %% When shared registrations are supported, then the first
+            %% Callee to register a procedure for a particular URI
+            %% MAY determine that additional registrations for this URI
+            %% are allowed, and what Invocation Rules to apply in case
+            %% such additional registrations are made.
+            %% When invoke is not 'single', Dealer MUST fail
+            %% all subsequent attempts to register a procedure for the
+            %% URI where the value for the invoke option does not match
+            %% that of the initial registration.
+            SharedRegAllowed =
+                maps:get(shared_registration, Opts, false),
+
+            %% Notice we are allowing a session to register the same URI
+            %% multiple times i.e. we are not checking
+            Allow =
+                SharedRegAllowed
+                andalso EPolicy =/= ?INVOKE_SINGLE
+                andalso EPolicy =:= Policy,
+
+            case Allow of
+                true ->
+                    do_add_registration(Uri, Opts, RealmUri, Ref);
+                false ->
+                    {error, {already_exists, Entry}}
+            end
+    end.
+
+
+%% @private
+do_add_registration(Uri, Opts, RealmUri, Ref) ->
+    NewOpts = maps:without([shared_registration], Opts),
+    NewEntry = bondy_registry_entry:new(
+        registration, RealmUri, Ref, Uri, NewOpts
+    ),
+    do_add(NewEntry).
+
+
+%% @private returns ok
+-spec resolve_registration_inconsistency({atom(), binary()}, tuple()) -> ok.
+
+resolve_registration_inconsistency(FullPrefix, {TrieKey, EntryKey}) ->
+    Opts = [{remove_tombstones, false}],
+    case plum_db:get(FullPrefix, EntryKey, Opts) of
+        undefined ->
+            %% The registration is not in plum_db! This should never happen
+            %% We fix the trie but allow the registration to happen
+            ?LOG_WARNING(#{
+                description => "Inconsistency found between registry trie and registry store.",
+                registry_entry_key => EntryKey
+            }),
+            ok;
+
+        '$deleted' ->
+            %% We fix the trie but allow the registration to happen
+            RealmUri = bondy_registry_entry:realm_uri(EntryKey),
+            delete_from_trie(RealmUri, TrieKey, registration),
+            ok
     end.
 
 
@@ -1215,6 +1260,10 @@ trie_key(Entry, Policy) ->
             {Key, Nodestring, SessionId, Id}
     end.
 
+
+trie_key_realm_procedure(RealmUri, {Key, _, _, _}) ->
+    <<RealmUri:(byte_size(RealmUri))/binary, $., Uri/binary>> = Key,
+    Uri.
 
 %% @private
 term_to_trie_key_part('_') ->

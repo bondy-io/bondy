@@ -3,7 +3,7 @@
 ## -----------------------------------------------------------------------------
 
 ## Name of the node
--name edge
+-name edge@127.0.0.1
 
 ## Cookie for distributed erlang
 -setcookie edge
