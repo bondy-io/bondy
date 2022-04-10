@@ -1313,13 +1313,14 @@ handle_unregister(#unregister{} = M, Ctxt) ->
 unregister(Uri, M, Ctxt) ->
     ok = maybe_reserved_ns(Uri),
     RealmUri = bondy_context:realm_uri(Ctxt),
-    RegId = M#unregister.request_id,
 
     ok = bondy_rbac:authorize(<<"wamp.unregister">>, Uri, Ctxt),
 
-    ok = bondy_registry:remove(registration, RegId, Ctxt, fun on_unregister/1),
+    ok = bondy_registry:remove(
+        registration, M#unregister.registration_id, Ctxt, fun on_unregister/1
+    ),
 
-    Reply = wamp_message:unregistered(RegId),
+    Reply = wamp_message:unregistered(M#unregister.request_id),
 
     bondy:send(RealmUri, bondy_context:ref(Ctxt), Reply).
 
