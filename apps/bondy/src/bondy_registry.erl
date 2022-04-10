@@ -694,7 +694,6 @@ match({_, ?EOT}) ->
 
 
 init([]) ->
-    %% TODO DO NOT DO THIS, LOAD only data from particular node when we get an update from peerservice. Make sure we load before the first Exchange or actually force and exchange and then load.
     process_flag(trap_exit, true),
 
     %% We initialise the tries. art tries survive registry crashes.
@@ -715,6 +714,16 @@ init([]) ->
         [true]
     }],
     ok = plum_db_events:subscribe(object_update, MS),
+
+    %% Every time a node goes up/down we  get an info message
+    Me = self(),
+    ok = partisan_peer_service:on_up('_', fun(Node) ->
+        Me ! {nodeup, Node}
+    end),
+    ok = partisan_peer_service:on_down('_', fun(Node) ->
+        Me ! {nodedown, Node} end
+    ),
+
 
     {ok, #state{}}.
 
@@ -791,6 +800,20 @@ handle_info(
             end
     end,
 
+    {noreply, State};
+
+handle_info({nodeup, _Node} = Event, State) ->
+    ?LOG_DEBUG(#{
+        event => Event
+    }),
+    {noreply, State};
+
+handle_info({nodedown, _Node} = Event, State) ->
+    %% A connection with node has gone down
+    ?LOG_DEBUG(#{
+        event => Event
+    }),
+    %% TODO deactivate (keep a bloomfilter or list) to filter future searches or delete?
     {noreply, State};
 
 handle_info(Info, State) ->
