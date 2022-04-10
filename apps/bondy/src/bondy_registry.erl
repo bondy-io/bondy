@@ -951,8 +951,20 @@ maybe_execute(undefined, _) ->
     ok;
 
 maybe_execute(Fun, Entry) when is_function(Fun, 1) ->
-    _ = Fun(Entry),
-    ok.
+    try
+        _ = Fun(Entry),
+        ok
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description => "Error while executing user function",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            ok
+    end.
+
 
 
 %% @private
