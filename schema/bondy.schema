@@ -1129,6 +1129,10 @@
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy. For example, Browsers will typically kill websocket
 %% connections after 60s and will not initiate PINGs.
+%% Enabling this feature implies having an additional timer per connection and
+%% this can be a considerable cost for servers that need to handle large
+%% numbers of connections. A better solution in most cases is to let the client
+%% handle pings.
 {mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
