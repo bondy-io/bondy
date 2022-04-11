@@ -58,6 +58,7 @@
 
 -record(state, {
     frame_type              ::  bondy_wamp_protocol:frame_type(),
+    client_ip               ::  binary(),
     protocol_state          ::  bondy_wamp_protocol:state() | undefined,
     auth_token              ::  map(),
     hibernate = false       ::  boolean(),
@@ -101,14 +102,7 @@ init(Req0, _) ->
     %% select one of these subprotocol and send it back to the client,
     %% otherwise the client might decide to close the connection, assuming no
     %% correct subprotocol was found.
-    ClientIP = bondy_http_utils:client_ip(Req0),
     Subprotocols = cowboy_req:parse_header(?SUBPROTO_HEADER, Req0),
-
-    ok = logger:set_process_metadata(#{
-        transport => websocket,
-        protocol => wamp,
-        peername => ClientIP
-    }),
 
     try
 
@@ -169,8 +163,10 @@ init(Req0, _) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Initialises the WS connection.
+%% @doc Called once the connection has been upgraded to websockets.
+%% Note that the init/2 function does not run in the same process as the
+%% Websocket callbacks. Any Websocket-specific initialization must be done in
+%% this function.
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_init(#state{protocol_state = undefined} = St) ->
@@ -182,20 +178,21 @@ websocket_init(#state{protocol_state = undefined} = St) ->
     },
     {[Frame], St};
 
-websocket_init(St) ->
+websocket_init(#state{protocol_state = PSt} = St) ->
     ok = logger:update_process_metadata(#{
-        transport => websocket,
-        protocol => wamp
+        transport => websockets,
+        protocol => wamp,
+        client_ip => St#state.client_ip
     }),
+    ok = bondy_wamp_protocol:update_process_metadata(PSt),
 
-    ?LOG_INFO(#{description => "Established connection with peer"}),
+    ?LOG_INFO(#{description => "Established connection with client."}),
 
     {[], reset_ping_interval(St)}.
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
-%% Handles frames sent by client
+%% @doc Called for every frame received from the client
 %% @end
 %% -----------------------------------------------------------------------------
 websocket_handle(Data, #state{protocol_state = undefined} = St) ->
@@ -248,7 +245,7 @@ websocket_handle(Data, St) ->
 
 
 %% -----------------------------------------------------------------------------
-%% @doc
+%% @doc Called for every Erlang message received.
 %% Handles internal erlang messages and WAMP messages BONDY wants to send to the
 %% client. See {@link bondy:send/2}.
 %% @end
@@ -371,7 +368,7 @@ terminate({error, Reason}, _Req, St) ->
 terminate({crash, Class, Reason}, _Req, St) ->
     %% A crash occurred in the handler.
     ?LOG_ERROR(#{
-        description => "Process crashed",
+        description => "A crash occurred in the handler.",
         class => Class,
         reason => Reason
     }),
@@ -420,14 +417,22 @@ maybe_token(Req) ->
 %% @private
 do_init({ws, FrameType, _Enc} = Subproto, BinProto, Req0, State) ->
     Peer = cowboy_req:peer(Req0),
+    ClientIP = bondy_http_utils:client_ip(Req0),
     AuthToken = State#state.auth_token,
     ProtocolOpts = #{auth_token => AuthToken},
     AllOpts = maps_utils:from_property_list(bondy_config:get(wamp_websocket)),
     {PingOpts, Opts} = maps:take(ping, AllOpts),
 
+    ok = logger:update_process_metadata(#{
+        transport => websockets,
+        protocol => wamp,
+        real_ip => ClientIP
+    }),
+
     case bondy_wamp_protocol:init(Subproto, Peer, ProtocolOpts) of
         {ok, CBState} ->
             St = #state{
+                client_ip = ClientIP,
                 frame_type = FrameType,
                 protocol_state = CBState,
                 ping_enabled = maps:get(enabled, PingOpts),
