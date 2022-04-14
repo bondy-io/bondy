@@ -728,9 +728,9 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call(init_tries, _From, State0) ->
-    State = init_tries(State0),
-    {reply, ok, State};
+handle_call(init_tries, _From, State) ->
+    Res = init_tries(State),
+    {reply, Res, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -850,29 +850,53 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_tries(State0) ->
+init_tries(State) ->
     ?LOG_NOTICE(#{
         description => "Initialising in-memory registry tries from store."
     }),
+
     Opts = [{resolver, lww}],
 
-    %% We initialise the registraion trie by reading the data from plum_db
-    %% (in-memory tables)
-    Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
-    {ok, State1} = init_tries(Iterator0, State0),
+    try
+        %% We initialise the registraion trie by reading the data from plum_db
+        %% (in-memory tables)
+        ok = init_trie(?REG_FULL_PREFIX('_'), Opts, State),
 
-    %% We initialise the subscription trie by reading the data from plum_db
-    %% (in-memory tables)
-    Iterator1 = plum_db:iterator(?SUBS_FULL_PREFIX('_'), Opts),
-    init_tries(Iterator1, State1).
+        %% We initialise the subscription trie by reading the data from plum_db
+        %% (in-memory tables)
+        ok = init_trie(?SUBS_FULL_PREFIX('_'), Opts, State)
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% @private
-init_tries(Iterator, #state{start_time = Now} = State) ->
+init_trie(Prefix, Opts, #state{} = State) ->
+    Iterator = plum_db:iterator(Prefix, Opts),
+    try
+        do_init_trie(Iterator, State)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Error while initilising registry tries from store",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            throw(Reason)
+    after
+        ok = plum_db:iterator_close(Iterator)
+    end.
+
+
+%% @private
+do_init_trie(Iterator, #state{start_time = Now} = State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
-            ok = plum_db:iterator_close(Iterator),
-            {ok, State};
+            ok;
 
         false ->
             ok = case plum_db:iterator_key_value(Iterator) of
@@ -881,8 +905,9 @@ init_tries(Iterator, #state{start_time = Now} = State) ->
                 {_, Entry} ->
                     maybe_add_to_trie(Entry, Now)
             end,
-            init_tries(plum_db:iterate(Iterator), State)
+            do_init_trie(plum_db:iterate(Iterator), State)
     end.
+
 
 
 %% -----------------------------------------------------------------------------
