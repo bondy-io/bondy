@@ -207,7 +207,7 @@ handle_call({add_and_claim, Name, Opts0}, {From, _Tag}, St) ->
 handle_call({add_or_claim, Name, Opts0}, {From, _Tag}, St) ->
   case lookup(Name) of
 	{ok, Tab} ->
-		ok = give_away(Tab, From),
+		ok = do_give_away(Tab, From),
 		{reply, {ok, Tab}, St};
 	error ->
 		Opts1 = set_heir(Opts0),
