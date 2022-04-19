@@ -776,6 +776,9 @@ is_expired(#{expires_at := Exp}) ->
 
 
 %% @private
+ticket_resolver(?TOMBSTONE, ?TOMBSTONE) ->
+    ?TOMBSTONE;
+
 ticket_resolver(?TOMBSTONE, L) when is_list(L) ->
     maybe_tombstone(remove_expired(L));
 
