@@ -279,7 +279,12 @@ configure_services() ->
 
 %% @private
 init_registry() ->
-    bondy_registry:init_tries().
+    case bondy_registry:init_tries() of
+        ok ->
+            ok;
+        {error, Reason} ->
+            exit(Reason)
+    end.
 
 
 %% @private
@@ -338,13 +343,11 @@ setup_event_handlers() ->
     _ = bondy_event_manager:add_watched_handler(bondy_prometheus, []),
 
     %% We subscribe to partisan up and down events and republish them
-    Mod = partisan_peer_service:manager(),
-
-    Mod:on_up('_', fun(Node) ->
+    partisan_peer_service:on_up('_', fun(Node) ->
         bondy_event_manager:notify({cluster_connection_up, Node})
     end),
 
-    Mod:on_down('_', fun(Node) ->
+    partisan_peer_service:on_down('_', fun(Node) ->
         bondy_event_manager:notify({cluster_connection_down, Node})
     end),
 

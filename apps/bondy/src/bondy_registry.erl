@@ -252,25 +252,9 @@ add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
     | {error, {already_exists, bondy_registry_entry:t()} | any()}.
 
 add(registration, Uri, Opts0, RealmUri, Ref) ->
-    case bondy_ref:target(Ref) of
-        {callback, MF} ->
-            Args = maps:get(callback_args, Opts0, []),
-
-            case bondy_wamp_callback:validate_target(MF, Args) of
-                true ->
-                    Opts1 = maps:without([callback_args], Opts0),
-                    %% In the case of callbacks we do not allow shared
-                    %% registrations.
-                    %% This means we cannot have multiple registrations for the
-                    %% same URI associated to the same Target.
-                    Opts = Opts1#{
-                        invoke => ?INVOKE_SINGLE,
-                        callback_args => Args
-                    },
-                    add_registration(Uri, Opts, RealmUri, Ref);
-                false ->
-                    {error, {invalid_callback, erlang:append_element(MF, Args)}}
-            end;
+    case bondy_ref:target_type(Ref) of
+        callback ->
+            add_callback(Uri, Opts0, RealmUri, Ref);
         _ ->
             add_registration(Uri, Opts0, RealmUri, Ref)
     end;
@@ -909,7 +893,6 @@ do_init_trie(Iterator, #state{start_time = Now} = State) ->
     end.
 
 
-
 %% -----------------------------------------------------------------------------
 %% @private
 %% @doc In the event of another not terminating properly, the last sessions'
@@ -1087,6 +1070,28 @@ prefix(subscription, RealmUri) ->
 
 prefix(registration, RealmUri) ->
     ?REG_FULL_PREFIX(RealmUri).
+
+
+%% @private
+add_callback(Uri, Opts0, RealmUri, Ref) ->
+    {callback, MF} = bondy_ref:target(Ref),
+    Args = maps:get(callback_args, Opts0, []),
+
+    case bondy_wamp_callback:validate_target(MF, Args) of
+        true ->
+            Opts1 = maps:without([callback_args], Opts0),
+            %% In the case of callbacks we do not allow shared
+            %% registrations.
+            %% This means we cannot have multiple registrations for the
+            %% same URI associated to the same Target.
+            Opts = Opts1#{
+                invoke => ?INVOKE_SINGLE,
+                callback_args => Args
+            },
+            add_registration(Uri, Opts, RealmUri, Ref);
+        false ->
+            {error, {invalid_callback, erlang:append_element(MF, Args)}}
+    end.
 
 
 %% @private
@@ -1294,17 +1299,25 @@ trie_key(Entry) ->
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    Nodestring = term_to_trie_key_part(bondy_registry_entry:nodestring(Entry)),
-    SessionId = term_to_trie_key_part(bondy_registry_entry:session_id(Entry)),
+    SessionId0 = bondy_registry_entry:session_id(Entry),
+    Nodestring = bondy_registry_entry:nodestring(Entry),
 
-    Id = case bondy_registry_entry:id(Entry) of
-        _ when SessionId == <<>> ->
+
+    {ProtocolSessionId, SessionId, Id} = case bondy_registry_entry:id(Entry) of
+        _ when SessionId0 == '_' ->
             %% As we currently do not support wildcard matching in art:match,
             %% we turn this into a prefix matching query
             %% TODO change when wildcard matching is enabled in art.
-            <<>>;
-        Id0 ->
-            term_to_trie_key_part(Id0)
+            {<<>>, <<>>, <<>>};
+        Id0 when SessionId0 == undefined ->
+            {<<"undefined">>, <<"undefined">>, term_to_trie_key_part(Id0)};
+        Id0 when is_binary(SessionId0) ->
+            ProtocolSessionId0 = bondy_session_id:to_external(SessionId0),
+            {
+                term_to_trie_key_part(ProtocolSessionId0),
+                term_to_trie_key_part(SessionId0),
+                term_to_trie_key_part(Id0)
+            }
     end,
 
     %% RealmUri is always ground, so we join it with URI using a $. as any
@@ -1315,9 +1328,9 @@ trie_key(Entry, Policy) ->
     case Policy of
         ?PREFIX_MATCH ->
             %% art lib uses the star char to explicitely denote a prefix
-            {<<Key/binary, $*>>, Nodestring, SessionId, Id};
+            {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
         _ ->
-            {Key, Nodestring, SessionId, Id}
+            {Key, Nodestring, ProtocolSessionId, SessionId, Id}
     end.
 
 
@@ -1343,8 +1356,8 @@ term_to_trie_key_part(Term) when is_binary(Term) ->
 -spec trie_ms(map()) -> ets:match_spec() | undefined.
 
 trie_ms(Opts) ->
-    %% {{$1, $2, $2, $4}, $5},
-    %% {{Key, Node, SessionId, EntryIdBin}, '_'},
+    %% {{$1, $2, $3, $4, $5}, $6},
+    %% {{Key, Node, ProtocolSessionId, SessionId, EntryIdBin}, '_'},
     Node = maps:get(nodestring, Opts, '_'),
 
     Conds1 = case maps:find(eligible, Opts) of
@@ -1354,7 +1367,7 @@ trie_ms(Opts) ->
             throw(non_eligible_entries);
 
         {ok, EligibleIds} ->
-            %% We include the provided SessionIds
+            %% We include the provided ProtocolSessionIds
             [
                 maybe_or(
                     [
@@ -1373,7 +1386,7 @@ trie_ms(Opts) ->
             Conds1;
 
         {ok, ExcludedIds} ->
-            %% We exclude the provided SessionIds
+            %% We exclude the provided ProtocolSessionIds
             ExclConds = maybe_and(
                 [
                     {'=/=', '$3', {const, integer_to_binary(S)}}
