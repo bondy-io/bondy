@@ -1933,10 +1933,14 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
 
     %% TODO disclose info only if feature is announced by Callee, Dealer
     %% and Caller
+    %% NOTICE: The spec defines disclose_me and disclose_caller BUT Autobhan
+    %% has deprecated this in favour of a router-based authrotization which is
+    %% unfortunate as the ideal solution should be the combination of both.
+    %% So for the time being we revert this to `true'.
     DiscloseCaller = bondy_registry_entry:get_option(
-        disclose_caller, Entry, false
+        disclose_caller, Entry, true
     ),
-    DiscloseMe = maps:get(disclose_me, Options, false),
+    DiscloseMe = maps:get(disclose_me, Options, true),
 
     Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->
