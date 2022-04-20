@@ -252,25 +252,9 @@ add(Type, Uri, Opts, Ctxt) when is_map(Ctxt) ->
     | {error, {already_exists, bondy_registry_entry:t()} | any()}.
 
 add(registration, Uri, Opts0, RealmUri, Ref) ->
-    case bondy_ref:target(Ref) of
-        {callback, MF} ->
-            Args = maps:get(callback_args, Opts0, []),
-
-            case bondy_wamp_callback:validate_target(MF, Args) of
-                true ->
-                    Opts1 = maps:without([callback_args], Opts0),
-                    %% In the case of callbacks we do not allow shared
-                    %% registrations.
-                    %% This means we cannot have multiple registrations for the
-                    %% same URI associated to the same Target.
-                    Opts = Opts1#{
-                        invoke => ?INVOKE_SINGLE,
-                        callback_args => Args
-                    },
-                    add_registration(Uri, Opts, RealmUri, Ref);
-                false ->
-                    {error, {invalid_callback, erlang:append_element(MF, Args)}}
-            end;
+    case bondy_ref:target_type(Ref) of
+        callback ->
+            add_callback(Uri, Opts0, RealmUri, Ref);
         _ ->
             add_registration(Uri, Opts0, RealmUri, Ref)
     end;
@@ -728,9 +712,9 @@ init([]) ->
     {ok, #state{}}.
 
 
-handle_call(init_tries, _From, State0) ->
-    State = init_tries(State0),
-    {reply, ok, State};
+handle_call(init_tries, _From, State) ->
+    Res = init_tries(State),
+    {reply, Res, State};
 
 handle_call(Event, From, State) ->
     ?LOG_WARNING(#{
@@ -850,29 +834,53 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %% @private
-init_tries(State0) ->
+init_tries(State) ->
     ?LOG_NOTICE(#{
         description => "Initialising in-memory registry tries from store."
     }),
+
     Opts = [{resolver, lww}],
 
-    %% We initialise the registraion trie by reading the data from plum_db
-    %% (in-memory tables)
-    Iterator0 = plum_db:iterator(?REG_FULL_PREFIX('_'), Opts),
-    {ok, State1} = init_tries(Iterator0, State0),
+    try
+        %% We initialise the registraion trie by reading the data from plum_db
+        %% (in-memory tables)
+        ok = init_trie(?REG_FULL_PREFIX('_'), Opts, State),
 
-    %% We initialise the subscription trie by reading the data from plum_db
-    %% (in-memory tables)
-    Iterator1 = plum_db:iterator(?SUBS_FULL_PREFIX('_'), Opts),
-    init_tries(Iterator1, State1).
+        %% We initialise the subscription trie by reading the data from plum_db
+        %% (in-memory tables)
+        ok = init_trie(?SUBS_FULL_PREFIX('_'), Opts, State)
+
+    catch
+        throw:Reason ->
+            {error, Reason}
+    end.
 
 
 %% @private
-init_tries(Iterator, #state{start_time = Now} = State) ->
+init_trie(Prefix, Opts, #state{} = State) ->
+    Iterator = plum_db:iterator(Prefix, Opts),
+    try
+        do_init_trie(Iterator, State)
+    catch
+        Class:Reason:Stacktrace ->
+            ?LOG_ERROR(#{
+                description =>
+                    "Error while initilising registry tries from store",
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
+            }),
+            throw(Reason)
+    after
+        ok = plum_db:iterator_close(Iterator)
+    end.
+
+
+%% @private
+do_init_trie(Iterator, #state{start_time = Now} = State) ->
     case plum_db:iterator_done(Iterator) of
         true ->
-            ok = plum_db:iterator_close(Iterator),
-            {ok, State};
+            ok;
 
         false ->
             ok = case plum_db:iterator_key_value(Iterator) of
@@ -881,7 +889,7 @@ init_tries(Iterator, #state{start_time = Now} = State) ->
                 {_, Entry} ->
                     maybe_add_to_trie(Entry, Now)
             end,
-            init_tries(plum_db:iterate(Iterator), State)
+            do_init_trie(plum_db:iterate(Iterator), State)
     end.
 
 
@@ -1062,6 +1070,28 @@ prefix(subscription, RealmUri) ->
 
 prefix(registration, RealmUri) ->
     ?REG_FULL_PREFIX(RealmUri).
+
+
+%% @private
+add_callback(Uri, Opts0, RealmUri, Ref) ->
+    {callback, MF} = bondy_ref:target(Ref),
+    Args = maps:get(callback_args, Opts0, []),
+
+    case bondy_wamp_callback:validate_target(MF, Args) of
+        true ->
+            Opts1 = maps:without([callback_args], Opts0),
+            %% In the case of callbacks we do not allow shared
+            %% registrations.
+            %% This means we cannot have multiple registrations for the
+            %% same URI associated to the same Target.
+            Opts = Opts1#{
+                invoke => ?INVOKE_SINGLE,
+                callback_args => Args
+            },
+            add_registration(Uri, Opts, RealmUri, Ref);
+        false ->
+            {error, {invalid_callback, erlang:append_element(MF, Args)}}
+    end.
 
 
 %% @private
@@ -1269,17 +1299,25 @@ trie_key(Entry) ->
 trie_key(Entry, Policy) ->
     RealmUri = bondy_registry_entry:realm_uri(Entry),
     Uri = bondy_registry_entry:uri(Entry),
-    Nodestring = term_to_trie_key_part(bondy_registry_entry:nodestring(Entry)),
-    SessionId = term_to_trie_key_part(bondy_registry_entry:session_id(Entry)),
+    SessionId0 = bondy_registry_entry:session_id(Entry),
+    Nodestring = bondy_registry_entry:nodestring(Entry),
 
-    Id = case bondy_registry_entry:id(Entry) of
-        _ when SessionId == <<>> ->
+
+    {ProtocolSessionId, SessionId, Id} = case bondy_registry_entry:id(Entry) of
+        _ when SessionId0 == '_' ->
             %% As we currently do not support wildcard matching in art:match,
             %% we turn this into a prefix matching query
             %% TODO change when wildcard matching is enabled in art.
-            <<>>;
-        Id0 ->
-            term_to_trie_key_part(Id0)
+            {<<>>, <<>>, <<>>};
+        Id0 when SessionId0 == undefined ->
+            {<<"undefined">>, <<"undefined">>, term_to_trie_key_part(Id0)};
+        Id0 when is_binary(SessionId0) ->
+            ProtocolSessionId0 = bondy_session_id:to_external(SessionId0),
+            {
+                term_to_trie_key_part(ProtocolSessionId0),
+                term_to_trie_key_part(SessionId0),
+                term_to_trie_key_part(Id0)
+            }
     end,
 
     %% RealmUri is always ground, so we join it with URI using a $. as any
@@ -1290,13 +1328,13 @@ trie_key(Entry, Policy) ->
     case Policy of
         ?PREFIX_MATCH ->
             %% art lib uses the star char to explicitely denote a prefix
-            {<<Key/binary, $*>>, Nodestring, SessionId, Id};
+            {<<Key/binary, $*>>, Nodestring, ProtocolSessionId, SessionId, Id};
         _ ->
-            {Key, Nodestring, SessionId, Id}
+            {Key, Nodestring, ProtocolSessionId, SessionId, Id}
     end.
 
 
-trie_key_realm_procedure(RealmUri, {Key, _, _, _}) ->
+trie_key_realm_procedure(RealmUri, {Key, _, _, _, _}) ->
     <<RealmUri:(byte_size(RealmUri))/binary, $., Uri/binary>> = Key,
     Uri.
 
@@ -1318,8 +1356,8 @@ term_to_trie_key_part(Term) when is_binary(Term) ->
 -spec trie_ms(map()) -> ets:match_spec() | undefined.
 
 trie_ms(Opts) ->
-    %% {{$1, $2, $2, $4}, $5},
-    %% {{Key, Node, SessionId, EntryIdBin}, '_'},
+    %% {{$1, $2, $3, $4, $5}, $6},
+    %% {{Key, Node, ProtocolSessionId, SessionId, EntryIdBin}, '_'},
     Node = maps:get(nodestring, Opts, '_'),
 
     Conds1 = case maps:find(eligible, Opts) of
@@ -1329,7 +1367,7 @@ trie_ms(Opts) ->
             throw(non_eligible_entries);
 
         {ok, EligibleIds} ->
-            %% We include the provided SessionIds
+            %% We include the provided ProtocolSessionIds
             [
                 maybe_or(
                     [
@@ -1348,7 +1386,7 @@ trie_ms(Opts) ->
             Conds1;
 
         {ok, ExcludedIds} ->
-            %% We exclude the provided SessionIds
+            %% We exclude the provided ProtocolSessionIds
             ExclConds = maybe_and(
                 [
                     {'=/=', '$3', {const, integer_to_binary(S)}}
@@ -1366,9 +1404,10 @@ trie_ms(Opts) ->
             undefined;
 
         [_] ->
+            % {Key, Node, ProtocolSessionId, SessionId, EntryIdBin}
             [
                 {
-                    {{'_', Node, '$3', '_'}, '_'}, Conds2, ['$_']
+                    {{'_', Node, '$3', '_', '_'}, '_'}, Conds2, ['$_']
                 }
             ];
 
@@ -1376,7 +1415,7 @@ trie_ms(Opts) ->
             Conds3 = [list_to_tuple(['andalso' | Conds2])],
             [
                 {
-                    {{'_', Node, '$3', '_'}, '_'}, Conds3, ['$_']
+                    {{'_', Node, '$3', '_', '_'}, '_'}, Conds3, ['$_']
                 }
             ]
     end.

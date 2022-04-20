@@ -707,6 +707,7 @@
         {protocol, [" protocol=", protocol], ""},
         {transport, [" transport=", transport], ""},
         {peername, [" peername=", peername], ""},
+        {listener, [" listener=", listener], ""},
         {serializer, [" serializer=", serializer], ""},
         " ",
         msg,

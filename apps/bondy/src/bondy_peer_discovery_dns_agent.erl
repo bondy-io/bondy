@@ -110,9 +110,12 @@ lookup(State, Timeout) ->
 %% @doc
 %% Example:
 %% ```erlang
+%%
+%% ListenAddr :: #{ip => {10,1,0,56}, port => 19086}.
+%% ListenAddr :: #{host => "myservice.com", port => 19086}.
 %% #{
 %%      name => 'bondy@bondy-1.bondy.infra.svc.cluster.local',
-%%      listen_addrs => [#{ip => {10,1,0,56}, port => 19086}]
+%%      listen_addrs => [ListenAddr]
 %% }.
 %% '''
 %% @end

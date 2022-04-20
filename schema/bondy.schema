@@ -1129,6 +1129,10 @@
 %% This feature is useful to keep a connection alive and validate the
 %% connection is healthy. For example, Browsers will typically kill websocket
 %% connections after 60s and will not initiate PINGs.
+%% Enabling this feature implies having an additional timer per connection and
+%% this can be a considerable cost for servers that need to handle large
+%% numbers of connections. A better solution in most cases is to let the client
+%% handle pings.
 {mapping, "wamp.websocket.ping.enabled", "bondy.wamp_websocket.ping.enabled", [
   {default, on},
   {datatype, {flag, on, off}}
@@ -1138,6 +1142,14 @@
 %% in which Bondy sends WebSockets PING control messages.
 {mapping, "wamp.websocket.ping.interval", "bondy.wamp_websocket.ping.interval", [
   {default, "30s"},
+  {datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.websocket.ping.enabled is 'on', this value controls the time
+%% Bondy will wait for a ping response. Once that time has passed this counts
+%% as a fail attempt (see max_attempts).
+{mapping, "wamp.websocket.ping.timeout", "bondy.wamp_websocket.ping.timeout", [
+  {default, "10s"},
   {datatype, {duration, ms}}
 ]}.
 
@@ -1390,6 +1402,63 @@
 
 
 
+%% @doc Defines if PING control message functionality is enabled or
+%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% might also initiate ping requests and Bondy will always respond to those
+%% even if this option is turned off.
+%% This feature is useful to keep a connection alive and validate the
+%% connection is healthy.
+%% Enabling this feature implies having an additional timer per connection and
+%% this can be a considerable cost for servers that need to handle large
+%% numbers of connections. A better solution in most cases is to let the client
+%% handle pings.
+{mapping, "wamp.tcp.ping.enabled", "bondy.wamp_tcp.ping.enabled", [
+{default, on},
+{datatype, {flag, on, off}}
+]}.
+
+%% @doc If wamp.tcp.ping.enabled is 'on', this value controls the interval
+%% in which Bondy sends WebSockets PING control messages.
+{mapping, "wamp.tcp.ping.interval", "bondy.wamp_tcp.ping.interval", [
+{default, "30s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.tcp.ping.enabled is 'on', this value controls the time
+%% Bondy will wait for a ping response. Once that time has passed this counts
+%% as a fail attempt (see max_attempts).
+{mapping, "wamp.tcp.ping.timeout", "bondy.wamp_tcp.ping.timeout", [
+{default, "10s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.tcp.ping.enabled is 'on', this value controls how many
+%% missed pings are considered a timeout. Thus, after this number of attempts
+%% Bondy will drop the connection.
+%% If the value is 'infinity' Bondy will never timeout based on missed pings.
+{mapping,
+"wamp.tcp.ping.max_attempts",
+"bondy.wamp_tcp.ping.max_attempts",
+[
+  {default, 3},
+  {datatype, [integer, {atom, infinity}]}
+]
+}.
+
+%% @doc Drops the connection after a period of inactivity. This option does not
+%% take effect when wamp.tcp.ping.enabled is 'on' and wamp.tcp.ping.
+%% interval times wamp.tcp.ping.max_attempts results in a value higher
+%% than this option.
+%% Notice that for some clients using this option alone is not enough to keep
+%% a connection alive as the client will drop the connection due to inactivity.
+%% If the client supports tcp PING control messages, enabled them,
+%% otherwise e.g. web browsers set wamp.tcp.ping.enabled to on.
+{mapping, "wamp.tcp.idle_timeout", "bondy.wamp_tcp.idle_timeout", [
+{default, "8h"},
+{datatype, [{duration, ms}, {atom, infinity}]}
+]}.
+
+
 
 
 
@@ -1469,6 +1538,63 @@
 {mapping, "wamp.tls.nodelay", "bondy.wamp_tls.socket_opts.nodelay", [
   {datatype, {flag, on, off}},
   {default, on}
+]}.
+
+
+%% @doc Defines if PING control message functionality is enabled or
+%% not. This option affects server (Bondy) initiated pings only. Some clients
+%% might also initiate ping requests and Bondy will always respond to those
+%% even if this option is turned off.
+%% This feature is useful to keep a connection alive and validate the
+%% connection is healthy.
+%% Enabling this feature implies having an additional timer per connection and
+%% this can be a considerable cost for servers that need to handle large
+%% numbers of connections. A better solution in most cases is to let the client
+%% handle pings.
+{mapping, "wamp.tls.ping.enabled", "bondy.wamp_tls.ping.enabled", [
+{default, on},
+{datatype, {flag, on, off}}
+]}.
+
+%% @doc If wamp.tls.ping.enabled is 'on', this value controls the interval
+%% in which Bondy sends WebSockets PING control messages.
+{mapping, "wamp.tls.ping.interval", "bondy.wamp_tls.ping.interval", [
+{default, "30s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.tls.ping.enabled is 'on', this value controls the time
+%% Bondy will wait for a ping response. Once that time has passed this counts
+%% as a fail attempt (see max_attempts).
+{mapping, "wamp.tls.ping.timeout", "bondy.wamp_tls.ping.timeout", [
+{default, "10s"},
+{datatype, {duration, ms}}
+]}.
+
+%% @doc If wamp.tls.ping.enabled is 'on', this value controls how many
+%% missed pings are considered a timeout. Thus, after this number of attempts
+%% Bondy will drop the connection.
+%% If the value is 'infinity' Bondy will never timeout based on missed pings.
+{mapping,
+"wamp.tls.ping.max_attempts",
+"bondy.wamp_tls.ping.max_attempts",
+[
+  {default, 3},
+  {datatype, [integer, {atom, infinity}]}
+]
+}.
+
+%% @doc Drops the connection after a period of inactivity. This option does not
+%% take effect when wamp.tls.ping.enabled is 'on' and wamp.tls.ping.
+%% interval times wamp.tls.ping.max_attempts results in a value higher
+%% than this option.
+%% Notice that for some clients using this option alone is not enough to keep
+%% a connection alive as the client will drop the connection due to inactivity.
+%% If the client supports tls PING control messages, enabled them,
+%% otherwise e.g. web browsers set wamp.tls.ping.enabled to on.
+{mapping, "wamp.tls.idle_timeout", "bondy.wamp_tls.idle_timeout", [
+{default, "8h"},
+{datatype, [{duration, ms}, {atom, infinity}]}
 ]}.
 
 %% @doc Default cert location for https can be overridden

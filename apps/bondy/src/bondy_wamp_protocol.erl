@@ -77,6 +77,7 @@
 -export([handle_outbound/2]).
 -export([terminate/1]).
 -export([validate_subprotocol/1]).
+-export([update_process_metadata/1]).
 
 
 
@@ -1022,25 +1023,37 @@ subprotocol(_) ->                           {error, invalid_subprotocol}.
 
 
 %% @private
-encoding(#wamp_state{subprotocol = {_, _, E}}) -> E.
+encoding(#wamp_state{subprotocol = {_, _, Serializer}}) ->
+    Serializer.
 
 
 %% @private
-do_init({_, _, Serializer} = Subprotocol, Peer, _Opts) ->
+do_init({_, _, _} = Subprotocol, Peer, _Opts) ->
     Ctxt = bondy_context:new(Peer, Subprotocol),
     State = #wamp_state{
         subprotocol = Subprotocol,
         context = Ctxt
     },
-    ok = logger:update_process_metadata(#{
-        protocol => wamp,
-        serializer => Serializer,
-        peername => bondy_context:peername(Ctxt)
-    }),
+
+    ok = update_process_metadata(State),
+
     {ok, State}.
 
 
 %% @private
 update_context(Ctxt, St) ->
     St#wamp_state{context = Ctxt}.
+
+
+update_process_metadata(#wamp_state{} = State) ->
+    #wamp_state{
+        subprotocol = {_, _, Serializer},
+        context = Ctxt
+    } = State,
+
+    ok = logger:update_process_metadata(#{
+        protocol => wamp,
+        serializer => Serializer,
+        peername => bondy_context:peername(Ctxt)
+    }).
 

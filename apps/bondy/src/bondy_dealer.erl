@@ -1934,9 +1934,9 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
     %% TODO disclose info only if feature is announced by Callee, Dealer
     %% and Caller
     DiscloseCaller = bondy_registry_entry:get_option(
-        disclose_caller, Entry, true
+        disclose_caller, Entry, false
     ),
-    DiscloseMe = maps:get(disclose_me, Options, true),
+    DiscloseMe = maps:get(disclose_me, Options, false),
 
     Details1 = case DiscloseCaller orelse DiscloseMe of
         true ->

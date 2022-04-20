@@ -180,6 +180,7 @@
     groups              :=  [binary()],
     has_password        :=  boolean(),
     has_authorized_keys :=  boolean(),
+    authorized_keys     =>  [binary()],
     sso_realm_uri       =>  maybe(uri()),
     meta                =>  #{binary() => any()}
 }.
@@ -777,7 +778,7 @@ disable(RealmUri, #{type := ?TYPE} = User) ->
 -spec to_external(User :: t()) -> external().
 
 to_external(#{type := ?TYPE, version := ?VERSION} = User) ->
-    Map = maps:without([password, authorized_keys], User),
+    Map = maps:without([password], User),
 
     Map#{
         has_password => has_password(User),

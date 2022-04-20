@@ -584,6 +584,7 @@ reset_reconnect_retry_state(State) ->
 
 %% @private
 on_disconnect(State) ->
+    %% We flush all subscriptions and registrations for the Bondy Relay session
     _ = maps:foreach(
         fun(_, #{realm_uri := RealmUri, ref := Ref}) ->
             bondy_router:flush(RealmUri, Ref)
@@ -670,6 +671,7 @@ signer(PubKey, #{cryptosign := #{exec := Filename}}) ->
         error:Reason ->
             error(Reason)
     end;
+
 signer(_, #{cryptosign := #{privkey := HexString}}) ->
     %% For testing only, this will be remove on 1.0.0
     fun(Message) ->

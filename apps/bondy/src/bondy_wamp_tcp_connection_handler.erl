@@ -121,7 +121,8 @@ init({Ref, Transport, _Opts0}) ->
 
     ok = logger:set_process_metadata(#{
         transport => Transport,
-        peername => inet_utils:peername_to_binary(Peername)
+        peername => inet_utils:peername_to_binary(Peername),
+        listener => Ref
     }),
 
     ok = socket_opened(St1),
@@ -495,7 +496,7 @@ init_wamp(Len, Enc, St0) ->
                     ),
 
                     ?LOG_INFO(#{
-                        description => "Established connection with peer"
+                        description => "Established connection with client."
                     }),
 
                     {ok, St1};
