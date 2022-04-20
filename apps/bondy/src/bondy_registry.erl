@@ -1404,9 +1404,10 @@ trie_ms(Opts) ->
             undefined;
 
         [_] ->
+            % {Key, Node, ProtocolSessionId, SessionId, EntryIdBin}
             [
                 {
-                    {{'_', Node, '$3', '_'}, '_'}, Conds2, ['$_']
+                    {{'_', Node, '$3', '_', '_'}, '_'}, Conds2, ['$_']
                 }
             ];
 
@@ -1414,7 +1415,7 @@ trie_ms(Opts) ->
             Conds3 = [list_to_tuple(['andalso' | Conds2])],
             [
                 {
-                    {{'_', Node, '$3', '_'}, '_'}, Conds3, ['$_']
+                    {{'_', Node, '$3', '_', '_'}, '_'}, Conds3, ['$_']
                 }
             ]
     end.
