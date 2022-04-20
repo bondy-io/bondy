@@ -165,11 +165,20 @@ local_context(RealmUri) when is_binary(RealmUri) ->
 %% @end
 %% -----------------------------------------------------------------------------
 local_context(RealmUri, Ref) when is_binary(RealmUri) ->
-    Ctxt = local_context(RealmUri),
+    Ctxt0 = local_context(RealmUri),
 
-    Ctxt#{
+    Ctxt1 = Ctxt0#{
         ref => Ref
-    }.
+    },
+
+    case bondy_ref:session_id(Ref) of
+        undefined ->
+            Ctxt1;
+        SessionId ->
+            Ctxt1#{session_id => SessionId}
+    end.
+
+
 
 
 %% -----------------------------------------------------------------------------
