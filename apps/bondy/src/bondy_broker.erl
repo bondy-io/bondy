@@ -804,7 +804,10 @@ make_match_opts(SessionId, Opts) ->
     %% and exclude_authrole.
     Exclusions0 = maps:get(exclude, Opts, []),
 
-    %% Publisher exclusion: enabled by default
+    %% Publisher exclusion:
+    %% By default, a Publisher of an event will not itself receive an event
+    %% published, even when subscribed to the Topic the Publisher is publishing
+    %% to. This behavior can be overridden using this feature.
     Exclusions = case maps:get(exclude_me, Opts, true) of
         true ->
             lists:append(
