@@ -41,7 +41,7 @@
 -record(entry_key, {
     realm_uri           ::  uri(),
     target              ::  wildcard(bondy_ref:target()),
-    session_id          ::  wildcard(maybe(id())),
+    session_id          ::  wildcard(maybe(bondy_session_id:t())),
     %% The message_id
     entry_id            ::  wildcard(id()),
     is_proxy = false    ::  wildcard(boolean())

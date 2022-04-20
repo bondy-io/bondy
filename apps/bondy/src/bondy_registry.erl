@@ -1334,7 +1334,7 @@ trie_key(Entry, Policy) ->
     end.
 
 
-trie_key_realm_procedure(RealmUri, {Key, _, _, _}) ->
+trie_key_realm_procedure(RealmUri, {Key, _, _, _, _}) ->
     <<RealmUri:(byte_size(RealmUri))/binary, $., Uri/binary>> = Key,
     Uri.
 

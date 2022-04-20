@@ -809,6 +809,8 @@ make_match_opts(SessionId, Opts) ->
         true ->
             lists:append(
                 [
+                    %% We get the protocol (WAMP) session identifier from the
+                    %% session identifier
                     bondy_session_id:to_external(S)
                     || S <- [SessionId], S =/= undefined
                 ],
