@@ -258,7 +258,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
-                            bondy_relay:forward(Node, PeerMsg)
+                            bondy_relay:forward(Node, PeerMsg, RelayOpts)
                     end
             end
     end.
