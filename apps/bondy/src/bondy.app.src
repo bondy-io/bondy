@@ -53,6 +53,7 @@
         bear,
         prometheus,
         telemetry,
+        riak_sysmon,
         %% 3rd-party Serialization formats
         jsone,
         msgpack,

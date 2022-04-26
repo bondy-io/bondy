@@ -104,6 +104,7 @@ start(_Type, Args) ->
 
     case bondy_sup:start_link() of
         {ok, Pid} ->
+            ok = bondy_sysmon_handler:add_handler(),
             %% Please do not change the order of this function calls
             %% unless, of course, you know exactly what you are doing.
             ok = bondy_router_worker:start_pool(),
