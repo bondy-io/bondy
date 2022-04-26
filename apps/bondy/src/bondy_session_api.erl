@@ -12,7 +12,7 @@ get(Key, SessionId, _Details) ->
             {ok, Session} ->
                 case bondy_session:external_id(Session) of
                     SessionId ->
-                        {ok, #{}, [bondy_session:info(Session)], #{}};
+                        {ok, #{}, [bondy_session:to_external(Session)], #{}};
                     OtherId ->
                         ?LOG_WARNING(#{
                             description => "Session data inconsistency. SessionId should be " ++ integer_to_list(SessionId) ++ ".",

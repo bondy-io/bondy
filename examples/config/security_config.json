@@ -47,8 +47,6 @@
         "grants" : [
             {
                 "permissions" : [
-                    "wamp.register",
-                    "wamp.unregister",
                     "wamp.subscribe",
                     "wamp.unsubscribe",
                     "wamp.call",
@@ -61,8 +59,6 @@
             },
             {
                 "permissions" : [
-                    "wamp.register",
-                    "wamp.unregister",
                     "wamp.subscribe",
                     "wamp.unsubscribe",
                     "wamp.call",
@@ -101,7 +97,7 @@
             {
                 "username" : "peer1",
                 "password" : "changethispassword",
-                "groups" : ["microservices"],
+                "groups" : ["microservices", "account_user"],
                 "meta" : {}
             },
             {

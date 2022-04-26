@@ -613,7 +613,8 @@ caller_details(#{session := Session} = Ctxt, Details) ->
     Details#{
         caller => bondy_session:external_id(Session),
         caller_authid => name_to_binary(authid(Ctxt)),
-        caller_authrole => name_to_binary(authrole(Ctxt))
+        caller_authrole => authrole(Ctxt),
+        x_caller_guid => bondy_session:id(Session)
     }.
 
 
@@ -631,7 +632,8 @@ publisher_details(#{session := Session} = Ctxt, Details) ->
     Details#{
         publisher => bondy_session:external_id(Session),
         publisher_authid => name_to_binary(authid(Ctxt)),
-        publisher_authrole => name_to_binary(authrole(Ctxt))
+        publisher_authrole => authrole(Ctxt),
+        x_publisher_guid => bondy_session:id(Session)
     }.
 
 

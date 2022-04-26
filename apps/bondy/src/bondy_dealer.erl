@@ -1956,7 +1956,7 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
     Details = case DiscloseSession of
         true ->
             Session = bondy_context:session(Ctxt),
-            Info = bondy_session:info(Session),
+            Info = bondy_session:to_external(Session),
             Details1#{'x_session_info' => Info};
         false ->
             Details1

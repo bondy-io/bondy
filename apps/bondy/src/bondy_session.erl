@@ -132,7 +132,6 @@
 -export([fetch/1]).
 -export([id/1]).
 -export([gen_message_id/1]).
--export([info/1]).
 -export([is_security_enabled/1]).
 -export([list/0]).
 -export([list/1]).
@@ -537,7 +536,7 @@ authid(Id) when is_binary(Id) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authrole(t()) -> maybe(bondy_rbac_group:name()).
+-spec authrole(t()) -> binary().
 
 authrole(#session{authrole = undefined, authroles = []}) ->
     <<"undefined">>;
@@ -545,8 +544,10 @@ authrole(#session{authrole = undefined, authroles = []}) ->
 authrole(#session{authrole = undefined, authroles = [Role]}) ->
     Role;
 
-authrole(#session{authrole = undefined}) ->
-    <<"multiple">>;
+authrole(#session{authrole = undefined, authroles = Roles}) ->
+    %% WAMP2 does not currently support multiple roles, so we return a comma
+    %% separated values of all user roles (groups)
+    binary_utils:join(Roles, <<$,>>);
 
 authrole(#session{authrole = Val}) ->
     Val;
@@ -748,10 +749,12 @@ list() ->
 %% @end
 %% -----------------------------------------------------------------------------
 list(#{return := details_map}) ->
+    %% TODO Fix this is wrong as we are storing session and indices, do a select instead
     Tabs = tuplespace:tables(?SESSION_SPACE),
     [to_external(X) || T <- Tabs, X <- ets:tab2list(T)];
 
 list(_) ->
+    %% TODO Fix this is wrong as we are storing session and indices, do a select instead
     Tabs = tuplespace:tables(?SESSION_SPACE),
     lists:append([ets:tab2list(T) || T <- Tabs]).
 
@@ -787,39 +790,27 @@ list_refs(RealmUri, N) when is_integer(N), N >= 1 ->
 -spec to_external(t()) -> external().
 
 to_external(#session{} = S) ->
+    Extra = case S#session.is_anonymous of
+        true ->
+            #{};
+        false ->
+            #{meta => bondy_rbac_user:meta(user(S))}
+    end,
+
     #{
         session => S#session.external_id,
-        'x_session_id' => S#session.id,
         authid => S#session.authid,
-        authrole => authrole(S),
-        %% TODO to be deprecated (leave it inside authextra)
-        'x_authroles' => S#session.authroles,
         authmethod => S#session.authmethod,
         authprovider => <<"com.leapsight.bondy">>,
-        authextra => #{
-            x_authroles => S#session.authroles
+        authrole => authrole(S),
+        authextra => Extra#{
+            session_id => S#session.id,
+            node => bondy_config:nodestring()
         },
         transport => #{
-            agent => S#session.agent,
             peername => inet_utils:peername_to_binary(S#session.peer)
         }
     }.
-
-
-
-%% -----------------------------------------------------------------------------
-%% @doc
-%% @end
-%% -----------------------------------------------------------------------------
--spec info(t()) -> external().
-
-info(#session{is_anonymous = true} = S) ->
-    to_external(S);
-
-info(#session{is_anonymous = false} = S) ->
-    Map = to_external(S),
-    Map#{'x_meta' => bondy_rbac_user:meta(user(S))}.
-
 
 
 

@@ -589,12 +589,13 @@ open_session(Extra, St0) when is_map(Extra) ->
         ReqDetails = bondy_context:request_details(Ctxt0),
 
         Authid = bondy_auth:user_id(AuthCtxt),
+        %% Authrole might be undefined here. This happens when the user sends
+        %% 'default' or NULL (althrough WAMP clients should not send NULL).
         Authrole = bondy_auth:role(AuthCtxt),
         Authroles = bondy_auth:roles(AuthCtxt),
         Authprovider = bondy_auth:provider(AuthCtxt),
         Authmethod = bondy_auth:method(AuthCtxt),
         Agent = maps:get(agent, ReqDetails, undefined),
-        UserMeta = bondy_rbac_user:meta(bondy_auth:user(AuthCtxt)),
         Peer = bondy_context:peer(Ctxt0),
 
         Properties = #{
@@ -621,22 +622,16 @@ open_session(Extra, St0) when is_map(Extra) ->
         Ctxt1 = bondy_context:set_session(Ctxt0, Session),
         St1 = update_context(Ctxt1, St0),
 
+
+        SessionInfo = bondy_session:to_external(Session),
+
         %% We send the WELCOME message
         Welcome = wamp_message:welcome(
             SessionId,
-            #{
+            SessionInfo#{
                 realm => RealmUri,
                 agent => bondy_router:agent(),
-                roles => bondy_router:roles(),
-                authprovider => Authprovider,
-                authmethod => Authmethod,
-                authrole => to_bin(Authrole),
-                authid => maybe_gen_authid(Authid),
-                authextra => Extra#{
-                    'x_session_id' => bondy_session:id(Session),
-                    'x_authroles' => [to_bin(R) || R <- Authroles],
-                    'x_meta' => UserMeta
-                }
+                roles => bondy_router:roles()
             }
         ),
         ok = bondy_event_manager:notify({wamp, Welcome, Ctxt1}),
@@ -655,14 +650,6 @@ open_session(Extra, St0) when is_map(Extra) ->
         error:{invalid_options, missing_client_role} = Reason ->
             stop(Reason, St0)
     end.
-
-
-%% @private
-to_bin(Term) when is_atom(Term) ->
-    atom_to_binary(Term, utf8);
-
-to_bin(Term) when is_binary(Term) ->
-    Term.
 
 
 %% @private
