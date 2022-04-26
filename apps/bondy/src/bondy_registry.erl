@@ -272,7 +272,7 @@ add(subscription = Type, Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% We use the trie to match as we need the Topic Uri in the key
-    case art_server:lookup(TrieKey, ?SUBSCRIPTION_TRIE) of
+    case art_lookup(TrieKey, ?SUBSCRIPTION_TRIE) of
         [] ->
             %% No matching subscriptions for this SessionId exists
             RegId = subscription_id(RealmUri, Opts),
@@ -631,7 +631,7 @@ match(Type, Uri, RealmUri, Opts) ->
         Pattern = <<RealmUri/binary, $., Uri/binary>>,
         MS = trie_ms(Opts),
 
-        case art_server:find_matches(Pattern, MS, Trie) of
+        case art_find_matches(Pattern, MS, Trie) of
             [] ->
                 ?EOT;
 
@@ -643,11 +643,10 @@ match(Type, Uri, RealmUri, Opts) ->
         throw:non_eligible_entries ->
             ?EOT;
 
-        error:badarg:Stacktrace ->
-            %% @TODO this will be fixed when art provides persistent tries
+        error:Reason:Stacktrace ->
             ?LOG_DEBUG(#{
                 description => "Error while searching trie",
-                reason => badarg,
+                reason => Reason,
                 stacktrace => Stacktrace
             }),
             ?EOT
@@ -934,7 +933,7 @@ delete_from_trie(Entry) ->
 delete_from_trie(RealmUri, TrieKey, Type) ->
     Procedure = trie_key_realm_procedure(RealmUri, TrieKey),
 
-    try art_server:delete(TrieKey, trie(Type)) of
+    try art_delete(TrieKey, trie(Type)) of
         ok ->
             %% Entry should match because entries are immutable
             _ = decr_counter(RealmUri, Procedure, 1),
@@ -1115,7 +1114,7 @@ add_registration(Uri, Opts, RealmUri, Ref) ->
     TrieKey = trie_key(Pattern),
 
     %% TODO we should limit the match to 1 result!!!
-    case art_server:lookup(TrieKey, ?REGISTRATION_TRIE) of
+    case art_lookup(TrieKey, ?REGISTRATION_TRIE) of
         [] ->
             RegId = registration_id(RealmUri, Opts),
             Entry = bondy_registry_entry:new(
@@ -1246,7 +1245,7 @@ add_to_trie(Entry) ->
     EntryKey = bondy_registry_entry:key(Entry),
 
     %% We add entry to the trie
-    _ = art_server:set(trie_key(Entry), EntryKey, trie(Type)),
+    _ = art_set(trie_key(Entry), EntryKey, trie(Type)),
 
     IsFirstEntry = incr_counter(RealmUri, Uri, 1) =:= 1,
     {ok, Entry, IsFirstEntry}.
@@ -1498,4 +1497,83 @@ filter_duplicate_entry_keys(Entries, SessionId) ->
                 {bondy_registry_entry:key_field(target), 1},
                 []
             )
+    end.
+
+
+%% @private
+art_lookup(TrieKey, Trie) ->
+    %% Always sync at the moment
+    art_lookup(TrieKey, Trie, 0).
+
+
+%% @private
+art_lookup(TrieKey, Trie, 0) ->
+    %% We do a sync call
+    case art_server:lookup(TrieKey, Trie) of
+        {error, badarg} ->
+            [];
+        {error, Reason} ->
+            error(Reason);
+        Result ->
+            Result
+    end;
+
+art_lookup(TrieKey, Trie, N) when N > 0 ->
+    %% We do an async call
+    try
+        art:lookup(TrieKey, Trie)
+    catch
+        error:badarg ->
+            art_lookup(TrieKey, Trie, N - 1);
+        _:Reason ->
+            error(Reason)
+    end.
+
+
+%% @private
+art_find_matches(Pattern, MS, Trie) ->
+    %% Always sync at the moment
+    art_find_matches(Pattern, MS, Trie, 0).
+
+
+%% @private
+art_find_matches(Pattern, MS, Trie, 0) ->
+    case art_server:find_matches(Pattern, MS, Trie) of
+        {error, badarg} ->
+            [];
+        {error, Reason} ->
+            error(Reason);
+        Result ->
+            Result
+    end;
+
+art_find_matches(Pattern, MS, Trie, N) when N > 0 ->
+    try
+        art_server:find_matches(Pattern, MS, Trie)
+    catch
+        error:badarg ->
+            art_find_matches(Pattern, MS, Trie, N - 1);
+        _:Reason ->
+            error(Reason)
+    end.
+
+
+
+%% @private
+art_delete(TrieKey, Trie) ->
+    case art_server:delete(TrieKey, Trie) of
+        {error, Reason} ->
+            error(Reason);
+        Result ->
+            Result
+    end.
+
+
+%% @private
+art_set(K, V, Trie) ->
+    case art_server:set(K, V, Trie) of
+        {error, Reason} ->
+            error(Reason);
+        Result ->
+            Result
     end.

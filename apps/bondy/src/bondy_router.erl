@@ -258,12 +258,7 @@ forward(Msg, To, #{realm_uri := RealmUri} = Opts) ->
                         false ->
                             Node = bondy_ref:node(Relay),
                             PeerMsg = {forward, To, Msg, Opts},
-                            RelayOpts = #{
-                                ack => true,
-                                retransmission => true,
-                                partition_key => erlang:phash2(RealmUri)
-                            },
-                            bondy_relay:forward(Node, PeerMsg)
+                            bondy_relay:forward(Node, PeerMsg, RelayOpts)
                     end
             end
     end.

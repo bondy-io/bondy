@@ -347,8 +347,7 @@ setup() ->
     Collectors = [
         prometheus_vm_memory_collector,
         prometheus_vm_statistics_collector,
-        prometheus_vm_system_info_collector,
-        oc_stat_exporter_prometheus
+        prometheus_vm_system_info_collector
     ],
     _ = [prometheus_registry:register_collector(C) || C <- Collectors],
     ok.

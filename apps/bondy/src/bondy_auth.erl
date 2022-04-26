@@ -476,6 +476,11 @@ valid_roles(_, #{username := anonymous}) ->
     %% so we drop the requested ones.
     {anonymous, [anonymous]};
 
+valid_roles(<<"default">>, User) ->
+    %% Clients might send "default" as opposed to NULL as WAMP does
+    %% not actually support NULL.
+    valid_roles(all, User);
+
 valid_roles(<<"all">>, User) ->
     valid_roles(all, User);
 
@@ -486,16 +491,13 @@ valid_roles(Role, User) when is_binary(Role) ->
     All = bondy_rbac_user:groups(User),
     case lists:member(Role, All) of
         true ->
+            %% The session is restricted to the specific role
             {Role, [Role]};
-        false when Role =:= <<"default">> ->
-            %% Some clients will send "default" as opposed to NULL (undefined).
-            %% Yes, it is very nasty for them to do this.
-            {undefined, All};
         false ->
             throw(no_such_group)
     end;
 
-valid_roles(Roles, User) ->
+valid_roles(Roles, User) when is_list(Roles) ->
     RolesSet = sets:from_list(Roles),
     AllSet = sets:from_list(bondy_rbac_user:groups(User)),
 

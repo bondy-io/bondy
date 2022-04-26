@@ -531,7 +531,7 @@ reset_ping_interval(St) ->
 
 %% @private
 send_ping(#state{ping_attempts = N, ping_max_attempts = M} = St) when N > M ->
-    ?LOG_ERROR(#{
+    ?LOG_INFO(#{
         description => "Connection closing",
         reason => ping_timeout,
         attempts => N

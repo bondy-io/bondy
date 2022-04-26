@@ -1956,7 +1956,13 @@ append_options(Options, CallId, Uri, Entry, Ctxt) ->
     Details = case DiscloseSession of
         true ->
             Session = bondy_context:session(Ctxt),
-            Info = bondy_session:info(Session),
+            Info0 = bondy_session:to_external(Session),
+
+            %% To be deprecated, we should return Info0 on the next release
+            Info = Info0#{
+                'x_authroles' => bondy_session:authroles(Session),
+                'x_meta' => key_value:get([authextra, meta], Info0, #{})
+            },
             Details1#{'x_session_info' => Info};
         false ->
             Details1

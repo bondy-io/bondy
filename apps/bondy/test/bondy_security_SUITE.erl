@@ -413,6 +413,7 @@ user_add(Config) ->
             enabled => true,
             sso_realm_uri => undefined,
             groups => [],
+            authorized_keys => [],
             has_authorized_keys => false,
             has_password => true,
             meta => #{<<"foo">> => <<"bar">>},

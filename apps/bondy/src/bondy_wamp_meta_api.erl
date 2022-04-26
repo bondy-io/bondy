@@ -307,7 +307,7 @@ do_handle_invocation(M, Ctxt, <<"wamp.session.", Part:16/binary, ".get">>) ->
                     R = wamp_message:yield(
                         M#invocation.request_id,
                         #{},
-                        [bondy_session:info(Session)]
+                        [bondy_session:to_external(Session)]
                     ),
                     {reply, R};
 
