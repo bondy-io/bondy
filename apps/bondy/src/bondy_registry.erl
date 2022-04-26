@@ -1502,7 +1502,8 @@ filter_duplicate_entry_keys(Entries, SessionId) ->
 
 %% @private
 art_lookup(TrieKey, Trie) ->
-    art_lookup(TrieKey, Trie, 1).
+    %% Always sync at the moment
+    art_lookup(TrieKey, Trie, 0).
 
 
 %% @private
@@ -1531,7 +1532,8 @@ art_lookup(TrieKey, Trie, N) when N > 0 ->
 
 %% @private
 art_find_matches(Pattern, MS, Trie) ->
-    art_find_matches(Pattern, MS, Trie, 1).
+    %% Always sync at the moment
+    art_find_matches(Pattern, MS, Trie, 0).
 
 
 %% @private
