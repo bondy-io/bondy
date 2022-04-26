@@ -804,7 +804,7 @@ to_external(#session{} = S) ->
         authprovider => <<"com.leapsight.bondy">>,
         authrole => authrole(S),
         authextra => Extra#{
-            session_id => S#session.id,
+            session_guid => S#session.id,
             node => bondy_config:nodestring()
         },
         transport => #{
