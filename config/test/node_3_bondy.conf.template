@@ -49,14 +49,14 @@ broker_bridge.kafka.topics.wamp_events = com.leapsight.wamp.events
 
 cluster.automatic_leave = on
 cluster.parallelism = 1
-cluster.peer_port = 18287
+cluster.peer_port = 18286
 cluster.peer_discovery.enabled = on
 cluster.peer_discovery.automatic_join = on
 cluster.peer_discovery.polling_interval = 5s
 cluster.peer_discovery.initial_delay = 1s
 cluster.peer_discovery.timeout = 5s
 cluster.peer_discovery.type = bondy_peer_discovery_static_agent
-cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18087
+cluster.peer_discovery.config.nodes.1 = bondy1@127.0.0.1:18086
 cluster.tls.enabled = on
 cluster.tls.server.cacertfile = ${BONDY_ETC_DIR}/ssl/server/cacert.pem
 cluster.tls.server.certfile = ${BONDY_ETC_DIR}/ssl/server/cert.pem
