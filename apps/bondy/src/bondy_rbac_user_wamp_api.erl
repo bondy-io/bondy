@@ -142,9 +142,8 @@ handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
     [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
     case bondy_rbac_user:add_group(Uri, Name, Group) of
-        {ok, Group} ->
-            Ext = bondy_rbac_user:to_external(Group),
-            R = wamp_message:result(M#call.request_id, #{}, [Ext]),
+        ok ->
+            R = wamp_message:result(M#call.request_id, #{}),
             {reply, R};
         {error, Reason} ->
             E = bondy_wamp_utils:error(Reason, M),
@@ -152,9 +151,9 @@ handle_call(?BONDY_USER_ADD_GROUP, #call{} = M, Ctxt) ->
     end;
 
 handle_call(?BONDY_USER_ADD_GROUPS, #call{} = M, Ctxt) ->
-    [Uri, Name, Group] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
+    [Uri, Name, Groups] = bondy_wamp_utils:validate_call_args(M, Ctxt, 3),
 
-    case bondy_rbac_user:add_groups(Uri, Name, Group) of
+    case bondy_rbac_user:add_groups(Uri, Name, Groups) of
         ok ->
             R = wamp_message:result(M#call.request_id, #{}),
             {reply, R};

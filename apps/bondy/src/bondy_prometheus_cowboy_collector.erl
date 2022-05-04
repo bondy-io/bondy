@@ -182,7 +182,7 @@ setup() ->
 %% Private functions
 %% ===================================================================
 
-dispatch_metrics(#{early_time_error := _}=Metrics) ->
+dispatch_metrics(#{early_error_time := _}=Metrics) ->
   inc(bondy_http_early_errors_total, early_error_labels(Metrics));
 dispatch_metrics(#{reason := switch_protocol}= Metrics) ->
   inc(bondy_protocol_upgrades_total, protocol_upgrade_labels(Metrics));

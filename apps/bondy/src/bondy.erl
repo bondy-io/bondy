@@ -64,6 +64,7 @@
 -export([take_via/1]).
 -export([unregister/1]).
 -export([unregister/2]).
+-export([lrw_nodes/2]).
 
 
 
@@ -71,6 +72,17 @@
 %% API
 %% =============================================================================
 
+
+%% -----------------------------------------------------------------------------
+%% @doc Returns the N top set of connected nodes sorted in increasing order of
+%% their weight for a given key according to the Lowest Random Weight hashing
+%% algorithm (a.k.a Rendezvous hashing).
+%% @end
+%% -----------------------------------------------------------------------------
+-spec lrw_nodes(Key :: any(), N :: non_neg_integer()) -> [node()].
+
+lrw_nodes(Key, N) ->
+    lrw:top(Key, partisan:nodes(), N).
 
 
 %% -----------------------------------------------------------------------------

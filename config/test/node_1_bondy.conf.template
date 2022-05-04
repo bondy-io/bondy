@@ -62,7 +62,7 @@ broker_bridge.kafka.enabled = off
 
 cluster.automatic_leave = on
 cluster.parallelism = 1
-cluster.peer_port = 18087
+cluster.peer_port = 18086
 cluster.peer_discovery.enabled = off
 cluster.peer_discovery.automatic_join = on
 cluster.peer_discovery.polling_interval = 10s

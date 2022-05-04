@@ -323,6 +323,7 @@ next(#iterator{entries = []}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
+% @TODO take into consideration force_locality
 -spec next_round_robin(iterator()) ->
     {bondy_registry_entry:t(), iterator()} | '$end_of_table'.
 
