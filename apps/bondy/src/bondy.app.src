@@ -60,6 +60,7 @@
         sidejob,
         jobs,
         uuid,
+        lrw,
         %% 1st-party deps
         mops,
         art,
