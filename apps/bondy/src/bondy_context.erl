@@ -433,7 +433,7 @@ authid(#{}) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec authrole(t()) -> binary() | anonymous | undefined.
+-spec authrole(t()) -> binary() | undefined.
 
 authrole(#{authrole := Val}) ->
     Val;

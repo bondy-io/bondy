@@ -474,7 +474,9 @@ valid_roles(undefined, User) ->
 valid_roles(_, #{username := anonymous}) ->
     %% If anonymous (user) the only valid role (group) is anonymous
     %% so we drop the requested ones.
-    {anonymous, [anonymous]};
+    %% We turn it to binary eventhough the group internally (in the db) is
+    %% called 'anonymous', but the bondy_rbac_group accepts both for lookups.
+    {<<"anonymous">>, [<<"anonymous">>]};
 
 valid_roles(<<"default">>, User) ->
     %% Clients might send "default" as opposed to NULL as WAMP does

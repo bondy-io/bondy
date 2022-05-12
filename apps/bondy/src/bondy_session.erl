@@ -878,7 +878,7 @@ parse_details(is_anonymous, V, Session) when is_boolean(V) ->
 parse_details(authid, V, Session) when is_binary(V) ->
     Session#session{authid = V};
 
-parse_details(authrole, V, Session) when is_binary(V); V =:= anonymous ->
+parse_details(authrole, V, Session) when is_binary(V) ->
     Session#session{authrole = V};
 
 parse_details(authroles, V, Session) when is_list(V) ->
