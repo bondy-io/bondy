@@ -462,7 +462,7 @@ new(Data) ->
 %% @doc
 %% @end
 %% -----------------------------------------------------------------------------
--spec add(t()) -> ok | {error, already_exists}.
+-spec add(t()) -> ok | {error, already_exists | any()}.
 
 add(#{type := ?TYPE, name := Name} = Bridge0) ->
     case exists(Name) of
