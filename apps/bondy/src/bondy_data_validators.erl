@@ -98,6 +98,7 @@ strict_username(Term) -> username(Term).
 -spec aliases(List :: [binary()]) -> {ok, [term()]} | boolean().
 
 aliases(L) when is_list(L) ->
+
     try
         Valid = lists:foldl(
             fun(Term, Acc) ->
@@ -111,7 +112,7 @@ aliases(L) when is_list(L) ->
                 end
             end,
             [],
-            L
+            sets:to_list(sets:from_list(L))
         ),
         {ok, lists:reverse(Valid)}
     catch
